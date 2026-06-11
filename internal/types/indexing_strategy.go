@@ -32,7 +32,7 @@ func DefaultIndexingStrategy() IndexingStrategy {
 
 // NeedsEmbedding returns true if any pipeline that requires an embedding model is enabled.
 func (s IndexingStrategy) NeedsEmbedding() bool {
-	return s.VectorEnabled || s.KeywordEnabled
+	return s.VectorEnabled
 }
 
 // NeedsChunks returns true if any pipeline that requires document chunks is enabled.

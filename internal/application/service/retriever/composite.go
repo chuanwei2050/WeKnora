@@ -210,8 +210,12 @@ func (c *CompositeRetrieveEngine) Index(ctx context.Context,
 		return nil
 	})
 	span.RecordError(err)
+	embedderName := ""
+	if embedder != nil {
+		embedderName = embedder.GetModelName()
+	}
 	span.SetAttributes(
-		attribute.String("embedder", embedder.GetModelName()),
+		attribute.String("embedder", embedderName),
 		attribute.String("source_id", indexInfo.SourceID),
 	)
 	return err
@@ -238,8 +242,12 @@ func (c *CompositeRetrieveEngine) BatchIndex(ctx context.Context,
 		return nil
 	})
 	span.RecordError(err)
+	embedderName := ""
+	if embedder != nil {
+		embedderName = embedder.GetModelName()
+	}
 	span.SetAttributes(
-		attribute.String("embedder", embedder.GetModelName()),
+		attribute.String("embedder", embedderName),
 		attribute.Int("index_info_count", len(indexInfoList)),
 	)
 	return err
@@ -326,8 +334,12 @@ func (c *CompositeRetrieveEngine) EstimateStorageSize(ctx context.Context,
 		return nil
 	})
 	span.RecordError(err)
+	embedderName := ""
+	if embedder != nil {
+		embedderName = embedder.GetModelName()
+	}
 	span.SetAttributes(
-		attribute.String("embedder", embedder.GetModelName()),
+		attribute.String("embedder", embedderName),
 		attribute.Int("index_info_count", len(indexInfoList)),
 		attribute.Int64("storage_size", sum.Load()),
 	)

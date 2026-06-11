@@ -29,14 +29,16 @@ PRELOADED_DIR="/app/skills/preloaded"
 
 if [ -d "$BUILTIN_DIR" ]; then
     mkdir -p "$PRELOADED_DIR"
-    for skill_dir in "$BUILTIN_DIR"/*/; do
-        [ -d "$skill_dir" ] || continue
-        skill_name="$(basename "$skill_dir")"
-        if [ ! -d "$PRELOADED_DIR/$skill_name" ]; then
-            cp -r "$skill_dir" "$PRELOADED_DIR/$skill_name"
-        fi
-    done
-    chown -R appuser:appuser "$PRELOADED_DIR"
+    if [ -w "$PRELOADED_DIR" ]; then
+        for skill_dir in "$BUILTIN_DIR"/*/; do
+            [ -d "$skill_dir" ] || continue
+            skill_name="$(basename "$skill_dir")"
+            if [ ! -d "$PRELOADED_DIR/$skill_name" ]; then
+                cp -r "$skill_dir" "$PRELOADED_DIR/$skill_name"
+            fi
+        done
+    fi
+    chown -R appuser:appuser "$PRELOADED_DIR" 2>/dev/null || true
 fi
 
 # ─── Drop privileges and exec the main process ───

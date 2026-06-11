@@ -48,6 +48,9 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 	params := make(map[string]any)
 	embeddingMap := make(map[string][]float32)
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
+		if embedder == nil {
+			return nil
+		}
 		embedding, err := embedder.Embed(ctx, indexInfo.Content)
 		if err != nil {
 			return err
@@ -68,6 +71,9 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 	}
 
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
+		if embedder == nil {
+			return nil
+		}
 		var contentList []string
 		for _, indexInfo := range indexInfoList {
 			contentList = append(contentList, indexInfo.Content)
@@ -240,6 +246,9 @@ func (v *KeywordsVectorHybridRetrieveEngineService) EstimateStorageSize(
 ) int64 {
 	params := make(map[string]any)
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
+		if embedder == nil {
+			return 0
+		}
 		embeddingMap := make(map[string][]float32)
 		// just for estimate storage size
 		for _, indexInfo := range indexInfoList {

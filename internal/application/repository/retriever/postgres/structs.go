@@ -75,6 +75,10 @@ func toDBVectorEmbedding(indexInfo *types.IndexInfo, additionalParams map[string
 			pgVector.Dimension = len(pgVector.Embedding.Slice())
 		}
 	}
+	if pgVector.Dimension == 0 {
+		pgVector.Embedding = pgvector.NewHalfVector([]float32{0})
+		pgVector.Dimension = 1
+	}
 	// Get is_enabled from additionalParams if available
 	if additionalParams != nil {
 		if chunkEnabledMap, ok := additionalParams["chunk_enabled"].(map[string]bool); ok {

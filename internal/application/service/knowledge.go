@@ -1828,6 +1828,31 @@ func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfi
 	return
 }
 
+func indexingEnginesForKnowledgeBase(
+	params []types.RetrieverEngineParams,
+	kb *types.KnowledgeBase,
+) []types.RetrieverEngineParams {
+	if kb == nil {
+		return params
+	}
+	result := make([]types.RetrieverEngineParams, 0, len(params))
+	for _, param := range params {
+		switch param.RetrieverType {
+		case types.VectorRetrieverType:
+			if kb.IsVectorEnabled() {
+				result = append(result, param)
+			}
+		case types.KeywordsRetrieverType:
+			if kb.IsKeywordEnabled() {
+				result = append(result, param)
+			}
+		default:
+			result = append(result, param)
+		}
+	}
+	return result
+}
+
 // processChunks processes chunks and creates embeddings for knowledge content
 func (s *knowledgeService) processChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
@@ -1881,7 +1906,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// 删除旧的索引数据 — only when vector/keyword indexing is enabled
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
+	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
+		s.retrieveEngine,
+		indexingEnginesForKnowledgeBase(tenantInfo.GetEffectiveEngines(), kb),
+	)
 	if err == nil && embeddingModel != nil {
 		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
 			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
@@ -2082,10 +2110,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		return
 	}
 
-	// Create index information and perform vector indexing — only when vector/keyword is enabled.
+	// Create index information and perform vector/keyword indexing when enabled.
 	// Chunks are ALWAYS saved to DB (above) because wiki and graph need them even without vector indexing.
 	var totalStorageSize int64
-	if kb.NeedsEmbeddingModel() && embeddingModel != nil {
+	if kb.IsVectorEnabled() || kb.IsKeywordEnabled() {
 		// Create index information — only for child/flat chunks, NOT parent chunks.
 		// Parent chunks are stored for context retrieval but do not need vector embeddings.
 		// Prepend the document title to improve semantic alignment between
@@ -2108,28 +2136,30 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			})
 		}
 
-		// Calculate storage size required for embeddings
-		span.AddEvent("estimate storage size")
-		totalStorageSize = retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfoList)
-		if tenantInfo.StorageQuota > 0 {
-			// Re-fetch tenant storage information
-			tenantInfo, err = s.tenantRepo.GetTenantByID(ctx, tenantInfo.ID)
-			if err != nil {
-				knowledge.ParseStatus = types.ParseStatusFailed
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-				span.RecordError(err)
-				return
-			}
-			// Check if there's enough storage quota available
-			if tenantInfo.StorageUsed+totalStorageSize > tenantInfo.StorageQuota {
-				knowledge.ParseStatus = types.ParseStatusFailed
-				knowledge.ErrorMessage = "存储空间不足"
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-				span.RecordError(errors.New("storage quota exceeded"))
-				return
+		if embeddingModel != nil {
+			// Calculate storage size required for embeddings
+			span.AddEvent("estimate storage size")
+			totalStorageSize = retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfoList)
+			if tenantInfo.StorageQuota > 0 {
+				// Re-fetch tenant storage information
+				tenantInfo, err = s.tenantRepo.GetTenantByID(ctx, tenantInfo.ID)
+				if err != nil {
+					knowledge.ParseStatus = types.ParseStatusFailed
+					knowledge.ErrorMessage = err.Error()
+					knowledge.UpdatedAt = time.Now()
+					s.repo.UpdateKnowledge(ctx, knowledge)
+					span.RecordError(err)
+					return
+				}
+				// Check if there's enough storage quota available
+				if tenantInfo.StorageUsed+totalStorageSize > tenantInfo.StorageQuota {
+					knowledge.ParseStatus = types.ParseStatusFailed
+					knowledge.ErrorMessage = "存储空间不足"
+					knowledge.UpdatedAt = time.Now()
+					s.repo.UpdateKnowledge(ctx, knowledge)
+					span.RecordError(errors.New("storage quota exceeded"))
+					return
+				}
 			}
 		}
 
@@ -2158,8 +2188,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			}
 
 			// delete index
+			dimension := 0
+			if embeddingModel != nil {
+				dimension = embeddingModel.GetDimensions()
+			}
 			if err := retrieveEngine.DeleteByKnowledgeIDList(
-				ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type,
+				ctx, []string{knowledge.ID}, dimension, kb.Type,
 			); err != nil {
 				logger.Errorf(ctx, "Delete index failed: %v", err)
 			}
@@ -2175,7 +2209,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
 				logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
 			}
-			if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type); err != nil {
+			dimension := 0
+			if embeddingModel != nil {
+				dimension = embeddingModel.GetDimensions()
+			}
+			if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, dimension, kb.Type); err != nil {
 				logger.Warnf(ctx, "Failed to cleanup index after deletion detected: %v", err)
 			}
 			span.AddEvent("aborted: knowledge was deleted during processing")
