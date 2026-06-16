@@ -2,6 +2,7 @@ package handler
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -158,6 +159,33 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// User is already in the correct format from service
 
 	logger.Infof(ctx, "User logged in successfully, email: %s", email)
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *AuthHandler) BidReviewSSO(c *gin.Context) {
+	ctx := c.Request.Context()
+	secret := strings.TrimSpace(os.Getenv("BIDREVIEW_SSO_SECRET"))
+	if secret == "" {
+		c.Error(errors.NewForbiddenError("BidReview SSO is not configured"))
+		return
+	}
+	headerSecret := strings.TrimSpace(c.GetHeader("X-BidReview-SSO-Secret"))
+	if subtle.ConstantTimeCompare([]byte(headerSecret), []byte(secret)) != 1 {
+		c.Error(errors.NewForbiddenError("Invalid BidReview SSO secret"))
+		return
+	}
+
+	var req types.BidReviewSSORequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewValidationError("Invalid BidReview SSO parameters").WithDetails(err.Error()))
+		return
+	}
+	response, err := h.userService.LoginWithBidReviewSSO(ctx, &req)
+	if err != nil {
+		logger.Errorf(ctx, "BidReview SSO failed: %v", err)
+		c.Error(errors.NewInternalServerError("BidReview SSO failed").WithDetails(err.Error()))
+		return
+	}
 	c.JSON(http.StatusOK, response)
 }
 

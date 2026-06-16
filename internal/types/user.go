@@ -24,6 +24,8 @@ type User struct {
 	IsActive bool `json:"is_active"  gorm:"default:true"`
 	// Whether the user can access all tenants (cross-tenant access)
 	CanAccessAllTenants bool `json:"can_access_all_tenants" gorm:"default:false"`
+	// BidReview role from SSO, used only in embedded mode.
+	BidReviewRole string `json:"bidreview_role,omitempty" gorm:"-"`
 	// Creation time of the user
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time of the user
@@ -94,6 +96,15 @@ type OIDCUserInfo struct {
 	Claims   map[string]interface{} `json:"claims,omitempty"`
 }
 
+type BidReviewSSORequest struct {
+	TenantExternalID string `json:"tenant_external_id" binding:"required"`
+	TenantName       string `json:"tenant_name"        binding:"required"`
+	UserExternalID   string `json:"user_external_id"   binding:"required"`
+	Email            string `json:"email"              binding:"required,email"`
+	Username         string `json:"username"           binding:"required"`
+	BidReviewRole    string `json:"bidreview_role"`
+}
+
 // RegisterRequest represents a registration request
 type RegisterRequest struct {
 	Username string `json:"username" binding:"required,min=2,max=50"`
@@ -103,12 +114,13 @@ type RegisterRequest struct {
 
 // LoginResponse represents a login response
 type LoginResponse struct {
-	Success      bool    `json:"success"`
-	Message      string  `json:"message,omitempty"`
-	User         *User   `json:"user,omitempty"`
-	Tenant       *Tenant `json:"tenant,omitempty"`
-	Token        string  `json:"token,omitempty"`
-	RefreshToken string  `json:"refresh_token,omitempty"`
+	Success       bool    `json:"success"`
+	Message       string  `json:"message,omitempty"`
+	User          *User   `json:"user,omitempty"`
+	Tenant        *Tenant `json:"tenant,omitempty"`
+	Token         string  `json:"token,omitempty"`
+	RefreshToken  string  `json:"refresh_token,omitempty"`
+	BidReviewRole string  `json:"bidreview_role,omitempty"`
 }
 
 // RegisterResponse represents a registration response

@@ -59,7 +59,7 @@ export const useMenuStore = defineStore('menuStore', () => {
     }
   )
 
-  const liteHiddenPaths = new Set(['logout', 'organizations'])
+  const liteHiddenPaths = new Set(['logout'])
 
   const visibleMenuArr = computed(() => {
     const authStore = useAuthStore()

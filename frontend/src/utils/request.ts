@@ -87,8 +87,9 @@ const processQueue = (error: any, token: string | null = null) => {
 
 function redirectToLogin() {
   if (typeof window === 'undefined') return;
-  if (window.location.pathname === '/login') return;
-  window.location.href = '/login';
+  const loginPath = window.location.pathname.startsWith('/knowledge') ? '/knowledge/login' : '/login';
+  if (window.location.pathname === loginPath) return;
+  window.location.href = loginPath;
 }
 
 instance.interceptors.response.use(

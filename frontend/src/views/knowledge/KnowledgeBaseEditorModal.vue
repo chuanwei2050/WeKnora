@@ -360,7 +360,6 @@ import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKn
 import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
 import { listModels } from '@/api/model'
 import { useUIStore } from '@/stores/ui'
-import { useAuthStore } from '@/stores/auth'
 import KBModelConfig from './settings/KBModelConfig.vue'
 import KBParserSettings from './settings/KBParserSettings.vue'
 import KBStorageSettings from './settings/KBStorageSettings.vue'
@@ -373,7 +372,6 @@ import DataSourceSettings from './settings/DataSourceSettings.vue'
 import { useI18n } from 'vue-i18n'
 
 const uiStore = useUIStore()
-const authStore = useAuthStore()
 const { t } = useI18n()
 
 // Props
@@ -437,7 +435,7 @@ const navItems = computed(() => {
       items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource'), badge: dsCount.value || undefined })
     }
   }
-  if (props.mode === 'edit' && props.kbId && !authStore.isLiteMode) {
+  if (props.mode === 'edit' && props.kbId) {
     items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') })
   }
   return items
@@ -1623,4 +1621,3 @@ watch(
   }
 }
 </style>
-

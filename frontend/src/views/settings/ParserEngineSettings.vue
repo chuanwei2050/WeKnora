@@ -301,7 +301,7 @@ const ENGINE_ORDER: Record<string, number> = {
 }
 
 const sortedEngines = computed(() => {
-  return [...engines.value].sort((a, b) => {
+  return engines.value.sort((a, b) => {
     const oa = ENGINE_ORDER[a.Name] ?? 100
     const ob = ENGINE_ORDER[b.Name] ?? 100
     if (oa !== ob) return oa - ob
@@ -383,7 +383,9 @@ async function loadConfig() {
 async function loadAll() {
   loading.value = true
   error.value = ''
-  await Promise.all([loadEngines(), loadConfig(), checkWkcStatus()])
+  const tasks: Promise<void>[] = [loadEngines(), loadConfig()]
+  tasks.push(checkWkcStatus())
+  await Promise.all(tasks)
   loading.value = false
 }
 

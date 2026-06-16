@@ -11,20 +11,23 @@ import "@/assets/dropdown-menu.less";
 import i18n from "./i18n";
 import { initTheme } from "@/composables/useTheme";
 import { installTDesignIconOfflineGuard } from "@/utils/tdesign-icon-offline";
+import { ensureBidReviewSession } from "@/utils/bidreview-sso";
 
 // 必须在 Vue 组件挂载之前执行，避免 tdesign-icons 运行时请求 tdesign.gtimg.com
 installTDesignIconOfflineGuard();
 
 initTheme();
 
-const app = createApp(App);
+ensureBidReviewSession().finally(() => {
+  const app = createApp(App);
 
-app.use(TDesign);
-app.use(createPinia());
-app.use(router);
-app.use(i18n);
+  app.use(TDesign);
+  app.use(createPinia());
+  app.use(router);
+  app.use(i18n);
 
-// 等首屏路由（含导航守卫、Lite 自动登录）完成后再挂载，避免先闪默认页再跳转
-router.isReady().finally(() => {
-  app.mount("#app");
+  // 等首屏路由（含导航守卫、Lite 自动登录）完成后再挂载，避免先闪默认页再跳转
+  router.isReady().finally(() => {
+    app.mount("#app");
+  });
 });

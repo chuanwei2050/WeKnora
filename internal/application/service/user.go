@@ -315,6 +315,116 @@ func (s *userService) LoginWithOIDC(ctx context.Context, code, redirectURI strin
 	}, nil
 }
 
+func (s *userService) LoginWithBidReviewSSO(
+	ctx context.Context,
+	req *types.BidReviewSSORequest,
+) (*types.LoginResponse, error) {
+	if req == nil {
+		return nil, errors.New("request is required")
+	}
+	tenantExternalID := strings.TrimSpace(req.TenantExternalID)
+	userExternalID := strings.TrimSpace(req.UserExternalID)
+	sourceEmail := strings.TrimSpace(strings.ToLower(req.Email))
+	sourceUsername := strings.TrimSpace(req.Username)
+	bidReviewRole := normalizeBidReviewRole(req.BidReviewRole)
+	if tenantExternalID == "" || userExternalID == "" || sourceEmail == "" || sourceUsername == "" {
+		return nil, errors.New("tenant_external_id, user_external_id, email and username are required")
+	}
+
+	businessKey := "bidreview:" + tenantExternalID
+	tenant, err := s.findTenantByBusiness(ctx, businessKey)
+	if err != nil {
+		return nil, err
+	}
+	if tenant == nil {
+		tenantName := strings.TrimSpace(req.TenantName)
+		if tenantName == "" {
+			tenantName = "BidReview Workspace"
+		}
+		tenant, err = s.tenantService.CreateTenant(ctx, &types.Tenant{
+			Name:        tenantName,
+			Description: "Provisioned from BidReview",
+			Business:    businessKey,
+			Status:      "active",
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create BidReview tenant: %w", err)
+		}
+	}
+
+	email := bidReviewSyntheticEmail(tenantExternalID, userExternalID)
+	user, err := s.userRepo.GetUserByEmail(ctx, email)
+	if err != nil && !isUserLookupNotFound(err) {
+		return nil, fmt.Errorf("failed to query BidReview user: %w", err)
+	}
+	if isUserLookupNotFound(err) || user == nil {
+		username := s.generateBidReviewUsername(ctx, sourceUsername, tenantExternalID, userExternalID)
+		randomPassword, err := generateRandomString(32)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate password: %w", err)
+		}
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(randomPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash password: %w", err)
+		}
+		user = &types.User{
+			ID:           uuid.New().String(),
+			Username:     username,
+			Email:        email,
+			PasswordHash: string(hashedPassword),
+			TenantID:     tenant.ID,
+			IsActive:     true,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		if err := s.userRepo.CreateUser(ctx, user); err != nil {
+			return nil, fmt.Errorf("failed to create BidReview user: %w", err)
+		}
+	} else {
+		changed := false
+		if user.TenantID != tenant.ID {
+			user.TenantID = tenant.ID
+			changed = true
+		}
+		if !user.IsActive {
+			user.IsActive = true
+			changed = true
+		}
+		if changed {
+			user.UpdatedAt = time.Now()
+			if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+				return nil, fmt.Errorf("failed to update BidReview user: %w", err)
+			}
+		}
+	}
+
+	user.BidReviewRole = bidReviewRole
+	accessToken, refreshToken, err := s.GenerateTokens(ctx, user)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate tokens: %w", err)
+	}
+	return &types.LoginResponse{
+		Success:      true,
+		Message:      "Login successful",
+		User:         user,
+		Tenant:       tenant,
+		Token:        accessToken,
+		RefreshToken: refreshToken,
+		BidReviewRole: bidReviewRole,
+	}, nil
+}
+
+func normalizeBidReviewRole(role string) string {
+	switch strings.TrimSpace(role) {
+	case "platform_admin":
+		return "platform_admin"
+	case "tenant_admin":
+		return "tenant_admin"
+	default:
+		return "member"
+	}
+}
+
 // GetUserByID gets a user by ID
 func (s *userService) GetUserByID(ctx context.Context, id string) (*types.User, error) {
 	return s.userRepo.GetUserByID(ctx, id)
@@ -767,6 +877,51 @@ func (s *userService) generateOIDCUsername(ctx context.Context, info *types.OIDC
 		candidate = fmt.Sprintf("%s-%d", base, i+1)
 	}
 	return fmt.Sprintf("%s-%d", base, time.Now().Unix())
+}
+
+func (s *userService) findTenantByBusiness(ctx context.Context, business string) (*types.Tenant, error) {
+	tenants, err := s.tenantService.ListTenants(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tenants: %w", err)
+	}
+	for _, tenant := range tenants {
+		if tenant != nil && tenant.Business == business {
+			return tenant, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *userService) generateBidReviewUsername(ctx context.Context, name, tenantExternalID, userExternalID string) string {
+	base := sanitizeUsernameCandidate(name)
+	if base == "" {
+		base = "bidreview-user"
+	}
+	suffix := shortStableID(tenantExternalID) + "-" + shortStableID(userExternalID)
+	candidate := fmt.Sprintf("%s-%s", base, suffix)
+	if len(candidate) > 100 {
+		candidate = candidate[:100]
+	}
+	existing, err := s.userRepo.GetUserByUsername(ctx, candidate)
+	if isUserLookupNotFound(err) || (err == nil && existing == nil) {
+		return candidate
+	}
+	return fmt.Sprintf("bidreview-%s-%s", shortStableID(tenantExternalID), shortStableID(userExternalID))
+}
+
+func bidReviewSyntheticEmail(tenantExternalID, userExternalID string) string {
+	return fmt.Sprintf("br-%s-%s@bidreview.local", shortStableID(tenantExternalID), shortStableID(userExternalID))
+}
+
+func shortStableID(value string) string {
+	cleaned := strings.NewReplacer("-", "", "_", "", " ", "").Replace(strings.ToLower(strings.TrimSpace(value)))
+	if len(cleaned) >= 12 {
+		return cleaned[:12]
+	}
+	if cleaned != "" {
+		return cleaned
+	}
+	return "unknown"
 }
 
 func generateRandomString(length int) (string, error) {

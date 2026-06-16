@@ -410,6 +410,7 @@ func RegisterEvaluationRoutes(r *gin.RouterGroup, handler *handler.EvaluationHan
 func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler) {
 	r.POST("/auth/register", handler.Register)
 	r.POST("/auth/login", handler.Login)
+	r.POST("/auth/bidreview-sso", handler.BidReviewSSO)
 	r.POST("/auth/auto-setup", handler.AutoSetup)
 	r.GET("/auth/oidc/config", handler.GetOIDCConfig)
 	r.GET("/auth/oidc/url", handler.GetOIDCAuthorizationURL)

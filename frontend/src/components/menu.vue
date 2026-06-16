@@ -3,8 +3,14 @@
         <!-- 展开时：Logo + 折叠按钮同行 -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
             <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
-                <img class="logo" src="@/assets/img/weknora.png" alt="">
-                <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
+                <template v-if="isBidReviewEmbedded">
+                    <span class="bidreview-logo-mark">知</span>
+                    <span class="bidreview-logo-text">知识库</span>
+                </template>
+                <template v-else>
+                    <img class="logo" src="@/assets/img/weknora.png" alt="">
+                    <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
+                </template>
             </div>
             <div class="sidebar-toggle"
                  @click="uiStore.toggleSidebar"
@@ -42,6 +48,18 @@
         
         <!-- 上半部分：知识库和对话 -->
         <div class="menu_top">
+            <div v-if="isBidReviewEmbedded" class="menu_box">
+                <t-tooltip content="返回主系统" placement="right" :disabled="!uiStore.sidebarCollapsed">
+                    <div class="menu_item" @click="handleReturnToBidReview">
+                        <div class="menu_item-box">
+                            <div class="menu_icon">
+                                <t-icon name="rollback" class="icon return-icon" />
+                            </div>
+                            <span v-if="!uiStore.sidebarCollapsed" class="menu_title">返回主系统</span>
+                        </div>
+                    </div>
+                </t-tooltip>
+            </div>
             <div class="menu_box" :class="{ 'has-submenu': item.children }" v-for="(item, index) in topMenuItems" :key="index">
                 <t-tooltip :content="item.title" placement="right" :disabled="!uiStore.sidebarCollapsed">
                 <div @click="handleMenuClick(item.path)"
@@ -147,6 +165,7 @@ import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
 import { getSystemInfo } from '@/api/system';
+import { isBidReviewEmbeddedMode, returnToBidReview } from '@/utils/bidreview-sso';
 
 const { t } = useI18n();
 const usemenuStore = useMenuStore();
@@ -168,6 +187,11 @@ type MenuItem = { title: string; icon: string; path: string; childrenPath?: stri
 const { menuArr, visibleMenuArr } = storeToRefs(usemenuStore);
 let activeSubmenu = ref<string>('');
 const isLiteEdition = ref(false);
+const isBidReviewEmbedded = computed(() => isBidReviewEmbeddedMode());
+
+const handleReturnToBidReview = () => {
+    returnToBidReview()
+}
 
 // 批量管理状态
 const batchMode = ref(false)
@@ -853,6 +877,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     .logo_box {
         display: flex;
         align-items: center;
+        gap: 10px;
         flex: 1;
         min-width: 0;
         overflow: hidden;
@@ -861,6 +886,29 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
             width: 134px;
             height: auto;
         }
+
+        .bidreview-logo-mark {
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            background: var(--td-brand-color);
+            color: var(--td-text-color-anti);
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .bidreview-logo-text {
+            color: var(--td-text-color-primary);
+            font-size: 17px;
+            font-weight: 600;
+            line-height: 1;
+            white-space: nowrap;
+        }
+
         .lite-badge {
             margin-left: 2px;
             align-self: flex-start;

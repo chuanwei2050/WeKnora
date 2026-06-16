@@ -178,6 +178,7 @@ import VectorStoreSettings from './VectorStoreSettings.vue'
 import ParserEngineSettings from './ParserEngineSettings.vue'
 import StorageEngineSettings from './StorageEngineSettings.vue'
 import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
+import { isBidReviewEmbeddedMode } from '@/utils/bidreview-sso'
 
 const route = useRoute()
 const router = useRouter()
@@ -187,22 +188,26 @@ const { t } = useI18n()
 const currentSection = ref<string>('general')
 const currentSubSection = ref<string>('')
 const expandedMenus = ref<string[]>([])
+const isBidReviewEmbedded = computed(() => isBidReviewEmbeddedMode())
 
-const navItems = computed(() => [
-  { key: 'general', icon: 'setting', label: t('general.title') },
-  { key: 'ollama', icon: 'server', label: 'Ollama' },
-  { key: 'weknoracloud', icon: '', label: 'WeKnora Cloud' },
-  { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
-   { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig')  },
-  { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
-  { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
-  { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
-  { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
-  { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
-  { key: 'system', icon: 'info-circle', label: t('settings.systemSettings') },
-  { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
-  { key: 'api', icon: 'secured', label: t('settings.apiInfo') }
-])
+const navItems = computed(() => {
+  const items = [
+    { key: 'general', icon: 'setting', label: t('general.title') },
+    { key: 'ollama', icon: 'server', label: 'Ollama' },
+    { key: 'weknoracloud', icon: '', label: 'WeKnora Cloud' },
+    { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
+    { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig')  },
+    { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
+    { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
+    { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
+    { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
+    { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
+    { key: 'system', icon: 'info-circle', label: t('settings.systemSettings') },
+    { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
+    { key: 'api', icon: 'secured', label: t('settings.apiInfo') }
+  ]
+  return items
+})
 
 // 导航项点击处理
 const handleNavClick = (item: any) => {
@@ -247,6 +252,10 @@ const handleClose = () => {
   uiStore.closeSettings()
   // 如果当前路由是设置页，返回上一页
   if (route.path === '/platform/settings') {
+    if (isBidReviewEmbedded.value) {
+      router.replace('/platform/knowledge-bases')
+      return
+    }
     router.back()
   }
 }
@@ -581,4 +590,3 @@ onUnmounted(() => {
   background: var(--td-gray-color-6);
 }
 </style>
-
