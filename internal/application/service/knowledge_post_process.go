@@ -89,8 +89,9 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		knowledge.ParseStatus = types.ParseStatusCompleted
 		knowledge.UpdatedAt = time.Now()
 
-		// Setup summary status
-		if len(textChunks) > 0 {
+		// Setup summary status. Keyword-only knowledge bases may not have a
+		// summary model configured; those documents are ready after parsing.
+		if len(textChunks) > 0 && kb.SummaryModelID != "" {
 			knowledge.SummaryStatus = types.SummaryStatusPending
 		} else {
 			knowledge.SummaryStatus = types.SummaryStatusNone
@@ -104,8 +105,10 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	}
 
 	// 4. Spawn Summary and Question Tasks
-	if len(textChunks) > 0 {
+	if len(textChunks) > 0 && kb.SummaryModelID != "" {
 		s.enqueueSummaryGenerationTask(ctx, payload)
+	}
+	if len(textChunks) > 0 {
 		// Question generation only makes sense for RAG indexing (improves chunk recall).
 		// Skip when only Wiki/Graph is enabled without vector/keyword search.
 		if kb.NeedsEmbeddingModel() {

@@ -2450,15 +2450,22 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		return nil
 	}
 
-	if kb.SummaryModelID == "" {
-		logger.Warn(ctx, "Knowledge base summary model ID is empty, skipping summary generation")
-		return nil
-	}
-
 	// Get knowledge
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get knowledge: %v", err)
+		return nil
+	}
+
+	if kb.SummaryModelID == "" {
+		logger.Warn(ctx, "Knowledge base summary model ID is empty, skipping summary generation")
+		if knowledge.SummaryStatus == types.SummaryStatusPending || knowledge.SummaryStatus == types.SummaryStatusProcessing {
+			knowledge.SummaryStatus = types.SummaryStatusNone
+			knowledge.UpdatedAt = time.Now()
+			if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+				logger.Warnf(ctx, "Failed to reset summary status to none: %v", err)
+			}
+		}
 		return nil
 	}
 

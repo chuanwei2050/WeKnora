@@ -10,11 +10,13 @@ import { useMenuStore } from '@/stores/menu';
 import { useUIStore } from '@/stores/ui';
 import { useOrganizationStore } from '@/stores/organization';
 import { useAuthStore } from '@/stores/auth';
+import { useSettingsStore } from '@/stores/settings';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
 const usemenuStore = useMenuStore();
 const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
 const authStore = useAuthStore();
+const settingsStore = useSettingsStore();
 const router = useRouter();
 import {
   batchQueryKnowledge,
@@ -839,13 +841,8 @@ watch(() => cardList.value, (newValue) => {
   }
 
   let analyzeList = [];
-  // Filter items that need polling: parsing in progress OR summary generation in progress
-  analyzeList = newValue.filter(item => {
-    const isParsing = item.parse_status == 'pending' || item.parse_status == 'processing';
-    const isSummaryPending = item.parse_status == 'completed' && 
-      (item.summary_status == 'pending' || item.summary_status == 'processing');
-    return isParsing || isSummaryPending;
-  })
+  // Filter items that need polling: parsing in progress OR summary generation in progress.
+  analyzeList = newValue.filter(shouldPollKnowledgeStatus)
   if (timeout !== null) {
     clearTimeout(timeout);
     timeout = null;
@@ -872,6 +869,22 @@ type KnowledgeCard = {
   metadata?: any;
   error_message?: string;
   tag_id?: string;
+};
+const isSummaryStatusPending = (item: KnowledgeCard) => (
+  item.parse_status === 'completed' &&
+  (item.summary_status === 'pending' || item.summary_status === 'processing')
+);
+const shouldPollKnowledgeStatus = (item: KnowledgeCard) => {
+  const isParsing = item.parse_status == 'pending' || item.parse_status == 'processing';
+  const shouldWaitForSummary = isSummaryStatusPending(item) && (!kbInfo.value || Boolean(kbInfo.value.summary_model_id));
+  return isParsing || shouldWaitForSummary;
+};
+const shouldShowSummaryGeneration = (item: KnowledgeCard) => (
+  isSummaryStatusPending(item) && Boolean(kbInfo.value?.summary_model_id)
+);
+const knowledgeCardDescription = (item: KnowledgeCard) => {
+  const description = item.description?.trim();
+  return description || t('knowledgeBase.noDescription');
 };
 const updateStatus = (analyzeList: KnowledgeCard[]) => {
   if (timeout !== null) {
@@ -907,23 +920,13 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
       // If there are no changes, the watch won't trigger, so we must manually poll again
       // Even if there are changes, we can manually poll again just to be safe.
       // The watch will clear this timeout if it triggers.
-      const stillPending = cardList.value.filter(item => {
-        const isParsing = item.parse_status == 'pending' || item.parse_status == 'processing';
-        const isSummaryPending = item.parse_status == 'completed' && 
-          (item.summary_status == 'pending' || item.summary_status == 'processing');
-        return isParsing || isSummaryPending;
-      });
+      const stillPending = cardList.value.filter(shouldPollKnowledgeStatus);
       if (stillPending.length > 0) {
         updateStatus(stillPending);
       }
     }).catch((_err) => {
       // 错误处理
-      const stillPending = cardList.value.filter(item => {
-        const isParsing = item.parse_status == 'pending' || item.parse_status == 'processing';
-        const isSummaryPending = item.parse_status == 'completed' && 
-          (item.summary_status == 'pending' || item.summary_status == 'processing');
-        return isParsing || isSummaryPending;
-      });
+      const stillPending = cardList.value.filter(shouldPollKnowledgeStatus);
       if (stillPending.length > 0) {
         updateStatus(stillPending);
       }
@@ -1141,9 +1144,9 @@ const ensureDocumentKbReady = () => {
     MessagePlugin.warning(t('knowledgeBase.notInitialized'));
     return false;
   }
-  // Embedding model only required when RAG indexing is enabled
+  // Embedding model is only required for vector indexing; keyword-only KBs can be searched without it.
   const strategy = (kbInfo.value as any).indexing_strategy
-  const needsEmbedding = !strategy || strategy.vector_enabled || strategy.keyword_enabled
+  const needsEmbedding = !strategy || strategy.vector_enabled
   if (needsEmbedding && !kbInfo.value.embedding_model_id) {
     MessagePlugin.warning(t('knowledgeBase.notInitialized'));
     return false;
@@ -1720,6 +1723,7 @@ const getTitle = (session_id: string, value: string) => {
   usemenuStore.updataMenuChildren(obj);
   usemenuStore.changeIsFirstSession(true);
   usemenuStore.changeFirstQuery(value);
+  settingsStore.selectKnowledgeBases([kbId.value]);
   router.push(`/platform/chat/${session_id}`);
 };
 
@@ -2292,14 +2296,14 @@ async function createNewSession(value: string): Promise<void> {
                         <span class="card-draft-tip">{{ t('knowledgeBase.draftTip') }}</span>
                       </div>
                       <div 
-                        v-else-if="item.parse_status === 'completed' && (item.summary_status === 'pending' || item.summary_status === 'processing')" 
+                        v-else-if="shouldShowSummaryGeneration(item)"
                         class="card-analyze"
                       >
                         <t-icon name="loading" class="card-analyze-loading"></t-icon>
                         <span class="card-analyze-txt">{{ t('knowledgeBase.generatingSummary') }}</span>
                       </div>
                       <div v-else-if="item.parse_status === 'completed'" class="card-content-txt">
-                        {{ item.description }}
+                        {{ knowledgeCardDescription(item) }}
                       </div>
                     </div>
                     <div class="card-bottom">
@@ -2377,6 +2381,7 @@ async function createNewSession(value: string): Promise<void> {
                   :selected-ids="selectedIds"
                   :tag-list="tagList"
                   :can-edit="canEdit"
+                  :can-generate-summary="Boolean(kbInfo?.summary_model_id)"
                   @open="(item: any) => openCardDetails(item)"
                   @toggle-row="toggleSelectRow"
                   @toggle-all="toggleSelectAll"
@@ -2512,7 +2517,13 @@ async function createNewSession(value: string): Promise<void> {
       </template>
 
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
-      <DocContent :visible="isCardDetails" :details="details" @closeDoc="closeDoc" @getDoc="getDoc"></DocContent>
+      <DocContent
+        :visible="isCardDetails"
+        :details="details"
+        :can-generate-summary="Boolean(kbInfo?.summary_model_id)"
+        @closeDoc="closeDoc"
+        @getDoc="getDoc"
+      ></DocContent>
     </div>
   </template>
   <template v-else>

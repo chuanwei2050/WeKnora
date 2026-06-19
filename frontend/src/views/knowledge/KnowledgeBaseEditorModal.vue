@@ -792,8 +792,8 @@ const validateForm = (): boolean => {
     }
   }
 
-  // 验证模型配置 - embedding 模型仅在检索索引启用时必须
-  const needsEmbedding = formData.value.indexingStrategy?.vectorEnabled || formData.value.indexingStrategy?.keywordEnabled
+  // 验证模型配置 - embedding 模型仅在向量索引启用时必须
+  const needsEmbedding = formData.value.indexingStrategy?.vectorEnabled
   if (needsEmbedding && !formData.value.modelConfig.embeddingModelId) {
     MessagePlugin.warning(t('knowledgeEditor.indexing.embeddingRequired'))
     currentSection.value = 'models'

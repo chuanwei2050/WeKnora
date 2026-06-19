@@ -48,7 +48,7 @@ mermaid.initialize({
     topPadding: 50
   }
 });
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo"]);
+const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canGenerateSummary"]);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
 
 marked.use({
@@ -822,7 +822,7 @@ const handleDetailsScroll = () => {
           </div>
         </div>
       </div>
-      <div v-else-if="details.summary_status === 'pending' || details.summary_status === 'processing'" class="summary_box">
+      <div v-else-if="canGenerateSummary !== false && (details.summary_status === 'pending' || details.summary_status === 'processing')" class="summary_box">
         <span class="label">{{ $t('knowledgeBase.documentSummary') }}</span>
         <div class="summary_loading">
           <t-loading size="small" />

@@ -502,9 +502,8 @@ const loadKnowledgeBases = async () => {
     const response: any = await listKnowledgeBases();
     if (response.data && Array.isArray(response.data)) {
       const validKbs = response.data.filter((kb: any) => {
-        if (!kb.summary_model_id || kb.summary_model_id === '') return false
         const strategy = kb.indexing_strategy
-        const needsEmbedding = !strategy || strategy.vector_enabled || strategy.keyword_enabled
+        const needsEmbedding = !strategy || strategy.vector_enabled
         if (needsEmbedding && (!kb.embedding_model_id || kb.embedding_model_id === '')) return false
         return true
       });
@@ -3316,5 +3315,3 @@ const getImgSrc = (url: string) => {
   }
 }
 </style>
-
-

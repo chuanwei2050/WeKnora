@@ -29,6 +29,7 @@ const props = defineProps<{
   canEdit: boolean;
   tagList: Tag[];
   loading?: boolean;
+  canGenerateSummary?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -87,6 +88,7 @@ const computeStatus = (item: KnowledgeItem): StatusInfo => {
   }
   if (
     item.parse_status === 'completed' &&
+    props.canGenerateSummary !== false &&
     (item.summary_status === 'pending' || item.summary_status === 'processing')
   ) {
     return { label: t('knowledgeBase.generatingSummary'), theme: 'primary', icon: 'loading', spin: true };

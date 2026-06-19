@@ -103,11 +103,15 @@ const dropdownStyle = ref<Record<string, string>>({})
 const dropdownWidth = props.dropdownWidth ?? 300
 const offsetY = props.offsetY ?? 8
 
-// 过滤：只显示已初始化（有 embedding & summary）的
+const isKnowledgeBaseReady = (kb: KnowledgeBase) => {
+  const strategy = (kb as any).indexing_strategy
+  const needsEmbedding = !strategy || strategy.vector_enabled
+  return !needsEmbedding || Boolean(kb.embedding_model_id)
+}
+
+// 过滤：只显示可用于问答检索的知识库
 const filteredKnowledgeBases = computed(() => {
-  const valid = knowledgeBases.value.filter(
-    k => k.embedding_model_id && k.summary_model_id
-  )
+  const valid = knowledgeBases.value.filter(isKnowledgeBaseReady)
   if (!searchQuery.value) return valid
   const q = searchQuery.value.toLowerCase()
   return valid.filter(k => k.name.toLowerCase().includes(q))

@@ -100,10 +100,31 @@ const defaultSettings: Settings = {
   autoCheckUpdate: true,
 };
 
+function loadInitialSettings(): Settings {
+  const raw = localStorage.getItem("WeKnora_settings");
+  if (!raw) return { ...defaultSettings };
+  try {
+    const stored = JSON.parse(raw);
+    return {
+      ...defaultSettings,
+      ...stored,
+      agentConfig: { ...defaultSettings.agentConfig, ...(stored.agentConfig || {}) },
+      modelConfig: { ...defaultSettings.modelConfig, ...(stored.modelConfig || {}) },
+      ollamaConfig: { ...defaultSettings.ollamaConfig, ...(stored.ollamaConfig || {}) },
+      conversationModels: { ...defaultSettings.conversationModels, ...(stored.conversationModels || {}) },
+      selectedKnowledgeBases: Array.isArray(stored.selectedKnowledgeBases) ? stored.selectedKnowledgeBases : [],
+      selectedFiles: Array.isArray(stored.selectedFiles) ? stored.selectedFiles : [],
+      selectedFileKbMap: stored.selectedFileKbMap || {},
+    };
+  } catch {
+    return { ...defaultSettings };
+  }
+}
+
 export const useSettingsStore = defineStore("settings", {
   state: () => ({
     // 从本地存储加载设置，如果没有则使用默认设置
-    settings: JSON.parse(localStorage.getItem("WeKnora_settings") || JSON.stringify(defaultSettings)),
+    settings: loadInitialSettings(),
   }),
 
   getters: {
@@ -382,4 +403,3 @@ export const useSettingsStore = defineStore("settings", {
     },
   },
 });
- 

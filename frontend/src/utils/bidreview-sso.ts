@@ -4,6 +4,14 @@ type BidReviewSession = {
   token?: string
   refresh_token?: string
   bidreview_role?: string
+  default_knowledge_base?: BidReviewDefaultKnowledgeBase
+}
+
+type BidReviewDefaultKnowledgeBase = {
+  id?: string
+  name?: string
+  description?: string
+  source?: string
 }
 
 const BIDREVIEW_TOKEN_KEY = 'bidreview_access_token'
@@ -65,4 +73,30 @@ export async function ensureBidReviewSession(): Promise<void> {
   localStorage.setItem('weknora_refresh_token', session.refresh_token)
   localStorage.setItem('weknora_lite_mode', 'true')
   localStorage.setItem(BIDREVIEW_ROLE_KEY, session.bidreview_role || 'member')
+  applyDefaultKnowledgeBase(session.default_knowledge_base)
+}
+
+function applyDefaultKnowledgeBase(kb?: BidReviewDefaultKnowledgeBase): void {
+  const kbId = typeof kb?.id === 'string' ? kb.id.trim() : ''
+  if (!kbId) return
+  const knowledgeBase = {
+    id: kbId,
+    name: kb?.name || '投标业务知识库',
+    description: kb?.description || '',
+  }
+  localStorage.setItem('weknora_current_kb', JSON.stringify(knowledgeBase))
+  localStorage.setItem('weknora_knowledge_bases', JSON.stringify([knowledgeBase]))
+  const rawSettings = localStorage.getItem('WeKnora_settings')
+  let settings: Record<string, unknown> = {}
+  if (rawSettings) {
+    try {
+      settings = JSON.parse(rawSettings)
+    } catch {
+      settings = {}
+    }
+  }
+  settings.selectedKnowledgeBases = [kbId]
+  settings.selectedFiles = []
+  settings.selectedFileKbMap = {}
+  localStorage.setItem('WeKnora_settings', JSON.stringify(settings))
 }
