@@ -5,12 +5,19 @@ type BidReviewSession = {
   refresh_token?: string
   bidreview_role?: string
   default_knowledge_base?: BidReviewDefaultKnowledgeBase
+  default_agent?: BidReviewDefaultAgent
 }
 
 type BidReviewDefaultKnowledgeBase = {
   id?: string
   name?: string
   description?: string
+  source?: string
+}
+
+type BidReviewDefaultAgent = {
+  id?: string
+  name?: string
   source?: string
 }
 
@@ -74,6 +81,7 @@ export async function ensureBidReviewSession(): Promise<void> {
   localStorage.setItem('weknora_lite_mode', 'true')
   localStorage.setItem(BIDREVIEW_ROLE_KEY, session.bidreview_role || 'member')
   applyDefaultKnowledgeBase(session.default_knowledge_base)
+  applyDefaultAgent(session.default_agent)
 }
 
 function applyDefaultKnowledgeBase(kb?: BidReviewDefaultKnowledgeBase): void {
@@ -99,4 +107,30 @@ function applyDefaultKnowledgeBase(kb?: BidReviewDefaultKnowledgeBase): void {
   settings.selectedFiles = []
   settings.selectedFileKbMap = {}
   localStorage.setItem('WeKnora_settings', JSON.stringify(settings))
+}
+
+function applyDefaultAgent(agent?: BidReviewDefaultAgent): void {
+  const agentId = typeof agent?.id === 'string' ? agent.id.trim() : ''
+  if (!agentId) return
+  const rawSettings = localStorage.getItem('WeKnora_settings')
+  let settings: Record<string, unknown> = {}
+  if (rawSettings) {
+    try {
+      settings = JSON.parse(rawSettings)
+    } catch {
+      settings = {}
+    }
+  }
+  settings.selectedAgentId = agentId
+  settings.selectedAgentSourceTenantId = null
+  settings.isAgentEnabled = true
+  settings.selectedKnowledgeBases = []
+  settings.selectedFiles = []
+  settings.selectedFileKbMap = {}
+  localStorage.setItem('WeKnora_settings', JSON.stringify(settings))
+  localStorage.setItem('weknora_bidreview_default_agent', JSON.stringify({
+    id: agentId,
+    name: agent?.name || '标书知识问答智能体',
+    source: agent?.source || 'bidreview_default',
+  }))
 }
