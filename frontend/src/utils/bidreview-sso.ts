@@ -130,7 +130,7 @@ function applyDefaultAgent(agent?: BidReviewDefaultAgent): void {
   localStorage.setItem('WeKnora_settings', JSON.stringify(settings))
   localStorage.setItem('weknora_bidreview_default_agent', JSON.stringify({
     id: agentId,
-    name: agent?.name || '标书知识问答智能体',
+    name: agent?.name || 'G博士',
     source: agent?.source || 'bidreview_default',
   }))
 }
