@@ -184,7 +184,7 @@ const headerTitle = computed(() => {
     }
     &.updated {
       color: var(--td-brand-color);
-      background: rgba(7, 192, 95, 0.1);
+      background: rgba(23, 74, 124, 0.1);
     }
     &.renamed {
       color: var(--td-warning-color);
@@ -217,8 +217,8 @@ const headerTitle = computed(() => {
   }
   &.updated {
     color: var(--td-brand-color);
-    background: rgba(7, 192, 95, 0.1);
-    border: 1px solid rgba(7, 192, 95, 0.2);
+    background: rgba(23, 74, 124, 0.1);
+    border: 1px solid rgba(23, 74, 124, 0.2);
   }
   &.renamed {
     color: var(--td-warning-color);

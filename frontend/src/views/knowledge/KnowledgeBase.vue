@@ -3943,7 +3943,7 @@ async function createNewSession(value: string): Promise<void> {
 
 .knowledge-card:hover {
   border-color: var(--td-brand-color);
-  box-shadow: 0 2px 8px rgba(7, 192, 95, 0.12);
+  box-shadow: 0 2px 8px rgba(23, 74, 124, 0.12);
 }
 
 /* 悬停知识卡片时跟随鼠标的详情气泡 */

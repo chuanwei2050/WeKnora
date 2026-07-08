@@ -2444,7 +2444,7 @@ const getImgSrc = (url: string) => {
 
 .mention-chip--kb .mention-chip__icon-wrap {
   background: rgba(5, 192, 95, 0.12);
-  color: var(--td-brand-color, #07c05f);
+  color: var(--td-brand-color, #174a7c);
 }
 
 .mention-chip--kb:hover {
@@ -3091,7 +3091,7 @@ const getImgSrc = (url: string) => {
   border-radius: 4px;
   border: .5px solid transparent;
   background: transparent;
-  color: var(--td-brand-color, #07c05f);
+  color: var(--td-brand-color, #174a7c);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;

@@ -14,7 +14,7 @@
   
   <!-- Title -->
   <text x="400" y="70" font-family="PingFang SC, sans-serif" font-size="36" font-weight="700" fill="#065F46" text-anchor="middle">Agentic RAG</text>
-  <text x="400" y="105" font-family="PingFang SC, sans-serif" font-size="16" fill="#059669" text-anchor="middle">基于 ReAct 范式的智能检索代理</text>
+  <text x="400" y="105" font-family="PingFang SC, sans-serif" font-size="16" fill="#0d355f" text-anchor="middle">基于 ReAct 范式的智能检索代理</text>
   
   <!-- Query Input -->
   <g transform="translate(300, 140)">
@@ -23,7 +23,7 @@
   </g>
   
   <!-- Arrow down -->
-  <path d="M400 200 L400 225" stroke="#059669" stroke-width="3" marker-end="url(#arrowGreen)"/>
+  <path d="M400 200 L400 225" stroke="#0d355f" stroke-width="3" marker-end="url(#arrowGreen)"/>
   
   <!-- ReAct Loop Container -->
   <g transform="translate(120, 235)">
@@ -74,7 +74,7 @@
   </g>
   
   <!-- Arrow down to result -->
-  <path d="M400 485 L400 505" stroke="#059669" stroke-width="3" marker-end="url(#arrowGreen)"/>
+  <path d="M400 485 L400 505" stroke="#0d355f" stroke-width="3" marker-end="url(#arrowGreen)"/>
   
   <!-- Final Answer -->
   <g transform="translate(250, 515)">
@@ -84,7 +84,7 @@
   
   <!-- Side annotation -->
   <g transform="translate(50, 320)">
-    <text x="0" y="0" font-family="PingFang SC, sans-serif" font-size="13" font-weight="600" fill="#059669">特点：</text>
+    <text x="0" y="0" font-family="PingFang SC, sans-serif" font-size="13" font-weight="600" fill="#0d355f">特点：</text>
     <text x="0" y="22" font-family="PingFang SC, sans-serif" font-size="12" fill="#6B7280">• 自主推理</text>
     <text x="0" y="42" font-family="PingFang SC, sans-serif" font-size="12" fill="#6B7280">• 工具调用</text>
     <text x="0" y="62" font-family="PingFang SC, sans-serif" font-size="12" fill="#6B7280">• 动态迭代</text>
@@ -93,7 +93,7 @@
   <!-- Arrow markers -->
   <defs>
     <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-      <polygon points="0 0, 10 3, 0 6" fill="#059669"/>
+      <polygon points="0 0, 10 3, 0 6" fill="#0d355f"/>
     </marker>
     <marker id="arrowPurple" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
       <polygon points="0 0, 10 3, 0 6" fill="#8B5CF6"/>

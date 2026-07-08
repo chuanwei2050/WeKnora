@@ -1916,11 +1916,11 @@ watch(currentSection, (section) => {
 }
 .avatar-popover-content .avatar-emoji-btn:hover {
   border-color: var(--td-brand-color);
-  background: rgba(7, 192, 95, 0.06);
+  background: rgba(23, 74, 124, 0.06);
 }
 .avatar-popover-content .avatar-emoji-btn.is-selected {
   border-color: var(--td-brand-color);
-  background: rgba(7, 192, 95, 0.12);
+  background: rgba(23, 74, 124, 0.12);
 }
 .avatar-popover-content .avatar-clear-btn {
   margin-top: 10px;
@@ -2106,7 +2106,7 @@ watch(currentSection, (section) => {
 
     &.is-me {
       border-left: 3px solid @primary-color;
-      background: rgba(7, 192, 95, 0.04);
+      background: rgba(23, 74, 124, 0.04);
     }
 
     .perm-role-tag {
@@ -2212,7 +2212,7 @@ watch(currentSection, (section) => {
 
     &.is-me {
       border: 1px solid @primary-color;
-      background: rgba(7, 192, 95, 0.04);
+      background: rgba(23, 74, 124, 0.04);
     }
 
     .member-avatar {
@@ -2227,7 +2227,7 @@ watch(currentSection, (section) => {
       color: var(--td-text-color-secondary);
 
       &.is-me {
-        background: rgba(7, 192, 95, 0.15);
+        background: rgba(23, 74, 124, 0.15);
         color: @primary-color;
         box-shadow: 0 0 0 2px @primary-color;
       }
@@ -2513,7 +2513,7 @@ watch(currentSection, (section) => {
       gap: 4px;
 
       &.type-document {
-        background: rgba(7, 192, 95, 0.08);
+        background: rgba(23, 74, 124, 0.08);
         color: var(--td-brand-color-active);
       }
 
@@ -2523,7 +2523,7 @@ watch(currentSection, (section) => {
       }
 
       &      .shared-icon-org {
-        background: rgba(7, 192, 95, 0.08);
+        background: rgba(23, 74, 124, 0.08);
         color: var(--td-brand-color-active);
       }
 
@@ -2534,7 +2534,7 @@ watch(currentSection, (section) => {
       }
 
       &.shared-icon-kb {
-        background: rgba(7, 192, 95, 0.08);
+        background: rgba(23, 74, 124, 0.08);
         color: var(--td-brand-color-active);
       }
 

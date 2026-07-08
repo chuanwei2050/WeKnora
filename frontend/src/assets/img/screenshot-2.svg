@@ -14,7 +14,7 @@
   
   <!-- Title -->
   <text x="400" y="70" font-family="PingFang SC, sans-serif" font-size="36" font-weight="700" fill="#065F46" text-anchor="middle">混合检索策略</text>
-  <text x="400" y="105" font-family="PingFang SC, sans-serif" font-size="16" fill="#059669" text-anchor="middle">BM25 关键词 + 向量语义 + 知识图谱</text>
+  <text x="400" y="105" font-family="PingFang SC, sans-serif" font-size="16" fill="#0d355f" text-anchor="middle">BM25 关键词 + 向量语义 + 知识图谱</text>
   
   <!-- Three retrieval methods -->
   <!-- BM25 -->

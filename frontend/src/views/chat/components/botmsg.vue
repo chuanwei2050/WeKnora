@@ -313,8 +313,8 @@ onBeforeUnmount(() => {
     max-width: 200px;
     cursor: default;
     transition: all 0.15s;
-    background: rgba(7, 192, 95, 0.06);
-    border: 1px solid rgba(7, 192, 95, 0.2);
+    background: rgba(23, 74, 124, 0.06);
+    border: 1px solid rgba(23, 74, 124, 0.2);
     color: var(--td-text-color-primary);
 
     &.kb-tag {

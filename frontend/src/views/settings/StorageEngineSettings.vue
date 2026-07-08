@@ -1065,7 +1065,7 @@ onMounted(loadAll)
   &.t-is-focused .t-input__wrap,
   &.t-is-focused input {
     border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
+    box-shadow: 0 0 0 2px rgba(23, 74, 124, 0.1);
   }
 }
 
@@ -1144,7 +1144,7 @@ onMounted(loadAll)
 
   &.active {
     border-color: var(--td-brand-color);
-    background: rgba(7, 192, 95, 0.06);
+    background: rgba(23, 74, 124, 0.06);
   }
 
   .mode-label {
@@ -1238,7 +1238,7 @@ onMounted(loadAll)
       &:hover {
         border-color: var(--td-brand-color);
         color: var(--td-brand-color);
-        background: rgba(7, 192, 95, 0.04);
+        background: rgba(23, 74, 124, 0.04);
       }
     }
   }

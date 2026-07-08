@@ -1437,7 +1437,7 @@ const handleOverlayMouseUp = () => {
   &.t-is-focused input,
   &.t-is-focused textarea {
     border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
+    box-shadow: 0 0 0 2px rgba(23, 74, 124, 0.1);
   }
 }
 
@@ -1522,7 +1522,7 @@ const handleOverlayMouseUp = () => {
       &:hover {
         border-color: var(--td-brand-color);
         color: var(--td-brand-color);
-        background: rgba(7, 192, 95, 0.04);
+        background: rgba(23, 74, 124, 0.04);
       }
     }
   }
@@ -1696,7 +1696,7 @@ const handleOverlayMouseUp = () => {
       top: 0;
       bottom: 0;
       width: var(--progress, 0%);
-      background: linear-gradient(90deg, rgba(7, 192, 95, 0.08), rgba(7, 192, 95, 0.15));
+      background: linear-gradient(90deg, rgba(23, 74, 124, 0.08), rgba(23, 74, 124, 0.15));
       transition: width 0.3s ease;
       z-index: 0;
       border-radius: 5px 0 0 5px;
@@ -1736,7 +1736,7 @@ const handleOverlayMouseUp = () => {
 
   &:hover {
     color: var(--td-brand-color);
-    background: rgba(7, 192, 95, 0.04);
+    background: rgba(23, 74, 124, 0.04);
   }
 }
 
@@ -1878,12 +1878,12 @@ const handleOverlayMouseUp = () => {
     transition: all 0.2s ease;
 
     &:hover {
-      background: rgba(7, 192, 95, 0.08) !important;
+      background: rgba(23, 74, 124, 0.08) !important;
       color: var(--td-brand-color-active) !important;
     }
 
     &:active {
-      background: rgba(7, 192, 95, 0.12) !important;
+      background: rgba(23, 74, 124, 0.12) !important;
     }
 
     .t-icon {

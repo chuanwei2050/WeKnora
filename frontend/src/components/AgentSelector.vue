@@ -504,7 +504,7 @@ watch(() => props.visible, (newVal) => {
   border-radius: 4px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--td-brand-color, #07c05f);
+  color: var(--td-brand-color, #174a7c);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -684,7 +684,7 @@ watch(() => props.visible, (newVal) => {
   
   &:hover {
     background: var(--td-bg-color-secondarycontainer-hover, #e8e8e8);
-    color: var(--td-brand-color, #07c05f);
+    color: var(--td-brand-color, #174a7c);
   }
 }
 

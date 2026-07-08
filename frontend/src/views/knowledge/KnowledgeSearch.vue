@@ -593,7 +593,7 @@ onMounted(() => {
 
     &.active {
       color: var(--td-brand-color);
-      background: rgba(7, 192, 95, 0.08);
+      background: rgba(23, 74, 124, 0.08);
     }
   }
 }
@@ -680,7 +680,7 @@ onMounted(() => {
 
 .search-btn {
   flex-shrink: 0;
-  background: linear-gradient(135deg, var(--td-brand-color) 0%, #00a67e 100%);
+  background: linear-gradient(135deg, var(--td-brand-color) 0%, #0d355f 100%);
   border: none;
   color: var(--td-text-color-anti);
   border-radius: 6px;
@@ -713,7 +713,7 @@ onMounted(() => {
   flex-shrink: 0;
 
   &.doc {
-    background: rgba(7, 192, 95, 0.1);
+    background: rgba(23, 74, 124, 0.1);
     color: var(--td-brand-color);
   }
   &.faq {
@@ -778,11 +778,11 @@ onMounted(() => {
   cursor: pointer;
   padding: 4px 10px;
   border-radius: 6px;
-  border: 1px solid rgba(7, 192, 95, 0.3);
+  border: 1px solid rgba(23, 74, 124, 0.3);
   transition: all 0.15s;
 
   &:hover {
-    background: rgba(7, 192, 95, 0.08);
+    background: rgba(23, 74, 124, 0.08);
     border-color: var(--td-brand-color);
   }
 }
@@ -884,7 +884,7 @@ onMounted(() => {
   transition: all 0.15s;
 
   &:hover {
-    background: rgba(7, 192, 95, 0.08);
+    background: rgba(23, 74, 124, 0.08);
     color: var(--td-brand-color-active);
   }
 }
@@ -1087,7 +1087,7 @@ onMounted(() => {
     color: #1677ff;
   }
   &.assistant {
-    background: rgba(7, 192, 95, 0.1);
+    background: rgba(23, 74, 124, 0.1);
     color: var(--td-brand-color);
   }
 }

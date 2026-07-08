@@ -424,7 +424,7 @@ onUnmounted(() => {
   }
 
   &.active {
-    background-color: rgba(7, 192, 95, 0.1);
+    background-color: rgba(23, 74, 124, 0.1);
     color: var(--td-brand-color);
     font-weight: 500;
   }
@@ -473,7 +473,7 @@ onUnmounted(() => {
   }
 
   &.active {
-    background-color: rgba(7, 192, 95, 0.08);
+    background-color: rgba(23, 74, 124, 0.08);
     color: var(--td-brand-color);
     font-weight: 500;
   }

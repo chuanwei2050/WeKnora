@@ -196,7 +196,7 @@ const getWebSearchDisplayText = (item) => {
     border-radius: 8px;
     background-color: var(--td-bg-color-container);
     border: .5px solid var(--td-component-stroke);
-    box-shadow: 0 2px 4px rgba(7, 192, 95, 0.08);
+    box-shadow: 0 2px 4px rgba(23, 74, 124, 0.08);
     box-sizing: border-box;
     overflow: hidden;
     box-sizing: border-box;
@@ -237,7 +237,7 @@ const getWebSearchDisplayText = (item) => {
     }
 
     .refer_header:hover {
-        background-color: rgba(7, 192, 95, 0.04);
+        background-color: rgba(23, 74, 124, 0.04);
         cursor: pointer;
     }
 
@@ -263,7 +263,7 @@ const getWebSearchDisplayText = (item) => {
     border-bottom: 1px dashed var(--td-brand-color);
 
     &:hover {
-        background-color: rgba(7, 192, 95, 0.08);
+        background-color: rgba(23, 74, 124, 0.08);
         border-radius: 3px;
         padding-right: 4px;
     }
@@ -287,7 +287,7 @@ const getWebSearchDisplayText = (item) => {
         transition: background-color 0.15s ease;
 
         &:hover {
-            background-color: rgba(7, 192, 95, 0.04);
+            background-color: rgba(23, 74, 124, 0.04);
         }
 
         .doc-group-left {
@@ -368,7 +368,7 @@ const getWebSearchDisplayText = (item) => {
         white-space: nowrap;
 
         &:hover {
-            background-color: rgba(7, 192, 95, 0.04);
+            background-color: rgba(23, 74, 124, 0.04);
             color: var(--td-brand-color);
         }
 

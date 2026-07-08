@@ -1298,7 +1298,7 @@ onUnmounted(() => {
 }
 
 .org-join-btn {
-  border-color: rgba(7, 192, 95, 0.5);
+  border-color: rgba(23, 74, 124, 0.5);
   color: var(--td-brand-color);
   font-weight: 500;
   transition: all 0.2s ease;
@@ -1308,7 +1308,7 @@ onUnmounted(() => {
   }
 
   &:hover {
-    background: rgba(7, 192, 95, 0.08);
+    background: rgba(23, 74, 124, 0.08);
     border-color: var(--td-brand-color);
     color: var(--td-brand-color);
 
@@ -1323,12 +1323,12 @@ onUnmounted(() => {
   border: none;
   color: var(--td-text-color-anti);
   font-weight: 500;
-  box-shadow: 0 2px 8px rgba(7, 192, 95, 0.25);
+  box-shadow: 0 2px 8px rgba(23, 74, 124, 0.25);
   transition: all 0.25s ease;
 
   &:hover {
     background: var(--td-brand-color);
-    box-shadow: 0 4px 14px rgba(7, 192, 95, 0.35);
+    box-shadow: 0 4px 14px rgba(23, 74, 124, 0.35);
   }
 
   .org-create-icon {
@@ -1465,29 +1465,29 @@ onUnmounted(() => {
     right: 0;
     width: 120px;
     height: 80px;
-    background: radial-gradient(ellipse 60% 50% at 100% 0%, rgba(7, 192, 95, 0.06) 0%, transparent 70%);
+    background: radial-gradient(ellipse 60% 50% at 100% 0%, rgba(23, 74, 124, 0.06) 0%, transparent 70%);
     pointer-events: none;
     z-index: 0;
   }
 
   &.joined-org {
     &:hover {
-      border-color: rgba(7, 192, 95, 0.4);
-      box-shadow: 0 4px 16px rgba(7, 192, 95, 0.08);
+      border-color: rgba(23, 74, 124, 0.4);
+      box-shadow: 0 4px 16px rgba(23, 74, 124, 0.08);
     }
   }
 
   &:hover {
-    border-color: rgba(7, 192, 95, 0.5);
-    box-shadow: 0 6px 20px rgba(7, 192, 95, 0.12);
+    border-color: rgba(23, 74, 124, 0.5);
+    box-shadow: 0 6px 20px rgba(23, 74, 124, 0.12);
   }
 
   .card-decoration {
-    color: rgba(7, 192, 95, 0.35);
+    color: rgba(23, 74, 124, 0.35);
   }
 
   &:hover .card-decoration {
-    color: rgba(7, 192, 95, 0.55);
+    color: rgba(23, 74, 124, 0.55);
   }
 
   .card-header {
@@ -1705,10 +1705,10 @@ onUnmounted(() => {
   }
 
   &.stat-kb {
-    background: rgba(7, 192, 95, 0.08);
+    background: rgba(23, 74, 124, 0.08);
     color: var(--td-brand-color);
     .t-icon { color: var(--td-brand-color); }
-    &:hover { background: rgba(7, 192, 95, 0.12); }
+    &:hover { background: rgba(23, 74, 124, 0.12); }
   }
 
   &.stat-agent {
@@ -1771,13 +1771,13 @@ onUnmounted(() => {
   }
 
   &.admin {
-    background: rgba(7, 192, 95, 0.12);
+    background: rgba(23, 74, 124, 0.12);
     color: var(--td-brand-color);
     .t-icon { color: var(--td-brand-color); }
   }
 
   &.editor {
-    background: rgba(7, 192, 95, 0.08);
+    background: rgba(23, 74, 124, 0.08);
     color: var(--td-brand-color);
     .t-icon { color: var(--td-brand-color); }
   }
@@ -2239,14 +2239,14 @@ onUnmounted(() => {
     right: 0;
     width: 80px;
     height: 56px;
-    background: radial-gradient(ellipse 60% 50% at 100% 0%, rgba(7, 192, 95, 0.06) 0%, transparent 70%);
+    background: radial-gradient(ellipse 60% 50% at 100% 0%, rgba(23, 74, 124, 0.06) 0%, transparent 70%);
     pointer-events: none;
     z-index: 0;
   }
 
   &:hover:not(.is-full) {
-    border-color: rgba(7, 192, 95, 0.5);
-    box-shadow: 0 4px 16px rgba(7, 192, 95, 0.08);
+    border-color: rgba(23, 74, 124, 0.5);
+    box-shadow: 0 4px 16px rgba(23, 74, 124, 0.08);
   }
 
   &.is-full {
@@ -2262,13 +2262,13 @@ onUnmounted(() => {
     position: absolute;
     top: 6px;
     right: 12px;
-    color: rgba(7, 192, 95, 0.35);
+    color: rgba(23, 74, 124, 0.35);
     pointer-events: none;
     z-index: 0;
   }
 
   &:hover:not(.is-full) .searchable-card-decoration {
-    color: rgba(7, 192, 95, 0.55);
+    color: rgba(23, 74, 124, 0.55);
   }
 
   .searchable-card-header {
@@ -2362,7 +2362,7 @@ onUnmounted(() => {
     font-family: "PingFang SC", system-ui, sans-serif;
 
     &.member {
-      background: rgba(7, 192, 95, 0.08);
+      background: rgba(23, 74, 124, 0.08);
       color: var(--td-brand-color);
     }
 
@@ -2372,7 +2372,7 @@ onUnmounted(() => {
     }
 
     &.searchable-badge-agent {
-      background: rgba(7, 192, 95, 0.08);
+      background: rgba(23, 74, 124, 0.08);
       color: var(--td-brand-color);
       .searchable-badge-agent-icon {
         width: 12px;
@@ -2497,7 +2497,7 @@ onUnmounted(() => {
     right: 0;
     width: 120px;
     height: 80px;
-    background: radial-gradient(ellipse 60% 50% at 100% 0%, rgba(7, 192, 95, 0.06) 0%, transparent 70%);
+    background: radial-gradient(ellipse 60% 50% at 100% 0%, rgba(23, 74, 124, 0.06) 0%, transparent 70%);
     pointer-events: none;
     z-index: 0;
   }
@@ -2507,7 +2507,7 @@ onUnmounted(() => {
   position: absolute;
   top: 8px;
   right: 16px;
-  color: rgba(7, 192, 95, 0.35);
+  color: rgba(23, 74, 124, 0.35);
   pointer-events: none;
   z-index: 0;
 }
@@ -2624,7 +2624,7 @@ onUnmounted(() => {
   font-family: "PingFang SC", system-ui, sans-serif;
 
   &.member {
-    background: rgba(7, 192, 95, 0.08);
+    background: rgba(23, 74, 124, 0.08);
     color: var(--td-brand-color);
   }
 
@@ -2634,7 +2634,7 @@ onUnmounted(() => {
   }
 
   &.preview-badge-agent {
-    background: rgba(7, 192, 95, 0.08);
+    background: rgba(23, 74, 124, 0.08);
     color: var(--td-brand-color);
     .preview-badge-agent-icon {
       width: 14px;

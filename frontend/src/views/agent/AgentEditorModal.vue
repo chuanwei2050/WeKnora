@@ -3659,7 +3659,7 @@ const handleSave = async () => {
   }
 
   &.active {
-    background: rgba(7, 192, 95, 0.1);
+    background: rgba(23, 74, 124, 0.1);
     color: var(--td-brand-color);
     font-weight: 500;
   }
@@ -4467,7 +4467,7 @@ const handleSave = async () => {
   &.t-is-focused,
   &:focus-within {
     border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
+    box-shadow: 0 0 0 2px rgba(23, 74, 124, 0.1);
   }
 }
 
@@ -4627,7 +4627,7 @@ const handleSave = async () => {
   flex-shrink: 0;
   
   &.normal {
-    background: linear-gradient(135deg, rgba(7, 192, 95, 0.15) 0%, rgba(7, 192, 95, 0.08) 100%);
+    background: linear-gradient(135deg, rgba(23, 74, 124, 0.15) 0%, rgba(23, 74, 124, 0.08) 100%);
     color: var(--td-brand-color-active);
   }
   

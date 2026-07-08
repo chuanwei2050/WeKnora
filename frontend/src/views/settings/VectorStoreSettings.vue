@@ -664,7 +664,7 @@ onMounted(async () => {
   word-break: break-word;
 
   &.success {
-    background: rgba(7, 192, 95, 0.1);
+    background: rgba(23, 74, 124, 0.1);
     color: var(--td-success-color);
   }
 
@@ -725,7 +725,7 @@ onMounted(async () => {
   gap: 8px;
   padding: 10px 14px;
   margin-bottom: 16px;
-  background: rgba(7, 192, 95, 0.1);
+  background: rgba(23, 74, 124, 0.1);
   border-radius: 6px;
   font-size: 13px;
   line-height: 1.5;

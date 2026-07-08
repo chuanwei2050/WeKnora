@@ -188,6 +188,7 @@ const { menuArr, visibleMenuArr } = storeToRefs(usemenuStore);
 let activeSubmenu = ref<string>('');
 const isLiteEdition = ref(false);
 const isBidReviewEmbedded = computed(() => isBidReviewEmbeddedMode());
+const bidReviewHiddenMenuPaths = new Set(['agents', 'organizations', 'creatChat']);
 
 const handleReturnToBidReview = () => {
     returnToBidReview()
@@ -288,7 +289,8 @@ const getIconActiveState = (itemPath: string) => {
 // 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
 const topMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => 
-        item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat'
+        (item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat')
+        && !(isBidReviewEmbedded.value && bidReviewHiddenMenuPaths.has(item.path))
     );
 });
 
@@ -1189,7 +1191,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 
     .submenu_item_selected {
-        background: rgba(7, 192, 95, 0.05) !important;
+        background: rgba(23, 74, 124, 0.05) !important;
         border-radius: 8px;
     }
 

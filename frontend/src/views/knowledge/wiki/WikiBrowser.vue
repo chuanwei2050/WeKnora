@@ -2202,12 +2202,12 @@ onUnmounted(() => {
   font-family: monospace;
   font-size: 12px;
   padding: 2px 8px;
-  background: rgba(7, 192, 95, 0.06);
+  background: rgba(23, 74, 124, 0.06);
   border-radius: 4px;
   transition: background 0.15s;
 
   &:hover {
-    background: rgba(7, 192, 95, 0.12);
+    background: rgba(23, 74, 124, 0.12);
   }
 }
 
