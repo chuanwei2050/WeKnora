@@ -82,6 +82,9 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb.CreatedAt = time.Now()
 	kb.TenantID = types.MustTenantIDFromContext(ctx)
 	kb.UpdatedAt = time.Now()
+	if userID, ok := types.UserIDFromContext(ctx); ok {
+		kb.CreatedBy = userID
+	}
 	kb.EnsureDefaults()
 
 	logger.Infof(ctx, "Creating knowledge base, ID: %s, tenant ID: %d, name: %s", kb.ID, kb.TenantID, kb.Name)
@@ -158,7 +161,17 @@ func (s *knowledgeBaseService) GetKnowledgeBasesByIDsOnly(ctx context.Context, i
 func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types.KnowledgeBase, error) {
 	tenantID := types.MustTenantIDFromContext(ctx)
 
-	kbs, err := s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
+	var (
+		kbs []*types.KnowledgeBase
+		err error
+	)
+	if types.IsBidReviewKnowledgeAdmin(ctx) {
+		kbs, err = s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
+	} else if userID, ok := types.UserIDFromContext(ctx); ok {
+		kbs, err = s.repo.ListKnowledgeBasesByTenantIDAndCreatedBy(ctx, tenantID, userID)
+	} else {
+		kbs = []*types.KnowledgeBase{}
+	}
 	if err != nil {
 		for _, kb := range kbs {
 			kb.EnsureDefaults()
@@ -216,6 +229,36 @@ func (s *knowledgeBaseService) ListKnowledgeBasesByTenantID(ctx context.Context,
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
+		})
+		return nil, err
+	}
+	for _, kb := range kbs {
+		kb.EnsureDefaults()
+		switch kb.Type {
+		case types.KnowledgeBaseTypeDocument:
+			if cnt, err := s.kgRepo.CountKnowledgeByKnowledgeBaseID(ctx, tenantID, kb.ID); err == nil {
+				kb.KnowledgeCount = cnt
+			}
+		case types.KnowledgeBaseTypeFAQ:
+			if cnt, err := s.chunkRepo.CountChunksByKnowledgeBaseID(ctx, tenantID, kb.ID); err == nil {
+				kb.ChunkCount = cnt
+			}
+		}
+		if processingCount, err := s.kgRepo.CountKnowledgeByStatus(ctx, tenantID, kb.ID, []string{"pending", "processing"}); err == nil {
+			kb.IsProcessing = processingCount > 0
+			kb.ProcessingCount = processingCount
+		}
+	}
+	return kbs, nil
+}
+
+// ListKnowledgeBasesByTenantIDAndCreatedBy returns non-temporary knowledge bases for one creator in the given tenant.
+func (s *knowledgeBaseService) ListKnowledgeBasesByTenantIDAndCreatedBy(ctx context.Context, tenantID uint64, createdBy string) ([]*types.KnowledgeBase, error) {
+	kbs, err := s.repo.ListKnowledgeBasesByTenantIDAndCreatedBy(ctx, tenantID, createdBy)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id":  tenantID,
+			"created_by": createdBy,
 		})
 		return nil, err
 	}
@@ -628,6 +671,10 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			StorageProviderConfig: sourceKB.StorageProviderConfig,
 			StorageConfig:         sourceKB.StorageConfig,
 			FAQConfig:             faqConfig,
+			CreatedBy:             sourceKB.CreatedBy,
+		}
+		if userID, ok := types.UserIDFromContext(ctx); ok {
+			targetKB.CreatedBy = userID
 		}
 		targetKB.EnsureDefaults()
 		if err := s.repo.CreateKnowledgeBase(ctx, targetKB); err != nil {

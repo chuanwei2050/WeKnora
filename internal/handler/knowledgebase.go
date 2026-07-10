@@ -179,9 +179,11 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 		return nil, id, 0, "", apperrors.NewInternalServerError(err.Error())
 	}
 
-	// Check 1: Verify tenant ownership (owner has full access)
+	// Check 1: current tenant access. Only admins and creators can manage.
 	if kb.TenantID == tenantID.(uint64) {
-		return kb, id, tenantID.(uint64), types.OrgRoleAdmin, nil
+		if types.CanManageKnowledgeBase(ctx, kb) {
+			return kb, id, tenantID.(uint64), types.OrgRoleAdmin, nil
+		}
 	}
 
 	// Check 2: If not owner, check organization shared access
@@ -431,6 +433,13 @@ func (h *KnowledgeBaseHandler) TogglePinKnowledgeBase(c *gin.Context) {
 		c.Error(apperrors.NewBadRequestError("knowledge base ID is required"))
 		return
 	}
+	if _, _, _, permission, err := h.validateAndGetKnowledgeBase(c); err != nil {
+		c.Error(err)
+		return
+	} else if permission != types.OrgRoleAdmin {
+		c.Error(apperrors.NewForbiddenError("No permission to pin knowledge base"))
+		return
+	}
 
 	kb, err := h.service.TogglePinKnowledgeBase(ctx, id)
 	if err != nil {
@@ -480,8 +489,8 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		return
 	}
 
-	// Only admin/editor can update knowledge base
-	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+	// Only workspace admins, platform admins, or the creator can update a knowledge base.
+	if permission != types.OrgRoleAdmin {
 		c.Error(apperrors.NewForbiddenError("No permission to update knowledge base"))
 		return
 	}
@@ -536,9 +545,9 @@ func (h *KnowledgeBaseHandler) DeleteKnowledgeBase(c *gin.Context) {
 		return
 	}
 
-	// Only owner (admin with matching tenant) can delete knowledge base
-	tenantID, _ := c.Get(types.TenantIDContextKey.String())
-	if kb.TenantID != tenantID.(uint64) || permission != types.OrgRoleAdmin {
+	// Only workspace admins, platform admins, or the creator can delete a knowledge base.
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if kb.TenantID != tenantID || permission != types.OrgRoleAdmin {
 		c.Error(apperrors.NewForbiddenError("Only knowledge base owner can delete"))
 		return
 	}
@@ -597,8 +606,8 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 	}
 
 	// Get tenant ID from context
-	tenantID, exists := c.Get(types.TenantIDContextKey.String())
-	if !exists {
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
 		logger.Error(ctx, "Failed to get tenant ID")
 		c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
 		return
@@ -615,10 +624,10 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
-	if sourceKB.TenantID != tenantID.(uint64) {
+	if sourceKB.TenantID != tenantID || !types.CanManageKnowledgeBase(ctx, sourceKB) {
 		logger.Warnf(ctx,
-			"Copy rejected: source knowledge base belongs to another tenant, source_id: %s, caller_tenant: %d, kb_tenant: %d",
-			secutils.SanitizeForLog(req.SourceID), tenantID.(uint64), sourceKB.TenantID)
+			"Copy rejected: no source knowledge base management permission, source_id: %s, caller_tenant: %d, kb_tenant: %d",
+			secutils.SanitizeForLog(req.SourceID), tenantID, sourceKB.TenantID)
 		c.Error(errors.NewForbiddenError("No permission to copy this knowledge base"))
 		return
 	}
@@ -635,8 +644,8 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 			c.Error(errors.NewInternalServerError(err.Error()))
 			return
 		}
-		if targetKB.TenantID != tenantID.(uint64) {
-			logger.Warnf(ctx, "Copy rejected: target knowledge base belongs to another tenant, target_id: %s",
+		if targetKB.TenantID != tenantID || !types.CanManageKnowledgeBase(ctx, targetKB) {
+			logger.Warnf(ctx, "Copy rejected: no target knowledge base management permission, target_id: %s",
 				secutils.SanitizeForLog(req.TargetID))
 			c.Error(errors.NewForbiddenError("No permission to copy to this knowledge base"))
 			return
@@ -646,12 +655,12 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 	// Generate task ID if not provided
 	taskID := req.TaskID
 	if taskID == "" {
-		taskID = utils.GenerateTaskID("kb_clone", tenantID.(uint64), req.SourceID)
+		taskID = utils.GenerateTaskID("kb_clone", tenantID, req.SourceID)
 	}
 
 	// Create KB clone payload
 	payload := types.KBClonePayload{
-		TenantID: tenantID.(uint64),
+		TenantID: tenantID,
 		TaskID:   taskID,
 		SourceID: req.SourceID,
 		TargetID: req.TargetID,
@@ -817,8 +826,8 @@ func (h *KnowledgeBaseHandler) ListMoveTargets(c *gin.Context) {
 		return
 	}
 
-	tenantID, exists := c.Get(types.TenantIDContextKey.String())
-	if !exists {
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
 		c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
 		return
 	}
@@ -833,7 +842,7 @@ func (h *KnowledgeBaseHandler) ListMoveTargets(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
-	if sourceKB.TenantID != tenantID.(uint64) {
+	if sourceKB.TenantID != tenantID || !types.CanManageKnowledgeBase(ctx, sourceKB) {
 		c.Error(errors.NewForbiddenError("No permission to access this knowledge base"))
 		return
 	}

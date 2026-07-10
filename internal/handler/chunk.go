@@ -17,13 +17,14 @@ import (
 type ChunkHandler struct {
 	service           interfaces.ChunkService
 	kgService         interfaces.KnowledgeService
+	kbService         interfaces.KnowledgeBaseService
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
 }
 
 // NewChunkHandler creates a new chunk handler
-func NewChunkHandler(service interfaces.ChunkService, kgService interfaces.KnowledgeService, kbShareService interfaces.KBShareService, agentShareService interfaces.AgentShareService) *ChunkHandler {
-	return &ChunkHandler{service: service, kgService: kgService, kbShareService: kbShareService, agentShareService: agentShareService}
+func NewChunkHandler(service interfaces.ChunkService, kgService interfaces.KnowledgeService, kbService interfaces.KnowledgeBaseService, kbShareService interfaces.KBShareService, agentShareService interfaces.AgentShareService) *ChunkHandler {
+	return &ChunkHandler{service: service, kgService: kgService, kbService: kbService, kbShareService: kbShareService, agentShareService: agentShareService}
 }
 
 // effectiveCtxForKnowledge resolves knowledge by ID, validates KB access (owner or shared with required role), and returns context with effectiveTenantID for downstream service calls.
@@ -40,12 +41,18 @@ func (h *ChunkHandler) effectiveCtxForKnowledge(c *gin.Context, knowledgeID stri
 		return nil, errors.NewNotFoundError("Knowledge not found")
 	}
 	if knowledge.TenantID == tenantID {
-		return context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
+		kb, err := h.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+		if err != nil {
+			return nil, errors.NewForbiddenError("Permission denied to access this knowledge")
+		}
+		if types.CanManageKnowledgeBase(ctx, kb) {
+			return context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
+		}
 	}
 	if !userExists {
 		return nil, errors.NewForbiddenError("Permission denied to access this knowledge")
 	}
-	if h.kbShareService != nil {
+	if requiredPermission == types.OrgRoleViewer && h.kbShareService != nil {
 		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, knowledge.KnowledgeBaseID, userID.(string))
 		if permErr == nil && isShared {
 			if !permission.HasPermission(requiredPermission) {

@@ -44,6 +44,7 @@ CREATE TABLE knowledge_bases (
     name VARCHAR(255) NOT NULL,
     description TEXT,
     tenant_id INT NOT NULL,
+    created_by VARCHAR(36),
     chunking_config JSON NOT NULL,
     image_processing_config JSON NOT NULL,
     embedding_model_id VARCHAR(64) NOT NULL,
@@ -58,6 +59,7 @@ CREATE TABLE knowledge_bases (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_knowledge_bases_tenant_name ON knowledge_bases(tenant_id, name);
+CREATE INDEX idx_knowledge_bases_tenant_created_by ON knowledge_bases(tenant_id, created_by);
 
 CREATE TABLE knowledges (
     id VARCHAR(36) PRIMARY KEY,

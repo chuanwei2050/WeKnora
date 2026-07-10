@@ -57,6 +57,8 @@ type KnowledgeBaseService interface {
 	ListKnowledgeBases(ctx context.Context) ([]*types.KnowledgeBase, error)
 	// ListKnowledgeBasesByTenantID lists all knowledge bases for a specific tenant (e.g. for shared agent context).
 	ListKnowledgeBasesByTenantID(ctx context.Context, tenantID uint64) ([]*types.KnowledgeBase, error)
+	// ListKnowledgeBasesByTenantIDAndCreatedBy lists non-temporary knowledge bases for one creator in a tenant.
+	ListKnowledgeBasesByTenantIDAndCreatedBy(ctx context.Context, tenantID uint64, createdBy string) ([]*types.KnowledgeBase, error)
 
 	// UpdateKnowledgeBase updates knowledge base information
 	// Parameters:
@@ -188,6 +190,8 @@ type KnowledgeBaseRepository interface {
 	//   - List of knowledge base objects
 	//   - Possible errors such as database errors, etc.
 	ListKnowledgeBasesByTenantID(ctx context.Context, tenantID uint64) ([]*types.KnowledgeBase, error)
+	// ListKnowledgeBasesByTenantIDAndCreatedBy lists all visible knowledge bases for a specific tenant and creator.
+	ListKnowledgeBasesByTenantIDAndCreatedBy(ctx context.Context, tenantID uint64, createdBy string) ([]*types.KnowledgeBase, error)
 
 	// UpdateKnowledgeBase updates a knowledge base record
 	// Parameters:

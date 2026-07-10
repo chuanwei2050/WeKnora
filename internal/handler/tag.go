@@ -41,8 +41,8 @@ func NewTagHandler(
 	return &TagHandler{tagService: tagService, tagRepo: tagRepo, chunkRepo: chunkRepo, kbService: kbService, kbShareService: kbShareService, agentShareService: agentShareService}
 }
 
-// effectiveCtxForKB validates KB access (owner or shared) and returns context with effectiveTenantID for downstream service calls.
-func (h *TagHandler) effectiveCtxForKB(c *gin.Context, kbID string) (context.Context, error) {
+// effectiveCtxForKB validates KB access and returns context with effectiveTenantID for downstream service calls.
+func (h *TagHandler) effectiveCtxForKB(c *gin.Context, kbID string, requiredPermission types.OrgMemberRole) (context.Context, error) {
 	ctx := c.Request.Context()
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
@@ -59,9 +59,11 @@ func (h *TagHandler) effectiveCtxForKB(c *gin.Context, kbID string) (context.Con
 		return nil, errors.NewInternalServerError(err.Error())
 	}
 	if kb.TenantID == tenantID {
-		return context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
+		if types.CanManageKnowledgeBase(ctx, kb) {
+			return context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
+		}
 	}
-	if userExists && h.kbShareService != nil {
+	if requiredPermission == types.OrgRoleViewer && userExists && h.kbShareService != nil {
 		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, kbID, userID.(string))
 		if permErr == nil && isShared {
 			sourceTenantID, srcErr := h.kbShareService.GetKBSourceTenant(ctx, kbID)
@@ -72,7 +74,7 @@ func (h *TagHandler) effectiveCtxForKB(c *gin.Context, kbID string) (context.Con
 			}
 		}
 	}
-	if userExists && h.agentShareService != nil {
+	if requiredPermission == types.OrgRoleViewer && userExists && h.agentShareService != nil {
 		can, err := h.agentShareService.UserCanAccessKBViaSomeSharedAgent(ctx, userID.(string), tenantID, kb)
 		if err == nil && can {
 			logger.Infof(ctx, "User %s accessing KB %s via some shared agent", userID.(string), kbID)
@@ -128,7 +130,7 @@ func (h *TagHandler) ListTags(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
 
-	effCtx, err := h.effectiveCtxForKB(c, kbID)
+	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleViewer)
 	if err != nil {
 		c.Error(err)
 		return
@@ -179,7 +181,7 @@ func (h *TagHandler) CreateTag(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
 
-	effCtx, err := h.effectiveCtxForKB(c, kbID)
+	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleEditor)
 	if err != nil {
 		c.Error(err)
 		return
@@ -232,7 +234,7 @@ func (h *TagHandler) UpdateTag(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
 
-	effCtx, err := h.effectiveCtxForKB(c, kbID)
+	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleEditor)
 	if err != nil {
 		c.Error(err)
 		return
@@ -286,7 +288,7 @@ func (h *TagHandler) DeleteTag(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
 
-	effCtx, err := h.effectiveCtxForKB(c, kbID)
+	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleEditor)
 	if err != nil {
 		c.Error(err)
 		return

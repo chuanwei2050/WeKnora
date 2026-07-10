@@ -1,7 +1,10 @@
 package types
 
 import (
+	"context"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestLanguageLocaleName(t *testing.T) {
@@ -107,4 +110,33 @@ func BenchmarkLanguageLocaleName(b *testing.B) {
 			LanguageLocaleName(locale)
 		}
 	}
+}
+
+func knowledgeContext(tenantID uint64, userID string, role string) context.Context {
+	ctx := context.WithValue(context.Background(), TenantIDContextKey, tenantID)
+	ctx = context.WithValue(ctx, UserIDContextKey, userID)
+	ctx = context.WithValue(ctx, UserContextKey, &User{ID: userID, BidReviewRole: role})
+	return ctx
+}
+
+func TestCanManageKnowledgeBaseCreatorAndAdmin(t *testing.T) {
+	owned := &KnowledgeBase{ID: "kb-owned", TenantID: 7, CreatedBy: "user-a"}
+	other := &KnowledgeBase{ID: "kb-other", TenantID: 7, CreatedBy: "user-b"}
+	historical := &KnowledgeBase{ID: "kb-null", TenantID: 7}
+	wrongTenant := &KnowledgeBase{ID: "kb-wrong-tenant", TenantID: 8, CreatedBy: "user-a"}
+
+	memberCtx := knowledgeContext(7, "user-a", "member")
+	assert.True(t, CanManageKnowledgeBase(memberCtx, owned))
+	assert.False(t, CanManageKnowledgeBase(memberCtx, other))
+	assert.False(t, CanManageKnowledgeBase(memberCtx, historical))
+	assert.False(t, CanManageKnowledgeBase(memberCtx, wrongTenant))
+
+	tenantAdminCtx := knowledgeContext(7, "admin-a", "tenant_admin")
+	assert.True(t, CanManageKnowledgeBase(tenantAdminCtx, owned))
+	assert.True(t, CanManageKnowledgeBase(tenantAdminCtx, other))
+	assert.True(t, CanManageKnowledgeBase(tenantAdminCtx, historical))
+	assert.False(t, CanManageKnowledgeBase(tenantAdminCtx, wrongTenant))
+
+	platformAdminCtx := knowledgeContext(7, "admin-b", "platform_admin")
+	assert.True(t, CanManageKnowledgeBase(platformAdminCtx, historical))
 }

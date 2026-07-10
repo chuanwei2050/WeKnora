@@ -54,6 +54,40 @@ func UserIDFromContext(ctx context.Context) (string, bool) {
 	return v, ok && v != ""
 }
 
+// UserFromContext extracts the authenticated user from ctx.
+func UserFromContext(ctx context.Context) (*User, bool) {
+	v, ok := ctx.Value(UserContextKey).(*User)
+	return v, ok && v != nil
+}
+
+// IsBidReviewKnowledgeAdmin reports whether the current user can manage all KBs in the active tenant.
+func IsBidReviewKnowledgeAdmin(ctx context.Context) bool {
+	user, ok := UserFromContext(ctx)
+	if !ok {
+		return false
+	}
+	if user.CanAccessAllTenants {
+		return true
+	}
+	return user.BidReviewRole == "platform_admin" || user.BidReviewRole == "tenant_admin"
+}
+
+// CanManageKnowledgeBase reports whether the current user can mutate a knowledge base.
+func CanManageKnowledgeBase(ctx context.Context, kb *KnowledgeBase) bool {
+	if kb == nil {
+		return false
+	}
+	tenantID, ok := TenantIDFromContext(ctx)
+	if !ok || tenantID != kb.TenantID {
+		return false
+	}
+	if IsBidReviewKnowledgeAdmin(ctx) {
+		return true
+	}
+	userID, ok := UserIDFromContext(ctx)
+	return ok && kb.CreatedBy != "" && kb.CreatedBy == userID
+}
+
 // SessionTenantIDFromContext extracts the session-owner tenant ID from ctx.
 // Falls back to TenantIDFromContext when the session key is absent.
 func SessionTenantIDFromContext(ctx context.Context) (uint64, bool) {

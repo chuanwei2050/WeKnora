@@ -80,7 +80,9 @@ func (h *KnowledgeHandler) validateKnowledgeBaseAccessWithKBID(c *gin.Context, k
 		return nil, kbID, 0, "", errors.NewInternalServerError(err.Error())
 	}
 	if kb.TenantID == tenantID {
-		return kb, kbID, tenantID, types.OrgRoleAdmin, nil
+		if types.CanManageKnowledgeBase(ctx, kb) {
+			return kb, kbID, tenantID, types.OrgRoleAdmin, nil
+		}
 	}
 	if userExists && h.kbShareService != nil {
 		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, kbID, userID.(string))
@@ -119,13 +121,19 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, k
 		return nil, ctx, errors.NewNotFoundError("Knowledge not found")
 	}
 
-	// Owner: knowledge belongs to caller's tenant
 	if knowledge.TenantID == tenantID {
-		return knowledge, context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
+		kb, err := h.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+		if err != nil {
+			return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
+		}
+		if types.CanManageKnowledgeBase(ctx, kb) {
+			return knowledge, context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
+		}
 	}
 
-	// Shared KB: check organization permission
-	if userExists && h.kbShareService != nil {
+	// Shared KB: check organization permission. Shared write is intentionally disabled;
+	// editor/admin share roles only allow read-style operations in embedded BidReview mode.
+	if requiredPermission == types.OrgRoleViewer && userExists && h.kbShareService != nil {
 		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, knowledge.KnowledgeBaseID, userID.(string))
 		if permErr == nil && isShared && permission.HasPermission(requiredPermission) {
 			effectiveTenantID := knowledge.TenantID
@@ -240,7 +248,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
 
 	// Check write permission
-	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+	if permission != types.OrgRoleAdmin {
 		c.Error(errors.NewForbiddenError("No permission to create knowledge"))
 		return
 	}
@@ -362,7 +370,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
 
 	// Check write permission
-	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+	if permission != types.OrgRoleAdmin {
 		c.Error(errors.NewForbiddenError("No permission to create knowledge"))
 		return
 	}
@@ -456,7 +464,7 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
 
 	// Check write permission
-	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+	if permission != types.OrgRoleAdmin {
 		c.Error(errors.NewForbiddenError("No permission to create knowledge"))
 		return
 	}
@@ -710,7 +718,7 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		c.Error(err)
 		return
 	}
-	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+	if permission != types.OrgRoleAdmin {
 		c.Error(errors.NewForbiddenError("No permission to delete knowledge"))
 		return
 	}
@@ -1337,7 +1345,7 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 			c.Error(err)
 			return
 		}
-		if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		if permission != types.OrgRoleAdmin {
 			c.Error(errors.NewForbiddenError("No permission to update knowledge tags"))
 			return
 		}
@@ -1599,8 +1607,8 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		return
 	}
 
-	tenantID, exists := c.Get(types.TenantIDContextKey.String())
-	if !exists {
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
 		c.Error(errors.NewUnauthorizedError("Unauthorized"))
 		return
 	}
@@ -1615,7 +1623,7 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
-	if sourceKB.TenantID != tenantID.(uint64) {
+	if sourceKB.TenantID != tenantID || !types.CanManageKnowledgeBase(ctx, sourceKB) {
 		c.Error(errors.NewForbiddenError("No permission to access source knowledge base"))
 		return
 	}
@@ -1630,7 +1638,7 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
-	if targetKB.TenantID != tenantID.(uint64) {
+	if targetKB.TenantID != tenantID || !types.CanManageKnowledgeBase(ctx, targetKB) {
 		c.Error(errors.NewForbiddenError("No permission to access target knowledge base"))
 		return
 	}
@@ -1665,11 +1673,11 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 	}
 
 	// Generate task ID
-	taskID := utils.GenerateTaskID("kg_move", tenantID.(uint64), req.SourceKBID)
+	taskID := utils.GenerateTaskID("kg_move", tenantID, req.SourceKBID)
 
 	// Create move payload
 	payload := types.KnowledgeMovePayload{
-		TenantID:     tenantID.(uint64),
+		TenantID:     tenantID,
 		TaskID:       taskID,
 		KnowledgeIDs: req.KnowledgeIDs,
 		SourceKBID:   req.SourceKBID,

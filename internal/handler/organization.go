@@ -994,6 +994,10 @@ func (h *OrganizationHandler) ShareKnowledgeBase(c *gin.Context) {
 		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	if kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID); err != nil || !types.CanManageKnowledgeBase(ctx, kb) {
+		c.Error(apperrors.NewForbiddenError("Only knowledge base managers can share it"))
+		return
+	}
 
 	share, err := h.shareService.ShareKnowledgeBase(ctx, kbID, req.OrganizationID, userID, tenantID, req.Permission)
 	if err != nil {
@@ -1028,6 +1032,10 @@ func (h *OrganizationHandler) ListKBShares(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
 		c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+	if kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID); err != nil || !types.CanManageKnowledgeBase(ctx, kb) {
+		c.Error(apperrors.NewForbiddenError("Only knowledge base managers can list its shares"))
 		return
 	}
 
@@ -1089,11 +1097,16 @@ func (h *OrganizationHandler) UpdateSharePermission(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	shareID := c.Param("share_id")
+	kbID := c.Param("id")
 	userID := c.GetString(types.UserIDContextKey.String())
 
 	var req types.UpdateSharePermissionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	if kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID); err != nil || !types.CanManageKnowledgeBase(ctx, kb) {
+		c.Error(apperrors.NewForbiddenError("Only knowledge base managers can update its shares"))
 		return
 	}
 
@@ -1123,7 +1136,12 @@ func (h *OrganizationHandler) RemoveShare(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	shareID := c.Param("share_id")
+	kbID := c.Param("id")
 	userID := c.GetString(types.UserIDContextKey.String())
+	if kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID); err != nil || !types.CanManageKnowledgeBase(ctx, kb) {
+		c.Error(apperrors.NewForbiddenError("Only knowledge base managers can remove its shares"))
+		return
+	}
 
 	if err := h.shareService.RemoveShare(ctx, shareID, userID); err != nil {
 		logger.Errorf(ctx, "Failed to remove share: %v", err)

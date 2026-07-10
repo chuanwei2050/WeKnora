@@ -51,6 +51,8 @@ type KnowledgeBase struct {
 	Description string `yaml:"description"             json:"description"`
 	// Tenant ID
 	TenantID uint64 `yaml:"tenant_id"               json:"tenant_id"`
+	// User ID that created this knowledge base. Empty historical values are admin-managed only.
+	CreatedBy string `yaml:"created_by"              json:"created_by,omitempty"       gorm:"type:varchar(36);index"`
 	// Chunking configuration
 	ChunkingConfig ChunkingConfig `yaml:"chunking_config"         json:"chunking_config"         gorm:"type:json"`
 	// Image processing configuration

@@ -24,8 +24,8 @@ type User struct {
 	IsActive bool `json:"is_active"  gorm:"default:true"`
 	// Whether the user can access all tenants (cross-tenant access)
 	CanAccessAllTenants bool `json:"can_access_all_tenants" gorm:"default:false"`
-	// BidReview role from SSO, used only in embedded mode.
-	BidReviewRole string `json:"bidreview_role,omitempty" gorm:"-"`
+	// BidReview role from SSO, used by embedded-mode permission gates.
+	BidReviewRole string `json:"bidreview_role,omitempty" gorm:"column:bidreview_role;type:varchar(32);default:'member'"`
 	// Creation time of the user
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time of the user
@@ -140,6 +140,7 @@ type UserInfo struct {
 	TenantID            uint64    `json:"tenant_id"`
 	IsActive            bool      `json:"is_active"`
 	CanAccessAllTenants bool      `json:"can_access_all_tenants"`
+	BidReviewRole       string    `json:"bidreview_role,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }
@@ -154,6 +155,7 @@ func (u *User) ToUserInfo() *UserInfo {
 		TenantID:            u.TenantID,
 		IsActive:            u.IsActive,
 		CanAccessAllTenants: u.CanAccessAllTenants,
+		BidReviewRole:       u.BidReviewRole,
 		CreatedAt:           u.CreatedAt,
 		UpdatedAt:           u.UpdatedAt,
 	}

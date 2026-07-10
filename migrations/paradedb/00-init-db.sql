@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     name VARCHAR(255) NOT NULL,
     description TEXT,
     tenant_id INTEGER NOT NULL,
+    created_by VARCHAR(36),
     chunking_config JSONB NOT NULL DEFAULT '{"chunk_size": 512, "chunk_overlap": 50, "split_markers": ["\n\n", "\n", "。"], "keep_separator": true}',
     image_processing_config JSONB NOT NULL DEFAULT '{"enable_multimodal": false, "model_id": ""}',
     embedding_model_id VARCHAR(64) NOT NULL,
@@ -72,6 +73,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
 
 -- Add indexes for knowledge_bases
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_id ON knowledge_bases(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_created_by ON knowledge_bases(tenant_id, created_by);
 
 -- Create knowledge table
 CREATE TABLE IF NOT EXISTS knowledges (

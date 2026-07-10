@@ -55,9 +55,11 @@ func (h *FAQHandler) effectiveCtxForKB(c *gin.Context, kbID string, requiredPerm
 		return nil, errors.NewInternalServerError(err.Error())
 	}
 	if kb.TenantID == tenantID {
-		return context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
+		if types.CanManageKnowledgeBase(ctx, kb) {
+			return context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
+		}
 	}
-	if userExists && h.kbShareService != nil {
+	if requiredPermission == types.OrgRoleViewer && userExists && h.kbShareService != nil {
 		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, kbID, userID.(string))
 		if permErr == nil && isShared && permission.HasPermission(requiredPermission) {
 			sourceTenantID, srcErr := h.kbShareService.GetKBSourceTenant(ctx, kbID)

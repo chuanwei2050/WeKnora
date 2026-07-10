@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     avatar VARCHAR(500),
     tenant_id INTEGER,
     is_active BOOLEAN NOT NULL DEFAULT true,
+    bidreview_role VARCHAR(32) NOT NULL DEFAULT 'member',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE
@@ -61,6 +62,7 @@ END $$;
 
 -- Add can_access_all_tenants column to users
 ALTER TABLE users ADD COLUMN IF NOT EXISTS can_access_all_tenants BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS bidreview_role VARCHAR(32) NOT NULL DEFAULT 'member';
 
 DO $$ BEGIN RAISE NOTICE '[Migration 000001] Creating table: auth_tokens'; END $$;
 CREATE TABLE IF NOT EXISTS auth_tokens (

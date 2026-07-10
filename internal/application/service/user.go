@@ -368,14 +368,15 @@ func (s *userService) LoginWithBidReviewSSO(
 			return nil, fmt.Errorf("failed to hash password: %w", err)
 		}
 		user = &types.User{
-			ID:           uuid.New().String(),
-			Username:     username,
-			Email:        email,
-			PasswordHash: string(hashedPassword),
-			TenantID:     tenant.ID,
-			IsActive:     true,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:            uuid.New().String(),
+			Username:      username,
+			Email:         email,
+			PasswordHash:  string(hashedPassword),
+			TenantID:      tenant.ID,
+			IsActive:      true,
+			BidReviewRole: bidReviewRole,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		}
 		if err := s.userRepo.CreateUser(ctx, user); err != nil {
 			return nil, fmt.Errorf("failed to create BidReview user: %w", err)
@@ -388,6 +389,10 @@ func (s *userService) LoginWithBidReviewSSO(
 		}
 		if !user.IsActive {
 			user.IsActive = true
+			changed = true
+		}
+		if user.BidReviewRole != bidReviewRole {
+			user.BidReviewRole = bidReviewRole
 			changed = true
 		}
 		if changed {
@@ -404,12 +409,12 @@ func (s *userService) LoginWithBidReviewSSO(
 		return nil, fmt.Errorf("failed to generate tokens: %w", err)
 	}
 	return &types.LoginResponse{
-		Success:      true,
-		Message:      "Login successful",
-		User:         user,
-		Tenant:       tenant,
-		Token:        accessToken,
-		RefreshToken: refreshToken,
+		Success:       true,
+		Message:       "Login successful",
+		User:          user,
+		Tenant:        tenant,
+		Token:         accessToken,
+		RefreshToken:  refreshToken,
 		BidReviewRole: bidReviewRole,
 	}, nil
 }

@@ -84,6 +84,19 @@ func (r *knowledgeBaseRepository) ListKnowledgeBasesByTenantID(
 	return kbs, nil
 }
 
+// ListKnowledgeBasesByTenantIDAndCreatedBy lists non-temporary knowledge bases by tenant and creator.
+func (r *knowledgeBaseRepository) ListKnowledgeBasesByTenantIDAndCreatedBy(
+	ctx context.Context, tenantID uint64, createdBy string,
+) ([]*types.KnowledgeBase, error) {
+	var kbs []*types.KnowledgeBase
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND is_temporary = ? AND created_by = ?", tenantID, false, createdBy).
+		Order("is_pinned DESC, pinned_at DESC, created_at DESC").Find(&kbs).Error; err != nil {
+		return nil, err
+	}
+	return kbs, nil
+}
+
 // TogglePinKnowledgeBase toggles the pin status of a knowledge base
 func (r *knowledgeBaseRepository) TogglePinKnowledgeBase(ctx context.Context, id string, tenantID uint64) (*types.KnowledgeBase, error) {
 	var kb types.KnowledgeBase

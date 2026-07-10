@@ -57,8 +57,8 @@ func (s *kbShareService) ShareKnowledgeBase(ctx context.Context, kbID string, or
 		return nil, ErrKBNotFound
 	}
 
-	// Check if user's tenant owns the knowledge base
-	if kb.TenantID != tenantID {
+	// Check if user's tenant owns the knowledge base and the user can manage it.
+	if kb.TenantID != tenantID || !types.CanManageKnowledgeBase(ctx, kb) {
 		return nil, ErrNotKBOwner
 	}
 
@@ -191,9 +191,8 @@ func (s *kbShareService) ListSharesByOrganization(ctx context.Context, orgID str
 	return s.shareRepo.ListByOrganization(ctx, orgID)
 }
 
-// ListSharedKnowledgeBases lists all knowledge bases shared to the user through organizations
-// It filters out knowledge bases that belong to the user's own tenant
-// It deduplicates knowledge bases that are shared to multiple organizations the user belongs to
+// ListSharedKnowledgeBases lists all knowledge bases shared to the user through organizations.
+// It skips only KBs the user can already manage directly.
 func (s *kbShareService) ListSharedKnowledgeBases(ctx context.Context, userID string, currentTenantID uint64) ([]*types.SharedKnowledgeBaseInfo, error) {
 	shares, err := s.shareRepo.ListSharedKBsForUser(ctx, userID)
 	if err != nil {
@@ -204,14 +203,12 @@ func (s *kbShareService) ListSharedKnowledgeBases(ctx context.Context, userID st
 	kbInfoMap := make(map[string]*types.SharedKnowledgeBaseInfo)
 
 	for _, share := range shares {
-		// Skip knowledge bases that belong to the user's own tenant
-		// (user already has full ownership of these)
-		if share.SourceTenantID == currentTenantID {
-			continue
-		}
-
 		// Skip if knowledge base is nil
 		if share.KnowledgeBase == nil {
+			continue
+		}
+		// Skip knowledge bases the user can already manage in the current tenant.
+		if share.SourceTenantID == currentTenantID && types.CanManageKnowledgeBase(ctx, share.KnowledgeBase) {
 			continue
 		}
 
@@ -341,7 +338,7 @@ func (s *kbShareService) ListSharedKnowledgeBasesInOrganization(ctx context.Cont
 				SourceTenantID: share.SourceTenantID,
 				SharedAt:       share.CreatedAt,
 			},
-			IsMine: share.SourceTenantID == currentTenantID,
+			IsMine: share.SourceTenantID == currentTenantID && types.CanManageKnowledgeBase(ctx, kb),
 		}
 		result = append(result, item)
 	}
