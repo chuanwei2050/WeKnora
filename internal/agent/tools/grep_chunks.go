@@ -80,8 +80,8 @@ type GrepChunksTool struct {
 	db            *gorm.DB
 	searchTargets types.SearchTargets
 
-	mu          sync.Mutex
-	seenChunks  map[string]bool
+	mu         sync.Mutex
+	seenChunks map[string]bool
 }
 
 // NewGrepChunksTool creates a new grep chunks tool
@@ -158,28 +158,30 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		limit = 100
 	}
 
-	allowedKBIDs := t.searchTargets.GetAllKnowledgeBaseIDs()
-	kbTenantMap := t.searchTargets.GetKBTenantMap()
+	resolvedTargets, usedSingleTargetFallback := resolveSearchTargets(t.searchTargets, input.KnowledgeBaseIDs)
+	if usedSingleTargetFallback {
+		logger.Warnf(ctx,
+			"[Tool][GrepChunks] Requested KBs %v did not match; using the sole authorized search target %s",
+			input.KnowledgeBaseIDs, resolvedTargets[0].KnowledgeBaseID)
+	}
+	if len(resolvedTargets) == 0 {
+		return &types.ToolResult{
+			Success: false,
+			Error:   "requested knowledge bases are not available in the authorized search scope; omit knowledge_base_ids or use an authorized ID",
+		}, nil
+	}
+
+	allowedKBIDs := resolvedTargets.GetAllKnowledgeBaseIDs()
+	kbTenantMap := resolvedTargets.GetKBTenantMap()
 
 	var allowedKnowledgeIDs []string
-	for _, target := range t.searchTargets {
+	for _, target := range resolvedTargets {
 		if target.Type == types.SearchTargetTypeKnowledge && len(target.KnowledgeIDs) > 0 {
 			allowedKnowledgeIDs = append(allowedKnowledgeIDs, target.KnowledgeIDs...)
 		}
 	}
 
-	kbIDs := input.KnowledgeBaseIDs
-	if len(kbIDs) == 0 {
-		kbIDs = allowedKBIDs
-	} else {
-		validKBs := make([]string, 0)
-		for _, kbID := range kbIDs {
-			if t.searchTargets.ContainsKB(kbID) {
-				validKBs = append(validKBs, kbID)
-			}
-		}
-		kbIDs = validKBs
-	}
+	kbIDs := allowedKBIDs
 
 	logger.Infof(ctx, "[Tool][GrepChunks] Queries: %v, Limit: %d, KBs: %v, KnowledgeIDs: %v",
 		queries, limit, kbIDs, allowedKnowledgeIDs)

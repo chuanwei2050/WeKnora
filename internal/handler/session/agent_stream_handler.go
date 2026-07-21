@@ -168,11 +168,11 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 	}
 	h.mu.Unlock()
 
-	// Send SSE response (both success and failure)
+	// Tool failures are recoverable Agent observations, not terminal stream
+	// errors. Fatal engine/model failures are emitted separately via EventError.
 	responseType := types.ResponseTypeToolResult
 	content := data.Output
 	if !data.Success {
-		responseType = types.ResponseTypeError
 		if data.Error != "" {
 			content = data.Error
 		}

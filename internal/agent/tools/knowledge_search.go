@@ -183,30 +183,26 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		logger.Infof(ctx, "[Tool][KnowledgeSearch] User specified %d knowledge bases: %v", len(userSpecifiedKBs), userSpecifiedKBs)
 	}
 
-	// Use pre-computed search targets, optionally filtered by user-specified KBs
-	searchTargets := t.searchTargets
-	if len(userSpecifiedKBs) > 0 {
-		// Filter search targets to only include user-specified KBs
-		userKBSet := make(map[string]bool)
-		for _, kbID := range userSpecifiedKBs {
-			userKBSet[kbID] = true
-		}
-		var filteredTargets types.SearchTargets
-		for _, target := range t.searchTargets {
-			if userKBSet[target.KnowledgeBaseID] {
-				filteredTargets = append(filteredTargets, target)
-			}
-		}
-		searchTargets = filteredTargets
+	// Use pre-computed search targets, optionally filtered by user-specified KBs.
+	// A mistyped ID is safe to ignore only in a single-target authorized scope.
+	searchTargets, usedSingleTargetFallback := resolveSearchTargets(t.searchTargets, userSpecifiedKBs)
+	if usedSingleTargetFallback {
+		logger.Warnf(ctx,
+			"[Tool][KnowledgeSearch] Requested KBs %v did not match; using the sole authorized search target %s",
+			userSpecifiedKBs, searchTargets[0].KnowledgeBaseID)
 	}
 
 	// Validate search targets
 	if len(searchTargets) == 0 {
 		logger.Errorf(ctx, "[Tool][KnowledgeSearch] No search targets available")
+		errorMessage := "no knowledge bases specified and no search targets configured"
+		if len(t.searchTargets) > 1 && len(userSpecifiedKBs) > 0 {
+			errorMessage = "requested knowledge bases are not available in the authorized search scope; omit knowledge_base_ids or use an authorized ID"
+		}
 		return &types.ToolResult{
 			Success: false,
-			Error:   "no knowledge bases specified and no search targets configured",
-		}, fmt.Errorf("no search targets available")
+			Error:   errorMessage,
+		}, nil
 	}
 
 	kbIDs := searchTargets.GetAllKnowledgeBaseIDs()
