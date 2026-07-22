@@ -83,6 +83,9 @@ func (h *KnowledgeHandler) validateKnowledgeBaseAccessWithKBID(c *gin.Context, k
 		if types.CanManageKnowledgeBase(ctx, kb) {
 			return kb, kbID, tenantID, types.OrgRoleAdmin, nil
 		}
+		if types.CanReadKnowledgeBase(ctx, kb) {
+			return kb, kbID, tenantID, types.OrgRoleViewer, nil
+		}
 	}
 	if userExists && h.kbShareService != nil {
 		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, kbID, userID.(string))
@@ -127,6 +130,9 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, k
 			return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
 		}
 		if types.CanManageKnowledgeBase(ctx, kb) {
+			return knowledge, context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
+		}
+		if requiredPermission == types.OrgRoleViewer && types.CanReadKnowledgeBase(ctx, kb) {
 			return knowledge, context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
 		}
 	}

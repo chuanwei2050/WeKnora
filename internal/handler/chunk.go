@@ -48,6 +48,9 @@ func (h *ChunkHandler) effectiveCtxForKnowledge(c *gin.Context, knowledgeID stri
 		if types.CanManageKnowledgeBase(ctx, kb) {
 			return context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
 		}
+		if requiredPermission == types.OrgRoleViewer && types.CanReadKnowledgeBase(ctx, kb) {
+			return context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
+		}
 	}
 	if !userExists {
 		return nil, errors.NewForbiddenError("Permission denied to access this knowledge")

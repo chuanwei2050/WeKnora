@@ -42,6 +42,7 @@ import { useI18n } from 'vue-i18n';
 import { formatStringDate, kbFileTypeVerification } from '@/utils';
 import { formatFileSize } from '@/utils/files';
 import { getParserEngines, type ParserEngineInfo } from '@/api/system';
+import { canManageBidReviewKnowledge } from '@/utils/bidreview-sso';
 const route = useRoute();
 const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
@@ -204,12 +205,12 @@ const isOwner = computed(() => {
 
 // Can edit: owner, admin, or editor
 const canEdit = computed(() => {
-  return orgStore.canEditKB(kbId.value, isOwner.value);
+  return canManageBidReviewKnowledge() && orgStore.canEditKB(kbId.value, isOwner.value);
 });
 
 // Can manage (delete, settings, etc.): owner or admin
 const canManage = computed(() => {
-  return orgStore.canManageKB(kbId.value, isOwner.value);
+  return canManageBidReviewKnowledge() && orgStore.canManageKB(kbId.value, isOwner.value);
 });
 
 // Current KB's shared record (when accessed via organization share)

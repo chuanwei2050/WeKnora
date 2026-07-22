@@ -62,6 +62,9 @@ func (h *TagHandler) effectiveCtxForKB(c *gin.Context, kbID string, requiredPerm
 		if types.CanManageKnowledgeBase(ctx, kb) {
 			return context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
 		}
+		if requiredPermission == types.OrgRoleViewer && types.CanReadKnowledgeBase(ctx, kb) {
+			return context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
+		}
 	}
 	if requiredPermission == types.OrgRoleViewer && userExists && h.kbShareService != nil {
 		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, kbID, userID.(string))

@@ -160,18 +160,7 @@ func (s *knowledgeBaseService) GetKnowledgeBasesByIDsOnly(ctx context.Context, i
 // ListKnowledgeBases returns all knowledge bases for a tenant
 func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types.KnowledgeBase, error) {
 	tenantID := types.MustTenantIDFromContext(ctx)
-
-	var (
-		kbs []*types.KnowledgeBase
-		err error
-	)
-	if types.IsBidReviewKnowledgeAdmin(ctx) {
-		kbs, err = s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
-	} else if userID, ok := types.UserIDFromContext(ctx); ok {
-		kbs, err = s.repo.ListKnowledgeBasesByTenantIDAndCreatedBy(ctx, tenantID, userID)
-	} else {
-		kbs = []*types.KnowledgeBase{}
-	}
+	kbs, err := s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
 	if err != nil {
 		for _, kb := range kbs {
 			kb.EnsureDefaults()

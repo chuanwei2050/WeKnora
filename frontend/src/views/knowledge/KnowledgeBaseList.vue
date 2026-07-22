@@ -13,7 +13,7 @@
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
             <h2 style="--wails-draggable: drag">{{ $t('knowledgeBase.title') }}</h2>
-            <t-tooltip :content="$t('knowledgeList.create')" placement="bottom">
+            <t-tooltip v-if="canManageWorkspaceKnowledge" :content="$t('knowledgeList.create')" placement="bottom">
               <t-button
                 variant="text"
                 theme="default"
@@ -118,6 +118,7 @@
           <div class="card-header">
             <span class="card-title" :title="kb.name">{{ kb.name }}</span>
             <t-popup
+              v-if="canManageWorkspaceKnowledge"
               overlayClassName="card-more-popup"
               trigger="click"
               destroy-on-close
@@ -284,6 +285,7 @@
         <div class="card-header">
           <span class="card-title" :title="kb.name">{{ kb.name }}</span>
           <t-popup
+            v-if="canManageWorkspaceKnowledge"
             v-model="kb.showMore"
             overlayClassName="card-more-popup"
             :on-visible-change="onVisibleChange"
@@ -487,7 +489,7 @@
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
       <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-      <t-button class="kb-create-btn empty-state-btn" @click="handleCreateKnowledgeBase">
+      <t-button v-if="canManageWorkspaceKnowledge" class="kb-create-btn empty-state-btn" @click="handleCreateKnowledgeBase">
         <template #icon><t-icon name="folder-add" /></template>
         {{ $t('knowledgeList.create') }}
       </t-button>
@@ -498,7 +500,7 @@
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
       <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-      <t-button class="kb-create-btn empty-state-btn" @click="handleCreateKnowledgeBase">
+      <t-button v-if="canManageWorkspaceKnowledge" class="kb-create-btn empty-state-btn" @click="handleCreateKnowledgeBase">
         <template #icon><t-icon name="folder-add" /></template>
         {{ $t('knowledgeList.create') }}
       </t-button>
@@ -629,6 +631,7 @@ import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import { useI18n } from 'vue-i18n'
+import { canManageBidReviewKnowledge } from '@/utils/bidreview-sso'
 
 const router = useRouter()
 const route = useRoute()
@@ -636,6 +639,7 @@ const uiStore = useUIStore()
 const authStore = useAuthStore()
 const orgStore = useOrganizationStore()
 const { t } = useI18n()
+const canManageWorkspaceKnowledge = computed(() => canManageBidReviewKnowledge())
 
 // 左侧空间选择：我的 / 空间 ID（已去掉「全部」）
 const spaceSelection = ref<'all' | 'mine' | 'shared' | string>('mine')

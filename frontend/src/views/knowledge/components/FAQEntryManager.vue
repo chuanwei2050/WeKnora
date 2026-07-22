@@ -1269,6 +1269,7 @@ import * as XLSX from 'xlsx'
 import Papa from 'papaparse'
 import FAQTagTooltip from '@/components/FAQTagTooltip.vue'
 import { useUIStore } from '@/stores/ui'
+import { canManageBidReviewKnowledge } from '@/utils/bidreview-sso'
 
 interface FAQEntry {
   id: number
@@ -1324,12 +1325,12 @@ const isOwner = computed(() => {
 
 // Can edit: owner, admin, or editor
 const canEdit = computed(() => {
-  return orgStore.canEditKB(props.kbId, isOwner.value)
+  return canManageBidReviewKnowledge() && orgStore.canEditKB(props.kbId, isOwner.value)
 })
 
 // Can manage (delete, settings, etc.): owner or admin
 const canManage = computed(() => {
-  return orgStore.canManageKB(props.kbId, isOwner.value)
+  return canManageBidReviewKnowledge() && orgStore.canManageKB(props.kbId, isOwner.value)
 })
 
 // Current KB's shared record (when accessed via organization share)
@@ -6291,6 +6292,5 @@ watch(() => entries.value.map(e => ({
   line-height: 1.4;
 }
 </style>
-
 
 

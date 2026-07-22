@@ -41,6 +41,12 @@ export function isBidReviewEmbeddedMode(): boolean {
   )
 }
 
+export function canManageBidReviewKnowledge(): boolean {
+  if (!isBidReviewEmbeddedMode()) return true
+  const role = localStorage.getItem(BIDREVIEW_ROLE_KEY)
+  return role === 'tenant_admin' || role === 'platform_admin'
+}
+
 export function returnToBidReview(): void {
   window.location.assign(safeBidReviewReturnPath())
 }

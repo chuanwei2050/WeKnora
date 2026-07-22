@@ -126,7 +126,7 @@ func TestCanManageKnowledgeBaseCreatorAndAdmin(t *testing.T) {
 	wrongTenant := &KnowledgeBase{ID: "kb-wrong-tenant", TenantID: 8, CreatedBy: "user-a"}
 
 	memberCtx := knowledgeContext(7, "user-a", "member")
-	assert.True(t, CanManageKnowledgeBase(memberCtx, owned))
+	assert.False(t, CanManageKnowledgeBase(memberCtx, owned))
 	assert.False(t, CanManageKnowledgeBase(memberCtx, other))
 	assert.False(t, CanManageKnowledgeBase(memberCtx, historical))
 	assert.False(t, CanManageKnowledgeBase(memberCtx, wrongTenant))
@@ -139,4 +139,24 @@ func TestCanManageKnowledgeBaseCreatorAndAdmin(t *testing.T) {
 
 	platformAdminCtx := knowledgeContext(7, "admin-b", "platform_admin")
 	assert.True(t, CanManageKnowledgeBase(platformAdminCtx, historical))
+
+	nativeCtx := knowledgeContext(7, "user-a", "")
+	assert.True(t, CanManageKnowledgeBase(nativeCtx, owned))
+	assert.False(t, CanManageKnowledgeBase(nativeCtx, other))
+}
+
+func TestCanReadKnowledgeBaseForSameTenantMember(t *testing.T) {
+	memberCtx := knowledgeContext(7, "user-a", "member")
+	assert.True(t, CanReadKnowledgeBase(memberCtx, &KnowledgeBase{TenantID: 7, CreatedBy: "user-a"}))
+	assert.True(t, CanReadKnowledgeBase(memberCtx, &KnowledgeBase{TenantID: 7, CreatedBy: "user-b"}))
+	assert.True(t, CanReadKnowledgeBase(memberCtx, &KnowledgeBase{TenantID: 7}))
+	assert.False(t, CanReadKnowledgeBase(memberCtx, &KnowledgeBase{TenantID: 8}))
+	assert.False(t, CanReadKnowledgeBase(context.WithValue(context.Background(), TenantIDContextKey, uint64(7)), &KnowledgeBase{TenantID: 7}))
+}
+
+func TestCanCreateKnowledgeBaseForBidReviewRoles(t *testing.T) {
+	assert.False(t, CanCreateKnowledgeBase(knowledgeContext(7, "member-a", "member")))
+	assert.True(t, CanCreateKnowledgeBase(knowledgeContext(7, "admin-a", "tenant_admin")))
+	assert.True(t, CanCreateKnowledgeBase(knowledgeContext(7, "platform-a", "platform_admin")))
+	assert.True(t, CanCreateKnowledgeBase(knowledgeContext(7, "native-a", "")))
 }

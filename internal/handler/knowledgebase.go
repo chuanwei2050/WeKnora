@@ -117,6 +117,10 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	logger.Info(ctx, "Start creating knowledge base")
+	if !types.CanCreateKnowledgeBase(ctx) {
+		c.Error(apperrors.NewForbiddenError("No permission to create knowledge base"))
+		return
+	}
 
 	// Parse request body
 	var req types.KnowledgeBase
@@ -179,10 +183,14 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 		return nil, id, 0, "", apperrors.NewInternalServerError(err.Error())
 	}
 
-	// Check 1: current tenant access. Only admins and creators can manage.
+	// Check 1: current tenant access. Members can read; only administrators
+	// (or native WeKnora creators) can manage.
 	if kb.TenantID == tenantID.(uint64) {
 		if types.CanManageKnowledgeBase(ctx, kb) {
 			return kb, id, tenantID.(uint64), types.OrgRoleAdmin, nil
+		}
+		if types.CanReadKnowledgeBase(ctx, kb) {
+			return kb, id, tenantID.(uint64), types.OrgRoleViewer, nil
 		}
 	}
 
@@ -272,9 +280,8 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 	if fillErr := h.service.FillKnowledgeBaseCounts(c.Request.Context(), kb); fillErr != nil {
 		logger.Warnf(c.Request.Context(), "Failed to fill KB counts for %s: %v", kb.ID, fillErr)
 	}
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	data := interface{}(kb)
-	if kb.TenantID != tenantID && permission != "" {
+	if permission != "" && permission != types.OrgRoleAdmin {
 		// Include my_permission in data so frontend can show role (e.g. "只读") instead of "--" for agent-visible KBs
 		var dataMap map[string]interface{}
 		b, _ := json.Marshal(kb)

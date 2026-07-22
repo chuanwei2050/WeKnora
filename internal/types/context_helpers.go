@@ -72,6 +72,35 @@ func IsBidReviewKnowledgeAdmin(ctx context.Context) bool {
 	return user.BidReviewRole == "platform_admin" || user.BidReviewRole == "tenant_admin"
 }
 
+// CanCreateKnowledgeBase reports whether the current user may create a knowledge base.
+// Native WeKnora users keep the existing behavior. BidReview SSO users are restricted
+// to workspace/platform administrators; ordinary workspace members are read-only.
+func CanCreateKnowledgeBase(ctx context.Context) bool {
+	user, ok := UserFromContext(ctx)
+	if !ok {
+		return false
+	}
+	if user.BidReviewRole == "" {
+		return true
+	}
+	return IsBidReviewKnowledgeAdmin(ctx)
+}
+
+// CanReadKnowledgeBase reports whether an authenticated user can read a knowledge
+// base in the active tenant. This intentionally includes historical knowledge bases
+// whose created_by value is empty.
+func CanReadKnowledgeBase(ctx context.Context, kb *KnowledgeBase) bool {
+	if kb == nil {
+		return false
+	}
+	tenantID, ok := TenantIDFromContext(ctx)
+	if !ok || tenantID != kb.TenantID {
+		return false
+	}
+	_, ok = UserIDFromContext(ctx)
+	return ok
+}
+
 // CanManageKnowledgeBase reports whether the current user can mutate a knowledge base.
 func CanManageKnowledgeBase(ctx context.Context, kb *KnowledgeBase) bool {
 	if kb == nil {
@@ -83,6 +112,9 @@ func CanManageKnowledgeBase(ctx context.Context, kb *KnowledgeBase) bool {
 	}
 	if IsBidReviewKnowledgeAdmin(ctx) {
 		return true
+	}
+	if user, ok := UserFromContext(ctx); ok && user.BidReviewRole != "" {
+		return false
 	}
 	userID, ok := UserIDFromContext(ctx)
 	return ok && kb.CreatedBy != "" && kb.CreatedBy == userID
