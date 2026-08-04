@@ -3297,6 +3297,7 @@ export default {
     exitFullscreen: 'Exit Fullscreen',
     audioLoading: 'Loading audio…',
     audioNotSupported: 'Your browser does not support audio playback',
+    excelTruncated: 'This spreadsheet is large. Only part of it is shown to keep the page responsive; download the file to view all data.',
   },
   knowledgeSearch: {
     title: 'Search',

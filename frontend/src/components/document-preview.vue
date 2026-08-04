@@ -2,13 +2,13 @@
 <script setup lang="ts">
 import { ref, shallowRef, watch, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
 import { previewKnowledgeFile } from '@/api/knowledge-base/index';
-import { MessagePlugin } from 'tdesign-vue-next';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
 import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
 import { sanitizeHTML, safeMarkdownToHTML } from '@/utils/security';
+import { createSafeExcelPreviewSheet, EXCEL_PREVIEW_LIMITS } from '@/utils/excel-preview-range.js';
 
 
 const VueOfficePptx = defineAsyncComponent(() => import('@vue-office/pptx'));
@@ -30,6 +30,7 @@ const textContent = ref('');
 const highlightedCode = ref('');
 const markdownHtml = ref('');
 const excelHtml = ref('');
+const excelPreviewTruncated = ref(false);
 const pptxData = shallowRef<ArrayBuffer | null>(null);
 const docxContainer = ref<HTMLElement | null>(null);
 const imageNaturalWidth = ref(0);
@@ -176,9 +177,13 @@ async function renderExcel(blob: Blob, fileType?: string) {
   }
 
   let html = '';
-  workbook.SheetNames.forEach((name, sheetIdx) => {
-    const sheet = workbook.Sheets[name];
-    const sheetHtml = XLSX.utils.sheet_to_html(sheet, { id: `sheet-${sheetIdx}` });
+  const previewSheetNames = workbook.SheetNames.slice(0, EXCEL_PREVIEW_LIMITS.maxSheets);
+  excelPreviewTruncated.value = previewSheetNames.length < workbook.SheetNames.length;
+  previewSheetNames.forEach((name, sheetIdx) => {
+    const result = createSafeExcelPreviewSheet(workbook.Sheets[name], XLSX.utils);
+    if (!result.sheet) return;
+    if (result.truncated) excelPreviewTruncated.value = true;
+    const sheetHtml = XLSX.utils.sheet_to_html(result.sheet, { id: `sheet-${sheetIdx}` });
     html += `<div class="excel-sheet">`;
     if (workbook.SheetNames.length > 1) {
       html += `<div class="excel-sheet-name">${name}</div>`;
@@ -323,6 +328,7 @@ function cleanup() {
   highlightedCode.value = '';
   markdownHtml.value = '';
   excelHtml.value = '';
+  excelPreviewTruncated.value = false;
   pptxData.value = null;
   imageNaturalWidth.value = 0;
   imageNaturalHeight.value = 0;
@@ -410,6 +416,10 @@ onUnmounted(() => {
 
     <!-- Excel -->
     <div v-else-if="previewType === 'excel' && excelHtml" class="preview-excel">
+      <div v-if="excelPreviewTruncated" class="excel-preview-notice">
+        <t-icon name="info-circle" size="16px" />
+        <span>{{ $t('preview.excelTruncated') }}</span>
+      </div>
       <div class="excel-container" v-html="excelHtml" />
     </div>
 
@@ -646,6 +656,18 @@ onUnmounted(() => {
 
 // ── Excel ──
 .preview-excel {
+  .excel-preview-notice {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--td-warning-color-3);
+    border-radius: @border-radius;
+    background: var(--td-warning-color-1);
+    color: var(--td-text-color-secondary);
+    font-size: 12px;
+  }
   .excel-container { .preview-container(); }
 }
 

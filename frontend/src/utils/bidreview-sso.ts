@@ -95,7 +95,7 @@ function applyDefaultKnowledgeBase(kb?: BidReviewDefaultKnowledgeBase): void {
   if (!kbId) return
   const knowledgeBase = {
     id: kbId,
-    name: kb?.name || '投标业务知识库',
+    name: kb?.name || '数科投标知识库',
     description: kb?.description || '',
   }
   localStorage.setItem('weknora_current_kb', JSON.stringify(knowledgeBase))

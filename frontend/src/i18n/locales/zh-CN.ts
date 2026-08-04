@@ -3294,6 +3294,7 @@ export default {
     exitFullscreen: "退出全屏",
     audioLoading: "加载音频中…",
     audioNotSupported: "您的浏览器不支持音频播放",
+    excelTruncated: "表格内容较大，为保证页面流畅仅展示部分数据，请下载文件查看完整内容。",
   },
   knowledgeSearch: {
     title: "搜索",

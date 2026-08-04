@@ -3365,6 +3365,7 @@ export default {
     exitFullscreen: '전체 화면 종료',
     audioLoading: '오디오 로딩 중…',
     audioNotSupported: '브라우저가 오디오 재생을 지원하지 않습니다',
+    excelTruncated: '스프레드시트가 커서 페이지 응답성을 위해 일부 데이터만 표시합니다. 전체 내용은 파일을 다운로드하여 확인하세요.',
   },
   knowledgeSearch: {
     title: '검색',
