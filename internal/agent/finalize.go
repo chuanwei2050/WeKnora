@@ -2,15 +2,52 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+var errIncompleteKnowledgeEvidence = errors.New("cannot synthesize final answer before deep-reading retrieved knowledge")
+
+func canSynthesizeFinalAnswer(state *types.AgentState) bool {
+	searchSucceeded := false
+	deepReadSucceeded := false
+	for _, step := range state.RoundSteps {
+		for _, toolCall := range step.ToolCalls {
+			if toolCall.Result == nil || !toolCall.Result.Success || toolCall.Result.Output == "" {
+				continue
+			}
+			switch toolCall.Name {
+			case agenttools.ToolKnowledgeSearch, agenttools.ToolGrepChunks:
+				searchSucceeded = true
+			case agenttools.ToolListKnowledgeChunks:
+				deepReadSucceeded = true
+			}
+		}
+	}
+	return !searchSucceeded || deepReadSucceeded
+}
+
+func buildFinalAnswerPrompt(query string) string {
+	return fmt.Sprintf(`Based only on the retrieved evidence above, answer the user's question.
+
+User question: %s
+
+Requirements:
+1. Only state conclusions supported by the retrieved evidence. If evidence is insufficient, say so plainly.
+2. Cite sources only by their user-facing document names when useful. Never expose internal identifiers, raw retrieval payloads, tool names, or system metadata.
+3. Output only the user-facing final answer. Do not output analysis, plans, retrieval steps, self-talk, or a restatement of the user's intent.
+4. Keep the answer concise, structured, and in the same language as the user's question.
+
+只输出面向用户的最终答案，不要输出分析过程、检索过程或任何内部标识。`, query)
+}
 
 // streamFinalAnswerToEventBus streams the final answer generation through EventBus
 func (e *AgentEngine) streamFinalAnswerToEventBus(
@@ -19,6 +56,14 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	state *types.AgentState,
 	sessionID string,
 ) error {
+	if !canSynthesizeFinalAnswer(state) {
+		logger.Warnf(ctx, "[Agent][FinalAnswer] Refusing synthesis because search results were not deep-read")
+		common.PipelineWarn(ctx, "Agent", "final_answer_incomplete_evidence", map[string]interface{}{
+			"session_id": sessionID,
+		})
+		return errIncompleteKnowledgeEvidence
+	}
+
 	totalToolCalls := countTotalToolCalls(state.RoundSteps)
 	logger.Infof(ctx, "[Agent][FinalAnswer] Synthesizing from %d steps, %d tool calls",
 		len(state.RoundSteps), totalToolCalls)
@@ -54,7 +99,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			toolResultCount++
 			messages = append(messages, chat.Message{
 				Role:    "user",
-				Content: fmt.Sprintf("Tool %s returned: %s", toolCall.Name, toolCall.Result.Output),
+				Content: fmt.Sprintf("Retrieved evidence %d: %s", toolResultCount, toolCall.Result.Output),
 			})
 			logger.Debugf(ctx, "[Agent][FinalAnswer] Added tool result [Step-%d][Tool-%d]: %s (output: %d chars)",
 				stepIdx+1, toolIdx+1, toolCall.Name, len(toolCall.Result.Output))
@@ -64,23 +109,9 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	logger.Debugf(ctx, "[Agent][FinalAnswer] Built context: %d messages, %d tool results",
 		len(messages), toolResultCount)
 
-	// Add final answer prompt
-	finalPrompt := fmt.Sprintf(`Based on the above tool call results, generate a complete answer for the user's question.
-
-User question: %s
-
-Requirements:
-1. Answer based on the actually retrieved content
-2. Clearly cite information sources (chunk_id, document name)
-3. Organize the answer in a structured format
-4. If information is insufficient, honestly state so
-5. IMPORTANT: Respond in the same language as the user's question
-
-Now generate the final answer:`, query)
-
 	messages = append(messages, chat.Message{
 		Role:    "user",
-		Content: finalPrompt,
+		Content: buildFinalAnswerPrompt(query),
 	})
 
 	// Generate a single ID for this entire final answer stream
@@ -91,20 +122,7 @@ Now generate the final answer:`, query)
 		ctx,
 		messages,
 		&chat.ChatOptions{Temperature: e.config.Temperature, Thinking: e.config.Thinking},
-		func(chunk *types.StreamResponse, fullContent string) {
-			if chunk.Content != "" {
-				logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(chunk.Content))
-				e.eventBus.Emit(ctx, event.Event{
-					ID:        answerID,
-					Type:      event.EventAgentFinalAnswer,
-					SessionID: sessionID,
-					Data: event.AgentFinalAnswerData{
-						Content: chunk.Content,
-						Done:    chunk.Done,
-					},
-				})
-			}
-		},
+		nil,
 	)
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][FinalAnswer] Final answer generation failed: %v", err)
@@ -116,6 +134,29 @@ Now generate the final answer:`, query)
 	}
 
 	fullAnswer := llmResult.Content
+	if fullAnswer == "" {
+		return errors.New("final answer synthesis returned empty content")
+	}
+	// Fallback synthesis is buffered so downstream consumers can validate the
+	// complete customer-visible answer before any portion is displayed.
+	e.eventBus.Emit(ctx, event.Event{
+		ID:        answerID,
+		Type:      event.EventAgentFinalAnswer,
+		SessionID: sessionID,
+		Data: event.AgentFinalAnswerData{
+			Content: fullAnswer,
+			Done:    false,
+		},
+	})
+	e.eventBus.Emit(ctx, event.Event{
+		ID:        answerID,
+		Type:      event.EventAgentFinalAnswer,
+		SessionID: sessionID,
+		Data: event.AgentFinalAnswerData{
+			Content: "",
+			Done:    true,
+		},
+	})
 	logger.Infof(ctx, "[Agent][FinalAnswer] Final answer generated: %d characters", len(fullAnswer))
 	common.PipelineInfo(ctx, "Agent", "final_answer_done", map[string]interface{}{
 		"session_id": sessionID,
