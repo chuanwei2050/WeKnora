@@ -345,18 +345,6 @@ const filteredTags = computed(() => {
   if (!query) return tagList.value;
   return tagList.value.filter((tag) => (tag.name || '').toLowerCase().includes(query));
 });
-const documentKnowledgeRoots = computed(() => {
-  const currentRoot = knowledgeList.value.find((item) => item.id === kbId.value && item.type !== 'faq');
-  if (currentRoot) return [currentRoot];
-  if (kbInfo.value && kbInfo.value.type !== 'faq') {
-    return [{ id: kbId.value, name: kbInfo.value.name, type: 'document' }];
-  }
-  return [];
-});
-const currentKnowledgeRootIndex = computed(() => {
-  const index = documentKnowledgeRoots.value.findIndex((item) => item.id === kbId.value);
-  return index >= 0 ? index + 1 : 1;
-});
 type KnowledgeTagTreeNode = {
   key: string;
   label: string;
@@ -366,15 +354,11 @@ type KnowledgeTagTreeNode = {
   depth: number;
   outline: string;
 };
-const knowledgeRootExpanded = ref(true);
-const expandedTreeTagId = ref<string | null>(null);
 const expandedTreeDirectoryKeys = ref<Record<string, boolean>>({});
 const activeTreeDocumentId = ref<string | null>(null);
-
-const treeRootNumber = (rootId: string) => {
-  const index = documentKnowledgeRoots.value.findIndex((item) => item.id === rootId);
-  return String(index >= 0 ? index + 1 : 1);
-};
+const draggingTreeNodeKey = ref<string | null>(null);
+const dragOverTreeNodeKey = ref<string | null>(null);
+const treeOrderSaving = ref(false);
 
 const stripOutlineNumber = (value?: string) => (
   String(value || '').replace(/^\s*\d+(?:\.\d+)*[、.．\s]+/, '').trim()
@@ -408,13 +392,13 @@ const tagTreeNodes = computed<KnowledgeTagTreeNode[]>(() => {
   const finalizeNodes = (nodes: KnowledgeTagTreeNode[], parentOutline: string, depth: number): number => (
     nodes.reduce((total, node, index) => {
       node.depth = depth;
-      node.outline = `${parentOutline}.${index + 1}`;
+      node.outline = parentOutline ? `${parentOutline}.${index + 1}` : String(index + 1);
       const childCount = finalizeNodes(node.children, node.outline, depth + 1);
       node.totalCount = Number(node.tag?.knowledge_count || 0) + childCount;
       return total + node.totalCount;
     }, 0)
   );
-  finalizeNodes(roots, String(currentKnowledgeRootIndex.value), 0);
+  finalizeNodes(roots, '', 0);
   return roots;
 });
 
@@ -433,13 +417,135 @@ const visibleTagTreeNodes = computed(() => {
   return rows;
 });
 
-const treeDocumentNumber = (tagOutline: string, documentIndex: number) => (
-  `${tagOutline}.${documentIndex + 1}`
-);
+type TreeNodeContext = {
+  node: KnowledgeTagTreeNode;
+  siblings: KnowledgeTagTreeNode[];
+};
 
-const treeDocumentName = (item: KnowledgeCard) => (
-  stripOutlineNumber(item.display_name || item.file_name || item.title || t('knowledgeBase.untitledDocument'))
-);
+const treeNodeParentKey = (key: string) => {
+  const separatorIndex = key.lastIndexOf('\u001f');
+  return separatorIndex >= 0 ? key.slice(0, separatorIndex) : '';
+};
+
+const treeNodeTagIds = (node: KnowledgeTagTreeNode): string[] => [
+  ...(node.tag ? [String(node.tag.id)] : []),
+  ...node.children.flatMap(treeNodeTagIds),
+];
+
+const findTreeNodeContext = (
+  nodes: KnowledgeTagTreeNode[],
+  key: string,
+): TreeNodeContext | null => {
+  for (const node of nodes) {
+    if (node.key === key) return { node, siblings: nodes };
+    const childContext = findTreeNodeContext(node.children, key);
+    if (childContext) return childContext;
+  }
+  return null;
+};
+
+const canDragTree = computed(() => (
+  canEdit.value
+  && !tagSearchQuery.value.trim()
+  && !tagHasMore.value
+  && !treeOrderSaving.value
+));
+
+const resetTreeDragState = () => {
+  draggingTreeNodeKey.value = null;
+  dragOverTreeNodeKey.value = null;
+};
+
+const handleTreeDragStart = (event: DragEvent, node: KnowledgeTagTreeNode) => {
+  if (!canDragTree.value || !event.dataTransfer) {
+    event.preventDefault();
+    return;
+  }
+  draggingTreeNodeKey.value = node.key;
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', node.key);
+};
+
+const handleTreeDragOver = (event: DragEvent, node: KnowledgeTagTreeNode) => {
+  const sourceKey = draggingTreeNodeKey.value;
+  if (!sourceKey || sourceKey === node.key) return;
+  const sourceContext = findTreeNodeContext(tagTreeNodes.value, sourceKey);
+  const targetContext = findTreeNodeContext(tagTreeNodes.value, node.key);
+  if (
+    !sourceContext
+    || !targetContext
+    || treeNodeParentKey(sourceContext.node.key) !== treeNodeParentKey(targetContext.node.key)
+  ) return;
+
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  dragOverTreeNodeKey.value = node.key;
+};
+
+const handleTreeDrop = async (event: DragEvent, targetNode: KnowledgeTagTreeNode) => {
+  event.preventDefault();
+  const sourceKey = draggingTreeNodeKey.value;
+  const sourceContext = sourceKey ? findTreeNodeContext(tagTreeNodes.value, sourceKey) : null;
+  const targetContext = findTreeNodeContext(tagTreeNodes.value, targetNode.key);
+  if (
+    !sourceContext
+    || !targetContext
+    || sourceContext.node.key === targetContext.node.key
+    || treeNodeParentKey(sourceContext.node.key) !== treeNodeParentKey(targetContext.node.key)
+  ) {
+    resetTreeDragState();
+    return;
+  }
+
+  const currentIds = tagTreeNodes.value.flatMap(treeNodeTagIds);
+  const movedIds = treeNodeTagIds(sourceContext.node);
+  const movedIdSet = new Set(movedIds);
+  const remainingIds = currentIds.filter((id) => !movedIdSet.has(id));
+  const targetIds = treeNodeTagIds(targetContext.node).filter((id) => !movedIdSet.has(id));
+  const targetStart = remainingIds.findIndex((id) => targetIds.includes(id));
+  if (targetStart < 0) {
+    resetTreeDragState();
+    return;
+  }
+
+  const currentTarget = event.currentTarget;
+  if (!(currentTarget instanceof HTMLElement)) {
+    resetTreeDragState();
+    return;
+  }
+  const rect = currentTarget.getBoundingClientRect();
+  const insertAt = event.clientY < rect.top + rect.height / 2
+    ? targetStart
+    : targetStart + targetIds.length;
+  const nextIds = [
+    ...remainingIds.slice(0, insertAt),
+    ...movedIds,
+    ...remainingIds.slice(insertAt),
+  ];
+  const tagById = new Map(tagList.value.map((tag) => [String(tag.id), tag]));
+  const orderedTags = nextIds
+    .map((id) => tagById.get(id))
+    .filter((tag): tag is any => Boolean(tag));
+  if (orderedTags.length !== tagList.value.length) {
+    resetTreeDragState();
+    return;
+  }
+
+  treeOrderSaving.value = true;
+  try {
+    await Promise.all(orderedTags.map((tag, index) => (
+      updateKnowledgeBaseTag(kbId.value, String(tag.id), { sort_order: (index + 1) * 100 })
+    )));
+    await loadTags(kbId.value, true);
+    MessagePlugin.success('目录顺序已保存');
+  } catch (error: any) {
+    await loadTags(kbId.value, true);
+    MessagePlugin.error(error?.message || t('common.operationFailed'));
+  } finally {
+    treeOrderSaving.value = false;
+    resetTreeDragState();
+  }
+};
 
 const editingTagInputRefs = new Map<string, TagInputInstance | null>();
 const setEditingTagInputRef = (el: TagInputInstance | null, tagId: string) => {
@@ -602,26 +708,6 @@ const handleTagRowClick = (tagId: string) => {
   handleTagFilterChange(tagId);
 };
 
-const handleTreeRootSelect = (root: { id: string }) => {
-  if (root.id !== kbId.value) {
-    router.push(`/platform/knowledge-bases/${root.id}`);
-    return;
-  }
-  knowledgeRootExpanded.value = true;
-  expandedTreeTagId.value = null;
-  expandedTreeDirectoryKeys.value = {};
-  activeTreeDocumentId.value = null;
-  handleTagFilterChange('');
-};
-
-const toggleTreeRoot = (root: { id: string }) => {
-  if (root.id !== kbId.value) {
-    router.push(`/platform/knowledge-bases/${root.id}`);
-    return;
-  }
-  knowledgeRootExpanded.value = !knowledgeRootExpanded.value;
-};
-
 const toggleTreeDirectory = (key: string) => {
   expandedTreeDirectoryKeys.value = {
     ...expandedTreeDirectoryKeys.value,
@@ -638,28 +724,10 @@ const handleTreeTagSelect = (tagId: string) => {
     editingTagId.value = null;
     editingTagName.value = '';
   }
-  expandedTreeTagId.value = tagId;
   activeTreeDocumentId.value = null;
   if (selectedTagId.value !== tagId) {
     handleTagFilterChange(tagId);
   }
-};
-
-const toggleTreeTag = (tagId: string) => {
-  if (expandedTreeTagId.value === tagId) {
-    expandedTreeTagId.value = null;
-    return;
-  }
-  expandedTreeTagId.value = tagId;
-  activeTreeDocumentId.value = null;
-  if (selectedTagId.value !== tagId) {
-    handleTagFilterChange(tagId);
-  }
-};
-
-const handleTreeDocumentOpen = (item: KnowledgeCard) => {
-  activeTreeDocumentId.value = item.id;
-  openCardDetails(item);
 };
 
 const startCreateTag = () => {
@@ -872,8 +940,6 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
   if (newKbId && newKbId !== oldKbId) {
     tagSearchQuery.value = '';
     tagPage.value = 1;
-    knowledgeRootExpanded.value = true;
-    expandedTreeTagId.value = null;
     expandedTreeDirectoryKeys.value = {};
     activeTreeDocumentId.value = null;
     // 重置标签选择状态，避免在不同知识库间保持标签选择
@@ -2083,165 +2149,127 @@ async function createNewSession(value: string): Promise<void> {
             </t-input>
           </div>
           <div class="tag-list knowledge-tree" role="tree" :aria-label="$t('knowledgeBase.documentCategoryTitle')">
-            <div v-for="root in documentKnowledgeRoots" :key="root.id" class="knowledge-tree-root">
-              <div
-                class="knowledge-tree-row knowledge-tree-root-row"
-                :class="{ active: root.id === kbId && !selectedTagId }"
-                role="treeitem"
-                :aria-expanded="root.id === kbId ? knowledgeRootExpanded : false"
-              >
-                <button
-                  type="button"
-                  class="tree-toggle"
-                  :aria-label="root.id === kbId && knowledgeRootExpanded ? $t('common.collapse') : $t('common.expand')"
-                  @click.stop="toggleTreeRoot(root)"
-                >
-                  <t-icon :name="root.id === kbId && knowledgeRootExpanded ? 'chevron-down' : 'chevron-right'" size="14px" />
-                </button>
-                <button type="button" class="tree-label" @click="handleTreeRootSelect(root)">
-                  <span class="tree-number">{{ treeRootNumber(root.id) }}</span>
-                  <span class="tree-name" :title="root.name">{{ stripOutlineNumber(root.name) }}</span>
-                </button>
+            <div v-if="creatingTag" class="knowledge-tree-row knowledge-tree-category-row tree-editing" @click.stop>
+              <span class="tree-toggle-placeholder" />
+              <span class="tree-number">{{ filteredTags.length + 1 }}</span>
+              <div class="tag-edit-input">
+                <t-input
+                  ref="newTagInputRef"
+                  v-model="newTagName"
+                  size="small"
+                  :maxlength="40"
+                  :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
+                  @keydown.enter.stop.prevent="submitCreateTag"
+                  @keydown.esc.stop.prevent="cancelCreateTag"
+                />
               </div>
+              <div class="tag-inline-actions">
+                <t-button variant="text" size="small" class="tag-action-btn confirm" :loading="creatingTagLoading" @click.stop="submitCreateTag">
+                  <t-icon name="check" size="16px" />
+                </t-button>
+                <t-button variant="text" size="small" class="tag-action-btn cancel" @click.stop="cancelCreateTag">
+                  <t-icon name="close" size="16px" />
+                </t-button>
+              </div>
+            </div>
 
-              <div v-if="root.id === kbId && knowledgeRootExpanded" class="knowledge-tree-children" role="group">
-                <div v-if="creatingTag" class="knowledge-tree-row knowledge-tree-category-row tree-editing" @click.stop>
-                  <span class="tree-toggle-placeholder" />
-                  <span class="tree-number">{{ currentKnowledgeRootIndex }}.{{ filteredTags.length + 1 }}</span>
-                  <div class="tag-edit-input">
-                    <t-input
-                      ref="newTagInputRef"
-                      v-model="newTagName"
-                      size="small"
-                      :maxlength="40"
-                      :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
-                      @keydown.enter.stop.prevent="submitCreateTag"
-                      @keydown.esc.stop.prevent="cancelCreateTag"
+            <template v-if="tagLoading && !filteredTags.length">
+              <div v-for="n in 7" :key="'tree-skel-tag-'+n" class="knowledge-tree-row knowledge-tree-category-row tree-skeleton-row">
+                <span class="tree-toggle-placeholder" />
+                <t-skeleton animation="gradient" :row-col="[{ width: '80%', height: '18px' }]" />
+              </div>
+            </template>
+            <template v-else-if="visibleTagTreeNodes.length">
+              <div v-for="node in visibleTagTreeNodes" :key="node.key" class="knowledge-tree-branch">
+                <div
+                  class="knowledge-tree-row knowledge-tree-category-row"
+                  :class="{
+                    active: node.tag && selectedTagId === node.tag.id,
+                    editing: node.tag && editingTagId === node.tag.id,
+                    'tree-dragging': draggingTreeNodeKey === node.key,
+                    'tree-drag-over': dragOverTreeNodeKey === node.key,
+                  }"
+                  :data-tree-depth="node.depth"
+                  :style="{ paddingLeft: `${node.depth * 20 + 2}px` }"
+                  :draggable="canDragTree && !(node.tag && editingTagId === node.tag.id)"
+                  role="treeitem"
+                  :aria-expanded="node.children.length ? Boolean(expandedTreeDirectoryKeys[node.key]) : undefined"
+                  @dragstart="handleTreeDragStart($event, node)"
+                  @dragover="handleTreeDragOver($event, node)"
+                  @drop="handleTreeDrop($event, node)"
+                  @dragend="resetTreeDragState"
+                >
+                  <button
+                    v-if="node.children.length"
+                    type="button"
+                    class="tree-toggle"
+                    @click.stop="toggleTreeDirectory(node.key)"
+                  >
+                    <t-icon
+                      :name="expandedTreeDirectoryKeys[node.key] ? 'chevron-down' : 'chevron-right'"
+                      size="14px"
                     />
-                  </div>
-                  <div class="tag-inline-actions">
-                    <t-button variant="text" size="small" class="tag-action-btn confirm" :loading="creatingTagLoading" @click.stop="submitCreateTag">
-                      <t-icon name="check" size="16px" />
-                    </t-button>
-                    <t-button variant="text" size="small" class="tag-action-btn cancel" @click.stop="cancelCreateTag">
-                      <t-icon name="close" size="16px" />
-                    </t-button>
-                  </div>
-                </div>
-
-                <template v-if="tagLoading && !filteredTags.length">
-                  <div v-for="n in 7" :key="'tree-skel-tag-'+n" class="knowledge-tree-row knowledge-tree-category-row tree-skeleton-row">
-                    <span class="tree-toggle-placeholder" />
-                    <t-skeleton animation="gradient" :row-col="[{ width: '80%', height: '18px' }]" />
-                  </div>
-                </template>
-                <template v-else-if="visibleTagTreeNodes.length">
-                  <div v-for="node in visibleTagTreeNodes" :key="node.key" class="knowledge-tree-branch">
-                    <div
-                      class="knowledge-tree-row knowledge-tree-category-row"
-                      :class="{ active: node.tag && selectedTagId === node.tag.id, editing: node.tag && editingTagId === node.tag.id }"
-                      :data-tree-depth="node.depth"
-                      :style="{ paddingLeft: `${node.depth * 20 + 2}px` }"
-                      role="treeitem"
-                      :aria-expanded="node.children.length ? Boolean(expandedTreeDirectoryKeys[node.key]) : (node.tag ? expandedTreeTagId === node.tag.id : false)"
-                    >
-                      <button
-                        type="button"
-                        class="tree-toggle"
-                        @click.stop="node.children.length ? toggleTreeDirectory(node.key) : (node.tag && toggleTreeTag(node.tag.id))"
-                      >
-                        <t-icon
-                          :name="(node.children.length ? expandedTreeDirectoryKeys[node.key] : (node.tag && expandedTreeTagId === node.tag.id)) ? 'chevron-down' : 'chevron-right'"
-                          size="14px"
-                        />
-                      </button>
-                      <span class="tree-number">{{ node.outline }}</span>
-                      <template v-if="node.tag && editingTagId === node.tag.id">
-                        <div class="tag-edit-input" @click.stop>
-                          <t-input
-                            :ref="setEditingTagInputRefByTag(node.tag.id)"
-                            v-model="editingTagName"
-                            size="small"
-                            :maxlength="40"
-                            @keydown.enter.stop.prevent="submitEditTag"
-                            @keydown.esc.stop.prevent="cancelEditTag"
-                          />
-                        </div>
-                      </template>
-                      <button
-                        v-else
-                        type="button"
-                        class="tree-label"
-                        @click="node.tag ? handleTreeTagSelect(node.tag.id) : toggleTreeDirectory(node.key)"
-                      >
-                        <span class="tree-name" :title="node.tag?.name || node.label">{{ node.label }}</span>
-                      </button>
-                      <div class="tag-list-right">
-                        <span class="tag-count">{{ node.totalCount }}</span>
-                        <template v-if="node.tag && editingTagId === node.tag.id">
-                          <div class="tag-inline-actions" @click.stop>
-                            <t-button variant="text" size="small" class="tag-action-btn confirm" :loading="editingTagSubmitting" @click.stop="submitEditTag">
-                              <t-icon name="check" size="16px" />
-                            </t-button>
-                            <t-button variant="text" size="small" class="tag-action-btn cancel" @click.stop="cancelEditTag">
-                              <t-icon name="close" size="16px" />
-                            </t-button>
+                  </button>
+                  <span v-else class="tree-toggle-placeholder" />
+                  <span class="tree-number">{{ node.outline }}</span>
+                  <template v-if="node.tag && editingTagId === node.tag.id">
+                    <div class="tag-edit-input" @click.stop>
+                      <t-input
+                        :ref="setEditingTagInputRefByTag(node.tag.id)"
+                        v-model="editingTagName"
+                        size="small"
+                        :maxlength="40"
+                        @keydown.enter.stop.prevent="submitEditTag"
+                        @keydown.esc.stop.prevent="cancelEditTag"
+                      />
+                    </div>
+                  </template>
+                  <button
+                    v-else
+                    type="button"
+                    class="tree-label"
+                    @click="node.tag ? handleTreeTagSelect(node.tag.id) : toggleTreeDirectory(node.key)"
+                  >
+                    <span class="tree-name" :title="node.tag?.name || node.label">{{ node.label }}</span>
+                  </button>
+                  <div class="tag-list-right">
+                    <span class="tag-count">{{ node.totalCount }}</span>
+                    <template v-if="node.tag && editingTagId === node.tag.id">
+                      <div class="tag-inline-actions" @click.stop>
+                        <t-button variant="text" size="small" class="tag-action-btn confirm" :loading="editingTagSubmitting" @click.stop="submitEditTag">
+                          <t-icon name="check" size="16px" />
+                        </t-button>
+                        <t-button variant="text" size="small" class="tag-action-btn cancel" @click.stop="cancelEditTag">
+                          <t-icon name="close" size="16px" />
+                        </t-button>
+                      </div>
+                    </template>
+                    <div v-else-if="canEdit && node.tag" class="tag-more" @click.stop>
+                      <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
+                        <div class="tag-more-btn"><t-icon name="more" size="14px" /></div>
+                        <template #content>
+                          <div class="tag-menu">
+                            <div class="tag-menu-item" @click="startEditTag(node.tag)">
+                              <t-icon class="menu-icon" name="edit" />
+                              <span>{{ $t('knowledgeBase.tagEditAction') }}</span>
+                            </div>
+                            <div class="tag-menu-item danger" @click="confirmDeleteTag(node.tag)">
+                              <t-icon class="menu-icon" name="delete" />
+                              <span>{{ $t('knowledgeBase.tagDeleteAction') }}</span>
+                            </div>
                           </div>
                         </template>
-                        <div v-else-if="canEdit && node.tag" class="tag-more" @click.stop>
-                          <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
-                            <div class="tag-more-btn"><t-icon name="more" size="14px" /></div>
-                            <template #content>
-                              <div class="tag-menu">
-                                <div class="tag-menu-item" @click="startEditTag(node.tag)">
-                                  <t-icon class="menu-icon" name="edit" />
-                                  <span>{{ $t('knowledgeBase.tagEditAction') }}</span>
-                                </div>
-                                <div class="tag-menu-item danger" @click="confirmDeleteTag(node.tag)">
-                                  <t-icon class="menu-icon" name="delete" />
-                                  <span>{{ $t('knowledgeBase.tagDeleteAction') }}</span>
-                                </div>
-                              </div>
-                            </template>
-                          </t-popup>
-                        </div>
-                      </div>
-                    </div>
-                    <div v-if="node.tag && expandedTreeTagId === node.tag.id && selectedTagId === node.tag.id" class="knowledge-tree-documents" role="group">
-                      <div
-                        v-if="docListLoading"
-                        class="knowledge-tree-row knowledge-tree-document-row tree-skeleton-row"
-                        :style="{ paddingLeft: `${(node.depth + 1) * 20 + 2}px` }"
-                      >
-                        <span class="tree-toggle-placeholder" />
-                        <t-skeleton animation="gradient" :row-col="[{ width: '76%', height: '16px' }]" />
-                      </div>
-                      <template v-else>
-                        <button
-                          v-for="(item, documentIndex) in cardList"
-                          :key="item.id"
-                          type="button"
-                          class="knowledge-tree-row knowledge-tree-document-row"
-                          :class="{ active: activeTreeDocumentId === item.id }"
-                          :style="{ paddingLeft: `${(node.depth + 1) * 20 + 2}px` }"
-                          role="treeitem"
-                          @click="handleTreeDocumentOpen(item)"
-                        >
-                          <span class="tree-toggle-placeholder" />
-                          <span class="tree-number">{{ treeDocumentNumber(node.outline, documentIndex) }}</span>
-                          <span class="tree-name" :title="treeDocumentName(item)">{{ treeDocumentName(item) }}</span>
-                        </button>
-                      </template>
+                      </t-popup>
                     </div>
                   </div>
-                </template>
-                <div v-else class="tag-empty-state">{{ $t('knowledgeBase.tagEmptyResult') }}</div>
-                <div v-if="tagHasMore" class="tag-load-more">
-                  <t-button variant="text" size="small" :loading="tagLoadingMore" @click.stop="kbId && loadTags(kbId)">
-                    {{ $t('tenant.loadMore') }}
-                  </t-button>
                 </div>
               </div>
+            </template>
+            <div v-else class="tag-empty-state">{{ $t('knowledgeBase.tagEmptyResult') }}</div>
+            <div v-if="tagHasMore" class="tag-load-more">
+              <t-button variant="text" size="small" :loading="tagLoadingMore" @click.stop="kbId && loadTags(kbId)">
+                {{ $t('tenant.loadMore') }}
+              </t-button>
             </div>
           </div>
         </aside>
@@ -3156,17 +3184,10 @@ async function createNewSession(value: string): Promise<void> {
     padding-right: 2px;
   }
 
-  .knowledge-tree-root,
-  .knowledge-tree-branch,
-  .knowledge-tree-children,
-  .knowledge-tree-documents {
+  .knowledge-tree-branch {
     display: flex;
     flex-direction: column;
     gap: 2px;
-  }
-
-  .knowledge-tree-children {
-    padding-left: 20px;
   }
 
   .knowledge-tree-row {
@@ -3207,12 +3228,19 @@ async function createNewSession(value: string): Promise<void> {
       cursor: default;
       background: var(--td-bg-color-secondarycontainer);
     }
-  }
 
-  .knowledge-tree-root-row {
-    min-height: 36px;
-    font-size: 14px;
-    font-weight: 500;
+    &[draggable="true"] {
+      cursor: grab;
+    }
+
+    &.tree-dragging {
+      opacity: 0.45;
+    }
+
+    &.tree-drag-over {
+      background: #dbeafe;
+      box-shadow: inset 0 -2px 0 #2563eb;
+    }
   }
 
   .knowledge-tree-category-row {
@@ -3246,13 +3274,6 @@ async function createNewSession(value: string): Promise<void> {
         color: var(--td-text-color-primary);
       }
     }
-  }
-
-  .knowledge-tree-document-row {
-    min-height: 30px;
-    padding-left: 2px;
-    font-size: 13px;
-    font-weight: 400;
   }
 
   .tree-toggle,
@@ -3302,12 +3323,7 @@ async function createNewSession(value: string): Promise<void> {
     white-space: nowrap;
   }
 
-  .knowledge-tree-root-row > .tree-label > .tree-number,
   .knowledge-tree-category-row > .tree-number {
-    margin-right: 10px;
-  }
-
-  .knowledge-tree-document-row .tree-number {
     margin-right: 10px;
   }
 
