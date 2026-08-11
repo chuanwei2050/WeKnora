@@ -98,6 +98,15 @@ func emptyTools() []chat.Tool {
 	return nil
 }
 
+func finalAnswerTools() []chat.Tool {
+	return []chat.Tool{{
+		Type: "function",
+		Function: chat.FunctionDef{
+			Name: "final_answer",
+		},
+	}}
+}
+
 // ---------------------------------------------------------------------------
 // TC1: Empty content + stop → should NOT complete with empty FinalAnswer
 // ---------------------------------------------------------------------------
@@ -152,6 +161,41 @@ func TestExecuteLoop_NonEmptyContentWithStop_ShouldComplete(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, state.IsComplete)
 	assert.Equal(t, "Here is my answer", state.FinalAnswer)
+}
+
+func TestExecuteLoop_PlainAnswerWithFinalAnswerTool_ShouldRetryForExplicitFinalization(t *testing.T) {
+	mock := &mockChat{
+		responses: []mockResponse{
+			{chunks: []types.StreamResponse{
+				{Content: "Here is my plain answer", Done: true, FinishReason: "stop"},
+			}},
+			{chunks: []types.StreamResponse{
+				{
+					Done:         true,
+					FinishReason: "tool_calls",
+					ToolCalls: []types.LLMToolCall{{
+						ID:   "call-final",
+						Type: "function",
+						Function: types.FunctionCall{
+							Name:      "final_answer",
+							Arguments: `{"answer":"Here is my plain answer"}`,
+						},
+					}},
+				},
+			}},
+		},
+	}
+
+	engine := newTestEngine(t, mock)
+	state := &types.AgentState{}
+	_, err := engine.executeLoop(
+		context.Background(), state, "test query", emptyMessages(), finalAnswerTools(), "sess-final", "msg-final",
+	)
+
+	assert.NoError(t, err)
+	assert.True(t, state.IsComplete)
+	assert.Equal(t, "Here is my plain answer", state.FinalAnswer)
+	assert.Equal(t, 2, mock.callCount)
 }
 
 // ---------------------------------------------------------------------------

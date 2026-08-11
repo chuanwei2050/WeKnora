@@ -354,6 +354,7 @@ func (e *AgentEngine) executeLoop(
 		"max_iterations": e.config.MaxIterations,
 	})
 	emptyRetries := 0
+	finalAnswerRetries := 0
 	consecutiveSameContent := 0
 	lastResponseContent := ""
 loop:
@@ -379,7 +380,7 @@ loop:
 		// every exit path (break/continue/next) without having to sprinkle
 		// manual finish calls throughout the many branches below.
 		outcome, iterErr := e.runReActIteration(ctx, state, &messages, tools,
-			sessionID, query, &emptyRetries, &consecutiveSameContent, &lastResponseContent)
+			sessionID, query, &emptyRetries, &finalAnswerRetries, &consecutiveSameContent, &lastResponseContent)
 		if iterErr != nil {
 			return state, iterErr
 		}
@@ -432,7 +433,7 @@ func (e *AgentEngine) runReActIteration(
 	messagesPtr *[]chat.Message,
 	tools []chat.Tool,
 	sessionID, query string,
-	emptyRetries, consecutiveSameContent *int,
+	emptyRetries, finalAnswerRetries, consecutiveSameContent *int,
 	lastResponseContent *string,
 ) (outcome iterOutcome, retErr error) {
 	roundStart := time.Now()
@@ -525,6 +526,23 @@ func (e *AgentEngine) runReActIteration(
 			response.Usage.CompletionTokens, response.Usage.TotalTokens)
 	}
 
+	// Some OpenAI-compatible reasoning models can use tools throughout the
+	// ReAct loop but still finish with plain assistant text instead of the
+	// mandatory final_answer tool. Keep that text internal and explicitly
+	// ask the model to submit it through the trusted finalization path. This
+	// preserves the output-contract boundary used by downstream consumers.
+	if response.FinishReason == "stop" && len(response.ToolCalls) == 0 && response.Content != "" &&
+		hasToolNamed(tools, agenttools.ToolFinalAnswer) && *finalAnswerRetries < maxEmptyResponseRetries {
+		*finalAnswerRetries++
+		*messagesPtr = append(*messagesPtr,
+			chat.Message{Role: "assistant", Content: response.Content},
+			chat.Message{Role: "user", Content: "Submit the complete answer above by calling the final_answer tool now. Do not add analysis."},
+		)
+		logger.Warnf(ctx, "[Agent][Round-%d] Plain-text final answer with final_answer available - retrying (%d/%d)",
+			round, *finalAnswerRetries, maxEmptyResponseRetries)
+		return iterOutcomeContinue, nil
+	}
+
 	// Detect stuck loops: if the LLM keeps returning the same content
 	// without tool calls (e.g., an unhandled finish reason), break early.
 	if len(response.ToolCalls) == 0 && response.Content != "" {
@@ -600,6 +618,15 @@ func (e *AgentEngine) runReActIteration(
 	})
 
 	return iterOutcomeNext, nil
+}
+
+func hasToolNamed(tools []chat.Tool, name string) bool {
+	for _, tool := range tools {
+		if tool.Function.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // String returns a stable label for Langfuse output payloads.

@@ -165,6 +165,11 @@ func (s *knowledgeTagService) CreateTag(
 	// "未分类" tag should have the lowest sort order to appear first
 	if name == types.UntaggedTagName {
 		sortOrder = -1
+	} else if sortOrder == 0 {
+		sortOrder, err = s.repo.NextSortOrder(ctx, kb.TenantID, kbID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	tag := &types.KnowledgeTag{
 		ID:              uuid.New().String(),

@@ -90,6 +90,26 @@ func (r *knowledgeTagRepository) GetByName(ctx context.Context, tenantID uint64,
 	return &tag, nil
 }
 
+// NextSortOrder returns a stable append-only order for a newly created tag.
+func (r *knowledgeTagRepository) NextSortOrder(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+) (int, error) {
+	var maxSortOrder int
+	if err := r.db.WithContext(ctx).
+		Model(&types.KnowledgeTag{}).
+		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+		Select("COALESCE(MAX(sort_order), 0)").
+		Scan(&maxSortOrder).Error; err != nil {
+		return 0, err
+	}
+	if maxSortOrder < 0 {
+		maxSortOrder = 0
+	}
+	return maxSortOrder + 100, nil
+}
+
 // ListByKB lists knowledge tags by knowledge base ID with pagination and optional keyword filtering.
 func (r *knowledgeTagRepository) ListByKB(
 	ctx context.Context,

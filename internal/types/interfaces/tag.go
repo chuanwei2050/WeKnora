@@ -37,6 +37,8 @@ type KnowledgeTagRepository interface {
 	// GetBySeqIDs retrieves multiple tags by their seq_ids in a single query.
 	GetBySeqIDs(ctx context.Context, tenantID uint64, seqIDs []int64) ([]*types.KnowledgeTag, error)
 	GetByName(ctx context.Context, tenantID uint64, kbID string, name string) (*types.KnowledgeTag, error)
+	// NextSortOrder returns an append-only display order for a newly created tag.
+	NextSortOrder(ctx context.Context, tenantID uint64, kbID string) (int, error)
 	ListByKB(
 		ctx context.Context,
 		tenantID uint64,

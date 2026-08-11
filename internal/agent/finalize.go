@@ -144,8 +144,9 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		Type:      event.EventAgentFinalAnswer,
 		SessionID: sessionID,
 		Data: event.AgentFinalAnswerData{
-			Content: fullAnswer,
-			Done:    false,
+			Content:        fullAnswer,
+			Done:           false,
+			OutputContract: event.AgentFinalAnswerOutputContract,
 		},
 	})
 	e.eventBus.Emit(ctx, event.Event{
@@ -153,8 +154,9 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		Type:      event.EventAgentFinalAnswer,
 		SessionID: sessionID,
 		Data: event.AgentFinalAnswerData{
-			Content: "",
-			Done:    true,
+			Content:        "",
+			Done:           true,
+			OutputContract: event.AgentFinalAnswerOutputContract,
 		},
 	})
 	logger.Infof(ctx, "[Agent][FinalAnswer] Final answer generated: %d characters", len(fullAnswer))

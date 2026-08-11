@@ -167,8 +167,9 @@ func (e *AgentEngine) streamThinkingToEventBus(
 						Type:      event.EventAgentFinalAnswer,
 						SessionID: sessionID,
 						Data: event.AgentFinalAnswerData{
-							Content: chunk.Content,
-							Done:    false,
+							Content:        chunk.Content,
+							Done:           false,
+							OutputContract: event.AgentFinalAnswerOutputContract,
 						},
 					})
 					return

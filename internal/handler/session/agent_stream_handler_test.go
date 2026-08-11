@@ -66,6 +66,65 @@ func TestHandleToolResultKeepsFailureNonFatal(t *testing.T) {
 	}
 }
 
+func TestHandleFinalAnswerAddsStructuredOutputContract(t *testing.T) {
+	streamManager := &recordingStreamManager{}
+	handler := &AgentStreamHandler{
+		ctx:                context.Background(),
+		sessionID:          "session-1",
+		assistantMessageID: "message-1",
+		assistantMessage:   &types.Message{},
+		streamManager:      streamManager,
+		eventStartTimes:    map[string]time.Time{},
+	}
+
+	err := handler.handleFinalAnswer(context.Background(), event.Event{
+		ID: "answer-1",
+		Data: event.AgentFinalAnswerData{
+			Content:        "正式答案",
+			Done:           false,
+			OutputContract: event.AgentFinalAnswerOutputContract,
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("handleFinalAnswer() error = %v", err)
+	}
+	if len(streamManager.events) != 1 {
+		t.Fatalf("events = %d, want 1", len(streamManager.events))
+	}
+	got := streamManager.events[0]
+	if got.Data["output_contract"] != "agent_final_answer/v1" {
+		t.Fatalf("output contract = %#v", got.Data["output_contract"])
+	}
+}
+
+func TestHandleFinalAnswerDoesNotInventOutputContract(t *testing.T) {
+	streamManager := &recordingStreamManager{}
+	handler := &AgentStreamHandler{
+		ctx:                context.Background(),
+		sessionID:          "session-1",
+		assistantMessageID: "message-1",
+		assistantMessage:   &types.Message{},
+		streamManager:      streamManager,
+		eventStartTimes:    map[string]time.Time{},
+	}
+
+	err := handler.handleFinalAnswer(context.Background(), event.Event{
+		ID: "answer-1",
+		Data: event.AgentFinalAnswerData{
+			Content: "自然停止内容",
+			Done:    false,
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("handleFinalAnswer() error = %v", err)
+	}
+	if got := streamManager.events[0].Data["output_contract"]; got != nil {
+		t.Fatalf("output contract = %#v, want nil", got)
+	}
+}
+
 func TestHandleErrorRemainsFatal(t *testing.T) {
 	streamManager := &recordingStreamManager{}
 	handler := &AgentStreamHandler{

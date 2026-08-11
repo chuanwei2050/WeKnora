@@ -11,6 +11,8 @@ import (
 // EventType represents the type of event in the system
 type EventType string
 
+const AgentFinalAnswerOutputContract = "agent_final_answer/v1"
+
 const (
 	// Query processing events
 	EventQueryReceived   EventType = "query.received"   // 用户查询到达

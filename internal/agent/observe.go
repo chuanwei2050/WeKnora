@@ -212,8 +212,9 @@ func (e *AgentEngine) analyzeResponse(
 					Type:      event.EventAgentFinalAnswer,
 					SessionID: sessionID,
 					Data: event.AgentFinalAnswerData{
-						Content: answer,
-						Done:    false,
+						Content:        answer,
+						Done:           false,
+						OutputContract: event.AgentFinalAnswerOutputContract,
 					},
 				})
 			}
@@ -222,8 +223,9 @@ func (e *AgentEngine) analyzeResponse(
 				Type:      event.EventAgentFinalAnswer,
 				SessionID: sessionID,
 				Data: event.AgentFinalAnswerData{
-					Content: "",
-					Done:    true,
+					Content:        "",
+					Done:           true,
+					OutputContract: event.AgentFinalAnswerOutputContract,
 				},
 			})
 
