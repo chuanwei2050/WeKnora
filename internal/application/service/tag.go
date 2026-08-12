@@ -224,6 +224,46 @@ func (s *knowledgeTagService) UpdateTag(
 	return tag, nil
 }
 
+// ReorderTags updates the order of selected tags while preserving unlisted tags.
+func (s *knowledgeTagService) ReorderTags(ctx context.Context, kbID string, tagIDs []string) error {
+	if kbID == "" {
+		return werrors.NewBadRequestError("知识库ID不能为空")
+	}
+	if len(tagIDs) == 0 {
+		return werrors.NewBadRequestError("标签顺序不能为空")
+	}
+
+	normalizedIDs := make([]string, 0, len(tagIDs))
+	seenIDs := make(map[string]struct{}, len(tagIDs))
+	for _, tagID := range tagIDs {
+		tagID = strings.TrimSpace(tagID)
+		if tagID == "" {
+			return werrors.NewBadRequestError("标签ID不能为空")
+		}
+		if _, exists := seenIDs[tagID]; exists {
+			return werrors.NewBadRequestError("标签ID不能重复")
+		}
+		seenIDs[tagID] = struct{}{}
+		normalizedIDs = append(normalizedIDs, tagID)
+	}
+
+	tenantID := types.MustTenantIDFromContext(ctx)
+	tags, err := s.repo.GetByIDs(ctx, tenantID, normalizedIDs)
+	if err != nil {
+		return err
+	}
+	if len(tags) != len(normalizedIDs) {
+		return werrors.NewBadRequestError("存在无效标签")
+	}
+	for _, tag := range tags {
+		if tag.KnowledgeBaseID != kbID {
+			return werrors.NewBadRequestError("标签不属于当前知识库")
+		}
+	}
+
+	return s.repo.Reorder(ctx, tenantID, kbID, normalizedIDs)
+}
+
 // DeleteTag deletes a tag. When force=true, also deletes all chunks under this tag.
 // For document-type knowledge bases, also deletes all knowledge files under this tag.
 // When contentOnly=true, only deletes the content under the tag but keeps the tag itself.

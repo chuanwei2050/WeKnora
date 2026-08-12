@@ -91,7 +91,9 @@ const checkKnowledgeBaseInitialization = async (): Promise<boolean> => {
 
 
 // 全局拖拽事件处理
+const isInternalTagSortDrag = (event: DragEvent) => Boolean(event.dataTransfer?.types.includes("application/x-weknora-tag-sort"));
 const handleGlobalDragEnter = (event: DragEvent) => {
+    if (isInternalTagSortDrag(event)) return;
     event.preventDefault();
     dragCounter++;
     if (event.dataTransfer) {
@@ -101,6 +103,7 @@ const handleGlobalDragEnter = (event: DragEvent) => {
 }
 
 const handleGlobalDragOver = (event: DragEvent) => {
+    if (isInternalTagSortDrag(event)) return;
     event.preventDefault();
     if (event.dataTransfer) {
         event.dataTransfer.dropEffect = 'copy';
@@ -108,6 +111,7 @@ const handleGlobalDragOver = (event: DragEvent) => {
 }
 
 const handleGlobalDragLeave = (event: DragEvent) => {
+    if (isInternalTagSortDrag(event)) return;
     event.preventDefault();
     dragCounter--;
     if (dragCounter === 0) {
@@ -116,6 +120,7 @@ const handleGlobalDragLeave = (event: DragEvent) => {
 }
 
 const handleGlobalDrop = async (event: DragEvent) => {
+    if (isInternalTagSortDrag(event)) return;
     event.preventDefault();
     dragCounter = 0;
     ismask.value = false;

@@ -228,6 +228,10 @@ export function updateKnowledgeBaseTag(
   return put(`/api/v1/knowledge-bases/${kbId}/tags/${tagId}`, data);
 }
 
+export function reorderKnowledgeBaseTags(kbId: string, tagIds: string[]) {
+  return put(`/api/v1/knowledge-bases/${kbId}/tags/order`, { tag_ids: tagIds });
+}
+
 export function deleteKnowledgeBaseTag(kbId: string, tagSeqId: number, params?: { force?: boolean }) {
   const forceQuery = params?.force ? '?force=true' : '';
   return del(`/api/v1/knowledge-bases/${kbId}/tags/${tagSeqId}${forceQuery}`);

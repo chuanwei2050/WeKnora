@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -108,6 +109,67 @@ func (r *knowledgeTagRepository) NextSortOrder(
 		maxSortOrder = 0
 	}
 	return maxSortOrder + 100, nil
+}
+
+// Reorder updates selected tags in their current slots and preserves the order of unlisted tags.
+func (r *knowledgeTagRepository) Reorder(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	tagIDs []string,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var tags []*types.KnowledgeTag
+		if err := tx.
+			Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+			Order("sort_order ASC, created_at DESC").
+			Find(&tags).Error; err != nil {
+			return err
+		}
+
+		tagsByID := make(map[string]*types.KnowledgeTag, len(tags))
+		for _, tag := range tags {
+			tagsByID[tag.ID] = tag
+		}
+
+		selectedTags := make([]*types.KnowledgeTag, 0, len(tagIDs))
+		selectedIDs := make(map[string]struct{}, len(tagIDs))
+		for _, tagID := range tagIDs {
+			if _, exists := selectedIDs[tagID]; exists {
+				return gorm.ErrDuplicatedKey
+			}
+			tag, exists := tagsByID[tagID]
+			if !exists {
+				return gorm.ErrRecordNotFound
+			}
+			selectedIDs[tagID] = struct{}{}
+			selectedTags = append(selectedTags, tag)
+		}
+
+		selectedIndex := 0
+		orderedTags := make([]*types.KnowledgeTag, 0, len(tags))
+		for _, tag := range tags {
+			if _, selected := selectedIDs[tag.ID]; selected {
+				orderedTags = append(orderedTags, selectedTags[selectedIndex])
+				selectedIndex++
+				continue
+			}
+			orderedTags = append(orderedTags, tag)
+		}
+
+		now := time.Now()
+		for index, tag := range orderedTags {
+			if err := tx.Model(&types.KnowledgeTag{}).
+				Where("tenant_id = ? AND knowledge_base_id = ? AND id = ?", tenantID, kbID, tag.ID).
+				Updates(map[string]interface{}{
+					"sort_order": (index + 1) * 100,
+					"updated_at": now,
+				}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // ListByKB lists knowledge tags by knowledge base ID with pagination and optional keyword filtering.

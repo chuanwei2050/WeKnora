@@ -271,6 +271,51 @@ func (h *TagHandler) UpdateTag(c *gin.Context) {
 	})
 }
 
+type reorderTagsRequest struct {
+	TagIDs []string `json:"tag_ids"`
+}
+
+// ReorderTags godoc
+// @Summary      批量调整标签顺序
+// @Description  调整指定标签在当前知识库中的顺序，并保留未指定标签的相对顺序
+// @Tags         标签管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string  true  "知识库ID"
+// @Param        request  body      reorderTagsRequest  true  "标签ID顺序"
+// @Success      200      {object}  map[string]interface{}  "排序成功"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/tags/order [put]
+func (h *TagHandler) ReorderTags(c *gin.Context) {
+	ctx := c.Request.Context()
+	kbID := secutils.SanitizeForLog(c.Param("id"))
+
+	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	var req reorderTagsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "Failed to bind reorder tags payload", err)
+		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		return
+	}
+
+	if err := h.tagService.ReorderTags(effCtx, kbID, req.TagIDs); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"kb_id": kbID,
+		})
+		c.Error(err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
 // DeleteTag godoc
 // @Summary      删除标签
 // @Description  删除标签，可使用force=true强制删除被引用的标签，content_only=true仅删除标签下的内容而保留标签本身

@@ -297,6 +297,7 @@ func RegisterKnowledgeTagRoutes(r *gin.RouterGroup, tagHandler *handler.TagHandl
 	{
 		kbTags.GET("", tagHandler.ListTags)
 		kbTags.POST("", tagHandler.CreateTag)
+		kbTags.PUT("/order", tagHandler.ReorderTags)
 		kbTags.PUT("/:tag_id", tagHandler.UpdateTag)
 		kbTags.DELETE("/:tag_id", tagHandler.DeleteTag)
 	}

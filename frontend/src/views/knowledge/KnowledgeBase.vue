@@ -25,6 +25,7 @@ import {
   updateKnowledgeTagBatch,
   createKnowledgeBaseTag,
   updateKnowledgeBaseTag,
+  reorderKnowledgeBaseTags,
   deleteKnowledgeBaseTag,
   uploadKnowledgeFile,
   createKnowledgeFromURL,
@@ -419,7 +420,6 @@ const visibleTagTreeNodes = computed(() => {
 
 type TreeNodeContext = {
   node: KnowledgeTagTreeNode;
-  siblings: KnowledgeTagTreeNode[];
 };
 
 const treeNodeParentKey = (key: string) => {
@@ -437,7 +437,7 @@ const findTreeNodeContext = (
   key: string,
 ): TreeNodeContext | null => {
   for (const node of nodes) {
-    if (node.key === key) return { node, siblings: nodes };
+    if (node.key === key) return { node };
     const childContext = findTreeNodeContext(node.children, key);
     if (childContext) return childContext;
   }
@@ -447,7 +447,8 @@ const findTreeNodeContext = (
 const canDragTree = computed(() => (
   canEdit.value
   && !tagSearchQuery.value.trim()
-  && !tagHasMore.value
+  && !tagLoading.value
+  && !tagLoadingMore.value
   && !treeOrderSaving.value
 ));
 
@@ -463,6 +464,7 @@ const handleTreeDragStart = (event: DragEvent, node: KnowledgeTagTreeNode) => {
   }
   draggingTreeNodeKey.value = node.key;
   event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData("application/x-weknora-tag-sort", "true");
   event.dataTransfer.setData('text/plain', node.key);
 };
 
@@ -522,25 +524,24 @@ const handleTreeDrop = async (event: DragEvent, targetNode: KnowledgeTagTreeNode
     ...movedIds,
     ...remainingIds.slice(insertAt),
   ];
-  const tagById = new Map(tagList.value.map((tag) => [String(tag.id), tag]));
-  const orderedTags = nextIds
-    .map((id) => tagById.get(id))
-    .filter((tag): tag is any => Boolean(tag));
-  if (orderedTags.length !== tagList.value.length) {
+  const currentTagIds = new Set(tagList.value.map((tag) => String(tag.id)));
+  if (
+    nextIds.length !== currentTagIds.size
+    || new Set(nextIds).size !== currentTagIds.size
+    || nextIds.some((id) => !currentTagIds.has(id))
+  ) {
     resetTreeDragState();
     return;
   }
 
   treeOrderSaving.value = true;
   try {
-    await Promise.all(orderedTags.map((tag, index) => (
-      updateKnowledgeBaseTag(kbId.value, String(tag.id), { sort_order: (index + 1) * 100 })
-    )));
+    await reorderKnowledgeBaseTags(kbId.value, nextIds);
     await loadTags(kbId.value, true);
     MessagePlugin.success('目录顺序已保存');
-  } catch (error: any) {
+  } catch (error: unknown) {
     await loadTags(kbId.value, true);
-    MessagePlugin.error(error?.message || t('common.operationFailed'));
+    MessagePlugin.error(error instanceof Error ? error.message : t('common.operationFailed'));
   } finally {
     treeOrderSaving.value = false;
     resetTreeDragState();
@@ -2151,7 +2152,7 @@ async function createNewSession(value: string): Promise<void> {
           <div class="tag-list knowledge-tree" role="tree" :aria-label="$t('knowledgeBase.documentCategoryTitle')">
             <div v-if="creatingTag" class="knowledge-tree-row knowledge-tree-category-row tree-editing" @click.stop>
               <span class="tree-toggle-placeholder" />
-              <span class="tree-number">{{ filteredTags.length + 1 }}</span>
+              <span class="tree-number">{{ tagTreeNodes.length + 1 }}</span>
               <div class="tag-edit-input">
                 <t-input
                   ref="newTagInputRef"
@@ -2194,10 +2195,10 @@ async function createNewSession(value: string): Promise<void> {
                   :draggable="canDragTree && !(node.tag && editingTagId === node.tag.id)"
                   role="treeitem"
                   :aria-expanded="node.children.length ? Boolean(expandedTreeDirectoryKeys[node.key]) : undefined"
-                  @dragstart="handleTreeDragStart($event, node)"
-                  @dragover="handleTreeDragOver($event, node)"
-                  @drop="handleTreeDrop($event, node)"
-                  @dragend="resetTreeDragState"
+                  @dragstart.stop="handleTreeDragStart($event, node)"
+                  @dragover.stop="handleTreeDragOver($event, node)"
+                  @drop.stop="handleTreeDrop($event, node)"
+                  @dragend.stop="resetTreeDragState"
                 >
                   <button
                     v-if="node.children.length"
