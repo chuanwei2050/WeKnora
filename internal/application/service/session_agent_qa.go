@@ -213,8 +213,20 @@ func (s *sessionService) AgentQA(
 		ctx = context.WithValue(ctx, types.GraphRelationTypesContextKey, agentGraphRelationTypes(ctx, s.knowledgeBaseService, agentConfig.KnowledgeBases))
 	}
 
-	verifiedAgent := agentConfig.VerifiedAnswer.Enabled &&
-		(!agentConfig.ComplexityRouting.Enabled || (routingDecision != nil && routingDecision.ActualAction == types.RoutingVerifiedAgent))
+	// Keep verification when enabled. If complexity routing is on but classification
+	// failed (routingDecision == nil), do not fall through to an unverified live stream.
+	verifiedAgent := false
+	if agentConfig.VerifiedAnswer.Enabled {
+		switch {
+		case !agentConfig.ComplexityRouting.Enabled:
+			verifiedAgent = true
+		case routingDecision == nil:
+			verifiedAgent = true
+			logger.Warnf(ctx, "Complexity routing unavailable; keeping verified-agent path enabled")
+		default:
+			verifiedAgent = routingDecision.ActualAction == types.RoutingVerifiedAgent
+		}
+	}
 	executionBus := eventBus
 	if verifiedAgent {
 		executionBus = newBufferedAgentEventBus(eventBus)
