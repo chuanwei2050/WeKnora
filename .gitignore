@@ -27,8 +27,16 @@ tmp/
 temp/
 logs/
 *.pid
+*.test.exe
+/*.exe
+
+# 本地调试脚本（勿提交）
+scripts/tmp-*
+scripts/debug-*
+scripts/siliconflow*
 
 WeKnora
+WeKnora.e2e
 WeKnora-lite
 cmd/desktop/build/bin/
 /models/
@@ -56,3 +64,18 @@ fix-docker.sh
 
 # WeChat Mini Program local/private configuration
 miniprogram/project.private.config.json
+
+# model-scripts：模型权重/镜像/离线包不进仓库（脚本与 example 可提交）
+model-scripts/config.yaml
+model-scripts/offline-bundle/
+model-scripts/offline-model-bundle/
+model-scripts/offline_packages/
+model-scripts/services/*/vendor/
+
+model-scripts/images/
+model-scripts/generated/
+model-scripts/**/*.tar
+model-scripts/**/*.tar.gz
+model-scripts/**/*.safetensors
+model-scripts/**/*.gguf
+model-scripts/**/*.onnx

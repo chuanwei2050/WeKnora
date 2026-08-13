@@ -1,0 +1,46 @@
+# 本地虚拟环境与缓存
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# 本地工作配置（提交 example，不提交私有 host/端口）
+config.yaml
+
+# prepare 默认产物（模型权重 / 镜像 / 依赖包）
+offline-bundle/
+offline-bundle.tar.gz
+offline-model-bundle/
+offline-model-bundle.tar.gz
+offline_packages/
+services/*/vendor/
+
+
+# 若误在本目录下直接落盘模型
+models/
+images/
+
+# gen-config / 运行产物
+generated/
+logs/
+.logs/
+*.log
+
+# 大文件介质（镜像、归档）
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.gguf
+*.onnx
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# 临时文件
+_tmp*/
+_smoke.py

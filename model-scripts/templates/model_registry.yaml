@@ -1,0 +1,49 @@
+﻿# WeKnora 妯″瀷绠＄悊 UI 鐧昏鏁版嵁缁撴瀯绀轰緥
+# VLM 涓?Chat 鍏辩敤涓绘ā鍨嬬鐐癸紙鏃犵嫭绔?VLM 鏈嶅姟锛?
+
+models:
+  - role: embedding
+    model_name: qwen3-embedding-4b
+    endpoint_url: http://192.168.1.100:8001/v1
+    approved_endpoint_id: model-embedding
+    protocol: openai-compatible
+    engine: vllm
+
+  - role: rerank
+    model_name: bge-reranker-v2-m3
+    endpoint_url: http://192.168.1.100:8002/v1
+    approved_endpoint_id: model-rerank
+    protocol: openai-compatible
+    engine: container
+
+  # 涓绘ā鍨嬮粯璁ゆ湭閮ㄧ讲锛涘惎鐢ㄥ悗 Chat / VLM 鎸囧悜鍚屼竴 endpoint
+  - role: chat
+    model_name: qwen3.6-27b
+    endpoint_url: http://192.168.1.100:8000/v1
+    approved_endpoint_id: model-chat
+    protocol: openai-compatible
+    engine: vllm
+    shared_service: chat
+
+  - role: vlm
+    model_name: qwen3.6-27b
+    endpoint_url: http://192.168.1.100:8000/v1
+    approved_endpoint_id: model-chat
+    protocol: openai-compatible
+    engine: vllm
+    shared_service: chat
+
+  - role: asr
+    model_name: sensevoice-small
+    endpoint_url: http://192.168.1.100:8004/v1
+    approved_endpoint_id: model-asr
+    protocol: openai-compatible
+    engine: container
+
+  - role: tts
+    model_name: cosyvoice2-0.5b
+    endpoint_url: http://192.168.1.100:8005/v1
+    approved_endpoint_id: model-tts
+    protocol: openai-compatible
+    engine: container
+

@@ -1,0 +1,123 @@
+﻿{
+  "approved_endpoints": [
+    {
+      "id": "model-embedding",
+      "scheme": "http",
+      "host": "192.168.1.100",
+      "port": 8001,
+      "protocol": "openai-compatible",
+      "tls_required": false,
+      "category": "model",
+      "allowed_uses": ["embedding", "model"],
+      "allowed_model_roles": ["embedding"],
+      "endpoint_url": "http://192.168.1.100:8001/v1",
+      "notes": "绂佹鐢ㄩ€? object-storage, data-connector, search"
+    },
+    {
+      "id": "model-rerank",
+      "scheme": "http",
+      "host": "192.168.1.100",
+      "port": 8002,
+      "protocol": "openai-compatible",
+      "tls_required": false,
+      "category": "model",
+      "allowed_uses": ["rerank", "model"],
+      "allowed_model_roles": ["rerank"],
+      "endpoint_url": "http://192.168.1.100:8002/v1",
+      "notes": "绂佹鐢ㄩ€? object-storage, data-connector"
+    },
+    {
+      "id": "model-chat",
+      "scheme": "http",
+      "host": "192.168.1.100",
+      "port": 8000,
+      "protocol": "openai-compatible",
+      "tls_required": false,
+      "category": "model",
+      "allowed_uses": ["chat", "vlm", "model"],
+      "allowed_model_roles": ["chat", "vlm"],
+      "endpoint_url": "http://192.168.1.100:8000/v1",
+      "notes": "Chat 涓?VLM 鍏辩敤涓绘ā鍨嬬鐐癸紱涓绘ā鍨嬮粯璁ゆ湭閮ㄧ讲"
+    },
+    {
+      "id": "model-asr",
+      "scheme": "http",
+      "host": "192.168.1.100",
+      "port": 8004,
+      "protocol": "openai-compatible",
+      "tls_required": false,
+      "category": "model",
+      "allowed_uses": ["asr", "model"],
+      "allowed_model_roles": ["asr"],
+      "endpoint_url": "http://192.168.1.100:8004/v1",
+      "notes": "绂佹鐢ㄩ€? object-storage"
+    },
+    {
+      "id": "model-tts",
+      "scheme": "http",
+      "host": "192.168.1.100",
+      "port": 8005,
+      "protocol": "openai-compatible",
+      "tls_required": false,
+      "category": "model",
+      "allowed_uses": ["tts", "model"],
+      "allowed_model_roles": ["tts"],
+      "endpoint_url": "http://192.168.1.100:8005/v1",
+      "notes": "绂佹鐢ㄩ€? object-storage"
+    }
+  ],
+  "model_registry": [
+    {
+      "role": "embedding",
+      "model_name": "qwen3-embedding-4b",
+      "endpoint_url": "http://192.168.1.100:8001/v1",
+      "approved_endpoint_id": "model-embedding",
+      "engine": "vllm"
+    },
+    {
+      "role": "rerank",
+      "model_name": "bge-reranker-v2-m3",
+      "endpoint_url": "http://192.168.1.100:8002/v1",
+      "approved_endpoint_id": "model-rerank",
+      "engine": "container"
+    },
+    {
+      "role": "chat",
+      "model_name": "qwen3.6-27b",
+      "endpoint_url": "http://192.168.1.100:8000/v1",
+      "approved_endpoint_id": "model-chat",
+      "engine": "vllm",
+      "shared_service": "chat",
+      "notes": "涓绘ā鍨嬮粯璁ゆ湭鍚敤"
+    },
+    {
+      "role": "vlm",
+      "model_name": "qwen3.6-27b",
+      "endpoint_url": "http://192.168.1.100:8000/v1",
+      "approved_endpoint_id": "model-chat",
+      "engine": "vllm",
+      "shared_service": "chat",
+      "notes": "涓?chat 鍏辩敤鍚屼竴绔偣锛屾棤鐙珛 VLM 鏈嶅姟"
+    },
+    {
+      "role": "asr",
+      "model_name": "sensevoice-small",
+      "endpoint_url": "http://192.168.1.100:8004/v1",
+      "approved_endpoint_id": "model-asr",
+      "engine": "container"
+    },
+    {
+      "role": "tts",
+      "model_name": "cosyvoice2-0.5b",
+      "endpoint_url": "http://192.168.1.100:8005/v1",
+      "approved_endpoint_id": "model-tts",
+      "engine": "container"
+    }
+  ],
+  "meta": {
+    "generated_by": "model-scripts/templates",
+    "air_gapped_mode": true,
+    "note": "VLM 澶嶇敤涓?Chat 绔偣锛涘惎鐢?models.chat 鍚庣敱 deploy/gen-config 閲嶆柊鐢熸垚"
+  }
+}
+

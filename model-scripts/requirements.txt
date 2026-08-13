@@ -1,0 +1,7 @@
+# model-scripts 自身依赖（联网 prepare / 内网 deploy 工具）
+requests>=2.31.0
+PyYAML>=6.0.1
+tqdm>=4.66.0
+huggingface_hub>=0.23.0
+# 可选：国内源下载
+modelscope>=1.14.0

@@ -1,0 +1,44 @@
+# 静态审阅模板。运行时以 `deploy.py gen-config|deploy` 生成文件为准。
+# 全容器：Embedding(vLLM) + Rerank/ASR/TTS(自建镜像) + 可选 Chat(vLLM，含 VLM)
+
+services:
+  embedding:
+    image: vllm/vllm-openai:latest
+    pull_policy: never
+    ports: ["8001:8000"]
+    volumes:
+      - "${MODEL_DATA_DIR:-/mnt/models}/models/embedding:/models:ro"
+
+  rerank:
+    image: weknora-rerank:airgap
+    pull_policy: never
+    ports: ["8002:8000"]
+    volumes:
+      - "${MODEL_DATA_DIR:-/mnt/models}/models/rerank:/models:ro"
+    environment:
+      - MODEL_DIR=/models
+      - PORT=8000
+
+  asr:
+    image: weknora-asr:airgap
+    pull_policy: never
+    ports: ["8004:8000"]
+    volumes:
+      - "${MODEL_DATA_DIR:-/mnt/models}/models/asr:/models:ro"
+    environment:
+      - MODEL_DIR=/models
+      - PORT=8000
+
+  tts:
+    image: weknora-tts:airgap
+    pull_policy: never
+    ports: ["8005:8000"]
+    volumes:
+      - "${MODEL_DATA_DIR:-/mnt/models}/models/tts:/models:ro"
+    environment:
+      - MODEL_DIR=/models
+      - PORT=8000
+
+  # chat:  # 默认不启用；启用后 VLM 共用此服务
+  #   image: vllm/vllm-openai:latest
+  #   ports: ["8000:8000"]

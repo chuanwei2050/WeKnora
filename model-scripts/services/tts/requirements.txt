@@ -1,0 +1,15 @@
+# CosyVoice2 TTS — OpenAI /v1/audio/speech 兼容
+# 注意: torch/torchaudio 由 CUDA 基础镜像提供，切勿在此再声明
+
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.0
+numpy>=1.24
+soundfile>=0.12.1
+onnxruntime-gpu>=1.17.0; platform_system!="Darwin"
+onnxruntime>=1.17.0; platform_system=="Darwin"
+HyperPyYAML>=1.2.2
+librosa>=0.10.0
+protobuf>=4.25.0
+lameenc>=1.7.0
+pydub>=0.25.1

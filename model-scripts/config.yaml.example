@@ -1,0 +1,125 @@
+# =============================================================================
+# 内网离线模型部署配置示例（全容器）
+# 用法: cp config.yaml.example config.yaml 后按需修改
+# 密钥仅通过环境变量注入（HF_TOKEN / MODELSCOPE_TOKEN）
+#
+# 一键流: prepare → 传包 → deploy（docker compose up -d）
+# =============================================================================
+
+bundle:
+  name: offline-model-bundle
+  output_dir: ./offline-bundle
+  checksum_algo: sha256
+  download_source: auto
+  download_retries: 3
+  download_retry_delay_sec: 5
+
+deploy:
+  data_dir: /mnt/models
+  host: 192.168.1.100
+  scheme: http
+  compose_project: weknora-models
+  auto_start: true
+  # 全容器模式下无需 systemd
+  install_systemd: false
+
+docker:
+  vllm_image: vllm/vllm-openai:latest
+  vllm_image_tar: images/vllm-openai.tar
+  vllm_min_version_hint: "0.19.0"
+  gpu_count: 1
+  shm_size: 16gb
+  # 业务服务镜像名（prepare 构建并 docker save）
+  service_images:
+    rerank: weknora-rerank:airgap
+    asr: weknora-asr:airgap
+    tts: weknora-tts:airgap
+  service_image_tars:
+    rerank: images/weknora-rerank.tar
+    asr: images/weknora-asr.tar
+    tts: images/weknora-tts.tar
+
+models:
+  embedding:
+    enabled: true
+    role: embedding
+    model_id: Qwen/Qwen3-Embedding-4B
+    revision: null
+    quant: bf16
+    download_id: null
+    engine: vllm
+    port: 8001
+    served_model_name: qwen3-embedding-4b
+    max_model_len: 8192
+    gpu_memory_utilization: 0.45
+    dtype: auto
+    device_ids: ["0"]
+    extra_vllm_args:
+      - "--trust-remote-code"
+    allowed_uses: [embedding, model]
+    forbidden_uses: [object-storage, data-connector, search]
+
+  rerank:
+    enabled: true
+    role: rerank
+    model_id: BAAI/bge-reranker-v2-m3
+    revision: null
+    quant: fp16
+    download_id: null
+    engine: container
+    needs_gpu: false
+    port: 8002
+    served_model_name: bge-reranker-v2-m3
+    allowed_uses: [rerank, model]
+    forbidden_uses: [object-storage, data-connector]
+
+  # 主 Chat；VLM 共用（roles: [vlm]）。默认不下载。
+  chat:
+    enabled: false
+    role: chat
+    roles: [vlm]
+    model_id: Qwen/Qwen3.6-27B
+    revision: null
+    quant: fp8
+    download_id: Qwen/Qwen3.6-27B-FP8
+    engine: vllm
+    port: 8000
+    served_model_name: qwen3.6-27b
+    max_model_len: 32768
+    gpu_memory_utilization: 0.90
+    dtype: fp8
+    device_ids: ["0"]
+    limit_mm_per_prompt: '{"image": 5}'
+    extra_vllm_args:
+      - "--trust-remote-code"
+    allowed_uses: [chat, vlm, model]
+    forbidden_uses: [object-storage, data-connector]
+
+  asr:
+    enabled: true
+    role: asr
+    model_id: FunAudioLLM/SenseVoiceSmall
+    revision: null
+    quant: fp16
+    download_id: null
+    engine: container
+    # 单卡默认与 embedding 抢 GPU 易 OOM；有多余 GPU 再改 true 并设 device_ids
+    needs_gpu: false
+    port: 8004
+    served_model_name: sensevoice-small
+    allowed_uses: [asr, model]
+    forbidden_uses: [object-storage]
+
+  tts:
+    enabled: true
+    role: tts
+    model_id: FunAudioLLM/CosyVoice2-0.5B
+    revision: null
+    quant: fp16
+    download_id: null
+    engine: container
+    needs_gpu: false
+    port: 8005
+    served_model_name: cosyvoice2-0.5b
+    allowed_uses: [tts, model]
+    forbidden_uses: [object-storage]
