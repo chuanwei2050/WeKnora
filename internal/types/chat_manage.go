@@ -1,6 +1,9 @@
 package types
 
-import "maps"
+import (
+	"context"
+	"maps"
+)
 
 // PipelineRequest holds immutable configuration set once at the request entry point.
 type PipelineRequest struct {
@@ -51,13 +54,15 @@ type PipelineRequest struct {
 	Attachments MessageAttachments `json:"-"`
 
 	// Misc request-scoped config
-	TenantID            uint64 `json:"-"`
-	WebSearchEnabled    bool   `json:"-"`
-	WebSearchProviderID string `json:"-"` // Resolved from agent config or tenant default
-	WebSearchMaxResults int    `json:"-"` // Resolved from agent config or tenant default
-	WebFetchEnabled     bool   `json:"-"` // Auto-fetch full page content for web search results after rerank
-	WebFetchTopN        int    `json:"-"` // Max pages to fetch (default 3)
-	Language            string `json:"-"`
+	TenantID            uint64                  `json:"-"`
+	WebSearchEnabled    bool                    `json:"-"`
+	WebSearchProviderID string                  `json:"-"` // Resolved from agent config or tenant default
+	WebSearchMaxResults int                     `json:"-"` // Resolved from agent config or tenant default
+	WebFetchEnabled     bool                    `json:"-"` // Auto-fetch full page content for web search results after rerank
+	WebFetchTopN        int                     `json:"-"` // Max pages to fetch (default 3)
+	Language            string                  `json:"-"`
+	ComplexityRouting   ComplexityRoutingConfig `json:"complexity_routing,omitempty"`
+	VerifiedAnswer      VerifiedAnswerConfig    `json:"verified_answer,omitempty"`
 }
 
 // QueryIntent represents the classified intent of a user query.
@@ -95,19 +100,23 @@ type PipelineState struct {
 	Intent       QueryIntent `json:"intent,omitempty"`
 	History      []*History  `json:"history,omitempty"`
 
-	SearchResult         []*SearchResult   `json:"-"`
-	RerankResult         []*SearchResult   `json:"-"`
-	MergeResult          []*SearchResult   `json:"-"`
-	Entity               []string          `json:"-"`
-	EntityKBIDs          []string          `json:"-"`
-	EntityKnowledge      map[string]string `json:"-"`
-	GraphResult          *GraphData        `json:"-"`
-	UserContent          string            `json:"-"`
-	RenderedContexts     string            `json:"-"`
-	ChatResponse         *ChatResponse     `json:"-"`
-	ImageDescription     string            `json:"-"`
-	QuotedContext        string            `json:"-"` // Quoted message text, injected at LLM prompt stage
-	SystemPromptOverride string            `json:"-"`
+	SearchResult         []*SearchResult    `json:"-"`
+	RerankResult         []*SearchResult    `json:"-"`
+	MergeResult          []*SearchResult    `json:"-"`
+	Entity               []string           `json:"-"`
+	EntityKBIDs          []string           `json:"-"`
+	EntityKnowledge      map[string]string  `json:"-"`
+	GraphResult          *GraphData         `json:"-"`
+	GraphSearchResult    *GraphSearchResult `json:"-"`
+	GraphContext         string             `json:"-"`
+	UserContent          string             `json:"-"`
+	RenderedContexts     string             `json:"-"`
+	ChatResponse         *ChatResponse      `json:"-"`
+	ImageDescription     string             `json:"-"`
+	QuotedContext        string             `json:"-"` // Quoted message text, injected at LLM prompt stage
+	SystemPromptOverride string             `json:"-"`
+	RoutingDecision      *RoutingDecision   `json:"routing_decision,omitempty"`
+	VerifiedResult       *VerifiedAnswer    `json:"verified_result,omitempty"`
 }
 
 // PipelineContext holds runtime context for the current pipeline execution.
@@ -115,6 +124,9 @@ type PipelineContext struct {
 	EventBus      EventBusInterface `json:"-"`
 	MessageID     string            `json:"-"`
 	UserMessageID string            `json:"-"`
+	// VerifiedRetrieve is injected by the session boundary. Reflection
+	// retrieval therefore remains inside the parent tenant/session scope.
+	VerifiedRetrieve func(context.Context, string) ([]*SearchResult, error) `json:"-"`
 }
 
 // ChatManage represents the full configuration, state and runtime context
@@ -135,6 +147,23 @@ func (c *ChatManage) NeedsRetrieval() bool {
 		return c.WebSearchEnabled
 	}
 	return c.Intent.NeedsKBRetrieval()
+}
+
+// ApplyRoutingDecision narrows or selects existing pipeline budgets. It does
+// not grant a new knowledge/tool scope and therefore cannot widen permissions.
+func (c *ChatManage) ApplyRoutingDecision() {
+	if c == nil || c.RoutingDecision == nil {
+		return
+	}
+	budget := c.RoutingDecision.Budget
+	if budget.RetrievalTopK > 0 && (c.EmbeddingTopK == 0 || budget.RetrievalTopK < c.EmbeddingTopK) {
+		c.EmbeddingTopK = budget.RetrievalTopK
+	}
+	c.EnableQueryExpansion = budget.QueryExpansion
+	c.VerifiedAnswer.Enabled = budget.VerificationEnabled
+	if budget.VerificationEnabled && budget.MaxAgentIterations > 0 && (c.VerifiedAnswer.Budget.MaxModelCalls == 0 || budget.MaxAgentIterations < c.VerifiedAnswer.Budget.MaxModelCalls) {
+		c.VerifiedAnswer.Budget.MaxModelCalls = budget.MaxAgentIterations
+	}
 }
 
 // Clone creates a deep copy of the ChatManage object.
@@ -210,6 +239,8 @@ func (c *ChatManage) Clone() *ChatManage {
 			WebFetchEnabled:          c.WebFetchEnabled,
 			WebFetchTopN:             c.WebFetchTopN,
 			Language:                 c.Language,
+			ComplexityRouting:        c.ComplexityRouting,
+			VerifiedAnswer:           c.VerifiedAnswer,
 		},
 		PipelineState: PipelineState{
 			RewriteQuery:         c.RewriteQuery,
@@ -217,6 +248,9 @@ func (c *ChatManage) Clone() *ChatManage {
 			ImageDescription:     c.ImageDescription,
 			QuotedContext:        c.QuotedContext,
 			SystemPromptOverride: c.SystemPromptOverride,
+			RoutingDecision:      c.RoutingDecision,
+			GraphSearchResult:    c.GraphSearchResult,
+			VerifiedResult:       c.VerifiedResult,
 			RenderedContexts:     c.RenderedContexts,
 			Entity:               entity,
 			EntityKBIDs:          entityKBIDs,

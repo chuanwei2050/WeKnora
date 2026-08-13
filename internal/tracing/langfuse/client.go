@@ -7,8 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"os"
 	"strings"
+
+	modeltransport "github.com/Tencent/WeKnora/internal/models/transport"
+	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // client is a thin HTTP client for the Langfuse ingestion API.
@@ -19,16 +25,31 @@ type client struct {
 	debug      bool
 }
 
-func newClient(cfg Config) *client {
+func newClient(cfg Config) (*client, error) {
 	credentials := cfg.PublicKey + ":" + cfg.SecretKey
-	return &client{
-		host: strings.TrimRight(cfg.Host, "/"),
-		auth: "Basic " + base64.StdEncoding.EncodeToString([]byte(credentials)),
-		httpClient: &http.Client{
-			Timeout: cfg.RequestTimeout,
-		},
-		debug: cfg.Debug,
+	httpClient := &http.Client{Timeout: cfg.RequestTimeout}
+	if cfg.ApprovedEndpoint != nil {
+		airGapped := strings.EqualFold(strings.TrimSpace(os.Getenv("AIR_GAPPED_MODE")), "true")
+		var err error
+		httpClient, err = modeltransport.NewEndpointHTTPClientWithValidation(cfg.Host, cfg.RequestTimeout, func(ip net.IP) error {
+			if err := cfg.ApprovedEndpoint.ValidateConnection(cfg.Host, types.EndpointCategoryTelemetry, "telemetry", []net.IP{ip}, airGapped); err != nil {
+				return err
+			}
+			if airGapped {
+				return cfg.ApprovedEndpoint.ValidateDeploymentAllowlist(secutils.IsSSRFWhitelisted, []net.IP{ip}, true)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
+	return &client{
+		host:       strings.TrimRight(cfg.Host, "/"),
+		auth:       "Basic " + base64.StdEncoding.EncodeToString([]byte(credentials)),
+		httpClient: httpClient,
+		debug:      cfg.Debug,
+	}, nil
 }
 
 type ingestionRequest struct {

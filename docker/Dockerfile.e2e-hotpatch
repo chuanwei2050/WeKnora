@@ -1,0 +1,14 @@
+# Hotpatch e2e image without pulling Docker Hub base layers.
+# Replaces the app binary and adds migration 000052.
+# Pin to the pre-hotpatch digest so rebuilds stay root (entrypoint uses gosu).
+# NOTE: this base image's CMD is ./WeKnora.codex — patch BOTH binaries.
+FROM wechatopenai/weknora-app:codex-test@sha256:e4afccb34d39ba4c414ebb99694eaecb699ced8677de05136441ad23b9eccbc1
+
+USER root
+COPY WeKnora.e2e /app/WeKnora
+COPY WeKnora.e2e /app/WeKnora.codex
+COPY migrations/versioned/000052_graph_triple_review.up.sql /app/migrations/versioned/
+COPY migrations/versioned/000052_graph_triple_review.down.sql /app/migrations/versioned/
+RUN chmod +x /app/WeKnora /app/WeKnora.codex && chown appuser:appuser /app/WeKnora /app/WeKnora.codex
+# Keep root so docker-entrypoint.sh can chown mounts then gosu to appuser.
+CMD ["./WeKnora.codex"]

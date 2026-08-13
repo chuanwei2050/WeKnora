@@ -1,0 +1,30 @@
+{
+  "schema": "weknora-formal-acceptance-status/v1",
+  "date": "2026-08-13",
+  "target": "http://127.0.0.1:18080",
+  "status": "passed",
+  "gates": {
+    "expert_frozen_suite": {
+      "status": "passed",
+      "artifact": "formal-acceptance-expert-20260813.json",
+      "cases": "8/8",
+      "accuracy": 1.0
+    },
+    "load_50_users_10_concurrent_live": {
+      "status": "passed",
+      "artifact": "online-baseline-50users-live-20260813.json",
+      "error_count": 0,
+      "timeout_count": 0,
+      "ttft_over_limit_count": 0
+    }
+  },
+  "supersedes": [
+    "formal-acceptance-status-20260812.md",
+    "formal-acceptance-status-20260812.json",
+    "online-baseline-50users-proxy-20260812-pass.json"
+  ],
+  "notes": [
+    "Load tokens refreshed by login on 2026-08-13 (load-tokens-50-20260813.txt).",
+    "Proxy-only 50-user runs are no longer authoritative."
+  ]
+}

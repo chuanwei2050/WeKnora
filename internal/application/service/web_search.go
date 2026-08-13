@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 	"time"
@@ -13,15 +14,17 @@ import (
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // WebSearchService provides web search functionality.
 // It resolves provider configurations from the database and creates provider
 // instances on-demand via the infrastructure registry.
 type WebSearchService struct {
-	registry     *infra_web_search.Registry
-	providerRepo interfaces.WebSearchProviderRepository
-	timeout      int
+	registry          *infra_web_search.Registry
+	providerRepo      interfaces.WebSearchProviderRepository
+	approvedEndpoints interfaces.ApprovedEndpointRepository
+	timeout           int
 }
 
 // NewWebSearchService creates a new web search service.
@@ -30,6 +33,7 @@ func NewWebSearchService(
 	cfg *config.Config,
 	registry *infra_web_search.Registry,
 	providerRepo interfaces.WebSearchProviderRepository,
+	approvedEndpoints interfaces.ApprovedEndpointRepository,
 ) (interfaces.WebSearchService, error) {
 	timeout := 10 // default timeout in seconds
 	if cfg.WebSearch != nil && cfg.WebSearch.Timeout > 0 {
@@ -37,9 +41,10 @@ func NewWebSearchService(
 	}
 
 	return &WebSearchService{
-		registry:     registry,
-		providerRepo: providerRepo,
-		timeout:      timeout,
+		registry:          registry,
+		providerRepo:      providerRepo,
+		approvedEndpoints: approvedEndpoints,
+		timeout:           timeout,
 	}, nil
 }
 
@@ -54,7 +59,6 @@ func (s *WebSearchService) Search(
 	if config == nil {
 		return nil, fmt.Errorf("web search config is required")
 	}
-
 	// Resolve the provider
 	searchProvider, err := s.resolveProvider(ctx, providerID, config)
 	if err != nil {
@@ -106,6 +110,9 @@ func (s *WebSearchService) resolveProvider(
 		}
 
 		params := mergeProxyFromWebSearchConfig(entity.Parameters, cfg)
+		if err := s.attachApprovedSearchEndpoint(ctx, tenantID, &params); err != nil {
+			return nil, err
+		}
 		provider, err := s.registry.CreateProvider(string(entity.Provider), params)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create provider %s (%s): %w", entity.Name, entity.Provider, err)
@@ -119,6 +126,9 @@ func (s *WebSearchService) resolveProvider(
 		params := mergeProxyFromWebSearchConfig(types.WebSearchProviderParameters{
 			APIKey: cfg.APIKey,
 		}, cfg)
+		if err := s.attachApprovedSearchEndpoint(ctx, 0, &params); err != nil {
+			return nil, err
+		}
 		provider, err := s.registry.CreateProvider(cfg.Provider, params)
 		if err != nil {
 			return nil, fmt.Errorf("web search provider %s is not available: %w", cfg.Provider, err)
@@ -127,6 +137,63 @@ func (s *WebSearchService) resolveProvider(
 	}
 
 	return nil, fmt.Errorf("no web search provider configured")
+}
+
+func (s *WebSearchService) attachApprovedSearchEndpoint(ctx context.Context, tenantID uint64, params *types.WebSearchProviderParameters) error {
+	if params == nil {
+		return fmt.Errorf("web search parameters are required")
+	}
+	endpointID := strings.TrimSpace(params.ApprovedEndpointID)
+	if endpointID == "" {
+		if airGappedMode() {
+			return fmt.Errorf("strict air-gapped mode requires an approved search endpoint")
+		}
+		return nil
+	}
+	if tenantID == 0 {
+		return fmt.Errorf("approved search endpoint requires a tenant-scoped provider")
+	}
+	if s.approvedEndpoints == nil {
+		return fmt.Errorf("approved endpoint registry is unavailable")
+	}
+	endpoint, err := s.approvedEndpoints.GetByID(ctx, tenantID, endpointID)
+	if err != nil {
+		return fmt.Errorf("load approved search endpoint: %w", err)
+	}
+	if endpoint == nil {
+		return fmt.Errorf("approved search endpoint not found: %s", endpointID)
+	}
+	if err := validateApprovedEndpointForUse(ctx, endpoint, types.EndpointCategorySearch, "query"); err != nil {
+		return err
+	}
+	params.ApprovedEndpoint = endpoint
+	return nil
+}
+
+func validateApprovedEndpointForUse(ctx context.Context, endpoint *types.ApprovedEndpoint, category types.ApprovedEndpointCategory, use string) error {
+	if endpoint == nil {
+		return fmt.Errorf("approved endpoint is required")
+	}
+	if err := endpoint.Validate(); err != nil {
+		return err
+	}
+	if err := endpoint.ValidateUse(category, use); err != nil {
+		return err
+	}
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", endpoint.Host)
+	if err != nil {
+		return fmt.Errorf("resolve approved endpoint: %w", err)
+	}
+	raw := fmt.Sprintf("%s://%s:%d", endpoint.Scheme, endpoint.Host, endpoint.Port)
+	if err := endpoint.ValidateConnection(raw, category, use, ips, airGappedMode()); err != nil {
+		return err
+	}
+	if airGappedMode() {
+		if err := endpoint.ValidateDeploymentAllowlist(secutils.IsSSRFWhitelisted, ips, true); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // mergeProxyFromWebSearchConfig applies cfg.ProxyURL over stored provider params when non-empty (call-time override).

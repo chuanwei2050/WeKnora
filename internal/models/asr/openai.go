@@ -5,12 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/transport"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -34,7 +35,11 @@ func NewOpenAIASR(config *Config) (*OpenAIASR, error) {
 	if config.BaseURL != "" {
 		apiCfg.BaseURL = config.BaseURL
 	}
-	httpClient := &http.Client{Timeout: asrDefaultTimeout}
+	allowedHost := ""
+	if parsed, err := url.Parse(config.BaseURL); err == nil {
+		allowedHost = parsed.Hostname()
+	}
+	httpClient := transport.NewHTTPClient(transport.Config{Timeout: asrDefaultTimeout, ValidateIP: config.ValidateIP, AllowedHosts: []string{allowedHost}})
 
 	// 注入用户自定义 HTTP header（类似 OpenAI Python SDK 的 extra_headers）
 	if len(config.CustomHeaders) > 0 {
@@ -108,6 +113,8 @@ func (s *OpenAIASR) Transcribe(ctx context.Context, audioBytes []byte, fileName 
 
 func (s *OpenAIASR) GetModelName() string { return s.modelName }
 func (s *OpenAIASR) GetModelID() string   { return s.modelID }
+
+func (s *OpenAIASR) SupportsStreaming() bool { return false }
 
 // DetectAudioFormat returns a file extension hint for the given audio bytes.
 func DetectAudioFormat(data []byte, fileName string) string {

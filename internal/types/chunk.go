@@ -117,7 +117,8 @@ type Chunk struct {
 	// Tenant ID, used for multi-tenant isolation
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the parent knowledge, associated with the Knowledge model
-	KnowledgeID string `json:"knowledge_id"`
+	KnowledgeID        string `json:"knowledge_id"`
+	KnowledgeVersionID string `json:"knowledge_version_id,omitempty" gorm:"type:varchar(36);index"`
 	// ID of the knowledge base, for quick location
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	// Optional tag ID for categorization within a knowledge base (used for FAQ)

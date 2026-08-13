@@ -369,6 +369,7 @@ import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
+import { SOFTWARE_TESTING_GRAPH_PRESET } from '@/constants/software-testing-graph-preset'
 import { useI18n } from 'vue-i18n'
 
 const uiStore = useUIStore()
@@ -503,7 +504,10 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     nodeExtractConfig: {
       enabled: false,
       text: '',
-      tags: [] as string[],
+      tags: [...SOFTWARE_TESTING_GRAPH_PRESET.tags],
+      entity_types: [...SOFTWARE_TESTING_GRAPH_PRESET.entity_types],
+      strict_schema: SOFTWARE_TESTING_GRAPH_PRESET.strict_schema,
+      require_triple_review: false,
       nodes: [] as Array<{
         name: string
         attributes: string[]
@@ -601,6 +605,9 @@ const loadKBData = async () => {
         enabled: kb.extract_config?.enabled || false,
         text: kb.extract_config?.text || '',
         tags: kb.extract_config?.tags || [],
+        entity_types: kb.extract_config?.entity_types || [],
+        strict_schema: !!kb.extract_config?.strict_schema,
+        require_triple_review: !!kb.extract_config?.require_triple_review,
         nodes: (kb.extract_config?.nodes || []).map((node: any) => ({
           name: node.name,
           attributes: node.attributes || []
@@ -916,6 +923,9 @@ const buildSubmitData = () => {
       enabled: true,
       text: formData.value.nodeExtractConfig.text,
       tags: formData.value.nodeExtractConfig.tags,
+      entity_types: formData.value.nodeExtractConfig.entity_types || [],
+      strict_schema: !!formData.value.nodeExtractConfig.strict_schema,
+      require_triple_review: !!formData.value.nodeExtractConfig.require_triple_review,
       nodes: formData.value.nodeExtractConfig.nodes,
       relations: formData.value.nodeExtractConfig.relations
     }
@@ -1031,6 +1041,9 @@ const doSubmit = async () => {
           enabled: data.extract_config?.enabled || false,
           text: data.extract_config?.text || '',
           tags: data.extract_config?.tags || [],
+          entity_types: data.extract_config?.entity_types || [],
+          strict_schema: !!data.extract_config?.strict_schema,
+          require_triple_review: !!data.extract_config?.require_triple_review,
           nodes: data.extract_config?.nodes || [],
           relations: data.extract_config?.relations || []
         },

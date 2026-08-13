@@ -1,0 +1,45 @@
+{
+  "schema_version": "voice-conversation-e2e/v1",
+  "status": "passed",
+  "target": "http://127.0.0.1:18080",
+  "session_id": "dd0cb773-addb-479d-98f2-1ce1a79f3f9c",
+  "asr_model": "85235d9c-2215-4ace-a65b-a2bb6c7f9f64",
+  "tts_model": "b99aabdc-94f1-4415-ab41-f3552f19346e",
+  "voice": "FunAudioLLM/CosyVoice2-0.5B:alex",
+  "agent_id": "",
+  "first_turn": {
+    "asr_text_chars": 22,
+    "chat_ttft_ms": 1730,
+    "tts_audio_first_block_bytes": 3928
+  },
+  "interruption": {
+    "first_audio_block_bytes": 3922,
+    "audio_bytes": 3922,
+    "interrupted": true,
+    "cancelled_transport": true
+  },
+  "followup_turn": {
+    "same_session": true,
+    "asr_text_chars": 22,
+    "chat_ttft_ms": 4315
+  },
+  "persistence": {
+    "completed_assistant_messages": 2,
+    "tts_audio_persisted": false,
+    "text_answer_preserved": true,
+    "autoplay_default_off": true,
+    "configured_voice_auto_play": null
+  },
+  "checks": {
+    "first_asr": true,
+    "first_chat": true,
+    "first_tts": true,
+    "playback_interruption": true,
+    "followup_same_session": true,
+    "text_answers_persisted": true,
+    "tts_audio_not_persisted": true,
+    "autoplay_default_off": true
+  },
+  "started_at": "2026-08-13T06:51:04.1135789+00:00",
+  "completed_at": "2026-08-13T06:51:14.2691973+00:00"
+}

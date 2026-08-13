@@ -78,6 +78,9 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 
 	// Set defaults
 	agent.EnsureDefaults()
+	if err := agent.Config.Validate(); err != nil {
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Creating custom agent, ID: %s, tenant ID: %d, name: %s, agent_mode: %s",
 		agent.ID, agent.TenantID, agent.Name, agent.Config.AgentMode)
@@ -254,6 +257,9 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 
 	// Ensure defaults
 	existingAgent.EnsureDefaults()
+	if err := existingAgent.Config.Validate(); err != nil {
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Updating custom agent, ID: %s, name: %s", agent.ID, agent.Name)
 

@@ -30,6 +30,23 @@ export interface CustomAgentConfig {
   llm_call_timeout?: number;        // LLM调用超时时间（秒）
   allowed_tools?: string[];         // 允许的工具
   reflection_enabled?: boolean;     // 是否启用反思
+	verified_answer?: {
+	  enabled?: boolean;
+	  strict_multi_model?: boolean;
+	  fact_validator_model_id?: string;
+	  logic_validator_model_id?: string;
+	  citation_validator_model_id?: string;
+	  max_reflections?: number;
+	  degradation_strategy?: 'conservative' | 'stop';
+	};
+	complexity_routing?: {
+	  enabled?: boolean;
+	  taxonomy_id?: string;
+	  taxonomy_version?: string;
+	  confidence_threshold?: number;
+	  fallback_action?: 'quick_rag' | 'contextual_rag' | 'graph_reasoning' | 'verified_agent';
+	  level_actions?: Partial<Record<'L1' | 'L2' | 'L3' | 'L4', 'quick_rag' | 'contextual_rag' | 'graph_reasoning' | 'verified_agent'>>;
+	};
   // MCP服务选择模式：all=全部启用的MCP服务, selected=指定服务, none=不使用MCP
   mcp_selection_mode?: 'all' | 'selected' | 'none';
   mcp_services?: string[];          // 选择的MCP服务ID列表
@@ -54,6 +71,12 @@ export interface CustomAgentConfig {
   image_storage_provider?: string;   // 图片存储提供商
   audio_upload_enabled?: boolean;    // 是否启用音频上传/ASR转录（默认: false）
   asr_model_id?: string;            // ASR模型ID（音频转录用）
+	voice_input_enabled?: boolean;
+	voice_output_enabled?: boolean;
+	tts_model_id?: string;
+	voice_language?: string;
+	voice_name?: string;
+	voice_auto_play?: boolean;
 
   // ===== 文件类型限制 =====
   // 支持的文件类型（如 ["csv", "xlsx", "xls"]）

@@ -1,0 +1,2 @@
+-- The metadata is additive and is intentionally retained on rollback so a
+-- downgrade does not silently erase the deployment policy of existing models.

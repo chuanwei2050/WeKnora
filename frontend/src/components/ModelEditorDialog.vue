@@ -25,7 +25,7 @@
           <t-radio-group v-model="formData.source">
             <t-radio
               value="local"
-              :disabled="ollamaServiceStatus === false || modelType === 'rerank'"
+              :disabled="ollamaServiceStatus === false || modelType === 'rerank' || modelType === 'tts'"
             >
               {{ $t('model.editor.sourceLocal') }}
             </t-radio>
@@ -328,6 +328,29 @@
           </div>
         </div>
 
+        <div v-else-if="modelType === 'tts'" class="ollama-unavailable-tip rerank-tip">
+          <t-icon name="info-circle-filled" class="tip-icon info" />
+          <span class="tip-text">TTS 当前使用 OpenAI-compatible 远程接口。</span>
+        </div>
+
+        <!-- 部署策略：位置由服务端根据端点解析，不能由普通用户伪造 -->
+        <div class="form-item deployment-policy-form">
+          <label class="form-label">部署策略</label>
+          <div class="deployment-policy-grid">
+            <t-select v-model="formData.protocol" placeholder="协议">
+              <t-option value="ollama" label="Ollama" />
+              <t-option value="openai-compatible" label="OpenAI-compatible" />
+              <t-option value="native" label="Native" />
+            </t-select>
+            <t-select v-model="formData.artifactPolicy" placeholder="权重策略">
+              <t-option value="preloaded-only" label="仅使用已预加载权重" />
+              <t-option value="allow-download" label="允许下载权重" />
+            </t-select>
+            <t-input v-model="formData.inferenceEngine" placeholder="推理引擎（可选）" />
+          </div>
+          <p class="form-desc">运行位置与连接权限由服务端根据端点和批准清单计算。</p>
+        </div>
+
       </t-form>
           </div>
 
@@ -373,11 +396,15 @@ interface ModelFormData {
   supportsVision?: boolean
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
   customHeaders?: CustomHeaderItem[]
+  protocol?: 'ollama' | 'openai-compatible' | 'native'
+  location?: 'public' | 'private-network' | 'same-host' | 'unknown'
+  artifactPolicy?: 'preloaded-only' | 'allow-download'
+  inferenceEngine?: string
 }
 
 interface Props {
   visible: boolean
-  modelType: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
+  modelType: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts'
   modelData?: ModelFormData | null
 }
 
@@ -408,10 +435,11 @@ const fallbackProviderOptions = computed(() => [
       embedding: 'https://api.openai.com/v1',
       rerank: 'https://api.openai.com/v1',
       vllm: 'https://api.openai.com/v1',
-      asr: 'https://api.openai.com/v1'
+      asr: 'https://api.openai.com/v1',
+      tts: 'https://api.openai.com/v1'
     },
     description: t('model.editor.providers.openai.description'),
-    modelTypes: ['chat', 'embedding', 'vllm', 'asr']
+    modelTypes: ['chat', 'embedding', 'vllm', 'asr', 'tts']
   },
   {
     value: 'azure_openai',
@@ -423,7 +451,7 @@ const fallbackProviderOptions = computed(() => [
       asr: 'https://{resource}.openai.azure.com'
     },
     description: t('model.editor.providers.azure_openai.description'),
-    modelTypes: ['chat', 'embedding', 'vllm', 'asr']
+    modelTypes: ['chat', 'embedding', 'vllm', 'asr', 'tts']
   },
   {
     value: 'aliyun',
@@ -507,7 +535,7 @@ const fallbackProviderOptions = computed(() => [
     label: t('model.editor.providers.generic.label'),
     defaultUrls: {},
     description: t('model.editor.providers.generic.description'),
-    modelTypes: ['chat', 'embedding', 'rerank', 'vllm', 'asr']
+    modelTypes: ['chat', 'embedding', 'rerank', 'vllm', 'asr', 'tts']
   },
 ])
 
@@ -530,7 +558,7 @@ const loadProviders = async () => {
 // API 返回的 defaultUrls/modelTypes 数据优先，但 label/description 使用 i18n
 const providerOptions = computed(() => {
   // API 数据可用时，用 API 的结构数据 + i18n 的显示文本
-  if (apiProviderOptions.value.length > 0) {
+  if (apiProviderOptions.value.length > 0 && apiProviderOptions.value.some(p => p.modelTypes.includes(props.modelType))) {
     return apiProviderOptions.value.map(p => ({
       ...p,
       label: te(`model.editor.providers.${p.value}.label`)
@@ -552,7 +580,7 @@ const dialogVisible = computed({
   set: (val) => emit('update:visible', val)
 })
 
-const isEdit = computed(() => !!props.modelData)
+const isEdit = computed(() => !!props.modelData?.id)
 
 const formRef = ref()
 const saving = ref(false)
@@ -619,7 +647,10 @@ const formData = ref<ModelFormData>({
   interfaceType: 'ollama',
   isDefault: false,
   supportsVision: false,
-  customHeaders: []
+  customHeaders: [],
+  protocol: 'ollama',
+  artifactPolicy: 'allow-download',
+  inferenceEngine: ''
 })
 
 const rules = computed(() => ({
@@ -664,6 +695,9 @@ const rules = computed(() => ({
 
 // 获取弹窗描述文字
 const getModalDescription = () => {
+  if (props.modelType === 'tts') {
+    return '配置 OpenAI-compatible 文本转语音模型。'
+  }
   const key = `model.editor.description.${props.modelType}` as const
   return t(key) || t('model.editor.description.default')
 }
@@ -678,6 +712,9 @@ const getModelNamePlaceholder = () => {
   if (props.modelType === 'asr') {
     return t('model.editor.modelNamePlaceholder.remoteAsr')
   }
+  if (props.modelType === 'tts') {
+    return '例如：gpt-4o-mini-tts'
+  }
   return formData.value.source === 'local'
     ? t('model.editor.modelNamePlaceholder.local')
     : t('model.editor.modelNamePlaceholder.remote')
@@ -689,6 +726,9 @@ const getBaseUrlPlaceholder = () => {
   }
   if (props.modelType === 'asr') {
     return t('model.editor.baseUrlPlaceholderAsr')
+  }
+  if (props.modelType === 'tts') {
+    return '例如：https://内网网关/v1'
   }
   return t('model.editor.baseUrlPlaceholder')
 }
@@ -752,7 +792,7 @@ watch(() => props.visible, (val) => {
     }
 
     // ReRank 模型强制使用 remote 来源（Ollama 不支持 ReRank）
-    if (props.modelType === 'rerank') {
+    if (props.modelType === 'rerank' || props.modelType === 'tts') {
       formData.value.source = 'remote'
     }
 
@@ -780,7 +820,10 @@ const resetForm = () => {
     interfaceType: undefined,
     isDefault: false,
     supportsVision: false,
-    customHeaders: []
+    customHeaders: [],
+    protocol: 'ollama',
+    artifactPolicy: 'allow-download',
+    inferenceEngine: ''
   }
   modelChecked.value = false
   modelAvailable.value = false
@@ -990,9 +1033,9 @@ const checkRemoteAPI = async () => {
         // 对话模型（KnowledgeQA）
         result = await checkRemoteModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
-          provider: formData.value.provider,
+          provider: formData.value.provider || '',
           ...headerPayload,
         })
         break
@@ -1002,10 +1045,10 @@ const checkRemoteAPI = async () => {
         result = await testEmbeddingModel({
           source: 'remote',
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           dimension: formData.value.dimension,
-          provider: formData.value.provider,
+          provider: formData.value.provider || '',
           ...headerPayload,
         })
         // 如果测试成功且返回了维度，自动填充
@@ -1019,9 +1062,9 @@ const checkRemoteAPI = async () => {
         // Rerank 模型
         result = await checkRerankModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
-          provider: formData.value.provider,
+          provider: formData.value.provider || '',
           ...headerPayload,
         })
         break
@@ -1031,9 +1074,9 @@ const checkRemoteAPI = async () => {
         // VLLM 使用 checkRemoteModel 进行基础连接测试
         result = await checkRemoteModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
-          provider: formData.value.provider,
+          provider: formData.value.provider || '',
           ...headerPayload,
         })
         break
@@ -1042,9 +1085,19 @@ const checkRemoteAPI = async () => {
         // ASR 模型（语音识别）— 使用专用的 ASR 测试接口（/v1/audio/transcriptions）
         result = await checkASRModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
-          provider: formData.value.provider,
+          provider: formData.value.provider || '',
+          ...headerPayload,
+        })
+        break
+
+      case 'tts':
+        result = await checkRemoteModel({
+          modelName: formData.value.modelName,
+          baseUrl: formData.value.baseUrl || '',
+          apiKey: formData.value.apiKey || '',
+          provider: formData.value.provider || '',
           ...headerPayload,
         })
         break
@@ -1225,6 +1278,7 @@ onUnmounted(() => {
 
 // 监听来源变化，清理所有状态
 watch(() => formData.value.source, () => {
+  formData.value.protocol = formData.value.source === 'local' ? 'ollama' : 'openai-compatible'
   // 重置校验状态
   modelChecked.value = false
   modelAvailable.value = false

@@ -8,7 +8,7 @@ export interface ModelConfig {
   id?: string;
   tenant_id?: number;
   name: string;
-  type: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR';
+  type: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR' | 'TTS' | 'VLM' | 'Verifier' | 'EvaluationJudge' | 'ParserOCR';
   source: 'local' | 'remote';
   description?: string;
   parameters: {
@@ -26,6 +26,24 @@ export interface ModelConfig {
     // 会在调用远程模型 API 时附加到每个请求上。Authorization、Content-Type 等保留头会被忽略。
     custom_headers?: Record<string, string>;
     supports_vision?: boolean; // Whether the model accepts image/multimodal input
+	protocol?: 'ollama' | 'openai-compatible' | 'native';
+	location?: 'public' | 'private-network' | 'same-host' | 'unknown';
+	artifact_policy?: 'preloaded-only' | 'allow-download';
+	inference_engine?: string;
+	capabilities?: {
+	  roles?: string[];
+	  streaming?: boolean;
+	  structured_output?: boolean;
+	  tool_calling?: boolean;
+	  vision_input?: boolean;
+	  audio_input?: boolean;
+	  audio_output?: boolean;
+	  embedding_dimension?: number;
+	  max_context_tokens?: number;
+	  max_concurrency?: number;
+	};
+	approved_endpoint_id?: string;
+	endpoint_use?: string;
   };
   is_default?: boolean;
   is_builtin?: boolean;
@@ -33,6 +51,29 @@ export interface ModelConfig {
   created_at?: string;
   updated_at?: string;
   deleted_at?: string | null;
+}
+
+export interface ModelCapabilityProbeResult {
+  role: string;
+  status: 'passed' | 'unsupported' | 'missing_resource' | 'failed';
+  latency_ms?: number;
+  error?: string;
+  model_key?: string;
+  checked_at: string;
+}
+
+export interface ModelPreflightResult {
+  model_id: string;
+  model_name: string;
+  location: 'public' | 'private-network' | 'same-host' | 'unknown';
+  protocol: 'ollama' | 'openai-compatible' | 'native';
+  probes: ModelCapabilityProbeResult[];
+  checked_at: string;
+}
+
+export function preflightModel(id: string): Promise<ModelPreflightResult> {
+  return post<{ success: boolean; data: ModelPreflightResult }>(`/api/v1/models/${id}/preflight`, {})
+    .then((response: any) => response?.data ?? response);
 }
 
 // 创建模型

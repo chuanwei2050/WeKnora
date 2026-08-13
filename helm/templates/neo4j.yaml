@@ -61,7 +61,7 @@ spec:
             # (K8s injects NEO4J_PORT_* from Service named "neo4j")
             - name: NEO4J_server_config_strict__validation_enabled
               value: "false"
-            # APOC plugin configuration
+            # APOC plugin configuration (required by graph ingest: apoc.merge.*, apoc.coll.union, apoc.periodic.iterate)
             - name: NEO4J_apoc_export_file_enabled
               value: "true"
             - name: NEO4J_apoc_import_file_enabled
@@ -70,6 +70,10 @@ spec:
               value: "true"
             - name: NEO4J_PLUGINS
               value: '["apoc"]'
+            - name: NEO4J_dbms_security_procedures_unrestricted
+              value: "apoc.*"
+            - name: NEO4J_dbms_security_procedures_allowlist
+              value: "apoc.*"
           volumeMounts:
             - name: neo4j-data
               mountPath: /data

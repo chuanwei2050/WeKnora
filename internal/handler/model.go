@@ -52,6 +52,11 @@ func hideSensitiveInfo(model *types.Model) *types.Model {
 			// Keep other parameters like embedding dimensions
 			EmbeddingParameters: model.Parameters.EmbeddingParameters,
 			ParameterSize:       model.Parameters.ParameterSize,
+			Protocol:            model.Parameters.Protocol,
+			Location:            model.Parameters.Location,
+			ArtifactPolicy:      model.Parameters.ArtifactPolicy,
+			InferenceEngine:     model.Parameters.InferenceEngine,
+			Capabilities:        model.Parameters.Capabilities,
 		},
 		IsBuiltin: model.IsBuiltin,
 		Status:    model.Status,
@@ -404,9 +409,24 @@ func modelTypeToFrontend(mt types.ModelType) string {
 		return "vllm"
 	case types.ModelTypeASR:
 		return "asr"
+	case types.ModelTypeTTS:
+		return "tts"
 	default:
 		return string(mt)
 	}
+}
+
+func (h *ModelHandler) PreflightModel(c *gin.Context) {
+	if c.GetUint64(types.TenantIDContextKey.String()) == 0 {
+		c.Error(errors.NewUnauthorizedError("unauthorized"))
+		return
+	}
+	result, err := h.service.ProbeModelCapabilities(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
 
 // ListModelProviders godoc

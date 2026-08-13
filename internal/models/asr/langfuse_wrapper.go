@@ -2,6 +2,7 @@ package asr
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 )
@@ -65,6 +66,19 @@ func (l *langfuseASR) Transcribe(ctx context.Context, audioBytes []byte, fileNam
 
 	gen.Finish(output, usage, err)
 	return result, err
+}
+
+func (l *langfuseASR) SupportsStreaming() bool {
+	streaming, ok := l.inner.(StreamingASR)
+	return ok && streaming.SupportsStreaming()
+}
+
+func (l *langfuseASR) NewStreamingSession(ctx context.Context) (StreamingSession, error) {
+	streaming, ok := l.inner.(StreamingSessionFactory)
+	if !ok {
+		return nil, fmt.Errorf("streaming ASR is not supported")
+	}
+	return streaming.NewStreamingSession(ctx)
 }
 
 // wrapASRLangfuse applies the Langfuse decorator when the manager is enabled.

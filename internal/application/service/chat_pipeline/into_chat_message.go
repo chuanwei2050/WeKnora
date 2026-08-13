@@ -160,6 +160,10 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 			contextsBuilder.WriteString(fmt.Sprintf("<context id=\"%d\">%s</context>", i+1, passage))
 		}
 	}
+	if graphContext := strings.TrimSpace(chatManage.GraphContext); graphContext != "" {
+		contextsBuilder.WriteString("\n")
+		contextsBuilder.WriteString(graphContext)
+	}
 
 	chatManage.RenderedContexts = contextsBuilder.String()
 

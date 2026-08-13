@@ -26,6 +26,7 @@ type Handler struct {
 	fileService          interfaces.FileService          // Service for file storage (image uploads)
 	modelService         interfaces.ModelService         // Service for model management (VLM access)
 	attachmentProcessor  *AttachmentProcessor            // Processor for file attachments
+	voiceTickets         *types.VoiceWSTicketStore       // One-time tickets for realtime voice sessions
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -60,6 +61,7 @@ func NewHandler(
 			imageResolver,
 			modelService,
 		),
+		voiceTickets: types.NewVoiceWSTicketStore(),
 	}
 }
 

@@ -12,8 +12,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
+	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/modelprofile"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -29,6 +31,7 @@ type SystemHandler struct {
 	neo4jDriver    neo4j.Driver
 	documentReader interfaces.DocumentReader
 	tenantSvc      interfaces.TenantService
+	modelSvc       interfaces.ModelService
 }
 
 // NewSystemHandler creates a new system handler
@@ -36,12 +39,14 @@ func NewSystemHandler(cfg *config.Config,
 	neo4jDriver neo4j.Driver,
 	documentReader interfaces.DocumentReader,
 	tenantSvc interfaces.TenantService,
+	modelSvc interfaces.ModelService,
 ) *SystemHandler {
 	return &SystemHandler{
 		cfg:            cfg,
 		neo4jDriver:    neo4jDriver,
 		documentReader: documentReader,
 		tenantSvc:      tenantSvc,
+		modelSvc:       modelSvc,
 	}
 }
 
@@ -117,6 +122,49 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 		"code": 0,
 		"msg":  "success",
 		"data": response,
+	})
+}
+
+// GetModelProfileStatus returns the MODEL_PROFILE checklist against tenant models.
+// @Summary      模型 profile 状态与检查清单
+// @Description  对照 ONLINE_/OFFLINE_ 期望角色与当前租户已登记模型（只读）
+// @Tags         系统
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}
+// @Router       /system/model-profile-status [get]
+func (h *SystemHandler) GetModelProfileStatus(c *gin.Context) {
+	ctx := c.Request.Context()
+	if _, ok := types.TenantIDFromContext(ctx); !ok {
+		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
+		return
+	}
+	if h.modelSvc == nil {
+		c.Error(errors.NewInternalServerError("model service unavailable"))
+		return
+	}
+	models, err := h.modelSvc.ListModels(ctx)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	views := make([]modelprofile.ModelView, 0, len(models))
+	for _, m := range models {
+		if m == nil {
+			continue
+		}
+		views = append(views, modelprofile.ModelView{
+			ID:                 m.ID,
+			Name:               m.Name,
+			Type:               string(m.Type),
+			CreatedAt:          m.CreatedAt,
+			EmbeddingDimension: m.Parameters.EmbeddingParameters.Dimension,
+		})
+	}
+	c.JSON(200, gin.H{
+		"code": 0,
+		"msg":  "success",
+		"data": modelprofile.Build(views),
 	})
 }
 

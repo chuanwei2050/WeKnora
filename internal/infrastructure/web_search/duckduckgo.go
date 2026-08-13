@@ -19,17 +19,33 @@ import (
 
 // DuckDuckGoProvider implements web search using DuckDuckGo (HTML first, API fallback)
 type DuckDuckGoProvider struct {
-	client *http.Client
+	client  *http.Client
+	htmlURL string
+	apiURL  string
 }
 
 // NewDuckDuckGoProvider creates a new DuckDuckGo provider.
 // DuckDuckGo is free and requires no API key; optional ProxyURL tunnels requests via an HTTP/HTTPS proxy.
 func NewDuckDuckGoProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
-	client, err := NewSearchHTTPClient(30*time.Second, params.ProxyURL)
+	client, err := newSearchHTTPClientForParameters(30*time.Second, params)
 	if err != nil {
 		return nil, err
 	}
-	return &DuckDuckGoProvider{client: client}, nil
+	htmlURL, err := approvedSearchEndpointURL(params.ApprovedEndpoint, "/html/")
+	if err != nil {
+		return nil, err
+	}
+	apiURL, err := approvedSearchEndpointURL(params.ApprovedEndpoint, "/")
+	if err != nil {
+		return nil, err
+	}
+	if htmlURL == "" {
+		htmlURL = "https://html.duckduckgo.com/html/"
+	}
+	if apiURL == "" {
+		apiURL = "https://api.duckduckgo.com/"
+	}
+	return &DuckDuckGoProvider{client: client, htmlURL: htmlURL, apiURL: apiURL}, nil
 }
 
 // Name returns the provider name
@@ -69,7 +85,7 @@ func (p *DuckDuckGoProvider) searchHTML(
 	query string,
 	maxResults int,
 ) ([]*types.WebSearchResult, error) {
-	baseURL := "https://html.duckduckgo.com/html/"
+	baseURL := p.htmlURL
 	params := url.Values{}
 	params.Set("q", query)
 	params.Set("kl", "cn-zh")
@@ -137,7 +153,7 @@ func (p *DuckDuckGoProvider) searchAPI(
 	query string,
 	maxResults int,
 ) ([]*types.WebSearchResult, error) {
-	baseURL := "https://api.duckduckgo.com/"
+	baseURL := p.apiURL
 	params := url.Values{}
 	params.Set("q", query)
 	params.Set("format", "json")

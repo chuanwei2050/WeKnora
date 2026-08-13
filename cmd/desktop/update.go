@@ -32,6 +32,16 @@ type githubRelease struct {
 
 func checkUpdate(ctx context.Context, currentVersion string, showUpToDate bool, autoDownload bool) {
 	go func() {
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("AIR_GAPPED_MODE")), "true") {
+			if showUpToDate {
+				wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
+					Type: wailsruntime.InfoDialog, Title: "Offline Updates",
+					Message: "严格离线模式已禁用 GitHub 自动更新，请使用离线介质升级。",
+					Buttons: []string{"OK"}, DefaultButton: "OK",
+				})
+			}
+			return
+		}
 		if currentVersion == "unknown" || currentVersion == "" {
 			if showUpToDate {
 				wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{

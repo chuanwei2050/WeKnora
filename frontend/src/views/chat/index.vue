@@ -50,7 +50,7 @@
                         <usermsg :content="session.content" :mentioned_items="session.mentioned_items" :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"></usermsg>
                     </div>
                     <div v-if="session.role == 'assistant'">
-                        <botmsg :content="session.content" :session="session" :user-query="getUserQuery(id)" @scroll-bottom="scrollToBottom"
+                        <botmsg :content="session.content" :session="session" :voice-config="voiceConfig" :user-query="getUserQuery(id)" @scroll-bottom="scrollToBottom"
                             :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"></botmsg>
                     </div>
                 </div>
@@ -72,7 +72,8 @@
         <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
             <InputField
                 ref="inputFieldRef"
-                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles)"
+                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, voiceMetadata) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, voiceMetadata)"
+                @voice-config="voiceConfig = $event"
                 @stop-generation="handleStopGeneration"
                 :isReplying="isReplying"
                 :sessionId="session_id"
@@ -126,6 +127,7 @@ const route = useRoute();
 const router = useRouter();
 const session_id = ref(props.session_id || route.params.chatid);
 const sessionData = ref(null);
+const voiceConfig = ref({});
 const inputFieldRef = ref();
 const created_at = ref('');
 const limit = ref(20);
@@ -479,7 +481,7 @@ const handleStopGeneration = () => {
     // API 调用成功后，后端的 stop 事件会清空它
 };
 
-const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = []) => {
+const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], voiceMetadata = undefined) => {
     userquery.value = value;
     isReplying.value = true;
     loading.value = true;
@@ -534,7 +536,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     }
 
     // 将@提及的知识库和文件信息存入用户消息
-     messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), channel: 'web' });
+     messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), voice_metadata: voiceMetadata, channel: 'web' });
     userHasScrolledUp.value = false;
     scrollToBottom(true);
     
@@ -586,6 +588,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         mentioned_items: mentionedItems,
         images: imageAttachments.length > 0 ? imageAttachments : undefined,
         attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,
+        voice_metadata: voiceMetadata,
         query: value, 
         method: 'POST', 
         url: endpoint
@@ -703,6 +706,8 @@ onChunk((data) => {
         }
         
         existingMessage.knowledge_references = data.knowledge_references || data.data?.references || [];
+        const extra = data.data?.extra || data.extra || {};
+        existingMessage.graph_paths = extra?.graph?.paths || [];
         console.log('[References] Saved to message, count:', existingMessage.knowledge_references.length);
         return;
     }
@@ -1010,6 +1015,7 @@ const handleAgentChunk = (data) => {
                 // 兼容旧格式
                 message.knowledge_references = data.knowledge_references;
             }
+            message.graph_paths = data.data?.extra?.graph?.paths || data.extra?.graph?.paths || message.graph_paths || [];
             break;
             
         case 'answer':

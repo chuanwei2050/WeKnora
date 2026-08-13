@@ -10,13 +10,16 @@ type ChunkContext struct {
 
 // PromptTemplateStructured represents the prompt template structured
 type PromptTemplateStructured struct {
-	Description string      `json:"description"`
-	Tags        []string    `json:"tags"`
-	Examples    []GraphData `json:"examples"`
+	Description  string      `json:"description"`
+	Tags         []string    `json:"tags"`
+	EntityTypes  []string    `json:"entity_types,omitempty"`
+	StrictSchema bool        `json:"strict_schema,omitempty"`
+	Examples     []GraphData `json:"examples"`
 }
 
 type GraphNode struct {
 	Name       string   `json:"name,omitempty"`
+	EntityType string   `json:"entity_type,omitempty"`
 	Chunks     []string `json:"chunks,omitempty"`
 	Attributes []string `json:"attributes,omitempty"`
 }
@@ -36,8 +39,9 @@ type GraphData struct {
 
 // NameSpace represents the name space of the knowledge base and knowledge
 type NameSpace struct {
-	KnowledgeBase string `json:"knowledge_base"`
-	Knowledge     string `json:"knowledge"`
+	KnowledgeBase      string `json:"knowledge_base"`
+	Knowledge          string `json:"knowledge"`
+	KnowledgeVersionID string `json:"knowledge_version_id,omitempty"`
 }
 
 // Labels returns the labels of the name space
@@ -48,6 +52,9 @@ func (n NameSpace) Labels() []string {
 	}
 	if n.Knowledge != "" {
 		res = append(res, n.Knowledge)
+	}
+	if n.KnowledgeVersionID != "" {
+		res = append(res, n.KnowledgeVersionID)
 	}
 	return res
 }

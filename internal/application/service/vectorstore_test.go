@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -23,6 +26,16 @@ type mockVectorStoreRepo struct {
 	deleteErr           error
 	existsByEndpointErr error
 	existsByEndpoint    bool
+}
+
+func newElasticsearchTestServer(t *testing.T) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"version":{"number":"8.11.0"}}`)
+	}))
+	t.Cleanup(server.Close)
+	return server.URL
 }
 
 func (m *mockVectorStoreRepo) Create(_ context.Context, store *types.VectorStore) error {
@@ -115,7 +128,7 @@ func mockEngineFactory(err error) interfaces.EngineFactory {
 // mockEngineService satisfies interfaces.RetrieveEngineService minimally.
 type mockEngineService struct{}
 
-func (m *mockEngineService) EngineType() types.RetrieverEngineType                    { return "mock" }
+func (m *mockEngineService) EngineType() types.RetrieverEngineType { return "mock" }
 func (m *mockEngineService) Retrieve(_ context.Context, _ types.RetrieveParams) ([]*types.RetrieveResult, error) {
 	return nil, nil
 }
@@ -155,13 +168,14 @@ func (m *mockEngineService) BatchUpdateChunkTagID(_ context.Context, _ map[strin
 func TestCreateStore_Success(t *testing.T) {
 	repo := &mockVectorStoreRepo{}
 	svc := NewVectorStoreService(repo, nil, nil)
+	addr := newElasticsearchTestServer(t)
 
 	store := &types.VectorStore{
 		TenantID:   1,
 		Name:       "test-es",
 		EngineType: types.ElasticsearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
-			Addr: "http://es:9200",
+			Addr: addr,
 		},
 	}
 
@@ -362,8 +376,9 @@ func TestCreateStore_DuplicateCheck_EnvStore(t *testing.T) {
 
 func TestCreateStore_DuplicateCheck_EnvStore_DifferentIndex_Allowed(t *testing.T) {
 	// Same endpoint as env store but different index — should be allowed
+	addr := newElasticsearchTestServer(t)
 	t.Setenv("RETRIEVE_DRIVER", "elasticsearch_v8")
-	t.Setenv("ELASTICSEARCH_ADDR", "http://es:9200")
+	t.Setenv("ELASTICSEARCH_ADDR", addr)
 	t.Setenv("ELASTICSEARCH_INDEX", "xwrag_default")
 
 	repo := &mockVectorStoreRepo{existsByEndpoint: false}
@@ -374,7 +389,7 @@ func TestCreateStore_DuplicateCheck_EnvStore_DifferentIndex_Allowed(t *testing.T
 		Name:       "different-index",
 		EngineType: types.ElasticsearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
-			Addr: "http://es:9200",
+			Addr: addr,
 		},
 		IndexConfig: types.IndexConfig{
 			IndexName: "different_index",
@@ -413,13 +428,14 @@ func TestCreateStore_RegistersInRegistry(t *testing.T) {
 	registry := newMockStoreRegistry()
 	factory := mockEngineFactory(nil)
 	svc := NewVectorStoreService(repo, registry, factory)
+	addr := newElasticsearchTestServer(t)
 
 	store := &types.VectorStore{
 		TenantID:   1,
 		Name:       "test-es",
 		EngineType: types.ElasticsearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
-			Addr: "http://es:9200",
+			Addr: addr,
 		},
 	}
 
@@ -436,13 +452,14 @@ func TestCreateStore_RegistryFailureDoesNotRollBackDB(t *testing.T) {
 	registry := newMockStoreRegistry()
 	factory := mockEngineFactory(assert.AnError) // factory fails
 	svc := NewVectorStoreService(repo, registry, factory)
+	addr := newElasticsearchTestServer(t)
 
 	store := &types.VectorStore{
 		TenantID:   1,
 		Name:       "test-es",
 		EngineType: types.ElasticsearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
-			Addr: "http://es:9200",
+			Addr: addr,
 		},
 	}
 
@@ -459,13 +476,14 @@ func TestCreateStore_RegistryFailureDoesNotRollBackDB(t *testing.T) {
 func TestCreateStore_NilRegistryAndFactory(t *testing.T) {
 	repo := &mockVectorStoreRepo{}
 	svc := NewVectorStoreService(repo, nil, nil) // no registry
+	addr := newElasticsearchTestServer(t)
 
 	store := &types.VectorStore{
 		TenantID:   1,
 		Name:       "test-es",
 		EngineType: types.ElasticsearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
-			Addr: "http://es:9200",
+			Addr: addr,
 		},
 	}
 

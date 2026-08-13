@@ -249,6 +249,20 @@ func TestIsRestrictedIP_IPv6(t *testing.T) {
 	}
 }
 
+func TestValidateURLForSSRFStrictAirGapRejectsPublicEndpoint(t *testing.T) {
+	t.Setenv("AIR_GAPPED_MODE", "true")
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	resetSSRFWhitelistForTest()
+	t.Cleanup(resetSSRFWhitelistForTest)
+
+	if err := ValidateURLForSSRF("https://8.8.8.8/dns-query"); err == nil {
+		t.Fatal("expected strict air-gapped mode to reject a public endpoint")
+	}
+	if err := ValidateURLForSSRF("http://127.0.0.1:8080/health"); err != nil {
+		t.Fatalf("expected allowlisted same-host endpoint to remain available: %v", err)
+	}
+}
+
 func parseIPForTest(t *testing.T, s string) net.IP {
 	t.Helper()
 	ip := net.ParseIP(s)

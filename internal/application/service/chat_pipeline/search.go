@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -24,6 +25,7 @@ type PluginSearch struct {
 	sessionService        interfaces.SessionService
 	webSearchStateService interfaces.WebSearchStateService
 	webSearchProviderRepo interfaces.WebSearchProviderRepository
+	governanceRepo        interfaces.KnowledgeGovernanceRepository
 }
 
 func NewPluginSearch(eventManager *EventManager,
@@ -36,6 +38,7 @@ func NewPluginSearch(eventManager *EventManager,
 	sessionService interfaces.SessionService,
 	webSearchStateService interfaces.WebSearchStateService,
 	webSearchProviderRepo interfaces.WebSearchProviderRepository,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
 ) *PluginSearch {
 	res := &PluginSearch{
 		knowledgeBaseService:  knowledgeBaseService,
@@ -47,6 +50,7 @@ func NewPluginSearch(eventManager *EventManager,
 		sessionService:        sessionService,
 		webSearchStateService: webSearchStateService,
 		webSearchProviderRepo: webSearchProviderRepo,
+		governanceRepo:        governanceRepo,
 	}
 	eventManager.Register(res)
 	return res
@@ -94,6 +98,7 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	go func() {
 		defer wg.Done()
 		kbResults := p.searchByTargets(ctx, chatManage)
+		kbResults = p.filterGovernedSearchResults(ctx, chatManage.TenantID, kbResults)
 		if len(kbResults) > 0 {
 			mu.Lock()
 			allResults = append(allResults, kbResults...)
@@ -141,6 +146,53 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 		"result_count": 0,
 	})
 	return ErrSearchNothing
+}
+
+func (p *PluginSearch) filterGovernedSearchResults(ctx context.Context, tenantID uint64, results []*types.SearchResult) []*types.SearchResult {
+	if len(results) == 0 || p.knowledgeService == nil {
+		return results
+	}
+	ids := make([]string, 0, len(results))
+	seen := make(map[string]bool)
+	for _, result := range results {
+		if result != nil && result.KnowledgeID != "" && !seen[result.KnowledgeID] {
+			seen[result.KnowledgeID] = true
+			ids = append(ids, result.KnowledgeID)
+		}
+	}
+	knowledges, err := p.knowledgeService.GetKnowledgeBatch(ctx, tenantID, ids)
+	if err != nil {
+		pipelineWarn(ctx, "Search", "governance_visibility", map[string]interface{}{"error": err.Error()})
+		return nil
+	}
+	byID := make(map[string]*types.Knowledge, len(knowledges))
+	for _, knowledge := range knowledges {
+		byID[knowledge.ID] = knowledge
+	}
+	filtered := make([]*types.SearchResult, 0, len(results))
+	now := time.Now().UTC()
+	for _, result := range results {
+		knowledge := byID[result.KnowledgeID]
+		if knowledge == nil || knowledge.CurrentVersionID == "" {
+			filtered = append(filtered, result)
+			continue
+		}
+		if result.KnowledgeVersionID != knowledge.CurrentVersionID || p.governanceRepo == nil {
+			if p.governanceRepo == nil && result.KnowledgeVersionID == knowledge.CurrentVersionID {
+				filtered = append(filtered, result)
+			}
+			continue
+		}
+		version, err := p.governanceRepo.GetVersion(ctx, tenantID, knowledge.CurrentVersionID)
+		if err != nil || version == nil || !version.IsRetrievable(now) {
+			continue
+		}
+		result.KnowledgeLayer = version.SourceMetadata.Layer
+		result.SourceCategory = version.SourceMetadata.SourceCategory
+		result.EffectiveAt = version.EffectiveAt
+		filtered = append(filtered, result)
+	}
+	return filtered
 }
 
 // getSearchResultFromHistory retrieves relevant knowledge references from chat history

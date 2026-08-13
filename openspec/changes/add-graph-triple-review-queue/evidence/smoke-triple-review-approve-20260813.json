@@ -1,0 +1,24 @@
+{
+  "schema": "graph-triple-review-smoke/v1",
+  "run_at": "2026-08-13T15:18:53.6724979+08:00",
+  "target": "http://127.0.0.1:18080",
+  "candidate_id": "c59f0e96-17e6-4ef0-b1e9-e117a664e913",
+  "tenant_id": 10000,
+  "knowledge_base_id": "cc7662ad-4960-443f-9b4e-fb57bfa6d52d",
+  "knowledge_id": "2adb5611-3fcf-44ea-8e4c-9fb4569f3f43",
+  "chunk_id": "78d7333d-7467-42fd-9139-c82bde7c3c9d",
+  "steps": {
+    "login": "pass",
+    "insert_pending": "pass",
+    "list_pending": "pass",
+    "get_by_id": "pass",
+    "post_approve": "pass",
+    "verify_status": "pass"
+  },
+  "final_status": "written",
+  "graph_write_verified": true,
+  "graph_write_error": "",
+  "neo4j_write_validated": false,
+  "caveat": "",
+  "gate": "passed"
+}

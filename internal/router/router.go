@@ -32,40 +32,45 @@ import (
 type RouterParams struct {
 	dig.In
 
-	Config                   *config.Config
-	UserService              interfaces.UserService
-	KBService                interfaces.KnowledgeBaseService
-	KnowledgeService         interfaces.KnowledgeService
-	ChunkService             interfaces.ChunkService
-	SessionService           interfaces.SessionService
-	MessageService           interfaces.MessageService
-	ModelService             interfaces.ModelService
-	EvaluationService        interfaces.EvaluationService
-	KBHandler                *handler.KnowledgeBaseHandler
-	KnowledgeHandler         *handler.KnowledgeHandler
-	TenantHandler            *handler.TenantHandler
-	TenantService            interfaces.TenantService
-	ChunkHandler             *handler.ChunkHandler
-	SessionHandler           *session.Handler
-	MessageHandler           *handler.MessageHandler
-	ModelHandler             *handler.ModelHandler
-	EvaluationHandler        *handler.EvaluationHandler
-	AuthHandler              *handler.AuthHandler
-	InitializationHandler    *handler.InitializationHandler
-	SystemHandler            *handler.SystemHandler
-	MCPServiceHandler        *handler.MCPServiceHandler
-	WebSearchHandler         *handler.WebSearchHandler
-	WebSearchProviderHandler *handler.WebSearchProviderHandler
-	VectorStoreHandler       *handler.VectorStoreHandler
-	FAQHandler               *handler.FAQHandler
-	TagHandler               *handler.TagHandler
-	CustomAgentHandler       *handler.CustomAgentHandler
-	SkillHandler             *handler.SkillHandler
-	OrganizationHandler      *handler.OrganizationHandler
-	IMHandler                *handler.IMHandler
-	DataSourceHandler        *handler.DataSourceHandler
-	WeKnoraCloudHandler      *handler.WeKnoraCloudHandler
-	WikiPageHandler          *handler.WikiPageHandler
+	Config                     *config.Config
+	UserService                interfaces.UserService
+	KBService                  interfaces.KnowledgeBaseService
+	KnowledgeService           interfaces.KnowledgeService
+	ChunkService               interfaces.ChunkService
+	SessionService             interfaces.SessionService
+	MessageService             interfaces.MessageService
+	ModelService               interfaces.ModelService
+	EvaluationService          interfaces.EvaluationService
+	KBHandler                  *handler.KnowledgeBaseHandler
+	KnowledgeHandler           *handler.KnowledgeHandler
+	TenantHandler              *handler.TenantHandler
+	TenantService              interfaces.TenantService
+	ChunkHandler               *handler.ChunkHandler
+	SessionHandler             *session.Handler
+	MessageHandler             *handler.MessageHandler
+	ModelHandler               *handler.ModelHandler
+	EvaluationHandler          *handler.EvaluationHandler
+	AuthHandler                *handler.AuthHandler
+	InitializationHandler      *handler.InitializationHandler
+	SystemHandler              *handler.SystemHandler
+	MCPServiceHandler          *handler.MCPServiceHandler
+	WebSearchHandler           *handler.WebSearchHandler
+	WebSearchProviderHandler   *handler.WebSearchProviderHandler
+	VectorStoreHandler         *handler.VectorStoreHandler
+	FAQHandler                 *handler.FAQHandler
+	TagHandler                 *handler.TagHandler
+	CustomAgentHandler         *handler.CustomAgentHandler
+	SkillHandler               *handler.SkillHandler
+	OrganizationHandler        *handler.OrganizationHandler
+	IMHandler                  *handler.IMHandler
+	DataSourceHandler          *handler.DataSourceHandler
+	WeKnoraCloudHandler        *handler.WeKnoraCloudHandler
+	WikiPageHandler            *handler.WikiPageHandler
+	AnswerFeedbackHandler      *handler.AnswerFeedbackHandler
+	GraphTripleReviewHandler   *handler.GraphTripleReviewHandler
+	KnowledgeGovernanceHandler *handler.KnowledgeGovernanceHandler
+	AcceptanceBenchmarkHandler *handler.AcceptanceBenchmarkHandler
+	ApprovedEndpointHandler    *handler.ApprovedEndpointHandler
 }
 
 // NewRouter 创建新的路由
@@ -155,9 +160,84 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler)
+		RegisterFeedbackRoutes(v1, params.AnswerFeedbackHandler)
+		RegisterGraphTripleReviewRoutes(v1, params.GraphTripleReviewHandler)
+		RegisterKnowledgeGovernanceRoutes(v1, params.KnowledgeGovernanceHandler)
+		RegisterAcceptanceBenchmarkRoutes(v1, params.AcceptanceBenchmarkHandler)
+		RegisterApprovedEndpointRoutes(v1, params.ApprovedEndpointHandler)
 	}
 
 	return r
+}
+
+func RegisterKnowledgeGovernanceRoutes(r *gin.RouterGroup, h *handler.KnowledgeGovernanceHandler) {
+	if h == nil {
+		return
+	}
+	// Reuse the existing /knowledge/:id branch so Gin can attach the nested
+	// version routes without conflicting wildcard parameter names.
+	versions := r.Group("/knowledge/:id/versions")
+	versions.POST("", h.CreateVersion)
+	versions.GET("", h.ListVersions)
+	versions.GET("/:version_id", h.GetVersion)
+	versions.POST("/:version_id/submit-review", h.SubmitReview)
+	versions.POST("/:version_id/approve", h.Approve)
+	versions.POST("/:version_id/reject", h.Reject)
+	versions.POST("/:version_id/publish", h.Publish)
+	versions.POST("/:version_id/rollback", h.Rollback)
+}
+
+func RegisterAcceptanceBenchmarkRoutes(r *gin.RouterGroup, h *handler.AcceptanceBenchmarkHandler) {
+	if h == nil {
+		return
+	}
+	suites := r.Group("/acceptance/suites")
+	suites.POST("", h.CreateSuite)
+	suites.GET("", h.ListSuites)
+	suites.GET("/:suite_version_id", h.GetSuite)
+	suites.POST("/:suite_version_id/freeze", h.FreezeSuite)
+	runs := r.Group("/acceptance/runs")
+	runs.POST("", h.CreateRun)
+	runs.GET("", h.ListRuns)
+	runs.GET("/:run_id", h.GetRun)
+	runs.POST("/:run_id/cases/:case_id", h.CreateCaseResult)
+	runs.POST("/:run_id/finalize", h.FinalizeRun)
+	runs.POST("/:run_id/cases/:case_id/review", h.ReviewCaseResult)
+	runs.GET("/:run_id/results", h.ListCaseResults)
+	runs.GET("/:run_id/artifacts", h.ListArtifacts)
+	runs.GET("/:run_id/materials", h.ListMaterials)
+	runs.POST("/:run_id/artifacts", h.CreateArtifact)
+}
+
+func RegisterApprovedEndpointRoutes(r *gin.RouterGroup, h *handler.ApprovedEndpointHandler) {
+	if h == nil {
+		return
+	}
+	endpoints := r.Group("/approved-endpoints")
+	endpoints.POST("", h.Create)
+	endpoints.GET("", h.List)
+	endpoints.GET("/:id", h.Get)
+	endpoints.GET("/:id/audits", h.Audits)
+	endpoints.PUT("/:id", h.Update)
+	endpoints.DELETE("/:id", h.Delete)
+}
+
+func RegisterFeedbackRoutes(r *gin.RouterGroup, h *handler.AnswerFeedbackHandler) {
+	feedback := r.Group("/answer-feedback")
+	feedback.POST("", h.Submit)
+	feedback.GET("", h.List)
+	feedback.POST("/:id/review", h.Review)
+}
+
+func RegisterGraphTripleReviewRoutes(r *gin.RouterGroup, h *handler.GraphTripleReviewHandler) {
+	if h == nil {
+		return
+	}
+	triples := r.Group("/graph-triple-reviews")
+	triples.GET("", h.List)
+	triples.GET("/:id", h.Get)
+	triples.POST("/:id/approve", h.Approve)
+	triples.POST("/:id/reject", h.Reject)
 }
 
 // RegisterChunkRoutes 注册分块相关的路由
@@ -324,6 +404,9 @@ func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler) {
 	{
 		sessions.POST("", handler.CreateSession)
 		sessions.DELETE("/batch", handler.BatchDeleteSessions)
+		// Reuse the :id parameter name so Gin can attach the nested WebSocket
+		// route to the existing /sessions/:id branch.
+		sessions.GET("/:id/voice/ws", handler.VoiceWebSocket)
 		sessions.GET("/:id", handler.GetSession)
 		sessions.GET("", handler.GetSessionsByTenant)
 		sessions.PUT("/:id", handler.UpdateSession)
@@ -333,6 +416,9 @@ func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler) {
 		sessions.POST("/:session_id/stop", handler.StopSession)
 		// 继续接收活跃流
 		sessions.GET("/continue-stream/:session_id", handler.ContinueStream)
+		sessions.POST("/:session_id/voice/ws-ticket", handler.IssueVoiceWSTicket)
+		sessions.POST("/:session_id/voice/asr", handler.TranscribeVoiceBatch)
+		sessions.POST("/:session_id/voice/tts", handler.SynthesizeVoice)
 	}
 }
 
@@ -391,6 +477,7 @@ func RegisterModelRoutes(r *gin.RouterGroup, handler *handler.ModelHandler) {
 		models.GET("", handler.ListModels)
 		// 获取单个模型
 		models.GET("/:id", handler.GetModel)
+		models.POST("/:id/preflight", handler.PreflightModel)
 		// 更新模型
 		models.PUT("/:id", handler.UpdateModel)
 		// 删除模型
@@ -453,6 +540,7 @@ func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler) {
 	systemRoutes := r.Group("/system")
 	{
 		systemRoutes.GET("/info", handler.GetSystemInfo)
+		systemRoutes.GET("/model-profile-status", handler.GetModelProfileStatus)
 		systemRoutes.GET("/parser-engines", handler.ListParserEngines)
 		systemRoutes.POST("/parser-engines/check", handler.CheckParserEngines)
 		systemRoutes.POST("/docreader/reconnect", handler.ReconnectDocReader)

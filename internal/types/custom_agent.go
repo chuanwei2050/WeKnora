@@ -3,6 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -208,6 +209,17 @@ type CustomAgentConfig struct {
 	RerankThreshold float64 `yaml:"rerank_threshold" json:"rerank_threshold"`
 
 	// ===== Advanced Settings (mainly for normal mode) =====
+	// Optional question complexity routing. The zero value keeps this feature disabled.
+	ComplexityRouting ComplexityRoutingConfig `yaml:"complexity_routing" json:"complexity_routing"`
+	// Verification is opt-in; reflection_enabled is retained as a compatibility alias.
+	VerifiedAnswer     VerifiedAnswerConfig `yaml:"verified_answer" json:"verified_answer"`
+	ReflectionEnabled  bool                 `yaml:"reflection_enabled" json:"reflection_enabled"`
+	VoiceInputEnabled  bool                 `yaml:"voice_input_enabled" json:"voice_input_enabled"`
+	VoiceOutputEnabled bool                 `yaml:"voice_output_enabled" json:"voice_output_enabled"`
+	TTSModelID         string               `yaml:"tts_model_id" json:"tts_model_id"`
+	VoiceLanguage      string               `yaml:"voice_language" json:"voice_language"`
+	VoiceName          string               `yaml:"voice_name" json:"voice_name"`
+	VoiceAutoPlay      bool                 `yaml:"voice_auto_play" json:"voice_auto_play"`
 	// Whether to enable query expansion
 	EnableQueryExpansion bool `yaml:"enable_query_expansion" json:"enable_query_expansion"`
 	// Whether to enable query rewrite for multi-turn conversations
@@ -292,10 +304,30 @@ func (a *CustomAgent) EnsureDefaults() {
 	if a.Config.MaxCompletionTokens == 0 {
 		a.Config.MaxCompletionTokens = 2048
 	}
+	a.Config.ComplexityRouting.EnsureDefaults()
+	a.Config.VerifiedAnswer.NormalizeLegacy(a.Config.ReflectionEnabled)
 	// Agent mode should always enable multi-turn conversation
 	if a.Config.AgentMode == AgentModeSmartReasoning {
 		a.Config.MultiTurnEnabled = true
 	}
+}
+
+// Validate checks opt-in routing and verification settings at the persistence
+// boundary. Legacy agents remain valid because both features default off.
+func (c CustomAgentConfig) Validate() error {
+	if c.ComplexityRouting.Enabled {
+		if err := c.ComplexityRouting.Validate(); err != nil {
+			return fmt.Errorf("complexity_routing: %w", err)
+		}
+	}
+	verified := c.VerifiedAnswer
+	verified.NormalizeLegacy(c.ReflectionEnabled)
+	if verified.Enabled {
+		if err := verified.Validate(nil); err != nil {
+			return fmt.Errorf("verified_answer: %w", err)
+		}
+	}
+	return nil
 }
 
 // IsAgentMode returns true if this agent uses ReAct agent mode

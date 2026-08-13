@@ -75,6 +75,9 @@ func (s *knowledgeBaseService) GetRepository() interfaces.KnowledgeBaseRepositor
 func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb *types.KnowledgeBase,
 ) (*types.KnowledgeBase, error) {
+	if err := kb.Governance.Validate(); err != nil {
+		return nil, err
+	}
 	// Generate UUID and set creation timestamps
 	if kb.ID == "" {
 		kb.ID = uuid.New().String()
@@ -329,6 +332,12 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		}
 		if config.WikiConfig != nil {
 			kb.WikiConfig = config.WikiConfig
+		}
+		if config.Governance != nil {
+			if err := config.Governance.Validate(); err != nil {
+				return nil, err
+			}
+			kb.Governance = *config.Governance
 		}
 		// Update indexing strategy — syncs to ExtractConfig for backward compat
 		if config.IndexingStrategy != nil {

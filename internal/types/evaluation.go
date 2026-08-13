@@ -2,13 +2,53 @@ package types
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/yanyiwu/gojieba"
 )
 
 // Jieba is a global instance of Chinese text segmentation tool
-var Jieba *gojieba.Jieba = gojieba.NewJieba()
+var Jieba *gojieba.Jieba = newJieba()
+
+func newJieba() *gojieba.Jieba {
+	for _, directory := range jiebaDictionaryDirectories() {
+		paths := make([]string, 0, 5)
+		for _, name := range []string{
+			"jieba.dict.utf8",
+			"hmm_model.utf8",
+			"user.dict.utf8",
+			"idf.utf8",
+			"stop_words.utf8",
+		} {
+			paths = append(paths, filepath.Join(directory, name))
+		}
+
+		complete := true
+		for _, path := range paths {
+			if _, err := os.Stat(path); err != nil {
+				complete = false
+				break
+			}
+		}
+		if complete {
+			return gojieba.NewJieba(paths...)
+		}
+	}
+
+	return gojieba.NewJieba()
+}
+
+func jiebaDictionaryDirectories() []string {
+	directories := make([]string, 0, 3)
+	if configured := strings.TrimSpace(os.Getenv("WEKNORA_JIEBA_DICT_DIR")); configured != "" {
+		directories = append(directories, configured)
+	}
+	directories = append(directories, "./jieba", "./data/jieba")
+	return directories
+}
 
 // EvaluationStatue represents the status of an evaluation task
 type EvaluationStatue int

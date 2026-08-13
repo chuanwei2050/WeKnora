@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	llmcontext "github.com/Tencent/WeKnora/internal/application/service/llmcontext"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -148,22 +151,6 @@ func (s *sessionService) AgentQA(
 		llmContext = []chat.Message{}
 	}
 
-	// Create agent engine with EventBus and ContextManager
-	logger.Info(ctx, "Creating agent engine")
-	engine, err := s.agentService.CreateAgentEngine(
-		ctx,
-		agentConfig,
-		summaryModel,
-		rerankModel,
-		eventBus,
-		contextManager,
-		sessionID,
-	)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to create agent engine: %v", err)
-		return err
-	}
-
 	// Route image data based on agent model's vision capability
 	var agentModelSupportsVision bool
 	if effectiveModelID != "" {
@@ -185,24 +172,285 @@ func (s *sessionService) AgentQA(
 		agentQuery += "\n\n" + req.QuotedContext
 	}
 
-	// Execute agent with streaming (asynchronously)
-	// Events will be emitted to EventBus and handled by the Handler layer
-	logger.Info(ctx, "Executing agent with streaming")
-	if _, err := engine.Execute(ctx, sessionID, req.AssistantMessageID, agentQuery, llmContext, agentImageURLs); err != nil {
-		logger.Errorf(ctx, "Agent execution failed: %v", err)
-		// Emit error event to the EventBus used by this agent
-		eventBus.Emit(ctx, event.Event{
-			Type:      event.EventError,
-			SessionID: sessionID,
-			Data: event.ErrorData{
-				Error:     err.Error(),
-				Stage:     "agent_execution",
-				SessionID: sessionID,
+	// AgentQA must use the same complexity classifier as normal RAG. The
+	// decision is request-scoped and only narrows the agent's existing budgets;
+	// it never expands tools or knowledge permissions.
+	var routingDecision *types.RoutingDecision
+	if agentConfig.ComplexityRouting.Enabled {
+		routingManage := &types.ChatManage{
+			PipelineRequest: types.PipelineRequest{
+				Query:             agentQuery,
+				ComplexityRouting: agentConfig.ComplexityRouting,
+				Images:            nil,
+				Attachments:       req.Attachments,
 			},
+			PipelineState: types.PipelineState{RewriteQuery: agentQuery, History: historyFromLLMContext(llmContext)},
+		}
+		routingDecision, err = chatpipeline.ClassifyQuery(ctx, summaryModel, s.cfg, routingManage)
+		if err != nil {
+			logger.Warnf(ctx, "Agent query routing degraded to conservative decision: %v", err)
+		}
+		agentConfig.RoutingDecision = routingDecision
+		agentConfig.ApplyRoutingDecision()
+		if routingDecision != nil && (routingDecision.Classification.Level == types.ComplexityL3 || routingDecision.Classification.Level == types.ComplexityL4) {
+			plan, planErr := chatpipeline.BuildSubQuestionPlan(ctx, summaryModel, agentQuery, routingDecision.Classification, 4, agentConfig.MaxIterations, 30000)
+			if planErr != nil {
+				logger.Warnf(ctx, "bounded sub-question plan unavailable: %v", planErr)
+				plan, _ = types.PlanSubQuestions(agentQuery, routingDecision.Classification, 4, agentConfig.MaxIterations, 30000)
+			}
+			agentConfig.SubQuestionPlan = &plan
+		}
+	}
+	graphAllowed := types.NeedsEntityRelation(agentQuery)
+	if routingDecision != nil {
+		graphAllowed = routingDecision.Classification.NeedsEntityRelation && routingDecision.Budget.GraphEnabled
+		if routingDecision.Budget.RetrievalTopK > 0 {
+			ctx = context.WithValue(ctx, types.RetrievalTopKContextKey, routingDecision.Budget.RetrievalTopK)
+		}
+	}
+	ctx = context.WithValue(ctx, types.GraphQueryAllowedContextKey, graphAllowed)
+	if graphAllowed {
+		ctx = context.WithValue(ctx, types.GraphRelationTypesContextKey, agentGraphRelationTypes(ctx, s.knowledgeBaseService, agentConfig.KnowledgeBases))
+	}
+
+	verifiedAgent := agentConfig.VerifiedAnswer.Enabled &&
+		(!agentConfig.ComplexityRouting.Enabled || (routingDecision != nil && routingDecision.ActualAction == types.RoutingVerifiedAgent))
+	executionBus := eventBus
+	if verifiedAgent {
+		executionBus = newBufferedAgentEventBus(eventBus)
+	}
+
+	// Create agent engine with the already-classified request configuration.
+	logger.Info(ctx, "Creating agent engine")
+	engine, err := s.agentService.CreateAgentEngine(
+		ctx,
+		agentConfig,
+		summaryModel,
+		rerankModel,
+		executionBus,
+		contextManager,
+		sessionID,
+	)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to create agent engine: %v", err)
+		return err
+	}
+
+	// Execute agent with streaming. Ordinary agents emit directly; verified
+	// agents buffer final/complete events until validation finishes.
+	logger.Info(ctx, "Executing agent with streaming")
+	startedAt := time.Now()
+	state, err := engine.Execute(ctx, sessionID, req.AssistantMessageID, agentQuery, llmContext, agentImageURLs)
+	if err != nil {
+		logger.Errorf(ctx, "Agent execution failed: %v", err)
+		if !verifiedAgent {
+			// Emit error event to the EventBus used by this agent.
+			eventBus.Emit(ctx, event.Event{
+				Type:      event.EventError,
+				SessionID: sessionID,
+				Data: event.ErrorData{
+					Error:     err.Error(),
+					Stage:     "agent_execution",
+					SessionID: sessionID,
+				},
+			})
+		}
+		return nil
+	}
+	if verifiedAgent {
+		if err := s.publishVerifiedAgentAnswer(ctx, eventBus, req, agentConfig, routingDecision, agentQuery, effectiveModelID, state, startedAt); err != nil {
+			logger.Errorf(ctx, "Verified agent answer failed: %v", err)
+			eventBus.Emit(ctx, event.Event{
+				Type:      event.EventError,
+				SessionID: sessionID,
+				Data: event.ErrorData{
+					Error:     err.Error(),
+					Stage:     "agent_verification",
+					SessionID: sessionID,
+				},
+			})
+		}
+	}
+	// Return empty - events will be handled by Handler via EventBus subscription.
+	return nil
+}
+
+func agentGraphRelationTypes(ctx context.Context, knowledgeBaseService interfaces.KnowledgeBaseService, knowledgeBaseIDs []string) []string {
+	if knowledgeBaseService == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	result := make([]string, 0)
+	for _, knowledgeBaseID := range knowledgeBaseIDs {
+		kb, err := knowledgeBaseService.GetKnowledgeBaseByID(ctx, knowledgeBaseID)
+		if err != nil || kb == nil || kb.ExtractConfig == nil {
+			continue
+		}
+		for _, relation := range kb.ExtractConfig.Relations {
+			if relation == nil || strings.TrimSpace(relation.Type) == "" {
+				continue
+			}
+			typ := strings.ToLower(strings.TrimSpace(relation.Type))
+			if !seen[typ] {
+				seen[typ] = true
+				result = append(result, typ)
+			}
+		}
+	}
+	return result
+}
+
+func newBufferedAgentEventBus(target *event.EventBus) *event.EventBus {
+	buffered := event.NewEventBus()
+	forwardTypes := []event.EventType{
+		event.EventAgentThought,
+		event.EventAgentToolCall,
+		event.EventAgentToolResult,
+		event.EventAgentReferences,
+		event.EventAgentReflection,
+		event.EventError,
+		event.EventSessionTitle,
+	}
+	for _, eventType := range forwardTypes {
+		currentType := eventType
+		buffered.On(currentType, func(ctx context.Context, evt event.Event) error {
+			if err := target.Emit(ctx, evt); err != nil {
+				logger.Warnf(ctx, "failed to forward buffered agent event %s: %v", currentType, err)
+			}
+			return nil
 		})
 	}
-	// Return empty - events will be handled by Handler via EventBus subscription
-	return nil
+	return buffered
+}
+
+func (s *sessionService) publishVerifiedAgentAnswer(
+	ctx context.Context,
+	eventBus *event.EventBus,
+	req *types.QARequest,
+	agentConfig *types.AgentConfig,
+	routingDecision *types.RoutingDecision,
+	query string,
+	chatModelID string,
+	state *types.AgentState,
+	startedAt time.Time,
+) error {
+	if state == nil || strings.TrimSpace(state.FinalAnswer) == "" {
+		return errors.New("verified agent produced an empty answer")
+	}
+	tenantID := s.resolveRetrievalTenantID(ctx, req)
+	retrievalCtx := context.WithValue(ctx, types.TenantIDContextKey, tenantID)
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			Query:                query,
+			SessionID:            req.Session.ID,
+			TenantID:             tenantID,
+			KnowledgeBaseIDs:     append([]string(nil), agentConfig.KnowledgeBases...),
+			KnowledgeIDs:         append([]string(nil), agentConfig.KnowledgeIDs...),
+			SearchTargets:        agentConfig.SearchTargets,
+			ChatModelID:          chatModelID,
+			ComplexityRouting:    agentConfig.ComplexityRouting,
+			VerifiedAnswer:       agentConfig.VerifiedAnswer,
+			EnableQueryExpansion: routingDecision != nil && routingDecision.Budget.QueryExpansion,
+		},
+		PipelineState: types.PipelineState{
+			RewriteQuery:    query,
+			MergeResult:     state.KnowledgeRefs,
+			ChatResponse:    &types.ChatResponse{Content: state.FinalAnswer},
+			RoutingDecision: routingDecision,
+		},
+		PipelineContext: types.PipelineContext{EventBus: eventBus.AsEventBusInterface()},
+	}
+	manage.VerifiedRetrieve = func(retrieveCtx context.Context, retrieveQuery string) ([]*types.SearchResult, error) {
+		return s.SearchKnowledge(context.WithValue(retrieveCtx, types.TenantIDContextKey, manage.TenantID), manage.KnowledgeBaseIDs, manage.KnowledgeIDs, retrieveQuery)
+	}
+	answer, err := chatpipeline.VerifyAnswer(retrievalCtx, s.modelService, manage)
+	if err != nil {
+		return err
+	}
+	visible := chatpipeline.VisibleVerifiedText(answer)
+	if strings.TrimSpace(visible) == "" {
+		return errors.New("verified agent produced no visible answer")
+	}
+	answerID := fmt.Sprintf("verified-answer-%d", time.Now().UnixNano())
+	if err := eventBus.Emit(ctx, event.Event{ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: req.Session.ID, Data: event.AgentFinalAnswerData{Content: visible}}); err != nil {
+		return err
+	}
+	if err := eventBus.Emit(ctx, event.Event{ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: req.Session.ID, Data: event.AgentFinalAnswerData{Done: true}}); err != nil {
+		return err
+	}
+	refs := make([]interface{}, 0, len(state.KnowledgeRefs))
+	for _, ref := range state.KnowledgeRefs {
+		refs = append(refs, ref)
+	}
+	return eventBus.Emit(ctx, event.Event{
+		Type:      event.EventAgentComplete,
+		SessionID: req.Session.ID,
+		Data: event.AgentCompleteData{
+			SessionID:       req.Session.ID,
+			FinalAnswer:     visible,
+			KnowledgeRefs:   refs,
+			AgentSteps:      state.RoundSteps,
+			TotalSteps:      len(state.RoundSteps),
+			TotalDurationMs: time.Since(startedAt).Milliseconds(),
+			MessageID:       req.AssistantMessageID,
+			Extra: map[string]interface{}{
+				"execution_path":               "verified_agent",
+				"routing":                      routingDecisionSummary(routingDecision),
+				"verification_decision":        answer.Decision,
+				"verification_confidence":      answer.Confidence,
+				"verification_degraded":        answer.Degraded,
+				"verification_retrieval_count": answer.RetrievalCount,
+				"reflection_actions":           answer.ReflectionActions,
+				"validator_model_count":        len(answer.Reports),
+				"validator_model_keys":         verifiedReportModelKeys(answer.Reports),
+			},
+		},
+	})
+}
+
+func historyFromLLMContext(messages []chat.Message) []*types.History {
+	var history []*types.History
+	var pendingQuery string
+	for _, message := range messages {
+		switch message.Role {
+		case "user":
+			pendingQuery = message.Content
+		case "assistant":
+			if pendingQuery == "" && message.Content == "" {
+				continue
+			}
+			history = append(history, &types.History{Query: pendingQuery, Answer: message.Content})
+			pendingQuery = ""
+		}
+	}
+	return history
+}
+
+func routingDecisionSummary(decision *types.RoutingDecision) map[string]interface{} {
+	if decision == nil {
+		return nil
+	}
+	return decision.Summary()
+}
+
+func verifiedReportModelKeys(reports []types.ValidationReport) []string {
+	keys := make([]string, 0, len(reports))
+	seen := map[string]struct{}{}
+	for _, report := range reports {
+		key := strings.TrimSpace(report.Model.ModelName)
+		if key == "" {
+			key = strings.TrimSpace(report.Model.Key())
+		}
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 // buildAgentConfig creates a runtime AgentConfig from the QARequest's custom agent configuration,
@@ -228,7 +476,10 @@ func (s *sessionService) buildAgentConfig(
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
+		ComplexityRouting:           customAgent.Config.ComplexityRouting,
 	}
+	agentConfig.VerifiedAnswer = customAgent.Config.VerifiedAnswer
+	agentConfig.VerifiedAnswer.NormalizeLegacy(customAgent.Config.ReflectionEnabled)
 
 	// Falls back to global configuration if no specific timeout is set for the agent.
 	if agentConfig.LLMCallTimeout == 0 && s.cfg.Agent != nil && s.cfg.Agent.LLMCallTimeout > 0 {

@@ -11,6 +11,7 @@ export interface WebSearchProviderEntity {
     api_key?: string
     engine_id?: string
     proxy_url?: string
+    approved_endpoint_id?: string
     extra_config?: Record<string, string>
   }
   is_default?: boolean

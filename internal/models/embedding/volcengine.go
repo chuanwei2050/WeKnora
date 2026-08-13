@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/transport"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -84,6 +87,13 @@ type VolcengineErrorResponse struct {
 func NewVolcengineEmbedder(apiKey, baseURL, modelName string,
 	truncatePromptTokens int, dimensions int, modelID string, pooler EmbedderPooler,
 ) (*VolcengineEmbedder, error) {
+	return NewVolcengineEmbedderWithValidation(apiKey, baseURL, modelName, truncatePromptTokens, dimensions, modelID, pooler, nil)
+}
+
+func NewVolcengineEmbedderWithValidation(apiKey, baseURL, modelName string,
+	truncatePromptTokens int, dimensions int, modelID string, pooler EmbedderPooler,
+	validateIP func(net.IP) error,
+) (*VolcengineEmbedder, error) {
 	if baseURL == "" {
 		baseURL = "https://ark.cn-beijing.volces.com"
 	}
@@ -112,9 +122,15 @@ func NewVolcengineEmbedder(apiKey, baseURL, modelName string,
 
 	timeout := 60 * time.Second
 
-	client := &http.Client{
-		Timeout: timeout,
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid embedding endpoint: %w", err)
 	}
+	client := transport.NewHTTPClient(transport.Config{
+		Timeout:      timeout,
+		ValidateIP:   validateIP,
+		AllowedHosts: []string{parsed.Hostname()},
+	})
 
 	return &VolcengineEmbedder{
 		apiKey:               apiKey,

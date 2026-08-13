@@ -10,7 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // Client wraps the Feishu Open Platform API for document/wiki operations.
@@ -35,6 +37,21 @@ func NewClient(config *Config) *Client {
 		appSecret:  config.AppSecret,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// NewClientWithEndpoint uses the administrator-approved transport when the
+// data source is bound to a private endpoint.
+func NewClientWithEndpoint(config *Config, endpoint *types.ApprovedEndpoint) (*Client, error) {
+	client := NewClient(config)
+	if endpoint == nil {
+		return client, nil
+	}
+	httpClient, err := datasource.NewApprovedEndpointHTTPClient(endpoint, 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	client.httpClient = httpClient
+	return client, nil
 }
 
 // getTenantAccessToken retrieves (or returns cached) tenant access token.

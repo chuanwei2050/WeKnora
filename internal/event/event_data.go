@@ -178,8 +178,9 @@ type AgentToolResultData struct {
 
 // AgentReferencesData represents knowledge references data
 type AgentReferencesData struct {
-	References interface{} `json:"references"` // []*types.SearchResult
-	Iteration  int         `json:"iteration"`
+	References interface{}            `json:"references"` // []*types.SearchResult
+	Iteration  int                    `json:"iteration"`
+	Extra      map[string]interface{} `json:"extra,omitempty"`
 }
 
 // AgentFinalAnswerData represents final answer streaming data

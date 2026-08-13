@@ -1883,7 +1883,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// Get embedding model for vectorization — only needed when vector/keyword indexing is enabled
 	var embeddingModel embedding.Embedder
-	if kb.NeedsEmbeddingModel() {
+	stagingVersionID := ""
+	if kb.Governance.Enabled {
+		stagingVersionID = strings.TrimSpace(knowledge.PendingVersionID)
+	}
+	isGovernedStaging := stagingVersionID != ""
+	if kb.NeedsEmbeddingModel() && !isGovernedStaging {
 		var err error
 		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 		if err != nil {
@@ -1899,8 +1904,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
 
 	// 删除旧的chunks
-	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
+	if !isGovernedStaging {
+		if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+			logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
+		}
 		// 不返回错误，继续处理（可能没有旧数据）
 	}
 
@@ -1910,7 +1917,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		s.retrieveEngine,
 		indexingEnginesForKnowledgeBase(tenantInfo.GetEffectiveEngines(), kb),
 	)
-	if err == nil && embeddingModel != nil {
+	if !isGovernedStaging && err == nil && embeddingModel != nil {
 		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
 			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
 			// 不返回错误，继续处理（可能没有旧数据）
@@ -1920,10 +1927,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// 删除知识图谱数据（如果存在）
-	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
-	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing graph data (may not exist): %v", err)
-		// 不返回错误，继续处理
+	if !isGovernedStaging {
+		namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
+		if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
+			logger.Warnf(ctx, "Failed to delete existing graph data (may not exist): %v", err)
+			// 不返回错误
+		}
 	}
 
 	logger.Infof(ctx, "Cleanup completed, starting to process new chunks")
@@ -1999,18 +2008,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
 		for i, pc := range options.ParentChunks {
 			parentDBChunks[i] = &types.Chunk{
-				ID:              uuid.New().String(),
-				TenantID:        knowledge.TenantID,
-				KnowledgeID:     knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID,
-				Content:         pc.Content,
-				ChunkIndex:      pc.Seq,
-				IsEnabled:       true,
-				CreatedAt:       time.Now(),
-				UpdatedAt:       time.Now(),
-				StartAt:         pc.Start,
-				EndAt:           pc.End,
-				ChunkType:       types.ChunkTypeParentText,
+				ID:                 uuid.New().String(),
+				TenantID:           knowledge.TenantID,
+				KnowledgeID:        knowledge.ID,
+				KnowledgeBaseID:    knowledge.KnowledgeBaseID,
+				Content:            pc.Content,
+				ChunkIndex:         pc.Seq,
+				IsEnabled:          true,
+				CreatedAt:          time.Now(),
+				UpdatedAt:          time.Now(),
+				StartAt:            pc.Start,
+				EndAt:              pc.End,
+				ChunkType:          types.ChunkTypeParentText,
+				KnowledgeVersionID: stagingVersionID,
 			}
 		}
 		// Set prev/next links for parent chunks
@@ -2038,18 +2048,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 		// 创建主文本Chunk
 		textChunk := &types.Chunk{
-			ID:              uuid.New().String(),
-			TenantID:        knowledge.TenantID,
-			KnowledgeID:     knowledge.ID,
-			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Content:         chunkData.Content,
-			ChunkIndex:      int(chunkData.Seq),
-			IsEnabled:       true,
-			CreatedAt:       time.Now(),
-			UpdatedAt:       time.Now(),
-			StartAt:         int(chunkData.Start),
-			EndAt:           int(chunkData.End),
-			ChunkType:       types.ChunkTypeText,
+			ID:                 uuid.New().String(),
+			TenantID:           knowledge.TenantID,
+			KnowledgeID:        knowledge.ID,
+			KnowledgeBaseID:    knowledge.KnowledgeBaseID,
+			Content:            chunkData.Content,
+			ChunkIndex:         int(chunkData.Seq),
+			IsEnabled:          true,
+			CreatedAt:          time.Now(),
+			UpdatedAt:          time.Now(),
+			StartAt:            int(chunkData.Start),
+			EndAt:              int(chunkData.End),
+			ChunkType:          types.ChunkTypeText,
+			KnowledgeVersionID: stagingVersionID,
 		}
 
 		// Wire up ParentChunkID for child chunks
@@ -2113,7 +2124,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Create index information and perform vector/keyword indexing when enabled.
 	// Chunks are ALWAYS saved to DB (above) because wiki and graph need them even without vector indexing.
 	var totalStorageSize int64
-	if kb.IsVectorEnabled() || kb.IsKeywordEnabled() {
+	if !isGovernedStaging && (kb.IsVectorEnabled() || kb.IsKeywordEnabled()) {
 		// Create index information — only for child/flat chunks, NOT parent chunks.
 		// Parent chunks are stored for context retrieval but do not need vector embeddings.
 		// Prepend the document title to improve semantic alignment between
@@ -2219,6 +2230,8 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			span.AddEvent("aborted: knowledge was deleted during processing")
 			return
 		}
+	} else if isGovernedStaging {
+		logger.Infof(ctx, "Governed version %s parsed into staging chunks; production indexes remain unchanged", stagingVersionID)
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping BatchIndex", kb.ID)
 	}
@@ -3181,7 +3194,9 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 		}
 
 		existing.ParseStatus = "pending"
-		existing.EnableStatus = "disabled"
+		if !kb.Governance.Enabled || strings.TrimSpace(existing.PendingVersionID) == "" {
+			existing.EnableStatus = "disabled"
+		}
 		existing.Description = ""
 		existing.ProcessedAt = nil
 		existing.EmbeddingModelID = kb.EmbeddingModelID
@@ -3191,7 +3206,8 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return nil, err
 		}
 
-		if err := s.enqueueManualProcessing(ctx, existing, meta.Content, true); err != nil {
+		needCleanup := !kb.Governance.Enabled || strings.TrimSpace(existing.PendingVersionID) == ""
+		if err := s.enqueueManualProcessing(ctx, existing, meta.Content, needCleanup); err != nil {
 			logger.Errorf(ctx, "Failed to enqueue manual reparse task: %v", err)
 			existing.ParseStatus = "failed"
 			existing.ErrorMessage = "Failed to enqueue processing task"
@@ -3200,18 +3216,23 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 		return existing, nil
 	}
 
-	// For non-manual knowledge, cleanup synchronously then enqueue document processing
-	logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
-	if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"knowledge_id": knowledgeID,
-		})
-		return nil, err
+	// Governed reparses retain the current production version while the pending
+	// version is parsed into isolated staging chunks.
+	if !kb.Governance.Enabled || strings.TrimSpace(existing.PendingVersionID) == "" {
+		logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
+		if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"knowledge_id": knowledgeID,
+			})
+			return nil, err
+		}
 	}
 
 	// Step 2: Update knowledge status and metadata
 	existing.ParseStatus = "pending"
-	existing.EnableStatus = "disabled"
+	if !kb.Governance.Enabled || strings.TrimSpace(existing.PendingVersionID) == "" {
+		existing.EnableStatus = "disabled"
+	}
 	existing.Description = ""
 	existing.ProcessedAt = nil
 	existing.EmbeddingModelID = kb.EmbeddingModelID

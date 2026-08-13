@@ -1,0 +1,19 @@
+{
+  "schema": "weknora-outbound-audit/v1",
+  "status": "passed",
+  "probe_url": "https://example.invalid/health",
+  "resolved_ips": [],
+  "public_ips": [],
+  "attempted_public_connections": 0,
+  "successful_public_connections": 0,
+  "blocked_or_failed_connections": 0,
+  "events": [
+    {
+      "mode": "fixture",
+      "url": "https://example.invalid/health",
+      "outcome": "not_attempted",
+      "reason": "NoNetwork"
+    }
+  ],
+  "generated_at": "2026-08-12T09:29:35.2398766+00:00"
+}

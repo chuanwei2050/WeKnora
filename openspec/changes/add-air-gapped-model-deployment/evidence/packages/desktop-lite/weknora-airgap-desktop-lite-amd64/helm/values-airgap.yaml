@@ -1,0 +1,36 @@
+global:
+  airGapped: true
+  imagePullSecrets:
+    - name: weknora-airgap-registry
+frontend:
+  image:
+    repository: registry.internal/weknora-ui
+    tag: "0.5.0"
+    digest: sha256:b1993a70eec0d1879461a3fbba5d24c021adebdc850807938c20a9760628caa5
+    pullPolicy: IfNotPresent
+app:
+  image:
+    repository: registry.internal/weknora-app
+    tag: "0.5.0"
+    digest: sha256:7cb9d5f25f626f82ec4b2369295313c5df0108757d28f4f18ada29337060025f
+    pullPolicy: IfNotPresent
+docreader:
+  image:
+    repository: registry.internal/weknora-docreader
+    tag: "0.5.0"
+    digest: sha256:b9c4636b65b5d4947d5e09cd311ba6cf37f1f2da37c51d4be2b911d432f12abe
+    pullPolicy: IfNotPresent
+postgresql:
+  image:
+    repository: registry.internal/paradedb
+    tag: "v0.22.2-pg17"
+    digest: sha256:af585013f97f622715de01e48d00558f7edf17055d7b40deafc9f98ca8d99a56
+redis:
+  image:
+    repository: registry.internal/redis
+    tag: "7-alpine"
+    digest: sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
+ollama:
+  enabled: false
+secrets:
+  existingSecret: weknora-airgap-secrets

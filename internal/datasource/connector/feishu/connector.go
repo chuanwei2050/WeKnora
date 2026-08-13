@@ -32,7 +32,10 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 		return err
 	}
 
-	client := NewClient(feishuConfig)
+	client, err := NewClientWithEndpoint(feishuConfig, config.ApprovedEndpoint)
+	if err != nil {
+		return fmt.Errorf("feishu approved endpoint: %w", err)
+	}
 	if err := client.Ping(ctx); err != nil {
 		return fmt.Errorf("feishu connection failed: %w", err)
 	}
@@ -47,7 +50,10 @@ func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceC
 		return nil, err
 	}
 
-	client := NewClient(feishuConfig)
+	client, err := NewClientWithEndpoint(feishuConfig, config.ApprovedEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("feishu approved endpoint: %w", err)
+	}
 	spaces, err := client.ListWikiSpaces(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list feishu wiki spaces: %w", err)
@@ -77,7 +83,10 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 		return nil, err
 	}
 
-	client := NewClient(feishuConfig)
+	client, err := NewClientWithEndpoint(feishuConfig, config.ApprovedEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("feishu approved endpoint: %w", err)
+	}
 
 	var allItems []types.FetchedItem
 
@@ -120,7 +129,10 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		return nil, nil, err
 	}
 
-	client := NewClient(feishuConfig)
+	client, err := NewClientWithEndpoint(feishuConfig, config.ApprovedEndpoint)
+	if err != nil {
+		return nil, nil, fmt.Errorf("feishu approved endpoint: %w", err)
+	}
 
 	// Parse the previous cursor state
 	var prevCursor feishuCursor

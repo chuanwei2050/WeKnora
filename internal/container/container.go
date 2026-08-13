@@ -104,6 +104,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(initTracer))
 	must(container.Provide(initLangfuse))
 	must(container.Provide(initDatabase))
+	must(container.Provide(repository.NewApprovedEndpointRepository))
 	must(container.Provide(initFileService))
 	must(container.Provide(initRedisClient))
 	must(container.Provide(initAntsPool))
@@ -155,6 +156,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewDataSourceRepository))
 	must(container.Provide(repository.NewSyncLogRepository))
 	must(container.Provide(repository.NewWikiPageRepository))
+	must(container.Provide(repository.NewAnswerFeedbackRepository))
+	must(container.Provide(repository.NewGraphTripleReviewRepository))
+	must(container.Provide(repository.NewKnowledgeGovernanceRepository))
+	must(container.Provide(repository.NewAcceptanceBenchmarkRepository))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -251,6 +256,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginDataAnalysis))
 	must(container.Invoke(chatpipeline.NewPluginIntoChatMessage))
 	must(container.Invoke(chatpipeline.NewPluginChatCompletion))
+	must(container.Invoke(chatpipeline.NewPluginVerifiedAnswer))
 	must(container.Invoke(chatpipeline.NewPluginChatCompletionStream))
 	must(container.Invoke(chatpipeline.NewPluginFilterTopK))
 	must(container.Invoke(chatpipeline.NewPluginQueryUnderstand))
@@ -290,6 +296,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewDataSourceHandler))
 	// Wiki page handler
 	must(container.Provide(handler.NewWikiPageHandler))
+	must(container.Provide(handler.NewAnswerFeedbackHandler))
+	must(container.Provide(handler.NewGraphTripleReviewHandler))
+	must(container.Provide(handler.NewKnowledgeGovernanceHandler))
+	must(container.Provide(handler.NewAcceptanceBenchmarkHandler))
+	must(container.Invoke(startVoiceTempCleaner))
+	must(container.Provide(handler.NewApprovedEndpointHandler))
 	// IM integration
 	logger.Debugf(ctx, "[Container] Registering IM integration...")
 	must(container.Provide(imPkg.NewService))
@@ -337,8 +349,21 @@ func initTracer() (*tracing.Tracer, error) {
 // Configuration is read from LANGFUSE_* environment variables (see
 // docs/langfuse.md). Returns a disabled manager if credentials are absent —
 // never an error — so deployments that don't use Langfuse are unaffected.
-func initLangfuse() (*langfuse.Manager, error) {
+func initLangfuse(approvedEndpoints interfaces.ApprovedEndpointRepository) (*langfuse.Manager, error) {
 	cfg := langfuse.LoadConfigFromEnv()
+	if strings.TrimSpace(cfg.ApprovedEndpointID) != "" {
+		if cfg.TenantID == 0 {
+			return nil, fmt.Errorf("langfuse approved endpoint requires LANGFUSE_TENANT_ID")
+		}
+		endpoint, err := approvedEndpoints.GetByID(context.Background(), cfg.TenantID, cfg.ApprovedEndpointID)
+		if err != nil {
+			return nil, fmt.Errorf("load langfuse approved endpoint: %w", err)
+		}
+		if endpoint == nil {
+			return nil, fmt.Errorf("langfuse approved endpoint not found: %s", cfg.ApprovedEndpointID)
+		}
+		cfg.ApprovedEndpoint = endpoint
+	}
 	return langfuse.Init(cfg)
 }
 
@@ -619,7 +644,7 @@ func resetPendingTasks(db *gorm.DB) {
 		Updates(map[string]interface{}{
 			"status":        types.SyncLogStatusFailed,
 			"error_message": "Sync interrupted due to application restart",
-			"end_time":      time.Now(),
+			"finished_at":   time.Now(),
 		})
 	if resultSync.Error != nil {
 		logger.Warnf(context.Background(), "Failed to reset pending data source sync tasks: %v", resultSync.Error)
@@ -1137,7 +1162,22 @@ func NewDuckDB() (*sql.DB, error) {
 	//   - spatial: used for st_read_meta() to enumerate layer (sheet) names from .xlsx/.xls
 	//   - excel:   used for read_xlsx() which gives proper type inference per sheet
 	bgCtx := context.Background()
+	strictAirGapped := strings.EqualFold(strings.TrimSpace(os.Getenv("AIR_GAPPED_MODE")), "true")
+	duckdbExtensionDir := strings.TrimSpace(os.Getenv("WEKNORA_DUCKDB_EXTENSION_DIR"))
 	for _, ext := range []string{"spatial", "excel"} {
+		if strictAirGapped {
+			loadTarget := ext
+			if duckdbExtensionDir != "" {
+				loadTarget = filepath.Join(duckdbExtensionDir, ext+".duckdb_extension")
+				loadTarget = strings.ReplaceAll(loadTarget, "'", "''")
+				loadTarget = "'" + loadTarget + "'"
+			}
+			if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("LOAD %s;", loadTarget)); err != nil {
+				_ = sqlDB.Close()
+				return nil, fmt.Errorf("strict air-gapped mode requires preloaded DuckDB extension %q: %w", ext, err)
+			}
+			continue
+		}
 		if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("INSTALL %s;", ext)); err != nil {
 			logger.Warnf(bgCtx, "[DuckDB] Failed to install %s extension: %v", ext, err)
 		}
@@ -1534,4 +1574,24 @@ func startDataSourceScheduler(scheduler *datasource.Scheduler, cleaner interface
 		scheduler.Stop()
 		return nil
 	})
+}
+
+func startVoiceTempCleaner(cfg *config.Config, cleaner interfaces.ResourceCleaner) error {
+	if cfg == nil {
+		return fmt.Errorf("config is required for voice temp cleanup")
+	}
+	interval := cfg.Voice.TempMaxAge / 2
+	if interval <= 0 {
+		interval = time.Hour
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := types.StartVoiceTempCleaner(ctx, cfg.Voice.TempRoot, cfg.Voice.TempMaxAge, interval); err != nil {
+		cancel()
+		return err
+	}
+	cleaner.RegisterWithName("VoiceTempCleaner", func() error {
+		cancel()
+		return nil
+	})
+	return nil
 }

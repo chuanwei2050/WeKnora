@@ -27,7 +27,24 @@ func NewUserRepository(db *gorm.DB) interfaces.UserRepository {
 
 // CreateUser creates a user
 func (r *userRepository) CreateUser(ctx context.Context, user *types.User) error {
-	return r.db.WithContext(ctx).Create(user).Error
+	// Native users intentionally keep an empty BidReviewRole. Preserve that
+	// classification before create because GORM or the database may apply the
+	// SSO member default to an empty value.
+	isNativeUser := user.BidReviewRole == ""
+	if err := r.db.WithContext(ctx).Select("*").Create(user).Error; err != nil {
+		return err
+	}
+	if !isNativeUser {
+		return nil
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&types.User{}).
+		Where("id = ?", user.ID).
+		UpdateColumn("bidreview_role", "").Error; err != nil {
+		return err
+	}
+	user.BidReviewRole = ""
+	return nil
 }
 
 // GetUserByID gets a user by ID

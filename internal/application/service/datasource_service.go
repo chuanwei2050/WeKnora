@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/textproto"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -29,6 +30,7 @@ type DataSourceService struct {
 	scheduler         *datasource.Scheduler
 	tenantRepo        interfaces.TenantRepository
 	tagService        interfaces.KnowledgeTagService
+	approvedEndpoints interfaces.ApprovedEndpointRepository
 }
 
 // NewDataSourceService creates a new data source service
@@ -42,6 +44,7 @@ func NewDataSourceService(
 	scheduler *datasource.Scheduler,
 	tenantRepo interfaces.TenantRepository,
 	tagService interfaces.KnowledgeTagService,
+	approvedEndpoints interfaces.ApprovedEndpointRepository,
 ) interfaces.DataSourceService {
 	return &DataSourceService{
 		dsRepo:            dsRepo,
@@ -53,6 +56,7 @@ func NewDataSourceService(
 		scheduler:         scheduler,
 		tenantRepo:        tenantRepo,
 		tagService:        tagService,
+		approvedEndpoints: approvedEndpoints,
 	}
 }
 
@@ -213,7 +217,7 @@ func (s *DataSourceService) ValidateConnection(ctx context.Context, dsID string)
 	}
 
 	// Parse configuration
-	config, err := ds.ParseConfig()
+	config, err := s.parseAuthorizedDataSourceConfig(ctx, ds)
 	if err != nil {
 		return datasource.ErrInvalidConfig
 	}
@@ -251,7 +255,7 @@ func (s *DataSourceService) ListAvailableResources(ctx context.Context, dsID str
 	}
 
 	// Parse configuration
-	config, err := ds.ParseConfig()
+	config, err := s.parseAuthorizedDataSourceConfig(ctx, ds)
 	if err != nil {
 		return nil, datasource.ErrInvalidConfig
 	}
@@ -433,7 +437,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 
 	// Parse configuration
-	config, err := ds.ParseConfig()
+	config, err := s.parseAuthorizedDataSourceConfig(ctx, ds)
 	if err != nil {
 		logger.Errorf(ctx, "failed to parse config: %v", err)
 		syncLog.Status = types.SyncLogStatusFailed
@@ -600,6 +604,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 
 // ValidateCredentials tests connectivity using raw credentials without persisting anything.
 func (s *DataSourceService) ValidateCredentials(ctx context.Context, connectorType string, credentials map[string]interface{}) error {
+	if airGappedMode() {
+		return fmt.Errorf("strict air-gapped mode requires a persisted data connector with approved_endpoint_id")
+	}
 	connector, err := s.connectorRegistry.Get(connectorType)
 	if err != nil {
 		return err
@@ -625,12 +632,61 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 		return err
 	}
 
-	config, err := ds.ParseConfig()
+	config, err := s.parseAuthorizedDataSourceConfig(ctx, ds)
 	if err != nil {
 		return datasource.ErrInvalidConfig
 	}
 
 	return connector.Validate(ctx, config)
+}
+
+func (s *DataSourceService) parseAuthorizedDataSourceConfig(ctx context.Context, ds *types.DataSource) (*types.DataSourceConfig, error) {
+	config, err := ds.ParseConfig()
+	if err != nil || config == nil {
+		return nil, datasource.ErrInvalidConfig
+	}
+	endpointID := strings.TrimSpace(config.ApprovedEndpointID)
+	if endpointID == "" {
+		if airGappedMode() {
+			return nil, fmt.Errorf("strict air-gapped mode requires approved_endpoint_id for data connector")
+		}
+		return config, nil
+	}
+	if s.approvedEndpoints == nil {
+		return nil, fmt.Errorf("approved endpoint registry is unavailable")
+	}
+	endpoint, err := s.approvedEndpoints.GetByID(ctx, ds.TenantID, endpointID)
+	if err != nil {
+		return nil, fmt.Errorf("load approved data connector endpoint: %w", err)
+	}
+	if endpoint == nil {
+		return nil, fmt.Errorf("approved data connector endpoint not found: %s", endpointID)
+	}
+	if err := validateApprovedEndpointForUse(ctx, endpoint, types.EndpointCategoryDataConnector, "sync"); err != nil {
+		return nil, err
+	}
+	config.ApprovedEndpoint = endpoint
+	bindApprovedDataSourceEndpoint(config, endpoint)
+	return config, nil
+}
+
+func bindApprovedDataSourceEndpoint(config *types.DataSourceConfig, endpoint *types.ApprovedEndpoint) {
+	if config == nil || endpoint == nil {
+		return
+	}
+	baseURL := fmt.Sprintf("%s://%s:%d", strings.ToLower(endpoint.Scheme), strings.ToLower(endpoint.Host), endpoint.Port)
+	switch strings.ToLower(strings.TrimSpace(config.Type)) {
+	case types.ConnectorTypeFeishu, types.ConnectorTypeYuque:
+		if config.Credentials == nil {
+			config.Credentials = make(map[string]interface{})
+		}
+		config.Credentials["base_url"] = baseURL
+	case types.ConnectorTypeNotion:
+		if config.Settings == nil {
+			config.Settings = make(map[string]interface{})
+		}
+		config.Settings["base_url"] = baseURL
+	}
 }
 
 // ingestItem writes a single FetchedItem into the knowledge base.

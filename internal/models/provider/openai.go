@@ -29,6 +29,7 @@ func (p *OpenAIProvider) Info() ProviderInfo {
 			types.ModelTypeRerank:      OpenAIBaseURL,
 			types.ModelTypeVLLM:        OpenAIBaseURL,
 			types.ModelTypeASR:         OpenAIBaseURL,
+			types.ModelTypeTTS:         OpenAIBaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
@@ -36,6 +37,7 @@ func (p *OpenAIProvider) Info() ProviderInfo {
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
+			types.ModelTypeTTS,
 		},
 		RequiresAuth: true,
 	}

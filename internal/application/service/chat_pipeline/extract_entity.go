@@ -61,6 +61,10 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		logger.Debugf(ctx, "skipping extract entity, neo4j is disabled")
 		return next()
 	}
+	if !ShouldUseGraph(chatManage) {
+		logger.Debugf(ctx, "skipping extract entity, entity relation not needed")
+		return next()
+	}
 
 	query := chatManage.Query
 
@@ -104,10 +108,10 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		return next()
 	}
 
-	// Check if any knowledge base has ExtractConfig enabled and collect their IDs
+	// Check if any knowledge base has graph indexing enabled and collect their IDs
 	enabledKBSet := make(map[string]struct{})
 	for _, kb := range kbs {
-		if kb.ExtractConfig != nil && kb.ExtractConfig.Enabled {
+		if kb.IsGraphEnabled() {
 			enabledKBSet[kb.ID] = struct{}{}
 		}
 	}
@@ -149,6 +153,18 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	logger.Debugf(ctx, "extracted node: %v", nodes)
 	chatManage.Entity = nodes
 	return next()
+}
+
+// ShouldUseGraph reports layer-1 graph search allowance (relation need ∧ routing budget).
+// Open-graph KB availability is checked at the execution layer, not here.
+func ShouldUseGraph(chatManage *types.ChatManage) bool {
+	if chatManage == nil {
+		return false
+	}
+	if chatManage.RoutingDecision != nil {
+		return chatManage.RoutingDecision.Budget.GraphEnabled && chatManage.RoutingDecision.Classification.NeedsEntityRelation
+	}
+	return types.NeedsEntityRelation(chatManage.Query) || types.NeedsEntityRelation(chatManage.RewriteQuery)
 }
 
 // Extractor is a struct for extracting entities
@@ -195,26 +211,20 @@ func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphDa
 		logger.Errorf(ctx, "failed to parse graph: %v", err)
 		return nil, err
 	}
-	// e.RemoveUnknownRelation(ctx, graph)
+	e.ApplySchemaFilter(ctx, graph)
 	return graph, nil
 }
 
-// RemoveUnknownRelation removes unknown relations from graph
-func (e *Extractor) RemoveUnknownRelation(ctx context.Context, graph *types.GraphData) {
-	relationType := make(map[string]bool)
-	for _, tag := range e.template.Tags {
-		relationType[tag] = true
-	}
+// ApplySchemaFilter applies the unified schema filter using template options.
+func (e *Extractor) ApplySchemaFilter(ctx context.Context, graph *types.GraphData) SchemaFilterResult {
+	return ApplyGraphSchemaFilter(ctx, graph, SchemaFilterOptionsFromTemplate(e.template))
+}
 
-	relationNew := make([]*types.GraphRelation, 0)
-	for _, relation := range graph.Relation {
-		if _, ok := relationType[relation.Type]; ok {
-			relationNew = append(relationNew, relation)
-		} else {
-			logger.Infof(ctx, "Unknown relation type %s with %v, ignore it", relation.Type, e.template.Tags)
-		}
-	}
-	graph.Relation = relationNew
+// RemoveUnknownRelation removes unknown relations from graph.
+// Deprecated for direct use: prefer ApplySchemaFilter / ApplyGraphSchemaFilter so empty Tags
+// no longer wipe all relations under non-strict mode.
+func (e *Extractor) RemoveUnknownRelation(ctx context.Context, graph *types.GraphData) {
+	e.ApplySchemaFilter(ctx, graph)
 }
 
 // QAPromptGenerator is a struct for generating QA prompts
@@ -248,6 +258,13 @@ func (qa *QAPromptGenerator) System(ctx context.Context) string {
 	} else {
 		tags, _ := json.Marshal(qa.Template.Tags)
 		promptLines = append(promptLines, fmt.Sprintf(qa.Template.Description, string(tags)))
+	}
+	if len(qa.Template.EntityTypes) > 0 || qa.Template.StrictSchema {
+		entityTypes, _ := json.Marshal(qa.Template.EntityTypes)
+		promptLines = append(promptLines,
+			"Entity types whitelist (entity_type must be chosen from this list when provided): "+string(entityTypes)+".",
+			"Each entity object MUST include entity_type. Do not invent types outside the whitelist when it is non-empty.",
+		)
 	}
 	if len(qa.Template.Examples) > 0 {
 		promptLines = append(promptLines, qa.ExamplesHeading)
@@ -346,6 +363,10 @@ func (f *Formater) formatExtraction(nodes []*types.GraphNode, relations []*types
 		item := map[string]interface{}{
 			f.nodePrefix: node.Name,
 		}
+		if strings.TrimSpace(node.EntityType) != "" {
+			item[f.nodePrefix+"_type"] = node.EntityType
+			item["entity_type"] = node.EntityType
+		}
 		if len(node.Attributes) > 0 {
 			item[fmt.Sprintf("%s%s", f.nodePrefix, f.attributeSuffix)] = node.Attributes
 		}
@@ -441,8 +462,18 @@ func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphDat
 					attributes = append(attributes, fmt.Sprintf("%v", v))
 				}
 			}
+			entityType := ""
+			for _, key := range []string{"entity_type", f.nodePrefix + "_type", "type"} {
+				if v := group[key]; v != nil {
+					entityType = strings.TrimSpace(fmt.Sprintf("%v", v))
+					if entityType != "" {
+						break
+					}
+				}
+			}
 			nodes = append(nodes, &types.GraphNode{
 				Name:       fmt.Sprintf("%v", group[f.nodePrefix]),
+				EntityType: entityType,
 				Attributes: attributes,
 			})
 		case group[f.relationSource] != nil && group[f.relationTarget] != nil:

@@ -62,6 +62,25 @@ Claude.md
 configure-ollama.sh
 fix-docker.sh
 
+# OpenSpec / e2e 证据中的机密与临时产物（勿提交）
+openspec/**/evidence/**/*token*.txt
+openspec/**/evidence/**/*tokens*.txt
+openspec/**/evidence/**/load-token*.json
+openspec/**/evidence/**/load-users-*.json
+openspec/**/evidence/**/*-raw.txt
+openspec/**/evidence/**/_unit-raw.txt
+openspec/**/evidence/**/*-attempt*.json
+openspec/**/evidence/**/*-retry.json
+openspec/**/evidence/**/outbound-audit-network-none-sim*.json
+openspec/**/evidence/**/approve-neo4j-blocked*.md
+openspec/**/evidence/**/online-tts-smoke.mp3
+openspec/**/evidence/online-baseline-v2/
+openspec/**/evidence/online-baseline-v3/
+openspec/**/evidence/online-baseline-v4/
+openspec/**/evidence/**/*.log
+.gocache-e2e/
+.full-flow-runs/
+
 # WeChat Mini Program local/private configuration
 miniprogram/project.private.config.json
 

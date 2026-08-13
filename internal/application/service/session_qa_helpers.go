@@ -113,6 +113,10 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 
 	// Ensure defaults are set
 	customAgent.EnsureDefaults()
+	cm.ComplexityRouting = customAgent.Config.ComplexityRouting
+	cm.ComplexityRouting.EnsureDefaults()
+	cm.VerifiedAnswer = customAgent.Config.VerifiedAnswer
+	cm.VerifiedAnswer.NormalizeLegacy(customAgent.Config.ReflectionEnabled)
 
 	// Override summary config fields
 	if customAgent.Config.SystemPrompt != "" {

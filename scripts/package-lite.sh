@@ -53,11 +53,19 @@ fi
 # ── Step 2: Build Go binary ──
 echo ">> Building WeKnora-lite binary..."
 export EDITION=lite
+# Milvus and Qdrant both register a generated common.proto descriptor.
+# Keep Lite startup consistent with the macOS packager and downgrade this
+# known cross-client conflict instead of panicking before the server starts.
+export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
 eval "$(./scripts/get_version.sh env)"
-LDFLAGS="-w -s $(./scripts/get_version.sh ldflags)"
+LDFLAGS="-w -s $(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
 export CGO_CFLAGS="-Wno-deprecated-declarations"
 if [ "$(uname)" = "Darwin" ]; then
     export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
+fi
+DUCKDB_EXTENSION_SOURCE_DIR="${DUCKDB_EXTENSION_SOURCE_DIR:-${HOME}/.duckdb/extensions}"
+if [ "${AIR_GAPPED_MODE:-false}" != "true" ] && [ "${AIR_GAPPED_MODE:-false}" != "TRUE" ]; then
+    go run ./cmd/download/duckdb
 fi
 CGO_ENABLED=1 go build -tags "sqlite_fts5" -ldflags="${LDFLAGS}" \
     -o WeKnora-lite ./cmd/server
@@ -76,10 +84,27 @@ cp docs/LITE.md "${DIST_DIR}/README.md"
 if [ -d config ]; then
     cp -r config "${DIST_DIR}/config"
 fi
+JIEBA_DICT_SOURCE="${JIEBA_DICT_SOURCE:-$(go env GOPATH)/pkg/mod/github.com/yanyiwu/gojieba@v1.4.5/deps/cppjieba/dict}"
+if [ ! -d "${JIEBA_DICT_SOURCE}" ]; then
+    echo "ERROR: missing gojieba dictionary directory: ${JIEBA_DICT_SOURCE}" >&2
+    exit 1
+fi
+mkdir -p "${DIST_DIR}/jieba"
+cp "${JIEBA_DICT_SOURCE}"/* "${DIST_DIR}/jieba/"
 if [ -d migrations/sqlite ]; then
     mkdir -p "${DIST_DIR}/migrations/sqlite"
     cp -r migrations/sqlite/* "${DIST_DIR}/migrations/sqlite/"
 fi
+mkdir -p "${DIST_DIR}/duckdb-extensions"
+for extension in spatial excel; do
+    extension_file=$(find "${DUCKDB_EXTENSION_SOURCE_DIR}" -type f -name "${extension}.duckdb_extension" -print -quit)
+    if [ -z "${extension_file}" ]; then
+        echo "ERROR: missing preloaded DuckDB extension: ${extension}.duckdb_extension" >&2
+        exit 1
+    fi
+    cp "${extension_file}" "${DIST_DIR}/duckdb-extensions/"
+done
+printf '\nWEKNORA_DUCKDB_EXTENSION_DIR=./duckdb-extensions\n' >> "${DIST_DIR}/.env.lite.example"
 if [ -f deploy/weknora-lite.service ]; then
     cp deploy/weknora-lite.service "${DIST_DIR}/"
 fi

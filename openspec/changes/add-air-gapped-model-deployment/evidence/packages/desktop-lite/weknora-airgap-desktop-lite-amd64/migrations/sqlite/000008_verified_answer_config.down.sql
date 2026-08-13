@@ -1,0 +1,2 @@
+-- Data migration is intentionally not reversible: runtime compatibility
+-- normalization keeps the legacy reflection flag readable for one cycle.

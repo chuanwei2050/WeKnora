@@ -88,11 +88,14 @@ type StorageConfig struct {
 
 // ExtractConfig represents the extract configuration for a knowledge base
 type ExtractConfig struct {
-	Enabled   bool             `json:"enabled"`
-	Text      string           `json:"text,omitempty"`
-	Tags      []string         `json:"tags,omitempty"`
-	Nodes     []*GraphNode     `json:"nodes,omitempty"`
-	Relations []*GraphRelation `json:"relations,omitempty"`
+	Enabled             bool             `json:"enabled"`
+	Text                string           `json:"text,omitempty"`
+	Tags                []string         `json:"tags,omitempty"`
+	EntityTypes         []string         `json:"entity_types,omitempty"`
+	StrictSchema        bool             `json:"strict_schema,omitempty"`
+	RequireTripleReview bool             `json:"require_triple_review,omitempty"`
+	Nodes               []*GraphNode     `json:"nodes,omitempty"`
+	Relations           []*GraphRelation `json:"relations,omitempty"`
 }
 
 // GraphNode represents a node in the graph extraction configuration

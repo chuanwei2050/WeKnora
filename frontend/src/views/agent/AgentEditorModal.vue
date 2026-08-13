@@ -355,6 +355,97 @@
                   </div>
                 </div>
 
+                <!-- 复杂度路由与验证式回答 -->
+                <div v-show="currentSection === 'reasoning'" class="section">
+                  <div class="section-header">
+                    <h2>复杂度路由与验证式回答</h2>
+                    <p class="section-description">按问题复杂度选择已有能力；默认关闭，不扩大知识库或工具权限。</p>
+                  </div>
+                  <div class="settings-group">
+                    <div class="setting-row">
+                      <div class="setting-info"><label>启用问题复杂度路由</label><p class="desc">低置信度时自动使用保守动作。</p></div>
+                      <div class="setting-control"><t-switch v-model="formData.config.complexity_routing.enabled" /></div>
+                    </div>
+                    <template v-if="formData.config.complexity_routing.enabled">
+                      <div class="setting-row">
+                        <div class="setting-info"><label>置信度阈值</label><p class="desc">范围 0 到 1。</p></div>
+                        <div class="setting-control"><t-input-number v-model="formData.config.complexity_routing.confidence_threshold" :min="0" :max="1" :step="0.05" theme="column" /></div>
+                      </div>
+                      <div class="setting-row">
+                        <div class="setting-info"><label>保守回退动作</label></div>
+                        <div class="setting-control">
+                          <t-select v-model="formData.config.complexity_routing.fallback_action" style="width: 260px">
+                            <t-option value="quick_rag" label="快速检索" /><t-option value="contextual_rag" label="上下文检索" />
+                          </t-select>
+                        </div>
+                      </div>
+                      <div v-for="level in ['L1', 'L2', 'L3', 'L4']" :key="level" class="setting-row">
+                        <div class="setting-info"><label>{{ level }} 目标动作</label><p class="desc">只能选择已有能力，服务端会再次校验。</p></div>
+                        <div class="setting-control">
+                          <t-select v-model="formData.config.complexity_routing.level_actions[level]" style="width: 260px">
+                            <t-option value="quick_rag" label="快速检索" /><t-option value="contextual_rag" label="上下文检索" />
+                            <t-option value="graph_reasoning" label="图谱检索" /><t-option value="verified_agent" label="验证式回答" />
+                          </t-select>
+                        </div>
+                      </div>
+                      <div class="setting-row setting-row-block">
+                        <div class="setting-info">
+                          <label>复杂度分类 Few-shot</label>
+                          <p class="desc">可选。注入分类 prompt；空则保持现网行为。上限由服务端截断。</p>
+                        </div>
+                        <div class="setting-control few-shot-editor">
+                          <div
+                            v-for="(item, idx) in formData.config.complexity_routing.few_shot"
+                            :key="idx"
+                            class="few-shot-row"
+                          >
+                            <t-input v-model="item.question" placeholder="示例问题" style="flex: 1; min-width: 180px" />
+                            <t-select v-model="item.level" style="width: 100px">
+                              <t-option value="L1" label="L1" />
+                              <t-option value="L2" label="L2" />
+                              <t-option value="L3" label="L3" />
+                              <t-option value="L4" label="L4" />
+                            </t-select>
+                            <t-input v-model="item.subtype" placeholder="subtype（可选）" style="width: 140px" />
+                            <t-button variant="text" theme="danger" @click="formData.config.complexity_routing.few_shot.splice(idx, 1)">删除</t-button>
+                          </div>
+                          <t-button
+                            size="small"
+                            variant="outline"
+                            @click="formData.config.complexity_routing.few_shot.push({ question: '', level: 'L1', subtype: '' })"
+                          >添加示例</t-button>
+                        </div>
+                      </div>
+                    </template>
+                    <div class="setting-row">
+                      <div class="setting-info"><label>启用验证式回答</label><p class="desc">仅持久化最终回答，草稿和验证正文不对用户展示。</p></div>
+                      <div class="setting-control"><t-switch v-model="formData.config.verified_answer.enabled" /></div>
+                    </div>
+                    <template v-if="formData.config.verified_answer.enabled">
+                      <div class="setting-row">
+                        <div class="setting-info"><label>严格多模型验证</label><p class="desc">要求至少两个规范化身份不同的验证模型。</p></div>
+                        <div class="setting-control"><t-switch v-model="formData.config.verified_answer.strict_multi_model" /></div>
+                      </div>
+                      <div class="setting-row">
+                        <div class="setting-info"><label>最大反思轮数</label><p class="desc">硬上限为 2，默认 1。</p></div>
+                        <div class="setting-control"><t-input-number v-model="formData.config.verified_answer.max_reflections" :min="0" :max="2" theme="column" /></div>
+                      </div>
+                      <div class="setting-row">
+                        <div class="setting-info"><label>事实验证模型</label></div>
+                        <div class="setting-control"><ModelSelector model-type="KnowledgeQA" :selected-model-id="formData.config.verified_answer.fact_validator_model_id" :all-models="allModels" @update:selected-model-id="(val: string) => formData.config.verified_answer.fact_validator_model_id = val" /></div>
+                      </div>
+                      <div class="setting-row">
+                        <div class="setting-info"><label>引用验证模型</label></div>
+                        <div class="setting-control"><ModelSelector model-type="KnowledgeQA" :selected-model-id="formData.config.verified_answer.citation_validator_model_id" :all-models="allModels" @update:selected-model-id="(val: string) => formData.config.verified_answer.citation_validator_model_id = val" /></div>
+                      </div>
+                      <div class="setting-row">
+                        <div class="setting-info"><label>逻辑验证模型</label></div>
+                        <div class="setting-control"><ModelSelector model-type="KnowledgeQA" :selected-model-id="formData.config.verified_answer.logic_validator_model_id" :all-models="allModels" @update:selected-model-id="(val: string) => formData.config.verified_answer.logic_validator_model_id = val" /></div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+
                 <!-- 多模态配置 -->
                 <div v-show="currentSection === 'multimodal'" class="section">
                   <div class="section-header">
@@ -453,6 +544,69 @@
                         />
                       </div>
                     </div>
+
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>语音输入</label>
+                        <p class="desc">允许用户主动录音，并将确认后的转写作为普通会话消息发送。</p>
+                      </div>
+                      <div class="setting-control"><t-switch v-model="formData.config.voice_input_enabled" /></div>
+                    </div>
+
+                    <div v-if="formData.config.voice_input_enabled" class="setting-row">
+                      <div class="setting-info">
+                        <label>实时语音识别模型 <span class="required">*</span></label>
+                        <p class="desc">浏览器或模型不支持流式识别时自动使用结束后转写。</p>
+                      </div>
+                      <div class="setting-control">
+                        <ModelSelector
+                          model-type="ASR"
+                          :selected-model-id="formData.config.asr_model_id"
+                          :all-models="allModels"
+                          @update:selected-model-id="(val: string) => formData.config.asr_model_id = val"
+                          @add-model="handleAddModel('asr')"
+                          placeholder="请选择 ASR 模型"
+                        />
+                      </div>
+                    </div>
+
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>语音输出</label>
+                        <p class="desc">只对有权访问的最终回答执行 TTS，合成音频默认不持久化。</p>
+                      </div>
+                      <div class="setting-control"><t-switch v-model="formData.config.voice_output_enabled" /></div>
+                    </div>
+
+                    <template v-if="formData.config.voice_output_enabled">
+                      <div class="setting-row">
+                        <div class="setting-info">
+                          <label>TTS 模型 <span class="required">*</span></label>
+                          <p class="desc">请选择声明音频输出能力的 TTS 模型。</p>
+                        </div>
+                        <div class="setting-control">
+                          <ModelSelector
+                            model-type="TTS"
+                            :selected-model-id="formData.config.tts_model_id"
+                            :all-models="allModels"
+                            @update:selected-model-id="(val: string) => formData.config.tts_model_id = val"
+                            @add-model="handleAddModel('tts')"
+                            placeholder="请选择 TTS 模型"
+                          />
+                        </div>
+                      </div>
+                      <div class="setting-row">
+                        <div class="setting-info"><label>语言 / 音色</label><p class="desc">留空时使用模型默认值。</p></div>
+                        <div class="setting-control" style="gap: 8px;">
+                          <t-input v-model="formData.config.voice_language" placeholder="zh-CN" style="width: 130px;" />
+                          <t-input v-model="formData.config.voice_name" placeholder="默认音色" style="width: 130px;" />
+                        </div>
+                      </div>
+                      <div class="setting-row">
+                        <div class="setting-info"><label>自动播放</label><p class="desc">默认关闭；浏览器限制自动播放时保留文本和手动播放控件。</p></div>
+                        <div class="setting-control"><t-switch v-model="formData.config.voice_auto_play" /></div>
+                      </div>
+                    </template>
                   </div>
                 </div>
 
@@ -1764,6 +1918,7 @@ const navItems = computed(() => {
   const items: { key: string; icon: string; label: string }[] = [
     { key: 'basic', icon: 'info-circle', label: t('agent.editor.basicInfo') },
     { key: 'model', icon: 'control-platform', label: t('agent.editor.modelConfig') },
+    { key: 'reasoning', icon: 'control-platform', label: '复杂度与验证' },
   ];
   // 知识库配置（放在工具上面）
   items.push({ key: 'knowledge', icon: 'folder', label: t('agent.editor.knowledgeConfig') });
@@ -1819,6 +1974,24 @@ const defaultFormData = {
     llm_call_timeout: 120,  // 120 seconds
     allowed_tools: [] as string[],
     reflection_enabled: false,
+    complexity_routing: {
+      enabled: false,
+      confidence_threshold: 0.6,
+      fallback_action: 'contextual_rag' as 'quick_rag' | 'contextual_rag' | 'graph_reasoning' | 'verified_agent',
+      level_actions: {
+        L1: 'quick_rag', L2: 'contextual_rag', L3: 'graph_reasoning', L4: 'verified_agent',
+      } as Record<string, 'quick_rag' | 'contextual_rag' | 'graph_reasoning' | 'verified_agent'>,
+      few_shot: [] as Array<{ question: string; level: string; subtype?: string }>,
+    },
+    verified_answer: {
+      enabled: false,
+      strict_multi_model: false,
+      fact_validator_model_id: '',
+      logic_validator_model_id: '',
+      citation_validator_model_id: '',
+      max_reflections: 1,
+      degradation_strategy: 'conservative' as 'conservative' | 'stop',
+    },
     // MCP 服务设置
     mcp_selection_mode: 'none' as 'all' | 'selected' | 'none',
     mcp_services: [] as string[],
@@ -1835,9 +2008,17 @@ const defaultFormData = {
     agent_type: 'rag-qa' as AgentType,
     system_prompt_id: '' as string,
     // 图片上传/多模态设置
-    image_upload_enabled: false,
-    vlm_model_id: '',
-    image_storage_provider: '',
+                    image_upload_enabled: false,
+                    vlm_model_id: '',
+                    image_storage_provider: '',
+                    audio_upload_enabled: false,
+                    asr_model_id: '',
+                    voice_input_enabled: false,
+                    voice_output_enabled: false,
+                    tts_model_id: '',
+                    voice_language: 'zh-CN',
+                    voice_name: '',
+                    voice_auto_play: false,
     // 文件类型限制
     supported_file_types: [] as string[],
     // FAQ 策略设置
@@ -2160,6 +2341,25 @@ watch(() => props.visible, async (val) => {
       
       // 补全可能缺失的字段
       agentData.config = { ...defaultFormData.config, ...agentData.config };
+      agentData.config.complexity_routing = {
+        ...defaultFormData.config.complexity_routing,
+        ...(agentData.config.complexity_routing || {}),
+        level_actions: {
+          ...defaultFormData.config.complexity_routing.level_actions,
+          ...(agentData.config.complexity_routing?.level_actions || {}),
+        },
+        few_shot: Array.isArray(agentData.config.complexity_routing?.few_shot)
+          ? agentData.config.complexity_routing.few_shot.map((item: any) => ({
+              question: item?.question || '',
+              level: item?.level || 'L1',
+              subtype: item?.subtype || '',
+            }))
+          : [],
+      };
+      agentData.config.verified_answer = {
+        ...defaultFormData.config.verified_answer,
+        ...(agentData.config.verified_answer || {}),
+      };
       
       // 确保数组字段存在
       if (!agentData.config.suggested_prompts) agentData.config.suggested_prompts = [];
@@ -3516,6 +3716,33 @@ const handleSave = async () => {
     return;
   }
 
+  const routing = formData.value.config.complexity_routing;
+  if (routing?.enabled && (routing.confidence_threshold < 0 || routing.confidence_threshold > 1)) {
+    MessagePlugin.error('复杂度路由置信度阈值必须在 0 到 1 之间');
+    currentSection.value = 'reasoning';
+    return;
+  }
+  if (routing?.enabled && ['L1', 'L2', 'L3', 'L4'].some(level => !routing.level_actions?.[level])) {
+    MessagePlugin.error('复杂度路由必须为 L1-L4 配置目标动作');
+    currentSection.value = 'reasoning';
+    return;
+  }
+  if (Array.isArray(routing?.few_shot)) {
+    routing.few_shot = routing.few_shot
+      .map((item: any) => ({
+        question: String(item?.question || '').trim(),
+        level: item?.level || 'L1',
+        subtype: String(item?.subtype || '').trim(),
+      }))
+      .filter((item: any) => item.question && item.level);
+  }
+  const verified = formData.value.config.verified_answer;
+  if (verified?.enabled && (verified.max_reflections < 0 || verified.max_reflections > 2)) {
+    MessagePlugin.error('验证式回答反思轮数必须在 0 到 2 之间');
+    currentSection.value = 'reasoning';
+    return;
+  }
+
   // 校验 VLM 模型（当图片上传启用时必填）
   if (formData.value.config.image_upload_enabled && !formData.value.config.vlm_model_id) {
     MessagePlugin.error(t('agentEditor.imageUpload.vlmModelRequired'));
@@ -3850,6 +4077,33 @@ const handleSave = async () => {
   :deep(.t-input-number) {
     width: 120px;
   }
+}
+
+.setting-row-block {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+
+  .setting-control {
+    min-width: 0;
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+.few-shot-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.few-shot-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
 }
 
 .select-option-with-tag {

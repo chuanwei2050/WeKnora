@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -12,12 +13,13 @@ import (
 
 // webSearchProviderService implements interfaces.WebSearchProviderService
 type webSearchProviderService struct {
-	repo interfaces.WebSearchProviderRepository
+	repo              interfaces.WebSearchProviderRepository
+	approvedEndpoints interfaces.ApprovedEndpointRepository
 }
 
 // NewWebSearchProviderService creates a new web search provider service
-func NewWebSearchProviderService(repo interfaces.WebSearchProviderRepository) interfaces.WebSearchProviderService {
-	return &webSearchProviderService{repo: repo}
+func NewWebSearchProviderService(repo interfaces.WebSearchProviderRepository, approvedEndpoints interfaces.ApprovedEndpointRepository) interfaces.WebSearchProviderService {
+	return &webSearchProviderService{repo: repo, approvedEndpoints: approvedEndpoints}
 }
 
 // CreateProvider creates a new web search provider configuration.
@@ -31,6 +33,9 @@ func (s *webSearchProviderService) CreateProvider(ctx context.Context, provider 
 	}
 
 	if err := validateProviderParameters(provider.Provider, provider.Parameters); err != nil {
+		return err
+	}
+	if err := s.validateApprovedEndpoint(ctx, provider.TenantID, &provider.Parameters); err != nil {
 		return err
 	}
 
@@ -66,9 +71,39 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 			return err
 		}
 	}
+	if err := s.validateApprovedEndpoint(ctx, provider.TenantID, &provider.Parameters); err != nil {
+		return err
+	}
 
 	logger.Infof(ctx, "Updating web search provider: tenant=%d, id=%s", provider.TenantID, provider.ID)
 	return s.repo.Update(ctx, provider)
+}
+
+func (s *webSearchProviderService) validateApprovedEndpoint(ctx context.Context, tenantID uint64, params *types.WebSearchProviderParameters) error {
+	if params == nil {
+		return fmt.Errorf("web search parameters are required")
+	}
+	endpointID := strings.TrimSpace(params.ApprovedEndpointID)
+	if endpointID == "" {
+		if airGappedMode() {
+			return fmt.Errorf("strict air-gapped mode requires approved_endpoint_id for web search")
+		}
+		return nil
+	}
+	if s.approvedEndpoints == nil {
+		return fmt.Errorf("approved endpoint registry is unavailable")
+	}
+	endpoint, err := s.approvedEndpoints.GetByID(ctx, tenantID, endpointID)
+	if err != nil {
+		return fmt.Errorf("load approved search endpoint: %w", err)
+	}
+	if endpoint == nil {
+		return fmt.Errorf("approved search endpoint not found: %s", endpointID)
+	}
+	if err := validateApprovedEndpointForUse(ctx, endpoint, types.EndpointCategorySearch, "query"); err != nil {
+		return err
+	}
+	return nil
 }
 
 // DeleteProvider deletes a provider by tenant + id.

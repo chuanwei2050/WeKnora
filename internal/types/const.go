@@ -23,6 +23,12 @@ const (
 	EmbedQueryContextKey ContextKey = "EmbedQuery"
 	// LanguageContextKey is the context key for user language preference (e.g. "zh-CN", "en-US")
 	LanguageContextKey ContextKey = "Language"
+	// GraphQueryAllowedContextKey controls whether the current request needs graph traversal.
+	GraphQueryAllowedContextKey ContextKey = "GraphQueryAllowed"
+	// RetrievalTopKContextKey carries a request-scoped retrieval budget into Agent tools.
+	RetrievalTopKContextKey ContextKey = "RetrievalTopK"
+	// GraphRelationTypesContextKey carries the allowlisted relation types into Agent tools.
+	GraphRelationTypesContextKey ContextKey = "GraphRelationTypes"
 	// LangfuseTraceContextKey carries the active Langfuse *Trace across the
 	// request lifecycle. Defined here (not inside the langfuse package) so
 	// that logger.CloneContext can preserve it without importing langfuse.

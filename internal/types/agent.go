@@ -62,6 +62,27 @@ type AgentConfig struct {
 	// Whether to execute independent tool calls in parallel (default: false).
 	// When enabled and the LLM returns multiple tool calls, they run concurrently via errgroup.
 	ParallelToolCalls bool `json:"parallel_tool_calls,omitempty"`
+
+	// ComplexityRouting is copied from persisted agent configuration at runtime.
+	ComplexityRouting ComplexityRoutingConfig `json:"complexity_routing,omitempty"`
+	VerifiedAnswer    VerifiedAnswerConfig    `json:"verified_answer,omitempty"`
+	// RoutingDecision is request-scoped and is never persisted with the agent.
+	RoutingDecision *RoutingDecision `json:"-"`
+	// SubQuestionPlan is request-scoped and is never persisted with the agent.
+	SubQuestionPlan *SubQuestionPlan `json:"-"`
+}
+
+// ApplyRoutingDecision narrows the agent's existing execution budget. It never
+// grants tools or knowledge scope that was not already present in the agent.
+func (c *AgentConfig) ApplyRoutingDecision() {
+	if c == nil || c.RoutingDecision == nil {
+		return
+	}
+	budget := c.RoutingDecision.Budget
+	if budget.MaxAgentIterations > 0 && (c.MaxIterations == 0 || budget.MaxAgentIterations < c.MaxIterations) {
+		c.MaxIterations = budget.MaxAgentIterations
+	}
+	c.VerifiedAnswer.Enabled = budget.VerificationEnabled
 }
 
 // SessionAgentConfig represents session-level agent configuration
@@ -214,6 +235,10 @@ type AgentState struct {
 	IsComplete    bool            `json:"is_complete"`    // Whether agent has finished
 	FinalAnswer   string          `json:"final_answer"`   // The final answer to the query
 	KnowledgeRefs []*SearchResult `json:"knowledge_refs"` // Collected knowledge references
+	// ConfirmedSubQuestionResults contains only successful, ordered retrieval
+	// results produced before the ReAct loop. It is request-scoped evidence,
+	// not model-generated reasoning.
+	ConfirmedSubQuestionResults map[int]string `json:"confirmed_sub_question_results,omitempty"`
 }
 
 // FunctionDefinition represents a function definition for LLM function calling

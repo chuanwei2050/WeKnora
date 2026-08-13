@@ -1,0 +1,16 @@
+{
+  "models": [
+    {
+      "role": "chat",
+      "protocol": "openai-compatible",
+      "location": "private-network",
+      "artifact_policy": "preloaded-only",
+      "model_name": "internal/chat-fixture",
+      "license": "Apache-2.0",
+      "redistributable": false,
+      "import_steps": [
+        "管理员从已批准的内网模型仓库导入 internal/chat-fixture"
+      ]
+    }
+  ]
+}

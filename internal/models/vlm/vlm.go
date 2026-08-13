@@ -3,6 +3,7 @@ package vlm
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -32,6 +33,7 @@ type Config struct {
 	Extra         map[string]any
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
+	ValidateIP    func(net.IP) error
 	AppID         string
 	AppSecret     string
 }

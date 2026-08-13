@@ -1,0 +1,1 @@
+ALTER TABLE acceptance_artifacts ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'report';

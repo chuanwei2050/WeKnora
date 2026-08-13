@@ -1,0 +1,26 @@
+{
+  "schema": "weknora-outbound-audit/v1",
+  "status": "passed",
+  "probe_url": "https://203.0.113.1/",
+  "resolved_ips": [
+    "203.0.113.1"
+  ],
+  "public_ips": [
+    "203.0.113.1"
+  ],
+  "attempted_public_connections": 1,
+  "successful_public_connections": 0,
+  "blocked_or_failed_connections": 1,
+  "events": [
+    {
+      "mode": "probe",
+      "url": "https://203.0.113.1/",
+      "outcome": "blocked_or_failed",
+      "error": "The request was canceled due to the configured HttpClient.Timeout of 5 seconds elapsing.",
+      "resolved_ips": [
+        "203.0.113.1"
+      ]
+    }
+  ],
+  "generated_at": "2026-08-13T06:51:15.0559027+00:00"
+}

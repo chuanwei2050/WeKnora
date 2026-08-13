@@ -85,3 +85,17 @@ Agent 工具直接调用同一服务，并返回真实 `nodes`、`edges`、`path
 
 - 默认最大深度和融合权重需在软件测评多跳问题集上校准，设计上先采用深度 2、硬上限 4。
 - 是否允许跨知识库路径连接取决于后续是否建立受治理的共享实体层；首版仅允许单一知识库命名空间内跨文档。
+
+## 补充设计决策
+
+### 1. 治理版本使用隔离图谱 namespace
+
+启用知识治理时，图谱 namespace 必须至少包含 `(tenant_id, knowledge_base_id, knowledge_version_id)`。`draft`、`pending_review` 和未进入生产的 `indexing` 版本只能写入 staging namespace，不得写入当前生产 namespace；未启用治理时继续使用兼容的 knowledge 级 namespace。
+
+### 2. 图谱切换与知识版本发布绑定
+
+版本发布任务必须在图谱、向量和关键词索引全部构建成功后，执行一次原子可见性切换：先校验新 namespace 的证据版本集合，再切换图谱 active namespace 和 `current_version_id`。任一索引失败时保留旧 active namespace，禁止只切换图谱或只切换文本索引。回滚复用同一流程。
+
+### 3. 查询层在 GraphContext 之前做版本过滤
+
+图仓储返回的节点、边、路径和证据必须按当前有效版本过滤后，才能转换成 `GraphData`、`GraphContext` 或回答引用。不能只在图结果关联 chunk 后过滤，因为未经授权或未发布的边可能已经影响路径和上下文排序。

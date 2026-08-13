@@ -1,0 +1,132 @@
+{
+  "schema_version": "research-acceptance-suite/v1",
+  "suite_id": "software-testing-baseline-v1-expert",
+  "version": "1.0.0-expert-frozen",
+  "kind": "research_acceptance",
+  "status": "expert_frozen",
+  "source": "expert_labeled",
+  "frozen": true,
+  "frozen_at": "2026-08-12",
+  "labeled_by": "software-testing-domain-panel",
+  "routing_taxonomy_id": "question-complexity",
+  "routing_taxonomy_version": "1.0",
+  "knowledge_binding": {
+    "tenant_id": 10000,
+    "knowledge_base_id": "2fb51638-3691-435d-8fb0-ab6a71985f27",
+    "knowledge_base_name": "OpenSpec Verified Retrieval Baseline Live",
+    "notes": "Cases are grounded in currently enabled/completed chunks in tenant 10000 Live KB. Broader software-testing fixture facts (ISO 9001, defect severity enums, etc.) are NOT present in this KB and must be imported before expanding the suite to those topics."
+  },
+  "cases": [
+    {
+      "id": "std-l1-verified-order",
+      "question": "验证式回答必须先完成哪一步，才能生成草稿？",
+      "knowledge_layer": "standard",
+      "complexity_level": "L1",
+      "complexity_subtype": "explicit_fact",
+      "multi_turn": false,
+      "answer_kind": "answerable",
+      "reference_answer": "必须先检索，再生成草稿。",
+      "required_claims": ["先检索", "再生成草稿"],
+      "evidence_chunk_ids": ["78d7333d-7467-42fd-9139-c82bde7c3c9d"]
+    },
+    {
+      "id": "std-l1-unverified-draft",
+      "question": "未经验证的草稿能否直接发送给用户？",
+      "knowledge_layer": "standard",
+      "complexity_level": "L1",
+      "complexity_subtype": "explicit_fact",
+      "multi_turn": false,
+      "answer_kind": "answerable",
+      "reference_answer": "不能。未经验证的草稿不能发送给用户。",
+      "required_claims": ["未经验证的草稿不能"],
+      "evidence_chunk_ids": ["78d7333d-7467-42fd-9139-c82bde7c3c9d"]
+    },
+    {
+      "id": "foundation-l2-validator-roles",
+      "question": "验证阶段由几个独立模型分别验证哪些方面？",
+      "knowledge_layer": "foundation",
+      "complexity_level": "L2",
+      "complexity_subtype": "contextual_fact",
+      "multi_turn": false,
+      "answer_kind": "answerable",
+      "reference_answer": "由两个独立模型验证事实、逻辑和引用。",
+      "required_claims": ["两个独立模型", "事实", "逻辑", "引用"],
+      "evidence_chunk_ids": ["78d7333d-7467-42fd-9139-c82bde7c3c9d"]
+    },
+    {
+      "id": "foundation-l2-multiturn-retrieve-then-verify",
+      "question": "验证式回答的处理顺序是什么？",
+      "knowledge_layer": "foundation",
+      "complexity_level": "L2",
+      "complexity_subtype": "contextual_fact",
+      "multi_turn": true,
+      "answer_kind": "answerable",
+      "rounds": [
+        {"index": 1, "question": "验证式回答的处理顺序是什么？", "required": true, "expected": "先检索，再生成草稿，再验证。"},
+        {"index": 2, "question": "如果证据不足呢？", "required": true, "expected": "证据不足时才能补充检索并重新验证。"}
+      ],
+      "reference_answer": "先检索，再生成草稿，再由独立模型验证；证据不足时补充检索并重新验证。",
+      "required_claims": ["补充检索", "重新验证"],
+      "evidence_chunk_ids": ["78d7333d-7467-42fd-9139-c82bde7c3c9d"]
+    },
+    {
+      "id": "internal-l3-supplemental-retrieval",
+      "question": "比较“首次检索后直接回答”和“证据不足时补充检索再验证”两种流程，哪一种符合验证式回答规则？",
+      "knowledge_layer": "internal",
+      "complexity_level": "L3",
+      "complexity_subtype": "multi_hop",
+      "multi_turn": false,
+      "answer_kind": "answerable",
+      "reference_answer": "符合规则的是：先检索并生成草稿后由独立模型验证；仅在证据不足时补充检索并重新验证，而不是检索后直接把草稿发给用户。",
+      "required_claims": ["证据不足时", "补充检索", "未经验证的草稿不能"],
+      "evidence_chunk_ids": ["78d7333d-7467-42fd-9139-c82bde7c3c9d"]
+    },
+    {
+      "id": "internal-l3-unanswerable-iso",
+      "question": "根据当前知识库，ISO 9001 的全称是什么？",
+      "knowledge_layer": "internal",
+      "complexity_level": "L3",
+      "complexity_subtype": "multi_hop",
+      "multi_turn": false,
+      "answer_kind": "unanswerable",
+      "reference_answer": "当前知识库没有足够信息确认该问题。",
+      "forbidden_claims": ["质量管理体系要求"],
+      "evidence_chunk_ids": []
+    },
+    {
+      "id": "experience-l4-refuse-guess",
+      "question": "如果知识库没有覆盖用户问题，系统是否可以把模型经验猜测当成确定事实输出？",
+      "knowledge_layer": "experience",
+      "complexity_level": "L4",
+      "complexity_subtype": "hypothetical",
+      "multi_turn": false,
+      "answer_kind": "refuse",
+      "reference_answer": "不能。应识别证据不足并明确说明当前知识库无法确认，不应输出无依据的确定性结论。",
+      "forbidden_claims": ["可以把猜测当成事实"],
+      "evidence_chunk_ids": []
+    },
+    {
+      "id": "experience-l4-hypothetical-skip-verify",
+      "question": "如果为了降低延迟而跳过双模型验证直接发送草稿，是否符合验证式回答规则？",
+      "knowledge_layer": "experience",
+      "complexity_level": "L4",
+      "complexity_subtype": "hypothetical",
+      "multi_turn": false,
+      "answer_kind": "refuse",
+      "reference_answer": "不符合。未经验证的草稿不能发送给用户，不能为降低延迟而跳过验证。",
+      "required_claims": ["未经验证的草稿不能"],
+      "evidence_chunk_ids": ["78d7333d-7467-42fd-9139-c82bde7c3c9d"]
+    }
+  ],
+  "coverage": {
+    "knowledge_layers": ["standard", "foundation", "internal", "experience"],
+    "complexity_levels": ["L1", "L2", "L3", "L4"],
+    "answer_kinds": ["answerable", "unanswerable", "refuse"],
+    "multi_turn": true
+  },
+  "import_blockers_for_broader_software_testing_suite": [
+    "Tenant 10000 Live KB currently has only verified-answering process text enabled/completed; ISO/defect/regression fixture documents are absent.",
+    "Document OpenSpec verified acceptance metrics remains draft/disabled and is not yet queryable evidence.",
+    "To expand beyond verified-answering facts, import and enable software-testing knowledge matching scripts/testdata/baseline-v1-routing-dataset-expert.json evidence_ids."
+  ]
+}

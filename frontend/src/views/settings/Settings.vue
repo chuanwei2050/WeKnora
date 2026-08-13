@@ -151,6 +151,21 @@
                 <div v-if="currentSection === 'mcp'" class="section">
                   <McpSettings />
                 </div>
+
+                <!-- 回答反馈审核 -->
+                <div v-if="currentSection === 'feedback'" class="section">
+                  <FeedbackReview />
+                </div>
+
+                <!-- 图三元组审核（独立于知识版本治理） -->
+                <div v-if="currentSection === 'graph-triples'" class="section">
+                  <GraphTripleReview />
+                </div>
+
+                <!-- 验收评测 -->
+                <div v-if="currentSection === 'acceptance'" class="section">
+                  <AcceptanceReview />
+                </div>
               </div>
             </div>
           </div>
@@ -179,6 +194,9 @@ import ParserEngineSettings from './ParserEngineSettings.vue'
 import StorageEngineSettings from './StorageEngineSettings.vue'
 import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
 import { isBidReviewEmbeddedMode } from '@/utils/bidreview-sso'
+import FeedbackReview from './FeedbackReview.vue'
+import GraphTripleReview from './GraphTripleReview.vue'
+import AcceptanceReview from './AcceptanceReview.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -190,8 +208,15 @@ const currentSubSection = ref<string>('')
 const expandedMenus = ref<string[]>([])
 const isBidReviewEmbedded = computed(() => isBidReviewEmbeddedMode())
 
-const navItems = computed(() => {
-  const items = [
+type SettingsNavItem = {
+  key: string
+  icon: string
+  label: string
+  children?: Array<{ key: string; label: string }>
+}
+
+const navItems = computed<SettingsNavItem[]>(() => {
+  const items: SettingsNavItem[] = [
     { key: 'general', icon: 'setting', label: t('general.title') },
     { key: 'ollama', icon: 'server', label: 'Ollama' },
     { key: 'weknoracloud', icon: '', label: 'WeKnora Cloud' },
@@ -204,7 +229,10 @@ const navItems = computed(() => {
     { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
     { key: 'system', icon: 'info-circle', label: t('settings.systemSettings') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
-    { key: 'api', icon: 'secured', label: t('settings.apiInfo') }
+    { key: 'api', icon: 'secured', label: t('settings.apiInfo') },
+    { key: 'feedback', icon: 'check-circle', label: t('settings.graphTripleReview.feedbackNav') },
+    { key: 'graph-triples', icon: 'relation', label: t('settings.graphTripleReview.nav') },
+    { key: 'acceptance', icon: 'chart-line', label: t('settings.graphTripleReview.acceptanceNav') }
   ]
   return items
 })

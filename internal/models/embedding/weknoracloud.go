@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/transport"
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/google/uuid"
 )
@@ -41,6 +42,10 @@ func NewWeKnoraCloudEmbedder(config Config) (*WeKnoraCloudEmbedder, error) {
 	if config.ExtraConfig != nil {
 		remoteModelName = strings.TrimSpace(config.ExtraConfig["remote_model_name"])
 	}
+	client, err := transport.NewEndpointHTTPClientWithValidation(strings.TrimRight(config.BaseURL, "/"), 60*time.Second, config.ValidateIP)
+	if err != nil {
+		return nil, fmt.Errorf("invalid WeKnoraCloud embedding endpoint: %w", err)
+	}
 	return &WeKnoraCloudEmbedder{
 		modelName:       config.ModelName,
 		remoteModelName: remoteModelName,
@@ -49,7 +54,7 @@ func NewWeKnoraCloudEmbedder(config Config) (*WeKnoraCloudEmbedder, error) {
 		apiKey:          config.AppSecret,
 		baseURL:         strings.TrimRight(config.BaseURL, "/"),
 		dimensions:      config.Dimensions,
-		client:          &http.Client{Timeout: 60 * time.Second},
+		client:          client,
 	}, nil
 }
 

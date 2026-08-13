@@ -78,6 +78,8 @@ type KnowledgeBase struct {
 	VectorStoreID *string `yaml:"vector_store_id"         json:"vector_store_id,omitempty" gorm:"column:vector_store_id;type:varchar(36);<-:create"`
 	// Extract config
 	ExtractConfig *ExtractConfig `yaml:"extract_config"          json:"extract_config"          gorm:"column:extract_config;type:json"`
+	// Governance is opt-in so legacy knowledge bases keep their existing import path.
+	Governance KnowledgeGovernanceConfig `yaml:"governance" json:"governance" gorm:"column:governance;type:json"`
 	// FAQConfig stores FAQ specific configuration such as indexing strategy
 	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"              gorm:"column:faq_config;type:json"`
 	// QuestionGenerationConfig stores question generation configuration for document knowledge bases
@@ -122,6 +124,8 @@ type KnowledgeBaseConfig struct {
 	// IndexingStrategy controls which indexing pipelines are active.
 	// nil means "no change" when updating (preserves existing strategy).
 	IndexingStrategy *IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"`
+	// Governance enables immutable-version review and publication for the KB.
+	Governance *KnowledgeGovernanceConfig `yaml:"governance" json:"governance"`
 }
 
 // ParserEngineRule maps a set of file types to a specific parser engine.
@@ -439,11 +443,14 @@ func (c *ASRConfig) Scan(value interface{}) error {
 
 // ExtractConfig represents the extract configuration for a knowledge base
 type ExtractConfig struct {
-	Enabled   bool             `yaml:"enabled"   json:"enabled"`
-	Text      string           `yaml:"text"      json:"text,omitempty"`
-	Tags      []string         `yaml:"tags"      json:"tags,omitempty"`
-	Nodes     []*GraphNode     `yaml:"nodes"     json:"nodes,omitempty"`
-	Relations []*GraphRelation `yaml:"relations" json:"relations,omitempty"`
+	Enabled             bool             `yaml:"enabled"       json:"enabled"`
+	Text                string           `yaml:"text"          json:"text,omitempty"`
+	Tags                []string         `yaml:"tags"          json:"tags,omitempty"`
+	EntityTypes         []string         `yaml:"entity_types"  json:"entity_types,omitempty"`
+	StrictSchema        bool             `yaml:"strict_schema" json:"strict_schema,omitempty"`
+	RequireTripleReview bool             `yaml:"require_triple_review" json:"require_triple_review,omitempty"`
+	Nodes               []*GraphNode     `yaml:"nodes"         json:"nodes,omitempty"`
+	Relations           []*GraphRelation `yaml:"relations"     json:"relations,omitempty"`
 }
 
 // Value implements the driver.Valuer interface, used to convert ExtractConfig to database value

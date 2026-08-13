@@ -1,0 +1,93 @@
+{
+  "schema": "weknora-offline-frozen-suite/v1",
+  "profile": "compose-airgap",
+  "run_id": "offline-20260812092935",
+  "frozen_inputs": {
+    "path": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\frozen-inputs-v1.json",
+    "freeze_sha256": "1495129bc2187950b905f36843c2fe2e2111f1288cf0abcde001cd9c69b27fd9",
+    "suite_sha256": "6f459566f92a164ce31bbc5a61fdecdb6fe1a8b0e6efae07a82ab7cc7e6d298c"
+  },
+  "applicability": {
+    "document_ingest": true,
+    "retrieval": true,
+    "routing": true,
+    "graph": true,
+    "verification": true,
+    "voice": true,
+    "performance": true
+  },
+  "profile_semantics": {
+    "single_node": "component/model location gate",
+    "server_load": "50 independent sessions / 10 concurrent sessions"
+  },
+  "checks": [
+    {
+      "name": "single_node_gate",
+      "status": "blocked",
+      "details": "profile=compose-airgap；模型角色清单缺失：chat, vlm, verifier_1, verifier_2, judge, embedding, rerank, asr, tts。",
+      "data": {
+        "profile": "compose-airgap",
+        "non_same_host": [],
+        "missing_model_roles": [
+          "chat",
+          "vlm",
+          "verifier_1",
+          "verifier_2",
+          "judge",
+          "embedding",
+          "rerank",
+          "asr",
+          "tts"
+        ]
+      }
+    },
+    {
+      "name": "airgap_preflight",
+      "status": "passed",
+      "details": "离线介质清单、位置和校验和预检通过。",
+      "data": null
+    },
+    {
+      "name": "outbound_audit",
+      "status": "passed",
+      "details": "出站审计必须证明成功公网连接数为 0。",
+      "data": {
+        "schema": "weknora-outbound-audit/v1",
+        "status": "passed",
+        "probe_url": "https://example.invalid/health",
+        "resolved_ips": [],
+        "public_ips": [],
+        "attempted_public_connections": 0,
+        "successful_public_connections": 0,
+        "blocked_or_failed_connections": 0,
+        "events": [
+          {
+            "mode": "fixture",
+            "url": "https://example.invalid/health",
+            "outcome": "not_attempted",
+            "reason": "NoNetwork"
+          }
+        ],
+        "generated_at": "2026-08-12T17:29:35.2398766+08:00"
+      }
+    },
+    {
+      "name": "frozen_e2e_suite",
+      "status": "blocked",
+      "details": "dry-run 未执行真实离线 RAG/Agent。",
+      "data": null
+    },
+    {
+      "name": "server_load_gate",
+      "status": "blocked",
+      "details": "dry-run 未发起服务器负载。",
+      "data": null
+    }
+  ],
+  "single_node_gate": "blocked",
+  "server_load_gate": "blocked",
+  "started_at": "2026-08-12T09:29:35.8167183+00:00",
+  "completed_at": "2026-08-12T09:29:36.0971706+00:00",
+  "gate": "blocked",
+  "integrity_sha256": "844efae8fe8820276bd7226f85ed7b7fdc50860c17786504803809cb7f7850ed"
+}

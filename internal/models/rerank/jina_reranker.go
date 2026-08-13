@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/transport"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -55,12 +57,16 @@ func NewJinaReranker(config *RerankerConfig) (*JinaReranker, error) {
 		baseURL = url
 	}
 
+	client, err := transport.NewEndpointHTTPClientWithValidation(baseURL, 60*time.Second, config.ValidateIP)
+	if err != nil {
+		return nil, fmt.Errorf("invalid rerank endpoint: %w", err)
+	}
 	return &JinaReranker{
 		modelName: config.ModelName,
 		modelID:   config.ModelID,
 		apiKey:    apiKey,
 		baseURL:   baseURL,
-		client:    &http.Client{},
+		client:    client,
 	}, nil
 }
 

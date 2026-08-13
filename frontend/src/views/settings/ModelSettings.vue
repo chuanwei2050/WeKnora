@@ -4,6 +4,54 @@
       <h2>{{ $t('modelSettings.title') }}</h2>
       <p class="section-description">{{ $t('modelSettings.description') }}</p>
 
+      <div class="profile-status-banner" role="status">
+        <div class="profile-status-row">
+          <span class="profile-badge">{{ $t('modelSettings.modelProfile.profileLabel') }}: {{ profileStatus?.profile || '—' }}</span>
+          <span class="airgap-badge" :class="{ on: profileStatus?.air_gapped }">
+            {{ profileStatus?.air_gapped ? $t('modelSettings.modelProfile.airGappedOn') : $t('modelSettings.modelProfile.airGappedOff') }}
+          </span>
+          <span v-if="profileStatus && !profileStatus.profile_valid" class="warn-badge">{{ $t('modelSettings.modelProfile.invalidProfile') }}</span>
+        </div>
+        <p v-if="profileStatus" class="profile-summary">
+          {{ $t('modelSettings.modelProfile.summary', {
+            missingEnv: profileStatus.summary.missing_env,
+            missingReg: profileStatus.summary.missing_registration,
+            mismatch: profileStatus.summary.mismatch,
+            ok: profileStatus.summary.ok
+          }) }}
+        </p>
+        <p class="profile-disclaimer">{{ $t('modelSettings.modelProfile.disclaimer') }}</p>
+        <t-button theme="default" variant="text" size="small" @click="profileExpanded = !profileExpanded">
+          {{ profileExpanded ? $t('modelSettings.modelProfile.collapse') : $t('modelSettings.modelProfile.expand') }}
+        </t-button>
+        <div v-if="profileExpanded && profileStatus" class="profile-role-list">
+          <div v-for="role in profileStatus.roles" :key="role.role" class="profile-role-row">
+            <div class="profile-role-main">
+              <strong>{{ role.role }}</strong>
+              <span class="status-pill" :data-status="role.status">{{ statusLabel(role.status) }}</span>
+              <span class="expected-name">{{ $t('modelSettings.modelProfile.expected') }}: {{ role.expected_name || '—' }}</span>
+            </div>
+            <div class="profile-role-actions">
+              <template v-if="role.status === 'missing_env'">
+                <span class="hint">{{ $t('modelSettings.modelProfile.fillEnvFirst') }}</span>
+              </template>
+              <t-button
+                v-else-if="actionForRole(role.role)"
+                size="small"
+                theme="primary"
+                variant="outline"
+                @click="runProfileAction(actionForRole(role.role)!)"
+              >
+                {{ actionForRole(role.role)!.intent === 'edit'
+                  ? $t('modelSettings.modelProfile.actionEdit')
+                  : $t('modelSettings.modelProfile.actionAdd') }}
+              </t-button>
+            </div>
+            <p v-if="role.gap_reason" class="gap-reason">{{ role.gap_reason }}</p>
+          </div>
+        </div>
+      </div>
+
       <div class="builtin-models-hint" role="note">
         <p class="builtin-hint-label">{{ $t('modelSettings.builtinModels.title') }}</p>
         <p class="builtin-hint-text">{{ $t('modelSettings.builtinModels.description') }}</p>
@@ -42,6 +90,7 @@
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.remote') }}</span>
+              <span class="deployment-tag">{{ deploymentSummary(model) }}</span>
               <!-- <span class="model-id">{{ model.modelName }}</span> -->
             </div>
           </div>
@@ -94,6 +143,7 @@
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.remote') }}</span>
+              <span class="deployment-tag">{{ deploymentSummary(model) }}</span>
               <!-- <span class="model-id">{{ model.modelName }}</span> -->
               <span v-if="model.dimension" class="dimension">{{ $t('model.editor.dimensionLabel') }}: {{ model.dimension }}</span>
             </div>
@@ -147,6 +197,7 @@
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.remote') }}</span>
+              <span class="deployment-tag">{{ deploymentSummary(model) }}</span>
               <!-- <span class="model-id">{{ model.modelName }}</span> -->
             </div>
           </div>
@@ -199,6 +250,7 @@
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.openaiCompatible') }}</span>
+              <span class="deployment-tag">{{ deploymentSummary(model) }}</span>
               <!-- <span class="model-id">{{ model.modelName }}</span> -->
             </div>
           </div>
@@ -251,6 +303,7 @@
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.openaiCompatible') }}</span>
+              <span class="deployment-tag">{{ deploymentSummary(model) }}</span>
             </div>
           </div>
           <div class="model-actions">
@@ -278,6 +331,46 @@
       </div>
     </div>
 
+    <!-- TTS 语音模型 -->
+    <div class="settings-group model-type-group" data-model-type="tts">
+      <div class="section-subheader">
+        <div class="subheader-text">
+          <h3>TTS 语音合成模型</h3>
+          <p class="section-desc">将最终回答转换为临时音频播放，默认不持久化。</p>
+        </div>
+        <t-button theme="primary" size="small" @click="openAddDialog('tts')">
+          <template #icon><add-icon /></template>
+          {{ $t('modelSettings.actions.addModel') }}
+        </t-button>
+      </div>
+      <div v-if="ttsModels.length > 0" class="model-list-container">
+        <div v-for="model in ttsModels" :key="model.id" class="model-card" :class="{ 'builtin-model': model.isBuiltin }">
+          <div class="model-info">
+            <div class="model-name">
+              {{ model.name }}
+              <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
+            </div>
+            <div class="model-meta">
+              <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.openaiCompatible') }}</span>
+              <span class="deployment-tag">{{ deploymentSummary(model) }}</span>
+            </div>
+          </div>
+          <div class="model-actions">
+            <t-dropdown :options="getModelOptions('tts', model)" @click="(data: any) => handleMenuAction(data, 'tts', model)" placement="bottom-right" attach="body">
+              <t-button variant="text" shape="square" size="small" class="more-btn"><t-icon name="more" /></t-button>
+            </t-dropdown>
+          </div>
+        </div>
+      </div>
+      <div v-else class="empty-models">
+        <p>暂未配置 TTS 模型</p>
+        <t-button theme="primary" size="small" @click="openAddDialog('tts')">
+          <template #icon><add-icon /></template>
+          {{ $t('modelSettings.actions.addModel') }}
+        </t-button>
+      </div>
+    </div>
+
     <!-- 模型编辑器弹窗 -->
     <ModelEditorDialog
       v-model:visible="showDialog"
@@ -295,14 +388,23 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
-import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
+import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, preflightModel, type ModelConfig, type ModelPreflightResult } from '@/api/model'
+import {
+  getModelProfileStatus,
+  type ModelProfileAction,
+  type ModelProfileDialogType,
+  type ModelProfileStatus
+} from '@/api/system'
 
 const { t } = useI18n()
 
 const showDialog = ref(false)
-const currentModelType = ref<'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'>('chat')
+const currentModelType = ref<'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts'>('chat')
 const editingModel = ref<any>(null)
 const loading = ref(true)
+const preflightResults = ref<Record<string, ModelPreflightResult>>({})
+const profileStatus = ref<ModelProfileStatus | null>(null)
+const profileExpanded = ref(false)
 
 // 模型列表数据
 const allModels = ref<ModelConfig[]>([])
@@ -338,6 +440,12 @@ const asrModels = computed(() =>
     .map(convertToLegacyFormat)
 )
 
+const ttsModels = computed(() =>
+  allModels.value
+    .filter(m => m.type === 'TTS')
+    .map(convertToLegacyFormat)
+)
+
 // 将后端模型格式转换为旧的前端格式
 function convertToLegacyFormat(model: ModelConfig) {
   return {
@@ -351,6 +459,10 @@ function convertToLegacyFormat(model: ModelConfig) {
     dimension: model.parameters.embedding_parameters?.dimension,
     isBuiltin: model.is_builtin || false,
     supportsVision: model.parameters.supports_vision || false,
+    protocol: model.parameters.protocol,
+    location: model.parameters.location,
+    artifactPolicy: model.parameters.artifact_policy,
+    inferenceEngine: model.parameters.inference_engine || '',
     // 将后端 map 形式转换为前端可编辑的数组形式
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
@@ -373,15 +485,96 @@ const loadModels = async () => {
   }
 }
 
+const loadProfileStatus = async () => {
+  try {
+    const res = await getModelProfileStatus()
+    profileStatus.value = res.data
+  } catch (error: any) {
+    console.error('加载 profile 状态失败:', error)
+    MessagePlugin.warning(error?.message || t('modelSettings.modelProfile.loadFailed'))
+  }
+}
+
+const statusLabel = (status: string) => {
+  switch (status) {
+    case 'ok':
+      return t('modelSettings.modelProfile.statusOk')
+    case 'missing_env':
+      return t('modelSettings.modelProfile.statusMissingEnv')
+    case 'missing_registration':
+      return t('modelSettings.modelProfile.statusMissingReg')
+    case 'mismatch':
+      return t('modelSettings.modelProfile.statusMismatch')
+    default:
+      return status
+  }
+}
+
+const actionForRole = (role: string): ModelProfileAction | undefined =>
+  profileStatus.value?.actions.find(a => a.role === role)
+
+const runProfileAction = (action: ModelProfileAction) => {
+  const dialogType = (action.add_dialog_type || 'chat') as ModelProfileDialogType
+  if (action.intent === 'edit' && action.matched_model_id) {
+    const model = allModels.value.find(m => m.id === action.matched_model_id)
+    if (!model) {
+      MessagePlugin.warning(t('modelSettings.modelProfile.loadFailed'))
+      return
+    }
+    if (model.is_builtin) {
+      MessagePlugin.warning(t('modelSettings.modelProfile.builtinCannotEdit'))
+      return
+    }
+    const mappedType = dialogTypeFromModelType(model.type) || dialogType
+    editModel(mappedType, convertToLegacyFormat(model))
+    return
+  }
+  const role = profileStatus.value?.roles.find(r => r.role === action.role)
+  currentModelType.value = dialogType
+  editingModel.value = {
+    name: role?.expected_name || '',
+    modelName: role?.expected_name || '',
+    source: 'remote',
+    baseUrl: role?.expected_base_url || '',
+    apiKey: '',
+    dimension: role?.expected_dimension || undefined,
+    provider: '',
+    supportsVision: dialogType === 'vllm'
+  }
+  showDialog.value = true
+}
+
+const dialogTypeFromModelType = (type: string): ModelProfileDialogType | null => {
+  switch (type) {
+    case 'KnowledgeQA':
+    case 'Verifier':
+    case 'EvaluationJudge':
+      return 'chat'
+    case 'Embedding':
+      return 'embedding'
+    case 'Rerank':
+      return 'rerank'
+    case 'VLLM':
+    case 'VLM':
+      return 'vllm'
+    case 'ASR':
+      return 'asr'
+    case 'TTS':
+      return 'tts'
+    default:
+      return null
+  }
+}
+
 // 打开添加对话框
-const openAddDialog = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr') => {
+const openAddDialog = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts') => {
   currentModelType.value = type
   editingModel.value = null
   showDialog.value = true
 }
 
 // 编辑模型
-const editModel = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', model: any) => {
+const editModel = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts', model: any) => {
   // 内置模型不能编辑
   if (model.isBuiltin) {
     MessagePlugin.warning(t('modelSettings.toasts.builtinCannotEdit'))
@@ -452,6 +645,10 @@ const handleModelSave = async (modelData: any) => {
         base_url: modelData.baseUrl?.trim() || '',
         api_key: modelData.apiKey?.trim() || '',
         provider: modelData.provider || '', // 添加 provider 字段
+        protocol: modelData.protocol,
+        location: modelData.location,
+        artifact_policy: modelData.artifactPolicy,
+        inference_engine: modelData.inferenceEngine?.trim() || '',
         ...(Object.keys(customHeadersMap).length > 0 ? { custom_headers: customHeadersMap } : {}),
         ...(currentModelType.value === 'embedding' && modelData.dimension ? {
           embedding_parameters: {
@@ -479,6 +676,7 @@ const handleModelSave = async (modelData: any) => {
     
     // 重新加载模型列表
     await loadModels()
+    await loadProfileStatus()
   } catch (error: any) {
     console.error('保存模型失败:', error)
     MessagePlugin.error(error.message || t('modelSettings.toasts.saveFailed'))
@@ -486,7 +684,7 @@ const handleModelSave = async (modelData: any) => {
 }
 
 // 删除模型
-const deleteModel = async (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', modelId: string) => {
+const deleteModel = async (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts', modelId: string) => {
   // 检查是否是内置模型
   const model = allModels.value.find(m => m.id === modelId)
   if (model?.is_builtin) {
@@ -499,6 +697,7 @@ const deleteModel = async (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr
     MessagePlugin.success(t('modelSettings.toasts.deleted'))
     // 重新加载模型列表
     await loadModels()
+    await loadProfileStatus()
   } catch (error: any) {
     console.error('删除模型失败:', error)
     MessagePlugin.error(error.message || t('modelSettings.toasts.deleteFailed'))
@@ -506,7 +705,7 @@ const deleteModel = async (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr
 }
 
 // 获取模型操作菜单选项
-const getModelOptions = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', model: any) => {
+const getModelOptions = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts', model: any) => {
   const options: any[] = []
   
   // 内置模型不能编辑和删除
@@ -515,6 +714,11 @@ const getModelOptions = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr',
   }
   
   // 编辑选项
+  options.push({
+    content: '能力预检',
+    value: `preflight-${type}-${model.id}`
+  })
+
   options.push({
     content: t('common.edit'),
     value: `edit-${type}-${model.id}`
@@ -537,10 +741,12 @@ const getModelOptions = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr',
 }
 
 // 处理菜单操作
-const handleMenuAction = (data: { value: string }, type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', model: any) => {
+const handleMenuAction = (data: { value: string }, type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts', model: any) => {
   const value = data.value
   
-  if (value.indexOf('edit-') === 0) {
+  if (value.indexOf('preflight-') === 0) {
+    runPreflight(model)
+  } else if (value.indexOf('edit-') === 0) {
     editModel(type, model)
   } else if (value.indexOf('copy-') === 0) {
     copyModel(type, model.id)
@@ -566,7 +772,7 @@ const generateCopyName = (originalName: string): string => {
 }
 
 // 复制模型
-const copyModel = async (_type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', modelId: string) => {
+const copyModel = async (_type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts', modelId: string) => {
   const source = allModels.value.find(m => m.id === modelId)
   if (!source) {
     return
@@ -588,6 +794,7 @@ const copyModel = async (_type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
     await createModel(newModel)
     MessagePlugin.success(t('modelSettings.toasts.copied'))
     await loadModels()
+    await loadProfileStatus()
   } catch (error: any) {
     console.error('复制模型失败:', error)
     MessagePlugin.error(error.message || t('modelSettings.toasts.copyFailed'))
@@ -595,20 +802,40 @@ const copyModel = async (_type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
 }
 
 // 获取后端模型类型
-function getModelType(type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'): 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR' {
+function getModelType(type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts'): 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR' | 'TTS' {
   const typeMap = {
     chat: 'KnowledgeQA' as const,
     embedding: 'Embedding' as const,
     rerank: 'Rerank' as const,
     vllm: 'VLLM' as const,
-    asr: 'ASR' as const
+    asr: 'ASR' as const,
+    tts: 'TTS' as const
   }
   return typeMap[type]
+}
+
+const deploymentSummary = (model: any): string => {
+  const location = model.location || 'unknown'
+  const protocol = model.protocol || (model.source === 'local' ? 'ollama' : 'openai-compatible')
+  const policy = model.artifactPolicy || 'allow-download'
+  return `${protocol} · ${location} · ${policy}`
+}
+
+const runPreflight = async (model: any) => {
+  try {
+    const result = await preflightModel(model.id)
+    preflightResults.value[model.id] = result
+    const passed = result.probes.filter(item => item.status === 'passed').length
+    MessagePlugin.info(`能力预检：${passed}/${result.probes.length} 个角色通过`)
+  } catch (error: any) {
+    MessagePlugin.error(error.message || '能力预检失败')
+  }
 }
 
 // 组件挂载时加载模型列表
 onMounted(() => {
   loadModels()
+  loadProfileStatus()
 })
 </script>
 
@@ -633,6 +860,102 @@ onMounted(() => {
     margin: 0 0 16px 0;
     line-height: 1.5;
   }
+}
+
+.profile-status-banner {
+  margin: 0 0 16px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  background: var(--td-bg-color-container);
+}
+
+.profile-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.profile-badge,
+.airgap-badge,
+.warn-badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--td-component-stroke);
+}
+
+.airgap-badge.on {
+  color: var(--td-warning-color);
+  border-color: var(--td-warning-color);
+}
+
+.warn-badge {
+  color: var(--td-error-color);
+  border-color: var(--td-error-color);
+}
+
+.profile-summary,
+.profile-disclaimer {
+  margin: 0 0 6px 0;
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+  line-height: 1.5;
+}
+
+.profile-role-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.profile-role-row {
+  padding: 8px 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+}
+
+.profile-role-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.profile-role-actions {
+  margin-top: 6px;
+}
+
+.status-pill {
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.status-pill[data-status='ok'] {
+  color: var(--td-success-color);
+}
+
+.status-pill[data-status='missing_env'],
+.status-pill[data-status='missing_registration'],
+.status-pill[data-status='mismatch'] {
+  color: var(--td-warning-color);
+}
+
+.expected-name,
+.hint,
+.gap-reason {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+}
+
+.gap-reason {
+  margin: 4px 0 0 0;
 }
 
 .builtin-models-hint {
@@ -789,6 +1112,14 @@ onMounted(() => {
       border-radius: 3px;
       font-size: 11px;
       font-weight: 500;
+    }
+
+    .deployment-tag {
+      color: var(--td-text-color-placeholder);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 360px;
     }
 
     .model-id {

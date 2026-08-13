@@ -2227,7 +2227,6 @@ func (h *InitializationHandler) extractRelationsFromText(
 		logger.Error(ctx, "文本关系提取失败", err)
 		return nil, err
 	}
-	extractor.RemoveUnknownRelation(ctx, graph)
 
 	result := &TextRelationExtractionResponse{
 		Nodes:     graph.Node,

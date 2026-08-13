@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -64,13 +66,21 @@ type QueryKnowledgeGraphInput struct {
 type QueryKnowledgeGraphTool struct {
 	BaseTool
 	knowledgeService interfaces.KnowledgeBaseService
+	graphRepo        interfaces.RetrieveGraphRepository
+	knowledgeRepo    interfaces.KnowledgeRepository
+	governanceRepo   interfaces.KnowledgeGovernanceRepository
+	searchTargets    types.SearchTargets
 }
 
 // NewQueryKnowledgeGraphTool creates a new query knowledge graph tool
-func NewQueryKnowledgeGraphTool(knowledgeService interfaces.KnowledgeBaseService) *QueryKnowledgeGraphTool {
+func NewQueryKnowledgeGraphTool(knowledgeService interfaces.KnowledgeBaseService, graphRepo interfaces.RetrieveGraphRepository, knowledgeRepo interfaces.KnowledgeRepository, governanceRepo interfaces.KnowledgeGovernanceRepository, searchTargets types.SearchTargets) *QueryKnowledgeGraphTool {
 	return &QueryKnowledgeGraphTool{
 		BaseTool:         queryKnowledgeGraphTool,
 		knowledgeService: knowledgeService,
+		graphRepo:        graphRepo,
+		knowledgeRepo:    knowledgeRepo,
+		governanceRepo:   governanceRepo,
+		searchTargets:    searchTargets,
 	}
 }
 
@@ -108,6 +118,20 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			Error:   "query is required",
 		}, fmt.Errorf("invalid query")
 	}
+	if allowed, ok := ctx.Value(types.GraphQueryAllowedContextKey).(bool); ok && !allowed {
+		return &types.ToolResult{
+			Success: false,
+			Error:   "knowledge graph is not needed for this query; use regular knowledge search",
+		}, fmt.Errorf("knowledge graph is not needed for this query")
+	}
+	if err := validateGraphTargets(input.KnowledgeBaseIDs, t.searchTargets); err != nil {
+		return &types.ToolResult{Success: false, Error: err.Error()}, err
+	}
+	if t.graphRepo != nil {
+		if result, ok := t.executeTypedGraphQuery(ctx, input); ok {
+			return result, nil
+		}
+	}
 
 	// Concurrently query all knowledge bases
 	type graphQueryResult struct {
@@ -140,8 +164,8 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 				return
 			}
 
-			// Check if graph extraction is enabled
-			if kb.ExtractConfig == nil || (len(kb.ExtractConfig.Nodes) == 0 && len(kb.ExtractConfig.Relations) == 0) {
+			// Check if graph indexing and extraction are enabled
+			if !kb.IsGraphEnabled() {
 				mu.Lock()
 				kbResults[id] = &graphQueryResult{kbID: id, err: fmt.Errorf("graph extraction not configured")}
 				mu.Unlock()
@@ -356,6 +380,133 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			"display_type":       "graph_query_results",
 		},
 	}, nil
+}
+
+func validateGraphTargets(knowledgeBaseIDs []string, targets types.SearchTargets) error {
+	if len(targets) == 0 {
+		return fmt.Errorf("knowledge graph scope is unavailable")
+	}
+	for _, knowledgeBaseID := range knowledgeBaseIDs {
+		if !targets.ContainsKB(knowledgeBaseID) {
+			return fmt.Errorf("knowledge base %s is not in the authorized search scope", knowledgeBaseID)
+		}
+	}
+	return nil
+}
+
+func (t *QueryKnowledgeGraphTool) executeTypedGraphQuery(ctx context.Context, input QueryKnowledgeGraphInput) (*types.ToolResult, bool) {
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || tenantID == 0 {
+		return nil, false
+	}
+	merged := &types.GraphSearchResult{}
+	var errorsFound []string
+	for _, kbID := range input.KnowledgeBaseIDs {
+		kb, err := t.knowledgeService.GetKnowledgeBaseByID(ctx, kbID)
+		if err != nil {
+			errorsFound = append(errorsFound, fmt.Sprintf("KB %s: %v", kbID, err))
+			continue
+		}
+		if !kb.IsGraphEnabled() || len(kb.ExtractConfig.Relations) == 0 {
+			errorsFound = append(errorsFound, fmt.Sprintf("KB %s: graph extraction not configured", kbID))
+			continue
+		}
+		relationTypes := make([]string, 0, len(kb.ExtractConfig.Relations))
+		for _, relation := range kb.ExtractConfig.Relations {
+			if relation != nil && relation.Type != "" {
+				relationTypes = append(relationTypes, relation.Type)
+			}
+		}
+		allowedRelationTypes := relationTypes
+		if configured, ok := ctx.Value(types.GraphRelationTypesContextKey).([]string); ok && len(configured) > 0 {
+			allowed := make(map[string]bool, len(configured))
+			for _, relationType := range configured {
+				allowed[strings.ToLower(strings.TrimSpace(relationType))] = true
+			}
+			allowedRelationTypes = allowedRelationTypes[:0]
+			for _, relationType := range relationTypes {
+				if allowed[strings.ToLower(strings.TrimSpace(relationType))] {
+					allowedRelationTypes = append(allowedRelationTypes, relationType)
+				}
+			}
+		}
+		currentVersions, versionErr := t.currentKnowledgeVersions(ctx, tenantID, kbID)
+		if versionErr != nil {
+			errorsFound = append(errorsFound, fmt.Sprintf("KB %s: failed to resolve current knowledge versions: %v", kbID, versionErr))
+			continue
+		}
+		graph, err := t.graphRepo.SearchPaths(ctx, types.GraphQuery{
+			Scope: types.GraphScope{TenantID: tenantID, KnowledgeBaseID: kbID, AllowedKnowledgeIDs: t.searchTargets.KnowledgeIDsForKB(kbID), CurrentKnowledgeVersions: currentVersions},
+			Seeds: []types.GraphSeed{{Name: input.Query}}, RelationTypes: allowedRelationTypes,
+			MaxDepth: 2, BranchFactor: 10, MaxExpandedNodes: 1000, MaxPaths: 100,
+		})
+		if err != nil {
+			errorsFound = append(errorsFound, fmt.Sprintf("KB %s: %v", kbID, err))
+			continue
+		}
+		if graph == nil {
+			continue
+		}
+		if len(currentVersions) > 0 {
+			types.FilterGraphSearchResult(graph, currentVersions)
+		}
+		types.EnsureGraphCitations(graph)
+		merged.Nodes = append(merged.Nodes, graph.Nodes...)
+		merged.Edges = append(merged.Edges, graph.Edges...)
+		merged.Paths = append(merged.Paths, graph.Paths...)
+		merged.Citations = append(merged.Citations, graph.Citations...)
+		merged.Truncated = merged.Truncated || graph.Truncated
+		merged.Fallback = merged.Fallback || graph.Fallback
+	}
+	if len(merged.Nodes) == 0 && len(merged.Paths) == 0 {
+		return nil, false
+	}
+	return &types.ToolResult{Success: true, Output: formatTypedGraphQuery(input.Query, merged, errorsFound), Data: map[string]interface{}{
+		"knowledge_base_ids": input.KnowledgeBaseIDs, "query": input.Query, "graph_data": merged,
+		"errors": errorsFound, "display_type": "graph_query_results",
+	}}, true
+}
+
+func (t *QueryKnowledgeGraphTool) currentKnowledgeVersions(ctx context.Context, tenantID uint64, knowledgeBaseID string) (map[string]string, error) {
+	if t.knowledgeRepo == nil {
+		return nil, nil
+	}
+	knowledges, err := t.knowledgeRepo.ListKnowledgeByKnowledgeBaseID(ctx, tenantID, knowledgeBaseID)
+	if err != nil {
+		return nil, err
+	}
+	versions := make(map[string]string)
+	for _, knowledge := range knowledges {
+		if knowledge == nil || knowledge.CurrentVersionID == "" {
+			continue
+		}
+		versionID := knowledge.CurrentVersionID
+		if t.governanceRepo != nil {
+			version, versionErr := t.governanceRepo.GetVersion(ctx, tenantID, versionID)
+			if versionErr != nil || version == nil || !version.IsRetrievable(time.Now().UTC()) {
+				versionID = "__not_retrievable__"
+			}
+		}
+		versions[knowledge.ID] = versionID
+	}
+	return versions, nil
+}
+
+func formatTypedGraphQuery(query string, result *types.GraphSearchResult, errorsFound []string) string {
+	output := fmt.Sprintf("=== Knowledge Graph Query ===\n\nQuery: %s\nNodes: %d\nEdges: %d\nPaths: %d\nCitations: %d\n", query, len(result.Nodes), len(result.Edges), len(result.Paths), len(result.Citations))
+	if result.Truncated {
+		output += fmt.Sprintf("Traversal truncated: %s\n", result.TruncationReason)
+	}
+	if len(errorsFound) > 0 {
+		output += "Partial failures:\n"
+		for _, message := range errorsFound {
+			output += "- " + message + "\n"
+		}
+	}
+	for i, path := range result.Paths {
+		output += fmt.Sprintf("Path #%d score=%.3f nodes=%v evidence=%d\n", i+1, path.Score, path.NodeKeys, len(path.Evidence))
+	}
+	return output
 }
 
 // buildGraphVisualizationData builds structured data for graph visualization

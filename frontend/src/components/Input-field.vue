@@ -14,11 +14,12 @@ import MentionSelector from './MentionSelector.vue';
 import AgentSelector from './AgentSelector.vue';
 import { getCaretCoordinates } from '@/utils/caret';
 import { listModels, type ModelConfig } from '@/api/model';
-import { listAgents, type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
+import { listAgents, type CustomAgent, type CustomAgentConfig, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider';
 import { getConversationConfig, updateConversationConfig, type ConversationConfig } from '@/api/system';
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
+import { useVoiceConversation } from '@/composables/useVoiceConversation';
 import {
   kbSatisfiesToolRequirements,
   deriveKbFilterFromTools,
@@ -36,6 +37,7 @@ const { t } = useI18n();
 
 let query = ref("");
 const showKbSelector = ref(false);
+const pendingVoiceMetadata = ref<Record<string, string> | undefined>();
 
 // Image upload state
 const uploadedImages = ref<Array<{ file: File; preview: string }>>([]);
@@ -349,6 +351,42 @@ const props = defineProps({
   }
 });
 
+const voiceConversation = useVoiceConversation(
+  props.sessionId || '',
+  () => String(currentAgentConfig.value?.asr_model_id || '')
+);
+const voiceInputAvailable = computed(() => Boolean(
+  props.sessionId &&
+  currentAgentConfig.value?.voice_input_enabled &&
+  currentAgentConfig.value?.asr_model_id &&
+  voiceConversation.supported.value
+));
+const voiceTranscript = computed(() => voiceConversation.finalText.value);
+const voicePartialTranscript = computed(() => voiceConversation.partialText.value);
+const voiceState = computed(() => voiceConversation.state.value);
+
+const toggleVoiceRecording = async () => {
+  if (props.isReplying) return;
+  if (voiceConversation.state.value === 'recording') {
+    voiceConversation.stop();
+    return;
+  }
+  if (voiceConversation.state.value === 'error') {
+    voiceConversation.cancel();
+  }
+  const started = await voiceConversation.start();
+  if (!started && voiceConversation.error.value) {
+    MessagePlugin.error('语音输入不可用，请检查麦克风权限或 ASR 配置');
+  }
+};
+
+const confirmVoiceTranscript = () => {
+  const result = voiceConversation.confirmFinalText();
+  if (!result.text.trim()) return;
+  query.value = result.text;
+  pendingVoiceMetadata.value = result.voice_metadata || undefined;
+};
+
 const isAgentEnabled = computed(() => settingsStore.isAgentEnabled);
 const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
@@ -360,7 +398,9 @@ const fileList = ref<Array<{ id: string; name: string }>>([]);
 
 // 选中的知识库：包含自己的 + 组织共享的 + 共享智能体下的（用于展示已选列表与 org 角标）
 const selectedKbs = computed(() => {
-  const own = knowledgeBases.value.filter(kb => selectedKbIds.value.includes(kb.id));
+  const own = knowledgeBases.value
+    .filter(kb => selectedKbIds.value.includes(kb.id))
+    .map(kb => ({ ...kb, org_name: '' }));
   const sharedList = orgStore.sharedKnowledgeBases || [];
   const sharedMapped = sharedList
     .filter((s: any) => s.knowledge_base != null && selectedKbIds.value.includes(s.knowledge_base.id))
@@ -1457,9 +1497,14 @@ watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
 }, { deep: true });
 
 const emit = defineEmits<{
-  (e: 'send-msg', query: string, modelId: string, mentionedItems: any[], imageFiles: File[], attachmentFiles: AttachmentFile[]): void;
+  (e: 'send-msg', query: string, modelId: string, mentionedItems: any[], imageFiles: File[], attachmentFiles: AttachmentFile[], voiceMetadata?: Record<string, string>): void;
+  (e: 'voice-config', config: CustomAgentConfig): void;
   (e: 'stop-generation'): void;
 }>();
+
+watch(currentAgentConfig, (config) => {
+  emit('voice-config', config || {});
+}, { immediate: true, deep: true });
 
 const createSession = async (val: string) => {
   if (!val.trim()) {
@@ -1503,7 +1548,7 @@ const createSession = async (val: string) => {
   // detached DOM element (which causes getComputedStyle to throw).
   const textarea = getTextareaEl();
   if (textarea) textarea.blur();
-  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles);
+  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles, pendingVoiceMetadata.value);
   
   // Clean up image previews
   uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
@@ -1694,6 +1739,7 @@ const handleSelectAgent = (agent: CustomAgent, sourceTenantId?: string) => {
 }
 
 const clearvalue = () => {
+  pendingVoiceMetadata.value = undefined;
   // Guard: only clear when the textarea DOM element is still mounted,
   // otherwise TDesign's autosize will call getComputedStyle on a non-Element.
   if (!getTextareaEl()) return;
@@ -2262,6 +2308,34 @@ defineExpose({
 
       <!-- 右侧控制按钮组 -->
       <div class="control-right">
+        <!-- 语音输入按钮；转写结果需显式确认后才会作为消息发送 -->
+        <t-tooltip v-if="voiceInputAvailable" :content="voiceState === 'recording' ? '停止录音' : '开始语音输入'" placement="top">
+          <div
+            class="control-btn voice-btn"
+            :class="{ active: voiceState === 'recording', disabled: isReplying }"
+            role="button"
+            tabindex="0"
+            :aria-label="voiceState === 'recording' ? '停止录音' : '开始语音输入'"
+            :aria-pressed="voiceState === 'recording'"
+            @click.stop="toggleVoiceRecording"
+            @keydown.enter.prevent="toggleVoiceRecording"
+            @keydown.space.prevent="toggleVoiceRecording"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="3" width="6" height="11" rx="3" />
+              <path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" />
+            </svg>
+          </div>
+        </t-tooltip>
+        <span v-if="voicePartialTranscript" class="voice-transcript" role="status">{{ voicePartialTranscript }}</span>
+        <button
+          v-if="voiceTranscript && !isReplying"
+          type="button"
+          class="voice-confirm-btn"
+          @click.stop="confirmVoiceTranscript"
+        >
+          使用转写
+        </button>
         <!-- 停止按钮（仅在回复中时显示） -->
         <t-tooltip 
           v-if="isReplying"
@@ -2903,6 +2977,42 @@ const getImgSrc = (url: string) => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.voice-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--td-component-border, #e7e7e7);
+
+  &.active {
+    color: var(--td-brand-color);
+    background: rgba(16, 185, 129, 0.1);
+    border-color: var(--td-brand-color);
+  }
+}
+
+.voice-transcript {
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--td-text-color-secondary, #666);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-confirm-btn {
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: var(--td-brand-color);
+  background: rgba(16, 185, 129, 0.08);
+  cursor: pointer;
+  font-size: 12px;
+
+  &:hover {
+    background: rgba(16, 185, 129, 0.14);
+  }
 }
 
 .stop-btn {

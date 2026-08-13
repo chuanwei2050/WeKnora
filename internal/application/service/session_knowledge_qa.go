@@ -137,6 +137,9 @@ func (s *sessionService) KnowledgeQA(
 			UserMessageID: req.UserMessageID,
 		},
 	}
+	chatManage.VerifiedRetrieve = func(retrieveCtx context.Context, query string) ([]*types.SearchResult, error) {
+		return s.SearchKnowledge(retrieveCtx, chatManage.KnowledgeBaseIDs, chatManage.KnowledgeIDs, query)
+	}
 
 	// Apply custom agent overrides (system prompt, temperature, retrieval params,
 	// rewrite, fallback, FAQ strategy, history turns)
@@ -199,15 +202,43 @@ func (s *sessionService) KnowledgeQA(
 		return err
 	}
 
-	// Emit references event if we have search results
-	if len(chatManage.MergeResult) > 0 {
+	// Emit the references/telemetry event even when retrieval is empty so a
+	// formal acceptance run can distinguish graph skip from a missing stream
+	// observation on refusal and unanswerable cases.
+	{
 		logger.Infof(ctx, "Emitting references event with %d results", len(chatManage.MergeResult))
+		skip := chatpipeline.AssessGraphSkip(chatManage)
+		graphRequested := skip.Layer1Allowed
+		graphUsed := chatManage.GraphSearchResult != nil && (len(chatManage.GraphSearchResult.Paths) > 0 || len(chatManage.GraphSearchResult.Citations) > 0)
+		graphReason, graphReasonLegacy := chatpipeline.ResolveGraphTelemetryReason(graphRequested, graphUsed, skip)
+		pathSummaries := chatpipeline.SummarizeGraphPaths(chatManage.GraphSearchResult)
+		hasVerification := chatManage.VerifiedResult != nil
+		confidence := 0.0
+		if hasVerification {
+			confidence = chatManage.VerifiedResult.Confidence
+		}
+		pathSummaries = chatpipeline.RankGraphPathsForDisplay(pathSummaries, confidence, hasVerification)
+		graphTelemetry := map[string]interface{}{
+			"requested":     graphRequested,
+			"used":          graphUsed,
+			"reason":        graphReason,
+			"reason_legacy": graphReasonLegacy,
+		}
+		if len(pathSummaries) > 0 {
+			graphTelemetry["paths"] = pathSummaries
+		}
+		telemetry := map[string]interface{}{
+			"routing":           routingDecisionSummary(chatManage.RoutingDecision),
+			"graph":             graphTelemetry,
+			"verification_path": verifiedExecutionPath(chatManage.VerifiedResult),
+		}
 		if err := eventBus.Emit(ctx, event.Event{
 			ID:        generateEventID("references"),
 			Type:      event.EventAgentReferences,
 			SessionID: req.Session.ID,
 			Data: event.AgentReferencesData{
 				References: chatManage.MergeResult,
+				Extra:      telemetry,
 			},
 		}); err != nil {
 			logger.Errorf(ctx, "Failed to emit references event: %v", err)
@@ -221,6 +252,13 @@ func (s *sessionService) KnowledgeQA(
 
 	logger.Info(ctx, "Knowledge base question answering initiated")
 	return nil
+}
+
+func verifiedExecutionPath(answer *types.VerifiedAnswer) string {
+	if answer == nil {
+		return ""
+	}
+	return answer.ExecutionPath
 }
 
 // selectChatModelID selects the appropriate chat model ID with priority for Remote models

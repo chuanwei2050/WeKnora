@@ -193,6 +193,7 @@ func (s *OllamaService) EnsureModelAvailable(ctx context.Context, modelName stri
 		logger.GetLogger(ctx).Warnf("Ollama service unavailable, skipping ensuring model %s availability", modelName)
 		return nil
 	}
+	strictAirgap := strings.EqualFold(strings.TrimSpace(os.Getenv("AIR_GAPPED_MODE")), "true")
 
 	available, err := s.IsModelAvailable(ctx, modelName)
 	if err != nil {
@@ -205,6 +206,9 @@ func (s *OllamaService) EnsureModelAvailable(ctx context.Context, modelName stri
 	}
 
 	if !available {
+		if strictAirgap {
+			return fmt.Errorf("strict air-gapped mode requires preloaded Ollama model %s; runtime pull is disabled", modelName)
+		}
 		return s.PullModel(ctx, modelName)
 	}
 

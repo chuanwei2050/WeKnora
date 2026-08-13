@@ -1,0 +1,91 @@
+{
+  "schema": "weknora-desktop-lite-same-host-e2e/v1",
+  "profile": "desktop-lite",
+  "runtime": {
+    "container": "weknora-same-host-app-20260812",
+    "application": "current worktree binary built with sqlite_fts5",
+    "database": "sqlite",
+    "retriever": "sqlite",
+    "storage": "local (/data/files)",
+    "stream_manager": "memory",
+    "components": [
+      { "name": "app", "location": "same-host", "status": "ready" },
+      { "name": "sqlite", "location": "same-host", "status": "ready" },
+      { "name": "local-storage", "location": "same-host", "status": "ready" },
+      { "name": "ollama", "location": "same-host", "status": "ready" }
+    ]
+  },
+  "network_isolation": {
+    "policy": "WEKNORA_AIRGAP_EGRESS",
+    "allowed": ["loopback", "established", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"],
+    "public_probe": { "target": "http://1.1.1.1/", "status": "blocked", "curl_exit_code": 7 },
+    "health_probe": { "target": "http://127.0.0.1:8080/health", "status": "passed" }
+  },
+  "network_transition": {
+    "connected_rehearsal": {
+      "egress_policy": "not yet applied",
+      "model_registration": "passed",
+      "chat_preflight": "passed",
+      "embedding_preflight": "passed",
+      "initial_knowledge_qa": "passed"
+    },
+    "cutover": {
+      "action": "applied WEKNORA_AIRGAP_EGRESS after the connected rehearsal",
+      "health_probe": "passed",
+      "chat_preflight": "passed",
+      "embedding_preflight": "passed",
+      "knowledge_qa": "passed",
+      "public_egress_probe": "blocked"
+    }
+  },
+  "models": [
+    {
+      "role": "chat",
+      "name": "qwen3.5:0.8b",
+      "protocol": "ollama",
+      "location": "same-host",
+      "artifact_policy": "preloaded-only",
+      "preflight": "passed",
+      "observed_model": "qwen3.5:0.8b"
+    },
+    {
+      "role": "embedding",
+      "name": "bge-m3:latest",
+      "protocol": "ollama",
+      "location": "same-host",
+      "artifact_policy": "preloaded-only",
+      "preflight": "passed",
+      "observed_model": "bge-m3:latest",
+      "dimension": 1024
+    }
+  ],
+  "functional_checks": {
+    "registration_and_login": "passed",
+    "knowledge_base_creation": "passed",
+    "local_storage_configuration": "passed",
+    "manual_knowledge_import": { "status": "passed", "parse_status": "completed" },
+    "hybrid_search": { "status": "passed", "result_count": 1 },
+    "knowledge_qa": {
+      "status": "passed",
+      "sse_completed": true,
+      "references_returned": true,
+      "answer_contains_preloaded_model": true,
+      "answer_contains_sqlite_storage": true
+    }
+  },
+  "single_node_gate": {
+    "status": "passed",
+    "all_enabled_required_components_same_host": true,
+    "all_required_model_endpoints_same_host": true,
+    "non_same_host": []
+  },
+  "package_preflight": {
+    "package": "C:/Users/86150/AppData/Local/Temp/weknora-desktop-lite-same-host-package-20260812/weknora-airgap-desktop-lite-amd64",
+    "airgap_preflight": "passed",
+    "require_same_host": "passed"
+  },
+  "notes": [
+    "本次 desktop-lite 验收适用角色为 Chat、Embedding、文档导入、索引、检索和回答；未启用 VLM、ASR、TTS、Rerank 或模型 OCR。",
+    "临时测试容器和模型仅用于本次可审计验收，未写入离线介质；模型许可证和导入步骤仍由模型清单负责。"
+  ]
+}

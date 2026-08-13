@@ -1,3 +1,9 @@
+# uv/uvx is copied from an explicit, cacheable image instead of being installed
+# through a network shell script. Air-gapped builders must preload this image or
+# override UV_IMAGE with an approved internal mirror digest.
+ARG UV_IMAGE=ghcr.io/astral-sh/uv@sha256:75bc2f1d328b6d5bf38bf7120dcfebf619b932bd78570c8ea1ae93db25b25ace
+FROM ${UV_IMAGE} AS uv
+
 # Build stage
 FROM golang:1.24-bookworm AS builder
 
@@ -79,13 +85,15 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         gosu \
         ffmpeg && \
     python3 -m pip install --break-system-packages --upgrade pip setuptools wheel && \
-    mkdir -p /home/appuser/.local/bin && \
-    curl -LsSf https://astral.sh/uv/install.sh | CARGO_HOME=/home/appuser/.cargo UV_INSTALL_DIR=/home/appuser/.local/bin sh && \
     chown -R appuser:appuser /home/appuser && \
-    ln -sf /home/appuser/.local/bin/uvx /usr/local/bin/uvx && \
-    chmod +x /usr/local/bin/uvx && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+# Keep MCP stdio support available without any runtime download. The source
+# image is explicit so it can be mirrored and verified as part of the offline
+# image set.
+COPY --from=uv /usr/local/bin/uv /usr/local/bin/uv
+COPY --from=uv /usr/local/bin/uvx /usr/local/bin/uvx
 
 # Create data directories and set permissions
 RUN mkdir -p /data/files && \

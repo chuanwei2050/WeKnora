@@ -1,0 +1,156 @@
+{
+  "schema": "weknora-acceptance-frozen-inputs/v1",
+  "baseline_id": "online-expert-baseline-v1",
+  "status": "expert_inputs_frozen_formal_run_pending",
+  "taxonomy": {
+    "taxonomy_id": "question-complexity",
+    "taxonomy_version": "1.0",
+    "confidence_threshold": 0.6,
+    "fallback_action": "contextual_rag",
+    "level_actions": {
+      "L1": "quick_rag",
+      "L2": "contextual_rag",
+      "L3": "graph_reasoning",
+      "L4": "verified_agent"
+    },
+    "input_budget_chars": 12000
+  },
+  "thresholds": {
+    "acceptance_gates": {
+      "accuracy_minimum": 0.9,
+      "ttft_max_ms": 15000,
+      "independent_sessions": 50,
+      "concurrent_sessions": 10
+    },
+    "verification": {
+      "weights": {
+        "fact": 0.35,
+        "logic": 0.25,
+        "citation": 0.25,
+        "completeness": 0.15
+      },
+      "pass_threshold": 0.8,
+      "reflect_threshold": 0.6,
+      "max_reflections": 1,
+      "hard_max_reflections": 2,
+      "degradation_strategy": "conservative",
+      "max_wall_clock_ms": 120000,
+      "max_model_calls": 12,
+      "max_parallel_calls": 3
+    }
+  },
+  "models": {
+    "chat": {
+      "provider": "siliconflow",
+      "protocol": "openai-compatible",
+      "name": "Qwen/Qwen3.6-27B",
+      "base_url_env": "ONLINE_LLM_MODEL_BASE_URL"
+    },
+    "vlm": {
+      "reuse": "chat"
+    },
+    "verifier_1": {
+      "provider": "siliconflow",
+      "protocol": "openai-compatible",
+      "name": "deepseek-ai/DeepSeek-V3.1-Terminus",
+      "base_url_env": "ONLINE_VERIFIER_MODEL_1_BASE_URL"
+    },
+    "verifier_2": {
+      "provider": "siliconflow",
+      "protocol": "openai-compatible",
+      "name": "Qwen/Qwen3.5-9B",
+      "base_url_env": "ONLINE_VERIFIER_MODEL_2_BASE_URL"
+    },
+    "judge": {
+      "provider": "siliconflow",
+      "protocol": "openai-compatible",
+      "name": "Qwen/Qwen3-32B",
+      "base_url_env": "ONLINE_EVALUATION_JUDGE_MODEL_BASE_URL"
+    },
+    "embedding": {
+      "provider": "siliconflow",
+      "protocol": "openai-compatible",
+      "name": "Qwen/Qwen3-Embedding-4B",
+      "dimension": 2560,
+      "base_url_env": "ONLINE_EMBEDDING_MODEL_BASE_URL"
+    },
+    "rerank": {
+      "provider": "siliconflow",
+      "protocol": "openai-compatible",
+      "name": "BAAI/bge-reranker-v2-m3",
+      "base_url_env": "ONLINE_RERANK_MODEL_BASE_URL"
+    },
+    "asr": {
+      "provider": "siliconflow",
+      "protocol": "openai-compatible",
+      "name": "FunAudioLLM/SenseVoiceSmall",
+      "base_url_env": "ONLINE_ASR_MODEL_BASE_URL"
+    },
+    "tts": {
+      "provider": "siliconflow",
+      "protocol": "openai-compatible",
+      "name": "FunAudioLLM/CosyVoice2-0.5B",
+      "voice_env": "ONLINE_TTS_VOICE",
+      "base_url_env": "ONLINE_TTS_MODEL_BASE_URL"
+    }
+  },
+  "prompts": {
+    "policy": "repository-defaults",
+    "query_understand": {
+      "version": "query-understand/v1",
+      "source": "internal/application/service/chat_pipeline/query_understand.go"
+    },
+    "complexity_classifier": {
+      "version": "question-complexity-classifier/v1",
+      "source": "scripts/complexity-routing-benchmark.ps1"
+    },
+    "verified_answer": {
+      "version": "verified-answer/v1",
+      "source": "internal/application/service/chat_pipeline/verified_answer.go"
+    },
+    "acceptance_judge": {
+      "version": "acceptance-judge/v1",
+      "source": "internal/types/acceptance_benchmark.go"
+    },
+    "voice": {
+      "version": "voice-openai-compatible/v1",
+      "source": "docs/voice-capabilities.md"
+    }
+  },
+  "files": {
+    "freeze": {
+      "path": "scripts/testdata/baseline-v1-freeze.json",
+      "sha256": "dc85aaa46d13887d701404c92c0ae734dace657cf46069c557091e7f123e10e5"
+    },
+    "routing_dataset": {
+      "path": "scripts/testdata/baseline-v1-routing-dataset-expert.json",
+      "sha256": "be5db2c239a5315f01be58ad3ba67d610871cf90365c27becec02485fb8858d8"
+    },
+    "acceptance_suite": {
+      "path": "scripts/testdata/baseline-v1-acceptance-suite-expert.json",
+      "sha256": "52615ffebd49134a0ef913dcc144ae7ff8c9dea168d6fb3db5d0c3de62177cc3"
+    },
+    "query_understand_prompt": {
+      "path": "internal/application/service/chat_pipeline/query_understand.go",
+      "sha256": "694322fe8a5c5cb6084740b07203dc2863184b0945e0d6f1a7a483b2ace9374f"
+    },
+    "complexity_classifier_prompt": {
+      "path": "scripts/complexity-routing-benchmark.ps1",
+      "sha256": "0ec11710c3228718e26cc41cba042ab412f780b84d02585e77a41a186dd8b0e5"
+    },
+    "verified_answer_prompt": {
+      "path": "internal/application/service/chat_pipeline/verified_answer.go",
+      "sha256": "418e9066becf852a97df2bdc0b114859579427244763e07f1ceb1f0364eb02ff"
+    },
+    "acceptance_judge_prompt": {
+      "path": "internal/types/acceptance_benchmark.go",
+      "sha256": "ac1102db9b66bedfd9ba5f64c5ea4126b17ac10c1a77fb9ca11eec3a11df18cc"
+    },
+    "voice_prompt": {
+      "path": "docs/voice-capabilities.md",
+      "sha256": "b159ce257b75544b64fcf1760a0bee777657a48da51a157db47ad8f4d532eb16"
+    }
+  },
+  "freeze_sha256": "f0fb7604903c2ec5331876692b4fccc8a86068d31a32818a5734b52f44351172",
+  "generated_at": "2026-08-12T17:01:27.5966148+00:00"
+}

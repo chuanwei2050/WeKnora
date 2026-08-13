@@ -217,12 +217,12 @@ instance.interceptors.response.use(
   }
 );
 
-export function get(url: string) {
-  return instance.get(url);
+export function get<T = any>(url: string): Promise<T> {
+  return instance.get<T, T>(url);
 }
 
-export async function getDown(url: string) {
-  let res = await instance.get(url, {
+export async function getDown<T = Blob>(url: string): Promise<T> {
+  const res = await instance.get<Blob, T>(url, {
     responseType: "blob",
   });
   return res
@@ -247,14 +247,14 @@ export function postChat(url: string, data = {}) {
   });
 }
 
-export function post(url: string, data = {}, config?: any) {
-  return instance.post(url, data, config);
+export function post<T = any>(url: string, data = {}, config?: any): Promise<T> {
+  return instance.post<unknown, T>(url, data, config);
 }
 
-export function put(url: string, data = {}) {
-  return instance.put(url, data);
+export function put<T = any>(url: string, data = {}): Promise<T> {
+  return instance.put<unknown, T>(url, data);
 }
 
-export function del(url: string, data?: any) {
-  return instance.delete(url, { data });
+export function del<T = any>(url: string, data?: any): Promise<T> {
+  return instance.delete<unknown, T>(url, { data });
 }

@@ -419,13 +419,15 @@ type LocalEngineConfig struct {
 // MinIOEngineConfig is for MinIO/S3-compatible object storage.
 // Mode "docker" uses env vars for endpoint/credentials; "remote" uses the fields below.
 type MinIOEngineConfig struct {
-	Mode            string `json:"mode"` // "docker" or "remote"
-	Endpoint        string `json:"endpoint"`
-	AccessKeyID     string `json:"access_key_id"`
-	SecretAccessKey string `json:"secret_access_key"`
-	BucketName      string `json:"bucket_name"`
-	UseSSL          bool   `json:"use_ssl"`
-	PathPrefix      string `json:"path_prefix"`
+	Mode               string            `json:"mode"` // "docker" or "remote"
+	Endpoint           string            `json:"endpoint"`
+	ApprovedEndpointID string            `json:"approved_endpoint_id,omitempty"`
+	ApprovedEndpoint   *ApprovedEndpoint `json:"-"`
+	AccessKeyID        string            `json:"access_key_id"`
+	SecretAccessKey    string            `json:"secret_access_key"`
+	BucketName         string            `json:"bucket_name"`
+	UseSSL             bool              `json:"use_ssl"`
+	PathPrefix         string            `json:"path_prefix"`
 }
 
 // COSEngineConfig is for Tencent Cloud COS.
@@ -440,35 +442,41 @@ type COSEngineConfig struct {
 
 // TOSEngineConfig is for Volcengine TOS (火山引擎对象存储).
 type TOSEngineConfig struct {
-	Endpoint   string `json:"endpoint"`
-	Region     string `json:"region"`
-	AccessKey  string `json:"access_key"`
-	SecretKey  string `json:"secret_key"`
-	BucketName string `json:"bucket_name"`
-	PathPrefix string `json:"path_prefix"`
+	Endpoint           string            `json:"endpoint"`
+	ApprovedEndpointID string            `json:"approved_endpoint_id,omitempty"`
+	ApprovedEndpoint   *ApprovedEndpoint `json:"-"`
+	Region             string            `json:"region"`
+	AccessKey          string            `json:"access_key"`
+	SecretKey          string            `json:"secret_key"`
+	BucketName         string            `json:"bucket_name"`
+	PathPrefix         string            `json:"path_prefix"`
 }
 
 // S3EngineConfig is for AWS S3 and S3-compatible object storage.
 type S3EngineConfig struct {
-	Endpoint   string `json:"endpoint"`
-	Region     string `json:"region"`
-	AccessKey  string `json:"access_key"`
-	SecretKey  string `json:"secret_key"`
-	BucketName string `json:"bucket_name"`
-	PathPrefix string `json:"path_prefix"`
+	Endpoint           string            `json:"endpoint"`
+	ApprovedEndpointID string            `json:"approved_endpoint_id,omitempty"`
+	ApprovedEndpoint   *ApprovedEndpoint `json:"-"`
+	Region             string            `json:"region"`
+	AccessKey          string            `json:"access_key"`
+	SecretKey          string            `json:"secret_key"`
+	BucketName         string            `json:"bucket_name"`
+	PathPrefix         string            `json:"path_prefix"`
 }
 
 // OSSEngineConfig is for Alibaba Cloud OSS (对象存储服务).
 type OSSEngineConfig struct {
-	Endpoint       string `json:"endpoint"`
-	Region         string `json:"region"`
-	AccessKey      string `json:"access_key"`
-	SecretKey      string `json:"secret_key"`
-	BucketName     string `json:"bucket_name"`
-	PathPrefix     string `json:"path_prefix"`
-	UseTempBucket  bool   `json:"use_temp_bucket"`
-	TempBucketName string `json:"temp_bucket_name"`
-	TempRegion     string `json:"temp_region"`
+	Endpoint           string            `json:"endpoint"`
+	ApprovedEndpointID string            `json:"approved_endpoint_id,omitempty"`
+	ApprovedEndpoint   *ApprovedEndpoint `json:"-"`
+	Region             string            `json:"region"`
+	AccessKey          string            `json:"access_key"`
+	SecretKey          string            `json:"secret_key"`
+	BucketName         string            `json:"bucket_name"`
+	PathPrefix         string            `json:"path_prefix"`
+	UseTempBucket      bool              `json:"use_temp_bucket"`
+	TempBucketName     string            `json:"temp_bucket_name"`
+	TempRegion         string            `json:"temp_region"`
 }
 
 // Value implements the driver.Valuer interface for StorageEngineConfig

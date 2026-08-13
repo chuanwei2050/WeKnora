@@ -35,12 +35,20 @@ func NewOllamaProvider(params types.WebSearchProviderParameters) (interfaces.Web
 	if params.APIKey == "" {
 		return nil, fmt.Errorf("API key is required for Ollama provider")
 	}
-	client := &http.Client{
-		Timeout: defaultOllamaTimeout,
+	client, err := newSearchHTTPClientForParameters(defaultOllamaTimeout, params)
+	if err != nil {
+		return nil, err
+	}
+	baseURL, err := approvedSearchEndpointURL(params.ApprovedEndpoint, "/api/web_search")
+	if err != nil {
+		return nil, err
+	}
+	if baseURL == "" {
+		baseURL = defaultOllamaWebSearchURL
 	}
 	return &OllamaProvider{
 		client:  client,
-		baseURL: defaultOllamaWebSearchURL, // Hardcoded — not tenant-configurable
+		baseURL: baseURL, // Default remains the public Ollama endpoint for legacy online deployments.
 		apiKey:  params.APIKey,
 	}, nil
 }

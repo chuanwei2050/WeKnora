@@ -19,6 +19,19 @@
                 </span>
             </div>
             <docInfo :session="session"></docInfo>
+            <div v-if="graphPaths.length" class="graph-paths-panel">
+                <button type="button" class="graph-paths-toggle" @click="graphPathsOpen = !graphPathsOpen">
+                    {{ graphPathsOpen ? t('chat.graphPathsHide') : t('chat.graphPathsShow') }}
+                    ({{ graphPaths.length }})
+                </button>
+                <ul v-if="graphPathsOpen" class="graph-paths-list">
+                    <li v-for="(path, idx) in graphPaths" :key="path.id || idx" class="graph-path-item">
+                        <span class="graph-path-nodes">{{ (path.nodes || []).join(' → ') }}</span>
+                        <span v-if="path.relations?.length" class="graph-path-relations">{{ path.relations.join(', ') }}</span>
+                        <span class="graph-path-score">score {{ Number(path.score || 0).toFixed(3) }}</span>
+                    </li>
+                </ul>
+            </div>
             <AgentStreamDisplay :session="session" :user-query="userQuery" v-if="session.isAgentMode"></AgentStreamDisplay>
             <deepThink :deepSession="session" v-if="session.showThink && !session.isAgentMode"></deepThink>
         </div>
@@ -52,6 +65,23 @@
                         <t-icon name="info-circle" />
                     </t-button>
                 </t-tooltip>
+                <t-button v-if="!feedbackSubmitted" size="small" variant="outline" shape="round" aria-label="回答有帮助" @click.stop="submitFeedback(5)">有帮助</t-button>
+                <t-button v-if="!feedbackSubmitted" size="small" variant="outline" shape="round" aria-label="回答需要纠正" @click.stop="chooseCorrection">需要纠正</t-button>
+                <t-input v-if="feedbackRating === 1" v-model="feedbackCorrection" size="small" placeholder="可选：说明需要纠正的内容" @click.stop />
+                <t-button v-if="feedbackRating === 1" size="small" theme="primary" @click.stop="submitFeedback(1)">提交纠错</t-button>
+                <t-button
+                    v-if="voiceOutputEnabled && ttsModelId && session.id"
+                    size="small"
+                    variant="outline"
+                    shape="round"
+                    :aria-label="voicePlaybackState === 'playing' ? '暂停朗读' : '朗读回答'"
+                    @click.stop="toggleAnswerPlayback"
+                >
+                    {{ voicePlaybackState === 'playing' ? '暂停朗读' : voicePlaybackState === 'paused' ? '继续朗读' : '朗读' }}
+                </t-button>
+                <span v-if="voicePlaybackState === 'loading'" class="voice-playback-status" role="status" aria-live="polite">正在加载语音</span>
+                <span v-else-if="voicePlaybackError" class="voice-playback-status" role="status" aria-live="polite">朗读失败，请点击“朗读”重试</span>
+                <span v-if="feedbackSubmitted" class="feedback-done" role="status">反馈已提交</span>
             </div>
             <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{ $t('common.loading') }}</span></div>
         </div>
@@ -82,6 +112,8 @@ import {
     ensureMermaidInitialized,
     renderMermaidInContainer
 } from '@/utils/mermaidShared';
+import { submitAnswerFeedback } from '@/api/feedback';
+import { useVoiceConversation } from '@/composables/useVoiceConversation';
 
 marked.use({
     breaks: true,  // 全局启用单个换行支持
@@ -108,6 +140,9 @@ let parentMd = ref()
 let reviewUrl = ref('')
 let reviewImg = ref(false)
 let isImgLoading = ref(false);
+const feedbackRating = ref(0);
+const feedbackCorrection = ref('');
+const feedbackSubmitted = ref(false);
 const props = defineProps({
     // 必填项
     content: {
@@ -130,7 +165,49 @@ const props = defineProps({
     embeddedMode: {
         type: Boolean,
         default: false
+    },
+    voiceConfig: {
+        type: Object,
+        default: () => ({})
     }
+});
+
+const graphPathsOpen = ref(false);
+const graphPaths = computed(() => (Array.isArray(props.session?.graph_paths) ? props.session.graph_paths : []));
+
+const voiceConversation = useVoiceConversation(
+    String(props.session?.session_id || ''),
+    () => String(props.voiceConfig?.asr_model_id || '')
+);
+const voiceOutputEnabled = computed(() => Boolean(props.voiceConfig?.voice_output_enabled));
+const ttsModelId = computed(() => String(props.voiceConfig?.tts_model_id || ''));
+const voicePlaybackState = computed(() => voiceConversation.playbackState.value);
+const voicePlaybackError = computed(() => voiceConversation.error.value);
+const autoPlaybackAttempted = ref(Boolean(props.session?.is_completed));
+
+const toggleAnswerPlayback = async () => {
+    if (voicePlaybackState.value === 'playing') {
+        voiceConversation.pausePlayback();
+        return;
+    }
+    if (voicePlaybackState.value === 'paused') {
+        voiceConversation.resumePlayback();
+        return;
+    }
+    await voiceConversation.playAnswerTTS(
+        String(props.session?.id || ''),
+        ttsModelId.value,
+        {
+            language: props.voiceConfig?.voice_language,
+            voice: props.voiceConfig?.voice_name
+        }
+    );
+};
+
+watch(() => props.session?.is_completed, (completed) => {
+    if (!completed || autoPlaybackAttempted.value || !props.voiceConfig?.voice_auto_play || !voiceOutputEnabled.value || !ttsModelId.value || !props.session?.id) return;
+    autoPlaybackAttempted.value = true;
+    void toggleAnswerPlayback();
 });
 
 const preview = (url) => {
@@ -213,7 +290,6 @@ const handleAddToKnowledge = () => {
     const question = (props.userQuery || '').trim();
     const manualContent = buildManualMarkdown(question, content);
     const manualTitle = formatManualTitle(question);
-``
     uiStore.openManualEditor({
         mode: 'create',
         title: manualTitle,
@@ -222,6 +298,29 @@ const handleAddToKnowledge = () => {
     });
 
     MessagePlugin.info(t('chat.editorOpened'));
+};
+
+const chooseCorrection = () => {
+    feedbackRating.value = 1;
+};
+
+const submitFeedback = async (rating) => {
+    const messageId = props.session?.id;
+    const sessionId = props.session?.session_id || props.session?.sessionId;
+    if (!messageId || !sessionId || !props.session?.is_completed) return;
+    try {
+        await submitAnswerFeedback({
+            session_id: sessionId,
+            message_id: messageId,
+            answer_version: props.session?.updated_at || props.session?.created_at || 'current',
+            rating,
+            correction: feedbackCorrection.value || undefined,
+        });
+        feedbackSubmitted.value = true;
+        MessagePlugin.success('反馈已提交');
+    } catch (error) {
+        MessagePlugin.error(error?.message || '反馈提交失败');
+    }
 };
 
 // 处理 markdown-content 中图片的点击事件
@@ -283,6 +382,51 @@ onBeforeUnmount(() => {
             width: 100%;
         }
     }
+}
+
+.graph-paths-panel {
+    margin: 4px 0 8px;
+}
+
+.graph-paths-toggle {
+    border: none;
+    background: transparent;
+    color: var(--td-brand-color);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0;
+}
+
+.graph-paths-list {
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.graph-path-item {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: baseline;
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+    line-height: 1.5;
+}
+
+.graph-path-nodes {
+    color: var(--td-text-color-primary);
+}
+
+.graph-path-relations {
+    opacity: 0.85;
+}
+
+.graph-path-score {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
 }
 
 // 内容包装器 - 与 Agent 模式的 answer 样式一致

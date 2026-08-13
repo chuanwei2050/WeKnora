@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 const (
@@ -38,6 +39,19 @@ func newClient(cfg *Config) *client {
 		token:      cfg.APIToken,
 		httpClient: &http.Client{Timeout: defaultTimeout},
 	}
+}
+
+func newClientWithEndpoint(cfg *Config, endpoint *types.ApprovedEndpoint) (*client, error) {
+	client := newClient(cfg)
+	if endpoint == nil {
+		return client, nil
+	}
+	httpClient, err := datasource.NewApprovedEndpointHTTPClient(endpoint, defaultTimeout)
+	if err != nil {
+		return nil, err
+	}
+	client.httpClient = httpClient
+	return client, nil
 }
 
 // doRequest executes an authenticated request and decodes JSON, with retry logic

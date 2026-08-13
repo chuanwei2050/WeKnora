@@ -1,0 +1,23 @@
+{
+  "schema_version": "research-acceptance-status/v1",
+  "profile": "online-app",
+  "status": "blocked",
+  "accuracy": {
+    "status": "blocked",
+    "reason": "当前 acceptance suite 是 synthetic engineering fixture，未完成 L1-L4 专家标注和冻结知识内容，未运行正式准确率门禁。"
+  },
+  "ttft": {
+    "status": "failed",
+    "report": "local-app-load-ttft-gated-20260812.json",
+    "users": 50,
+    "concurrent": 10,
+    "completed": 50,
+    "errors": 0,
+    "timeouts": 0,
+    "ttft_limit_ms": 15000,
+    "ttft_over_limit_count": 3,
+    "max_ttft_ms": 18923
+  },
+  "formal_gate": "blocked",
+  "reason": "准确率缺少专家冻结套件，且 10 并发 TTFT 门禁实际失败。"
+}

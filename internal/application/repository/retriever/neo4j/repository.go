@@ -234,3 +234,34 @@ func listI2listS(list []any) []string {
 	}
 	return result
 }
+
+// SearchPaths provides the typed graph-query boundary for callers. Existing
+// installations may still contain the legacy one-hop graph, but its node
+// properties do not contain authoritative relationship evidence. Such data
+// must be reported as a text-retrieval fallback instead of being presented as
+// a typed, traceable path.
+func (n *Neo4jRepository) SearchPaths(ctx context.Context, query types.GraphQuery) (*types.GraphSearchResult, error) {
+	if err := query.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	if query.MaxDepth == 0 {
+		query.MaxDepth = 2
+	}
+	if query.MaxDepth > 4 {
+		return nil, fmt.Errorf("max_depth must not exceed 4")
+	}
+	if n.driver == nil {
+		return &types.GraphSearchResult{Fallback: true, FallbackReason: "neo4j_unavailable"}, nil
+	}
+	canonical, found, err := n.searchCanonicalPaths(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return &canonical, nil
+	}
+	// The legacy one-hop schema has no relationship-level evidence or
+	// knowledge-ID scope. Do not query it as a typed fallback: the caller will
+	// continue with ordinary text retrieval.
+	return &types.GraphSearchResult{Fallback: true, FallbackReason: "legacy_graph_schema"}, nil
+}

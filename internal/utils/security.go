@@ -991,6 +991,11 @@ func ValidateURLForSSRF(rawURL string) error {
 	if hostname == "" {
 		return fmt.Errorf("URL has no hostname")
 	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("AIR_GAPPED_MODE")), "true") {
+		if err := validateStrictAirGappedHost(hostname); err != nil {
+			return err
+		}
+	}
 
 	// If the host is whitelisted, skip the heavy checks.
 	if IsSSRFWhitelisted(hostname) {
@@ -1002,6 +1007,29 @@ func ValidateURLForSSRF(rawURL string) error {
 		return fmt.Errorf("SSRF validation failed: %s", reason)
 	}
 	return nil
+}
+
+func validateStrictAirGappedHost(hostname string) error {
+	if ip := net.ParseIP(hostname); ip != nil {
+		if !isPrivateAirGappedIP(ip) {
+			return fmt.Errorf("strict air-gapped mode rejects public endpoint %q", hostname)
+		}
+		return nil
+	}
+	ips, err := net.DefaultResolver.LookupIP(context.Background(), "ip", hostname)
+	if err != nil || len(ips) == 0 {
+		return fmt.Errorf("strict air-gapped mode cannot resolve endpoint %q", hostname)
+	}
+	for _, ip := range ips {
+		if !isPrivateAirGappedIP(ip) {
+			return fmt.Errorf("strict air-gapped mode rejects endpoint %q resolving to public IP %s", hostname, ip)
+		}
+	}
+	return nil
+}
+
+func isPrivateAirGappedIP(ip net.IP) bool {
+	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
 }
 
 // IsSystemProxy 判断是否为系统代理

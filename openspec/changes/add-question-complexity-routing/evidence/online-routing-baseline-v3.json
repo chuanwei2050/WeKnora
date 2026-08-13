@@ -1,0 +1,346 @@
+{
+  "schema_version": "question-complexity-routing-benchmark/v1",
+  "profile": "online",
+  "taxonomy": {
+    "id": "question-complexity",
+    "version": "1.0"
+  },
+  "model": {
+    "protocol": "openai-compatible",
+    "endpoint": "https://api.siliconflow.cn/v1",
+    "name": "Qwen/Qwen3.6-27B"
+  },
+  "started_at": "2026-08-12T13:57:57.6435423+00:00",
+  "completed_at": "2026-08-12T13:59:37.1523014+00:00",
+  "sample_count": 20,
+  "valid_count": 20,
+  "invalid_count": 0,
+  "accuracy": 0.95,
+  "confusion_matrix": {
+    "L1": {
+      "L1": 5,
+      "L2": 0,
+      "L3": 0,
+      "L4": 0
+    },
+    "L2": {
+      "L1": 1,
+      "L2": 4,
+      "L3": 0,
+      "L4": 0
+    },
+    "L3": {
+      "L1": 0,
+      "L2": 0,
+      "L3": 5,
+      "L4": 0
+    },
+    "L4": {
+      "L1": 0,
+      "L2": 0,
+      "L3": 0,
+      "L4": 5
+    }
+  },
+  "per_level": {
+    "L1": {
+      "support": 5,
+      "precision": 0.8333333333333334,
+      "recall": 1
+    },
+    "L2": {
+      "support": 5,
+      "precision": 1,
+      "recall": 0.8
+    },
+    "L3": {
+      "support": 5,
+      "precision": 1,
+      "recall": 1
+    },
+    "L4": {
+      "support": 5,
+      "precision": 1,
+      "recall": 1
+    }
+  },
+  "routing_baseline": {
+    "action_by_level": {
+      "L1": "quick_rag",
+      "L2": "contextual_rag",
+      "L3": "graph_reasoning",
+      "L4": "verified_agent"
+    },
+    "action_accuracy": 0.95,
+    "action_confusion_matrix": {
+      "quick_rag": {
+        "quick_rag": 5,
+        "contextual_rag": 0,
+        "graph_reasoning": 0,
+        "verified_agent": 0
+      },
+      "contextual_rag": {
+        "quick_rag": 1,
+        "contextual_rag": 4,
+        "graph_reasoning": 0,
+        "verified_agent": 0
+      },
+      "graph_reasoning": {
+        "quick_rag": 0,
+        "contextual_rag": 0,
+        "graph_reasoning": 5,
+        "verified_agent": 0
+      },
+      "verified_agent": {
+        "quick_rag": 0,
+        "contextual_rag": 0,
+        "graph_reasoning": 0,
+        "verified_agent": 5
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "std-l1-001",
+      "expert_level": "L1",
+      "predicted_level": "L1",
+      "predicted_subtype": "direct_lookup",
+      "confidence": 0.95,
+      "predicted_action": "quick_rag",
+      "expected_action": "quick_rag",
+      "classification_ms": 11156,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "std-l1-002",
+      "expert_level": "L1",
+      "predicted_level": "L1",
+      "predicted_subtype": "direct_lookup",
+      "confidence": 0.95,
+      "predicted_action": "quick_rag",
+      "expected_action": "quick_rag",
+      "classification_ms": 2868,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "std-l1-003",
+      "expert_level": "L1",
+      "predicted_level": "L1",
+      "predicted_subtype": "direct_lookup",
+      "confidence": 0.95,
+      "predicted_action": "quick_rag",
+      "expected_action": "quick_rag",
+      "classification_ms": 1582,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "std-l1-004",
+      "expert_level": "L1",
+      "predicted_level": "L1",
+      "predicted_subtype": "direct_lookup",
+      "confidence": 0.95,
+      "predicted_action": "quick_rag",
+      "expected_action": "quick_rag",
+      "classification_ms": 2788,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "std-l1-005",
+      "expert_level": "L1",
+      "predicted_level": "L1",
+      "predicted_subtype": "direct_lookup",
+      "confidence": 0.9,
+      "predicted_action": "quick_rag",
+      "expected_action": "quick_rag",
+      "classification_ms": 1748,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "foundation-l2-001",
+      "expert_level": "L2",
+      "predicted_level": "L2",
+      "predicted_subtype": "contextual_fact_lookup",
+      "confidence": 0.9,
+      "predicted_action": "contextual_rag",
+      "expected_action": "contextual_rag",
+      "classification_ms": 1849,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "foundation-l2-002",
+      "expert_level": "L2",
+      "predicted_level": "L2",
+      "predicted_subtype": "contextual_location_lookup",
+      "confidence": 0.95,
+      "predicted_action": "contextual_rag",
+      "expected_action": "contextual_rag",
+      "classification_ms": 3647,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "foundation-l2-003",
+      "expert_level": "L2",
+      "predicted_level": "L2",
+      "predicted_subtype": "contextual_lookup",
+      "confidence": 0.9,
+      "predicted_action": "contextual_rag",
+      "expected_action": "contextual_rag",
+      "classification_ms": 1979,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "foundation-l2-004",
+      "expert_level": "L2",
+      "predicted_level": "L2",
+      "predicted_subtype": "contextual_fact_lookup",
+      "confidence": 0.9,
+      "predicted_action": "contextual_rag",
+      "expected_action": "contextual_rag",
+      "classification_ms": 3158,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "foundation-l2-005",
+      "expert_level": "L2",
+      "predicted_level": "L1",
+      "predicted_subtype": "direct_lookup",
+      "confidence": 0.9,
+      "predicted_action": "quick_rag",
+      "expected_action": "contextual_rag",
+      "classification_ms": 1558,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "internal-l3-001",
+      "expert_level": "L3",
+      "predicted_level": "L3",
+      "predicted_subtype": "comparison",
+      "confidence": 0.95,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "graph_reasoning",
+      "classification_ms": 2003,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "internal-l3-002",
+      "expert_level": "L3",
+      "predicted_level": "L3",
+      "predicted_subtype": "multi-hop synthesis",
+      "confidence": 0.9,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "graph_reasoning",
+      "classification_ms": 2504,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "internal-l3-003",
+      "expert_level": "L3",
+      "predicted_level": "L3",
+      "predicted_subtype": "comparison",
+      "confidence": 0.95,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "graph_reasoning",
+      "classification_ms": 1640,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "internal-l3-004",
+      "expert_level": "L3",
+      "predicted_level": "L3",
+      "predicted_subtype": "multi-hop synthesis",
+      "confidence": 0.9,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "graph_reasoning",
+      "classification_ms": 2069,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "internal-l3-005",
+      "expert_level": "L3",
+      "predicted_level": "L3",
+      "predicted_subtype": "explicit_explanation",
+      "confidence": 0.9,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "graph_reasoning",
+      "classification_ms": 1916,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "experience-l4-001",
+      "expert_level": "L4",
+      "predicted_level": "L4",
+      "predicted_subtype": "policy_action_reasoning",
+      "confidence": 0.95,
+      "predicted_action": "verified_agent",
+      "expected_action": "verified_agent",
+      "classification_ms": 1597,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "experience-l4-002",
+      "expert_level": "L4",
+      "predicted_level": "L4",
+      "predicted_subtype": "policy_action_reasoning",
+      "confidence": 0.95,
+      "predicted_action": "verified_agent",
+      "expected_action": "verified_agent",
+      "classification_ms": 49193,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "experience-l4-003",
+      "expert_level": "L4",
+      "predicted_level": "L4",
+      "predicted_subtype": "policy_action_reasoning",
+      "confidence": 0.95,
+      "predicted_action": "verified_agent",
+      "expected_action": "verified_agent",
+      "classification_ms": 2257,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "experience-l4-004",
+      "expert_level": "L4",
+      "predicted_level": "L4",
+      "predicted_subtype": "hypothetical_policy_action",
+      "confidence": 0.95,
+      "predicted_action": "verified_agent",
+      "expected_action": "verified_agent",
+      "classification_ms": 1693,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "experience-l4-005",
+      "expert_level": "L4",
+      "predicted_level": "L4",
+      "predicted_subtype": "hypothetical_scenario",
+      "confidence": 0.9,
+      "predicted_action": "verified_agent",
+      "expected_action": "verified_agent",
+      "classification_ms": 2223,
+      "valid": true,
+      "error": null
+    }
+  ],
+  "gate": "passed",
+  "integrity_sha256": "188acf3b743622ae24535fb66306fb6f2c1894e0e97d8f53a5f18a3548537d16"
+}

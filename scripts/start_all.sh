@@ -58,6 +58,10 @@ log_success() {
     printf "%b\n" "${GREEN}[SUCCESS]${NC} $1"
 }
 
+is_strict_air_gapped() {
+    [ "${AIR_GAPPED_MODE:-false}" = "true" ] || [ "${AIR_GAPPED_MODE:-false}" = "TRUE" ]
+}
+
 # 选择可用的 Docker Compose 命令（优先 docker compose，其次 docker-compose）
 DOCKER_COMPOSE_BIN=""
 DOCKER_COMPOSE_SUBCMD=""
@@ -118,6 +122,11 @@ install_ollama() {
     if [ $IS_REMOTE -eq 1 ]; then
         log_info "检测到远程Ollama服务配置，无需在本地安装Ollama"
         return 0
+    fi
+
+    if is_strict_air_gapped; then
+        log_error "严格离线模式禁止安装或下载 Ollama，请先导入离线介质并启动本地服务"
+        return 1
     fi
 
     log_info "本地Ollama未安装，正在安装..."
@@ -312,12 +321,21 @@ check_platform() {
 
 # 预拉取沙箱镜像（Agent Skills 执行所需，仅拉取不启动）
 ensure_sandbox_image() {
+    if [ "${WEKNORA_SANDBOX_MODE:-docker}" = "local" ] || [ "${WEKNORA_SANDBOX_MODE:-docker}" = "disabled" ]; then
+        log_info "沙箱模式为 ${WEKNORA_SANDBOX_MODE}，跳过 Docker 沙箱镜像检查"
+        return 0
+    fi
     local sandbox_image="wechatopenai/weknora-sandbox:${WEKNORA_VERSION:-latest}"
 
     # 检查本地是否已存在沙箱镜像
     if docker image inspect "$sandbox_image" &> /dev/null; then
         log_success "沙箱镜像已就绪: $sandbox_image"
         return 0
+    fi
+
+    if is_strict_air_gapped; then
+        log_error "严格离线模式缺少沙箱镜像 $sandbox_image，禁止后台拉取"
+        return 1
     fi
 
     log_info "沙箱镜像 ($sandbox_image) 未检测到，正在后台拉取..."
@@ -361,7 +379,11 @@ start_docker() {
     # 启动基本服务
     log_info "启动核心服务容器..."
 	# 统一通过已检测到的 Compose 命令启动
-	if [ "$NO_PULL" = true ]; then
+	if is_strict_air_gapped; then
+		# 严格离线模式不得拉取或构建镜像，所有制品必须预先导入。
+		log_info "严格离线模式：跳过镜像拉取和构建，使用已导入镜像..."
+		PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD up --no-build -d
+	elif [ "$NO_PULL" = true ]; then
 		# 不拉取镜像，使用本地镜像
 		log_info "跳过镜像拉取，使用本地镜像..."
 		PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD up --build -d
@@ -435,6 +457,11 @@ list_containers() {
 # 拉取最新的Docker镜像
 pull_images() {
     log_info "正在拉取最新的Docker镜像..."
+
+    if is_strict_air_gapped; then
+        log_error "严格离线模式禁止拉取 Docker 镜像，请使用离线介质导入"
+        return 1
+    fi
     
     # 检查Docker环境
     check_docker
@@ -460,6 +487,12 @@ pull_images() {
     if [ $? -ne 0 ]; then
         log_error "镜像拉取失败"
         return 1
+    fi
+
+    if [ "${WEKNORA_SANDBOX_MODE:-docker}" = "local" ] || [ "${WEKNORA_SANDBOX_MODE:-docker}" = "disabled" ]; then
+        log_info "沙箱模式为 ${WEKNORA_SANDBOX_MODE}，跳过 Docker 沙箱镜像拉取"
+        log_success "所有镜像已成功拉取到最新版本"
+        return 0
     fi
 
     # 拉取 sandbox 镜像（sandbox 在 profile 中，需要单独拉取）

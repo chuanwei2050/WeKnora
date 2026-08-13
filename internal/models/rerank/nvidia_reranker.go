@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/transport"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -27,6 +29,7 @@ type NvidiaReranker struct {
 func (r *NvidiaReranker) SetCustomHeaders(headers map[string]string) {
 	r.customHeaders = headers
 }
+
 type NvidiaRerankDocument struct {
 	Text string `json:"text"`
 }
@@ -58,16 +61,16 @@ func NewNvidiaReranker(config *RerankerConfig) (*NvidiaReranker, error) {
 		baseURL = url
 	}
 
+	client, err := transport.NewEndpointHTTPClientWithValidation(baseURL, 60*time.Second, config.ValidateIP)
+	if err != nil {
+		return nil, fmt.Errorf("invalid rerank endpoint: %w", err)
+	}
 	return &NvidiaReranker{
 		modelName: config.ModelName,
 		modelID:   config.ModelID,
 		apiKey:    apiKey,
 		baseURL:   baseURL,
-		client: &http.Client{
-			Transport: &http.Transport{
-				Proxy: http.ProxyFromEnvironment,
-			},
-		},
+		client:    client,
 	}, nil
 }
 

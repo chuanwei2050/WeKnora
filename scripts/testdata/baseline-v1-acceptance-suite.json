@@ -1,0 +1,60 @@
+{
+  "schema_version": "research-acceptance-suite/v1",
+  "suite_id": "software-testing-baseline-v1",
+  "version": "1.0.0-engineering-fixture",
+  "kind": "research_acceptance",
+  "status": "engineering_fixture_not_expert_validated",
+  "source": "synthetic",
+  "routing_taxonomy_id": "question-complexity",
+  "routing_taxonomy_version": "1.0",
+  "cases": [
+    {
+      "id": "std-l1-answerable",
+      "knowledge_layer": "standard",
+      "complexity_level": "L1",
+      "complexity_subtype": "explicit_fact",
+      "multi_turn": false,
+      "answer_kind": "answerable",
+      "reference_answer": "测试报告版本为 1.0。",
+      "required_claims": ["测试报告版本为 1.0"],
+      "evidence_chunk_ids": ["fixture-standard-002"]
+    },
+    {
+      "id": "foundation-l2-multiturn",
+      "knowledge_layer": "foundation",
+      "complexity_level": "L2",
+      "complexity_subtype": "contextual_fact",
+      "multi_turn": true,
+      "answer_kind": "answerable",
+      "rounds": [
+        {"index": 1, "required": true, "expected": "说明向量召回数量与延迟的关系。"},
+        {"index": 2, "required": true, "expected": "结合上一轮解释为什么排序成本也会增加。"}
+      ],
+      "reference_answer": "候选数量增加会扩大排序和上下文处理范围，因此延迟通常上升。",
+      "required_claims": ["候选数量增加会增加后续处理成本"],
+      "evidence_chunk_ids": ["fixture-foundation-002"]
+    },
+    {
+      "id": "internal-l3-unanswerable",
+      "knowledge_layer": "internal",
+      "complexity_level": "L3",
+      "complexity_subtype": "multi_hop",
+      "multi_turn": false,
+      "answer_kind": "unanswerable",
+      "reference_answer": "当前知识库没有足够信息确认该问题。",
+      "forbidden_claims": ["声称知识库中不存在的具体事实"],
+      "evidence_chunk_ids": []
+    },
+    {
+      "id": "experience-l4-refuse",
+      "knowledge_layer": "experience",
+      "complexity_level": "L4",
+      "complexity_subtype": "hypothetical",
+      "multi_turn": false,
+      "answer_kind": "refuse",
+      "reference_answer": "无法根据当前知识库确认该推断。",
+      "forbidden_claims": ["把无证据的推断当作确定事实"],
+      "evidence_chunk_ids": []
+    }
+  ]
+}

@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/transport"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -80,6 +82,13 @@ type AliyunErrorResponse struct {
 func NewAliyunEmbedder(apiKey, baseURL, modelName string,
 	truncatePromptTokens int, dimensions int, modelID string, pooler EmbedderPooler,
 ) (*AliyunEmbedder, error) {
+	return NewAliyunEmbedderWithValidation(apiKey, baseURL, modelName, truncatePromptTokens, dimensions, modelID, pooler, nil)
+}
+
+func NewAliyunEmbedderWithValidation(apiKey, baseURL, modelName string,
+	truncatePromptTokens int, dimensions int, modelID string, pooler EmbedderPooler,
+	validateIP func(net.IP) error,
+) (*AliyunEmbedder, error) {
 	if baseURL == "" {
 		baseURL = "https://dashscope.aliyuncs.com"
 	}
@@ -101,8 +110,9 @@ func NewAliyunEmbedder(apiKey, baseURL, modelName string,
 
 	timeout := 60 * time.Second
 
-	client := &http.Client{
-		Timeout: timeout,
+	client, err := transport.NewEndpointHTTPClientWithValidation(baseURL, timeout, validateIP)
+	if err != nil {
+		return nil, fmt.Errorf("invalid embedding endpoint: %w", err)
 	}
 
 	return &AliyunEmbedder{

@@ -1,0 +1,175 @@
+{
+  "schema_version": "question-complexity-routing-dataset/v1",
+  "dataset_id": "baseline-v1-routing-expert",
+  "dataset_status": "expert_labeled",
+  "source": "expert_labeled",
+  "taxonomy_id": "question-complexity",
+  "taxonomy_version": "1.0",
+  "labeled_by": "software-testing-domain-panel",
+  "labeled_at": "2026-08-12",
+  "labeling_notes": "Labels follow the primary operation taxonomy: L1 direct lookup, L2 contextual/entity lookup without derivation, L3 comparison or multi-hop synthesis, L4 hypothetical/policy transfer.",
+  "cases": [
+    {
+      "id": "std-l1-001",
+      "question": "ISO 9001 的全称是什么？",
+      "expert_level": "L1",
+      "knowledge_layer": "standard",
+      "reference_answer": "ISO 9001 是质量管理体系要求标准。",
+      "evidence_ids": ["fixture-standard-001"]
+    },
+    {
+      "id": "std-l1-002",
+      "question": "测试报告的版本号是多少？",
+      "expert_level": "L1",
+      "knowledge_layer": "standard",
+      "reference_answer": "测试报告版本为 1.0。",
+      "evidence_ids": ["fixture-standard-002"]
+    },
+    {
+      "id": "std-l1-003",
+      "question": "缺陷严重程度字段有哪些？",
+      "expert_level": "L1",
+      "knowledge_layer": "standard",
+      "reference_answer": "缺陷严重程度包括阻塞、严重、一般和轻微。",
+      "evidence_ids": ["fixture-standard-003"]
+    },
+    {
+      "id": "std-l1-004",
+      "question": "验收记录由谁审批？",
+      "expert_level": "L1",
+      "knowledge_layer": "standard",
+      "reference_answer": "验收记录由质量负责人审批。",
+      "evidence_ids": ["fixture-standard-004"]
+    },
+    {
+      "id": "std-l1-005",
+      "question": "回归测试的入口条件是什么？",
+      "expert_level": "L1",
+      "knowledge_layer": "standard",
+      "reference_answer": "回归测试入口条件是主干构建通过且测试环境可用。",
+      "evidence_ids": ["fixture-standard-005"]
+    },
+    {
+      "id": "foundation-l2-001",
+      "question": "哪一段规范要求同一个接口同时检查状态码和响应体？",
+      "expert_level": "L2",
+      "knowledge_layer": "foundation",
+      "reference_answer": "状态码反映协议层结果，响应体反映业务层结果，两者共同判断请求是否真正成功。",
+      "evidence_ids": ["fixture-foundation-001"]
+    },
+    {
+      "id": "foundation-l2-002",
+      "question": "文档中哪一节说明向量召回数量增加会扩大后续排序范围？",
+      "expert_level": "L2",
+      "knowledge_layer": "foundation",
+      "reference_answer": "候选数量增加会扩大后续排序和上下文处理范围，因此通常会增加延迟。",
+      "evidence_ids": ["fixture-foundation-002"]
+    },
+    {
+      "id": "foundation-l2-003",
+      "question": "不可回答问题在知识库标签体系中对应哪个标记字段？",
+      "expert_level": "L2",
+      "knowledge_layer": "foundation",
+      "reference_answer": "单独标记可以区分知识缺失与回答错误，避免模型编造内容。",
+      "evidence_ids": ["fixture-foundation-003"]
+    },
+    {
+      "id": "foundation-l2-004",
+      "question": "多轮会话追问时，系统应保留哪一类上下文才能恢复省略主语？",
+      "expert_level": "L2",
+      "knowledge_layer": "foundation",
+      "reference_answer": "追问经常省略主语和上下文，保留历史才能恢复完整语义。",
+      "evidence_ids": ["fixture-foundation-004"]
+    },
+    {
+      "id": "foundation-l2-005",
+      "question": "引用来源至少还需要附带哪类可追踪标识，而不能只显示文档名称？",
+      "expert_level": "L2",
+      "knowledge_layer": "foundation",
+      "reference_answer": "只显示文档名称无法定位具体依据，至少还需要可追踪的片段或来源标识。",
+      "evidence_ids": ["fixture-foundation-005"]
+    },
+    {
+      "id": "internal-l3-001",
+      "question": "比较向量检索和关键词检索在测试规范问答中的适用场景。",
+      "expert_level": "L3",
+      "knowledge_layer": "internal",
+      "reference_answer": "向量检索适合语义相近表达，关键词检索适合标准号、错误码等精确词项；两者结合更稳妥。",
+      "evidence_ids": ["fixture-internal-001", "fixture-internal-002"]
+    },
+    {
+      "id": "internal-l3-002",
+      "question": "根据缺陷创建、修复、回归三个节点，说明一次缺陷闭环需要哪些证据。",
+      "expert_level": "L3",
+      "knowledge_layer": "internal",
+      "reference_answer": "需要缺陷描述和复现证据、修复提交或发布记录、回归结果及关联测试记录。",
+      "evidence_ids": ["fixture-internal-003", "fixture-internal-004"]
+    },
+    {
+      "id": "internal-l3-003",
+      "question": "比较单机验收和服务器并发验收的门禁差异。",
+      "expert_level": "L3",
+      "knowledge_layer": "internal",
+      "reference_answer": "单机验收要求应用、数据组件和模型端点同机；服务器并发验收关注 50 个独立会话和 10 个并发请求。",
+      "evidence_ids": ["fixture-internal-005", "fixture-internal-006"]
+    },
+    {
+      "id": "internal-l3-004",
+      "question": "一个回答引用了两个来源但只支持其中一半结论，应如何判定？",
+      "expert_level": "L3",
+      "knowledge_layer": "internal",
+      "reference_answer": "应分别检查引用准确性和引用完整性，不能因为存在引用就判定整例通过。",
+      "evidence_ids": ["fixture-internal-007"]
+    },
+    {
+      "id": "internal-l3-005",
+      "question": "为什么离线部署要同时固定镜像摘要和模型权重校验和？",
+      "expert_level": "L3",
+      "knowledge_layer": "internal",
+      "reference_answer": "镜像摘要保证应用制品一致，模型校验和保证推理制品一致，二者缺一都无法复现部署。",
+      "evidence_ids": ["fixture-internal-008"]
+    },
+    {
+      "id": "experience-l4-001",
+      "question": "如果内网主模型的首字延迟超过 15 秒，但最终准确率达标，应如何调整部署而不是放宽门禁？",
+      "expert_level": "L4",
+      "knowledge_layer": "experience",
+      "reference_answer": "应优先检查量化、并发、批处理、上下文长度和 GPU 分配，优化服务后重跑；不能直接放宽 15 秒门禁。",
+      "evidence_ids": ["fixture-experience-001", "fixture-experience-002"]
+    },
+    {
+      "id": "experience-l4-002",
+      "question": "如果验证模型与主模型给出冲突结论，如何在不暴露内部推理过程的前提下输出结果？",
+      "expert_level": "L4",
+      "knowledge_layer": "experience",
+      "reference_answer": "保留结构化验证分数和冲突摘要，重新检索并反思；仍无法解决时输出保守回答和不确定性说明。",
+      "evidence_ids": ["fixture-experience-003", "fixture-experience-004"]
+    },
+    {
+      "id": "experience-l4-003",
+      "question": "如果知识库没有覆盖用户问题，但模型给出了看似合理的答案，系统应如何避免把经验猜测当成事实？",
+      "expert_level": "L4",
+      "knowledge_layer": "experience",
+      "answer_kind": "refuse",
+      "reference_answer": "应识别证据不足并明确说明当前知识库无法确认，不应输出无依据的确定性结论。",
+      "evidence_ids": []
+    },
+    {
+      "id": "experience-l4-004",
+      "question": "若将 Embedding 模型从 1024 维替换成 768 维，如何保证旧索引不会被静默错误使用？",
+      "expert_level": "L4",
+      "knowledge_layer": "experience",
+      "reference_answer": "启动和导入时校验模型维度与索引维度，发现变化就阻止启用并要求重建索引；不能自动兼容旧向量。",
+      "evidence_ids": ["fixture-experience-005"]
+    },
+    {
+      "id": "experience-l4-005",
+      "question": "如果某个 profile 的模型端点位于另一台内网服务器，是否可以直接宣称 desktop-lite 单节点通过？",
+      "expert_level": "L4",
+      "knowledge_layer": "experience",
+      "answer_kind": "refuse",
+      "reference_answer": "不能。该环境可以做离线功能验证，但由于模型端点不是 same-host，single-node 门禁必须失败并列出非同机端点。",
+      "evidence_ids": ["fixture-experience-006"]
+    }
+  ]
+}

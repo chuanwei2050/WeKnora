@@ -105,6 +105,10 @@ type Knowledge struct {
 	FileSize int64 `json:"file_size"`
 	// File hash of the knowledge
 	FileHash string `json:"file_hash"`
+	// Current governed version. Empty for legacy, non-governed knowledge bases.
+	CurrentVersionID string `json:"current_version_id,omitempty" gorm:"type:varchar(36);index"`
+	// Pending governed version receives parsed chunks without replacing the current version.
+	PendingVersionID string `json:"pending_version_id,omitempty" gorm:"type:varchar(36);index"`
 	// File path of the knowledge
 	FilePath string `json:"file_path"`
 	// Storage size of the knowledge

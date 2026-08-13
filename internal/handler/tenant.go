@@ -20,10 +20,11 @@ import (
 // Provides functionality for creating, retrieving, updating, and deleting tenants
 // through the REST API endpoints
 type TenantHandler struct {
-	service     interfaces.TenantService
-	userService interfaces.UserService
-	kbService   interfaces.KnowledgeBaseService
-	config      *config.Config
+	service           interfaces.TenantService
+	userService       interfaces.UserService
+	kbService         interfaces.KnowledgeBaseService
+	config            *config.Config
+	approvedEndpoints interfaces.ApprovedEndpointRepository
 }
 
 // authorizeTenantAccess checks that the authenticated user owns the target tenant
@@ -58,12 +59,13 @@ func (h *TenantHandler) authorizeTenantAccess(c *gin.Context, targetTenantID uin
 //   - config: Application configuration
 //
 // Returns a pointer to the newly created TenantHandler
-func NewTenantHandler(service interfaces.TenantService, userService interfaces.UserService, kbService interfaces.KnowledgeBaseService, config *config.Config) *TenantHandler {
+func NewTenantHandler(service interfaces.TenantService, userService interfaces.UserService, kbService interfaces.KnowledgeBaseService, config *config.Config, approvedEndpoints interfaces.ApprovedEndpointRepository) *TenantHandler {
 	return &TenantHandler{
-		service:     service,
-		userService: userService,
-		kbService:   kbService,
-		config:      config,
+		service:           service,
+		userService:       userService,
+		kbService:         kbService,
+		config:            config,
+		approvedEndpoints: approvedEndpoints,
 	}
 }
 
@@ -846,6 +848,10 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 	if tenant == nil {
 		logger.Error(ctx, "Tenant is empty")
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		return
+	}
+	if err := validateStorageEndpointApprovals(ctx, tenant.ID, &cfg, h.approvedEndpoints); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	tenant.StorageEngineConfig = &cfg

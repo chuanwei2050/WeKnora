@@ -34,11 +34,12 @@ type qaRequestContext struct {
 	webSearchEnabled  bool
 	enableMemory      bool // Whether memory feature is enabled
 	mentionedItems    types.MentionedItems
-	effectiveTenantID uint64            // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
-	images            []ImageAttachment // Uploaded images with analysis text
-	userMessageID     string            // Created user message ID (populated after createUserMessage)
-	channel           string            // Source channel: "web", "api", "im", etc.
+	effectiveTenantID uint64                   // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
+	images            []ImageAttachment        // Uploaded images with analysis text
+	userMessageID     string                   // Created user message ID (populated after createUserMessage)
+	channel           string                   // Source channel: "web", "api", "im", etc.
 	attachments       types.MessageAttachments // Processed file attachments
+	voiceMetadata     types.JSON
 }
 
 // buildQARequest converts the qaRequestContext into a types.QARequest for service invocation.
@@ -84,6 +85,14 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	if request.Query == "" {
 		logger.Error(ctx, "Query content is empty")
 		return nil, nil, errors.NewBadRequestError("Query content cannot be empty")
+	}
+	var voiceMetadata types.JSON
+	if len(request.VoiceMetadata) > 0 {
+		metadata, marshalErr := json.Marshal(request.VoiceMetadata)
+		if marshalErr != nil {
+			return nil, nil, errors.NewBadRequestError("invalid voice metadata")
+		}
+		voiceMetadata = types.JSON(metadata)
 	}
 
 	// SSRF protection: strip client-supplied URL/Caption fields from image attachments.
@@ -225,6 +234,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		images:            request.Images,
 		channel:           request.Channel,
 		attachments:       processedAttachments,
+		voiceMetadata:     voiceMetadata,
 	}
 
 	return reqCtx, &request, nil
@@ -543,7 +553,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	}
 
 	// Create user message
-	userMsg, err := h.createUserMessage(ctx, sessionID, reqCtx.query, reqCtx.requestID, reqCtx.mentionedItems, convertImageAttachments(reqCtx.images), reqCtx.attachments, reqCtx.channel)
+	userMsg, err := h.createUserMessage(ctx, sessionID, reqCtx.query, reqCtx.requestID, reqCtx.mentionedItems, convertImageAttachments(reqCtx.images), reqCtx.attachments, reqCtx.channel, reqCtx.voiceMetadata)
 	if err != nil {
 		reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
 		return

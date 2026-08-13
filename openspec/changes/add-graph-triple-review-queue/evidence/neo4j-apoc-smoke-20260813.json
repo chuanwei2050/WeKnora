@@ -1,0 +1,32 @@
+﻿{
+    "schema":  "weknora-neo4j-apoc-smoke/v1",
+    "run_at":  "2026-08-13T15:27:36.3133238+08:00",
+    "container":  "WeKnora-neo4j-e2e",
+    "gate":  "passed",
+    "checks":  {
+                   "apoc.version":  {
+                                        "ok":  true,
+                                        "output":  "v\r\n\"5.26.29\""
+                                    },
+                   "apoc.merge.node":  {
+                                           "ok":  true,
+                                           "output":  "names\r\n[\"apoc.merge.node\", \"apoc.merge.node.eager\", \"apoc.merge.nodeWithStats\", \"apoc.merge.nodeWithStats.eager\"]"
+                                       },
+                   "apoc.merge.relationship":  {
+                                                   "ok":  true,
+                                                   "output":  "names\r\n[\"apoc.merge.relationship\", \"apoc.merge.relationship.eager\", \"apoc.merge.relationshipWithStats\", \"apoc.merge.relationshipWithStats.eager\"]"
+                                               },
+                   "apoc.coll.union":  {
+                                           "ok":  true,
+                                           "output":  "u\r\n[1, 2, 3]"
+                                       },
+                   "apoc.periodic.iterate":  {
+                                                 "ok":  true,
+                                                 "output":  "names\r\n[\"apoc.periodic.iterate\"]"
+                                             },
+                   "merge_roundtrip":  {
+                                           "ok":  true,
+                                           "output":  "name\r\n\"smoke-a\""
+                                       }
+               }
+}

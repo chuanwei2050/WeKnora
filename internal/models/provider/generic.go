@@ -26,6 +26,7 @@ func (p *GenericProvider) Info() ProviderInfo {
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
+			types.ModelTypeTTS,
 		},
 		RequiresAuth: false, // 可能需要也可能不需要
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -29,16 +30,30 @@ type tosFileService struct {
 const tosScheme = "tos://"
 
 // NewTosFileService creates a TOS file service.
-func NewTosFileService(endpoint, region, accessKey, secretKey, bucketName, pathPrefix string) (interfaces.FileService, error) {
-	return NewTosFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, "", "")
+func NewTosFileService(endpoint, region, accessKey, secretKey, bucketName, pathPrefix string, httpClients ...*http.Client) (interfaces.FileService, error) {
+	return NewTosFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, "", "", httpClients...)
 }
 
 // NewTosFileServiceWithTempBucket creates a TOS file service with optional temp bucket.
-func NewTosFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, tempBucketName, tempRegion string) (interfaces.FileService, error) {
-	client, err := tos.NewClientV2(
-		endpoint,
+func NewTosFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, tempBucketName, tempRegion string, httpClients ...*http.Client) (interfaces.FileService, error) {
+	var httpClient *http.Client
+	if len(httpClients) > 0 {
+		httpClient = httpClients[0]
+	}
+	return newTosFileServiceWithHTTPClient(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, tempBucketName, tempRegion, httpClient)
+}
+
+func newTosFileServiceWithHTTPClient(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, tempBucketName, tempRegion string, httpClient *http.Client) (interfaces.FileService, error) {
+	options := []tos.ClientOption{
 		tos.WithRegion(region),
 		tos.WithCredentials(tos.NewStaticCredentials(accessKey, secretKey)),
+	}
+	if httpClient != nil {
+		options = append(options, tos.WithHTTPTransport(httpClient.Transport))
+	}
+	client, err := tos.NewClientV2(
+		endpoint,
+		options...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize TOS client: %w", err)
@@ -53,11 +68,14 @@ func NewTosFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, buc
 			tempRegion = region
 		}
 		// Temporary bucket may belong to another region, so probe with a short-lived client.
-		tempClient, err := tos.NewClientV2(
-			endpoint,
+		tempOptions := []tos.ClientOption{
 			tos.WithRegion(tempRegion),
 			tos.WithCredentials(tos.NewStaticCredentials(accessKey, secretKey)),
-		)
+		}
+		if httpClient != nil {
+			tempOptions = append(tempOptions, tos.WithHTTPTransport(httpClient.Transport))
+		}
+		tempClient, err := tos.NewClientV2(endpoint, tempOptions...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize TOS temp client: %w", err)
 		}

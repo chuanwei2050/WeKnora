@@ -12,6 +12,7 @@ import { useOrganizationStore } from '@/stores/organization';
 import { useAuthStore } from '@/stores/auth';
 import { useSettingsStore } from '@/stores/settings';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
+import KnowledgeGovernancePanel from './components/KnowledgeGovernancePanel.vue';
 const usemenuStore = useMenuStore();
 const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
@@ -58,6 +59,7 @@ const validTabs = ['documents', 'wiki', 'graph'] as const
 type KbTab = typeof validTabs[number]
 const initTab = validTabs.includes(route.query.tab as any) ? (route.query.tab as KbTab) : 'documents'
 const activeKbTab = ref<KbTab>(initTab);
+const governanceVisible = ref(false)
 
 // Wiki 状态用于面包屑上的索引中指示。父组件自行拉取，避免依赖 WikiBrowser 挂载状态
 // （用户切到"文档" tab 时 WikiBrowser 会卸载，这里仍需持续反映后台索引进度）。
@@ -847,7 +849,7 @@ const loadKnowledgeList = async () => {
       }));
     
     // Merge and deduplicate by id (my KBs take precedence)
-    const myKbIds = new Set(myKbs.map(kb => kb.id));
+    const myKbIds = new Set(myKbs.map((kb: { id: string }) => kb.id));
     const uniqueSharedKbs = sharedKbs.filter(kb => !myKbIds.has(kb.id));
     
     knowledgeList.value = [...myKbs, ...uniqueSharedKbs];
@@ -894,7 +896,7 @@ watch(tagSearchQuery, (newVal, oldVal) => {
   if (tagSearchDebounce) {
     clearTimeout(tagSearchDebounce);
   }
-  tagSearchDebounce = window.setTimeout(() => {
+  tagSearchDebounce = setTimeout(() => {
     if (kbId.value) {
       loadTags(kbId.value, true);
     }
@@ -907,7 +909,7 @@ watch(docSearchKeyword, (newVal, oldVal) => {
   if (docSearchDebounce) {
     clearTimeout(docSearchDebounce);
   }
-  docSearchDebounce = window.setTimeout(() => {
+  docSearchDebounce = setTimeout(() => {
     if (kbId.value) {
       page = 1;
       loadKnowledgeFiles(kbId.value);
@@ -2015,6 +2017,15 @@ async function createNewSession(value: string): Promise<void> {
                 <t-icon name="setting" size="16px" />
               </button>
             </t-tooltip>
+            <button
+              v-if="canManage && !isFAQ"
+              type="button"
+              class="kb-governance-button"
+              :disabled="!kbId"
+              @click="governanceVisible = true"
+            >
+              版本治理
+            </button>
           </div>
           <p class="document-subtitle">{{ $t('knowledgeEditor.document.subtitle') }}</p>
           <p v-if="unsupportedFileTypes.length" class="parser-hint" @click="goToParserSettings">
@@ -2726,6 +2737,13 @@ async function createNewSession(value: string): Promise<void> {
     :initial-type="uiStore.kbEditorType"
     @update:visible="(val) => val ? null : uiStore.closeKBEditor()"
     @success="handleKBEditorSuccess"
+  />
+  <KnowledgeGovernancePanel
+    v-if="kbId"
+    :visible="governanceVisible"
+    :knowledge-base-id="kbId"
+    :knowledge-items="cardList"
+    @update:visible="governanceVisible = $event"
   />
 </template>
 <style>
@@ -3739,6 +3757,26 @@ async function createNewSession(value: string): Promise<void> {
 
   :deep(.t-icon) {
     font-size: 18px;
+  }
+}
+
+.kb-governance-button {
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--td-brand-color);
+  border-radius: 15px;
+  background: transparent;
+  color: var(--td-brand-color);
+  cursor: pointer;
+  font-size: 12px;
+
+  &:hover:not(:disabled) {
+    background: var(--td-brand-color-light);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
   }
 }
 

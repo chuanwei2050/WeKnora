@@ -1,0 +1,29 @@
+{
+  "schema": "weknora-outbound-audit/v1",
+  "status": "failed",
+  "probe_url": "https://example.com/",
+  "resolved_ips": [
+    "104.20.23.154",
+    "172.66.147.243"
+  ],
+  "public_ips": [
+    "104.20.23.154",
+    "172.66.147.243"
+  ],
+  "attempted_public_connections": 1,
+  "successful_public_connections": 1,
+  "blocked_or_failed_connections": 0,
+  "events": [
+    {
+      "mode": "probe",
+      "url": "https://example.com/",
+      "outcome": "success",
+      "status_code": 200,
+      "resolved_ips": [
+        "104.20.23.154",
+        "172.66.147.243"
+      ]
+    }
+  ],
+  "generated_at": "2026-08-13T06:51:06.1013456+00:00"
+}

@@ -1,0 +1,369 @@
+{
+  "schema": "weknora-formal-acceptance/v1",
+  "run_id": "formal-expert-20260812-kb2",
+  "suite_file": "F:\\AI-Project\\WeKnora-development\\scripts\\testdata\\baseline-v1-acceptance-suite-expert.json",
+  "target": "http://127.0.0.1:18080",
+  "profile": "compose-airgap",
+  "mode": "rag",
+  "frozen_inputs": {
+    "path": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\frozen-inputs-v1.json",
+    "freeze_sha256": "f0fb7604903c2ec5331876692b4fccc8a86068d31a32818a5734b52f44351172"
+  },
+  "dry_run": false,
+  "formal_suite": true,
+  "gate": "passed",
+  "reason": "",
+  "case_count": 8,
+  "passed_count": 8,
+  "failed_count": 0,
+  "accuracy": 1.0,
+  "knowledge_base_ids": [
+    "2fb51638-3691-435d-8fb0-ab6a71985f27"
+  ],
+  "started_at": "2026-08-12T15:02:35.8867094+00:00",
+  "completed_at": "2026-08-12T15:03:48.8849094+00:00",
+  "results": [
+    {
+      "case_id": "std-l1-verified-order",
+      "passed": true,
+      "timed_out": false,
+      "error": "",
+      "execution": {
+        "answer": "根据检索到的信息，验证式回答必须先完成**检索**，才能生成草稿。具体流程为：先检索，再生成草稿，随后由两个独立模型验证事实、逻辑和引用；若证据不足，则需补充检索并重新验证。未经验证的草稿不能发送给用户。",
+        "evidence_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "citation_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "timing": {
+          "accepted_at": "2026-08-12T15:02:35.9736841+00:00",
+          "first_visible_at": "2026-08-12T15:02:38.81318+00:00",
+          "completed_at": "2026-08-12T15:02:39.3226586+00:00",
+          "ttft_ms": 2839,
+          "timed_out": false,
+          "error": null,
+          "attempts": 1
+        },
+        "routing": {
+          "expected_level": "L1",
+          "expected_subtype": "explicit_fact",
+          "actual_level": "",
+          "actual_subtype": "",
+          "needs_entity_relation": false,
+          "actual_action": "",
+          "planned_action": "",
+          "degradation_reason": ""
+        },
+        "graph": {
+          "requested": false,
+          "used": false,
+          "reason": "routing_disabled_or_relation_not_needed"
+        },
+        "verification_path": "",
+        "degradation_reason": "",
+        "round_count": 1
+      }
+    },
+    {
+      "case_id": "std-l1-unverified-draft",
+      "passed": true,
+      "timed_out": false,
+      "error": "",
+      "execution": {
+        "answer": "根据检索到的信息，未经验证的草稿**不能**直接发送给用户。依据如下：-验证式回答流程要求：必须先检索，再生成草稿，随后由两个独立模型验证事实、逻辑和引用。-明确规定：**未经验证的草稿不能发送给用户**。只有在证据不足时，才允许补充检索并重新验证。",
+        "evidence_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "citation_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "timing": {
+          "accepted_at": "2026-08-12T15:02:39.3974352+00:00",
+          "first_visible_at": "2026-08-12T15:02:42.613116+00:00",
+          "completed_at": "2026-08-12T15:02:43.4163468+00:00",
+          "ttft_ms": 3216,
+          "timed_out": false,
+          "error": null,
+          "attempts": 1
+        },
+        "routing": {
+          "expected_level": "L1",
+          "expected_subtype": "explicit_fact",
+          "actual_level": "",
+          "actual_subtype": "",
+          "needs_entity_relation": false,
+          "actual_action": "",
+          "planned_action": "",
+          "degradation_reason": ""
+        },
+        "graph": {
+          "requested": false,
+          "used": false,
+          "reason": "routing_disabled_or_relation_not_needed"
+        },
+        "verification_path": "",
+        "degradation_reason": "",
+        "round_count": 1
+      }
+    },
+    {
+      "case_id": "foundation-l2-validator-roles",
+      "passed": true,
+      "timed_out": false,
+      "error": "",
+      "execution": {
+        "answer": "根据检索到的信息，验证阶段由两个独立模型分别验证以下三个方面：1. **事实**2. **逻辑**3. **引用**",
+        "evidence_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "citation_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "timing": {
+          "accepted_at": "2026-08-12T15:02:43.4276176+00:00",
+          "first_visible_at": "2026-08-12T15:02:50.8387993+00:00",
+          "completed_at": "2026-08-12T15:02:50.849333+00:00",
+          "ttft_ms": 7411,
+          "timed_out": false,
+          "error": null,
+          "attempts": 1
+        },
+        "routing": {
+          "expected_level": "L2",
+          "expected_subtype": "contextual_fact",
+          "actual_level": "",
+          "actual_subtype": "",
+          "needs_entity_relation": false,
+          "actual_action": "",
+          "planned_action": "",
+          "degradation_reason": ""
+        },
+        "graph": {
+          "requested": false,
+          "used": false,
+          "reason": "routing_disabled_or_relation_not_needed"
+        },
+        "verification_path": "",
+        "degradation_reason": "",
+        "round_count": 1
+      }
+    },
+    {
+      "case_id": "foundation-l2-multiturn-retrieve-then-verify",
+      "passed": true,
+      "timed_out": false,
+      "error": "",
+      "execution": {
+        "answer": "根据检索到的信息，验证式回答的处理顺序如下：1. **先检索**：首先进行信息检索。2. **生成草稿**：基于检索结果生成回答草稿。3. **独立验证**：由两个独立模型对草稿的事实、逻辑和引用进行验证。4. **补充检索与重新验证（如需）**：如果证据不足，则补充检索并重新进行验证。5. **发送**：只有经过验证的草稿才能发送给用户，未经验证的草稿严禁发送。\n在验证式回答的流程中，如果验证阶段发现**证据不足**，处理方式如下：1. **补充检索**：系统会再次进行信息检索，以获取更多支持性证据。2. **重新验证**：基于新检索到的信息，由独立模型对回答草稿进行重新验证。只有当验证通过（即事实、逻辑和引用均得到充分支持）后，回答才会发送给用户。如果经过补充检索和重新验证后证据仍然不足，通常不会发送未经验证或证据不充分的答案，以确保回答的准确性。",
+        "evidence_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "citation_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "timing": {
+          "accepted_at": "2026-08-12T15:02:50.860725+00:00",
+          "first_visible_at": "2026-08-12T15:02:54.0733898+00:00",
+          "completed_at": "2026-08-12T15:03:01.7006257+00:00",
+          "ttft_ms": 3213,
+          "timed_out": false,
+          "error": null,
+          "attempts": 1
+        },
+        "routing": {
+          "expected_level": "L2",
+          "expected_subtype": "contextual_fact",
+          "actual_level": "",
+          "actual_subtype": "",
+          "needs_entity_relation": false,
+          "actual_action": "",
+          "planned_action": "",
+          "degradation_reason": ""
+        },
+        "graph": {
+          "requested": false,
+          "used": false,
+          "reason": "routing_disabled_or_relation_not_needed"
+        },
+        "verification_path": "",
+        "degradation_reason": "",
+        "round_count": 2
+      }
+    },
+    {
+      "case_id": "internal-l3-supplemental-retrieval",
+      "passed": true,
+      "timed_out": false,
+      "error": "",
+      "execution": {
+        "answer": "根据提供的检索信息，符合验证式回答规则的流程是：**证据不足时补充检索再验证**。具体依据如下：1. **验证式回答的标准流程**：必须先检索，再生成草稿，然后由两个独立模型验证事实、逻辑和引用。2. **证据不足的处理**：只有在证据不足时，才能进行补充检索并重新验证。3. **禁止行为**：未经验证的草稿不能发送给用户。因此，“首次检索后直接回答”如果跳过了“由两个独立模型验证”这一环节，或者在证据不足时未进行补充检索和重新验证，则不符合规则。而“证据不足时补充检索再验证”明确符合规则中对于证据不足情况的处理要求，且隐含了最终必须经过验证才能输出的前提。",
+        "evidence_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "citation_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "timing": {
+          "accepted_at": "2026-08-12T15:03:01.7091796+00:00",
+          "first_visible_at": "2026-08-12T15:03:10.12224+00:00",
+          "completed_at": "2026-08-12T15:03:12.7258397+00:00",
+          "ttft_ms": 8413,
+          "timed_out": false,
+          "error": null,
+          "attempts": 1
+        },
+        "routing": {
+          "expected_level": "L3",
+          "expected_subtype": "multi_hop",
+          "actual_level": "",
+          "actual_subtype": "",
+          "needs_entity_relation": false,
+          "actual_action": "",
+          "planned_action": "",
+          "degradation_reason": ""
+        },
+        "graph": {
+          "requested": false,
+          "used": false,
+          "reason": "routing_disabled_or_relation_not_needed"
+        },
+        "verification_path": "",
+        "degradation_reason": "",
+        "round_count": 1
+      }
+    },
+    {
+      "case_id": "internal-l3-unanswerable-iso",
+      "passed": true,
+      "timed_out": false,
+      "error": "",
+      "execution": {
+        "answer": "根据提供的检索信息，其中仅包含关于“OpenSpec验收规则 retry”的标题以及关于验证式回答流程的描述，并未包含关于 ISO9001的任何信息。因此，我无法根据当前知识库回答 ISO9001的全称是什么。建议您查阅相关的国际标准文档或提供更包含该信息的检索资料。",
+        "evidence_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "citation_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "timing": {
+          "accepted_at": "2026-08-12T15:03:12.740019+00:00",
+          "first_visible_at": "2026-08-12T15:03:15.8533448+00:00",
+          "completed_at": "2026-08-12T15:03:16.7603882+00:00",
+          "ttft_ms": 3113,
+          "timed_out": false,
+          "error": null,
+          "attempts": 1
+        },
+        "routing": {
+          "expected_level": "L3",
+          "expected_subtype": "multi_hop",
+          "actual_level": "",
+          "actual_subtype": "",
+          "needs_entity_relation": false,
+          "actual_action": "",
+          "planned_action": "",
+          "degradation_reason": ""
+        },
+        "graph": {
+          "requested": false,
+          "used": false,
+          "reason": "routing_disabled_or_relation_not_needed"
+        },
+        "verification_path": "",
+        "degradation_reason": "",
+        "round_count": 1
+      }
+    },
+    {
+      "case_id": "experience-l4-refuse-guess",
+      "passed": true,
+      "timed_out": false,
+      "error": "",
+      "execution": {
+        "answer": "根据提供的检索信息，系统**不可以**把模型经验猜测当成确定事实输出。依据如下：1. **严格的事实依据**：作为 WeKnora，必须仅基于检索到的事实回答问题，**不得使用任何先验知识**。2. **验证流程要求**：验证式回答必须经过“检索 ->生成草稿 ->两个独立模型验证事实、逻辑和引用”的流程。3. **证据不足的处理**：当证据不足时，正确的做法是**补充检索并重新验证**，而不是依赖猜测。4. **禁止未经验证的内容**：明确规定**未经验证的草稿不能发送给用户**。因此，如果知识库没有覆盖用户问题，应当如实告知用户无法回答并提供建议，而不能输出未经检索验证的猜测内容。",
+        "evidence_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "citation_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "timing": {
+          "accepted_at": "2026-08-12T15:03:16.7738815+00:00",
+          "first_visible_at": "2026-08-12T15:03:20.5860704+00:00",
+          "completed_at": "2026-08-12T15:03:23.1897477+00:00",
+          "ttft_ms": 3812,
+          "timed_out": false,
+          "error": null,
+          "attempts": 1
+        },
+        "routing": {
+          "expected_level": "L4",
+          "expected_subtype": "hypothetical",
+          "actual_level": "",
+          "actual_subtype": "",
+          "needs_entity_relation": false,
+          "actual_action": "",
+          "planned_action": "",
+          "degradation_reason": ""
+        },
+        "graph": {
+          "requested": false,
+          "used": false,
+          "reason": "routing_disabled_or_relation_not_needed"
+        },
+        "verification_path": "",
+        "degradation_reason": "",
+        "round_count": 1
+      }
+    },
+    {
+      "case_id": "experience-l4-hypothetical-skip-verify",
+      "passed": true,
+      "timed_out": false,
+      "error": "",
+      "execution": {
+        "answer": "不符合。根据提供的检索信息，验证式回答规则明确规定：**“未经验证的草稿不能发送给用户”**。规则要求必须先检索，再生成草稿，并由**两个独立模型验证**事实、逻辑和引用。只有在证据不足时，才能补充检索并重新验证。因此，为了降低延迟而跳过双模型验证直接发送草稿，违反了“未经验证的草稿不能发送给用户”这一核心约束。",
+        "evidence_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "citation_chunk_ids": [
+          "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+        ],
+        "timing": {
+          "accepted_at": "2026-08-12T15:03:40.6509659+00:00",
+          "first_visible_at": "2026-08-12T15:03:47.7681466+00:00",
+          "completed_at": "2026-08-12T15:03:48.8706863+00:00",
+          "ttft_ms": 7117,
+          "timed_out": false,
+          "error": null,
+          "attempts": 2
+        },
+        "routing": {
+          "expected_level": "L4",
+          "expected_subtype": "hypothetical",
+          "actual_level": "",
+          "actual_subtype": "",
+          "needs_entity_relation": false,
+          "actual_action": "",
+          "planned_action": "",
+          "degradation_reason": ""
+        },
+        "graph": {
+          "requested": false,
+          "used": false,
+          "reason": "routing_disabled_or_relation_not_needed"
+        },
+        "verification_path": "",
+        "degradation_reason": "",
+        "round_count": 1
+      }
+    }
+  ],
+  "persistence": {
+    "attempted": true,
+    "ok": false,
+    "error": "Response status code does not indicate success: 404 (Not Found)."
+  },
+  "persistence_warning": "案例结果未写入服务器验收账本: Response status code does not indicate success: 404 (Not Found)."
+}

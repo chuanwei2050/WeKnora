@@ -268,6 +268,9 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	if minScore == 0 {
 		minScore = 0.3
 	}
+	if routedTopK, ok := ctx.Value(types.RetrievalTopKContextKey).(int); ok && routedTopK > 0 && routedTopK < topK {
+		topK = routedTopK
+	}
 
 	logger.Infof(
 		ctx,
@@ -1085,6 +1088,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 		data := map[string]interface{}{
 			"knowledge_base_ids": kbsToSearch,
 			"results":            []interface{}{},
+			"search_results":     []*types.SearchResult{},
 			"count":              0,
 		}
 		if len(queries) > 0 {
@@ -1319,6 +1323,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 	data := map[string]interface{}{
 		"knowledge_base_ids": kbsToSearch,
 		"results":            formattedResults,
+		"search_results":     searchResultsForAgent(results),
 		"count":              len(formattedResults),
 		"kb_counts":          kbCounts,
 		"display_type":       "search_results",
@@ -1333,6 +1338,21 @@ func (t *KnowledgeSearchTool) formatOutput(
 		Output:  output,
 		Data:    data,
 	}, nil
+}
+
+// searchResultsForAgent keeps the typed retrieval results available to the
+// agent boundary. The rendered Output is intentionally optimized for the LLM,
+// while the verified-answer pipeline needs the original chunk IDs and content
+// to build its evidence bundle without reparsing XML.
+func searchResultsForAgent(results []*searchResultWithMeta) []*types.SearchResult {
+	refs := make([]*types.SearchResult, 0, len(results))
+	for _, result := range results {
+		if result == nil || result.SearchResult == nil {
+			continue
+		}
+		refs = append(refs, result.SearchResult)
+	}
+	return refs
 }
 
 // chunkRange represents a continuous range of chunk indices

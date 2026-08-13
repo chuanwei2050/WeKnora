@@ -14,6 +14,15 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// ShouldEnqueueGraphExtract reports whether a chunk should enqueue graph extraction
+// for the given knowledge base. Graph must be enabled and the chunk must show relation signals.
+func ShouldEnqueueGraphExtract(kb *types.KnowledgeBase, chunkContent string) bool {
+	if kb == nil || !kb.IsGraphEnabled() {
+		return false
+	}
+	return types.NeedsEntityRelation(chunkContent)
+}
+
 // KnowledgePostProcessService acts as an orchestrator for all post-processing tasks
 // after a document has been parsed and split into chunks (including multimodal OCR/Caption).
 type KnowledgePostProcessService struct {
@@ -118,13 +127,18 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 
 	// 5. Spawn Graph RAG Tasks — only when graph indexing is enabled in IndexingStrategy
 	if kb.IsGraphEnabled() {
-		logger.Infof(ctx, "[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d text-like chunks", len(textChunks))
+		graphCandidates := 0
 		for _, chunk := range textChunks {
+			if !ShouldEnqueueGraphExtract(kb, chunk.Content) {
+				continue
+			}
+			graphCandidates++
 			err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.SummaryModelID)
 			if err != nil {
 				logger.Errorf(ctx, "[KnowledgePostProcess] Failed to create chunk extract task for %s: %v", chunk.ID, err)
 			}
 		}
+		logger.Infof(ctx, "[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d/%d relation-bearing text-like chunks", graphCandidates, len(textChunks))
 	}
 
 	// 6. Spawn Wiki Ingest Task if wiki indexing is enabled in IndexingStrategy

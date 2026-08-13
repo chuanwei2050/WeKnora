@@ -44,6 +44,7 @@ func NewPluginSearchParallel(
 	graphRepository interfaces.RetrieveGraphRepository,
 	chunkRepository interfaces.ChunkRepository,
 	knowledgeRepository interfaces.KnowledgeRepository,
+	governanceRepository interfaces.KnowledgeGovernanceRepository,
 ) *PluginSearchParallel {
 	// Create internal plugins without registering them
 	searchPlugin := &PluginSearch{
@@ -56,12 +57,14 @@ func NewPluginSearchParallel(
 		sessionService:        sessionService,
 		webSearchStateService: webSearchStateService,
 		webSearchProviderRepo: webSearchProviderRepo,
+		governanceRepo:        governanceRepository,
 	}
 
 	searchEntityPlugin := &PluginSearchEntity{
-		graphRepo:     graphRepository,
-		chunkRepo:     chunkRepository,
-		knowledgeRepo: knowledgeRepository,
+		graphRepo:      graphRepository,
+		chunkRepo:      chunkRepository,
+		knowledgeRepo:  knowledgeRepository,
+		governanceRepo: governanceRepository,
 	}
 
 	res := &PluginSearchParallel{
@@ -112,6 +115,20 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	entityCM.SearchResult = nil
 
 	noop := func() *PluginError { return nil }
+	skip := AssessGraphSkip(chatManage)
+	graphEnabled := skip.Layer1Allowed
+	skipReason := skip.Reason
+	if !graphEnabled {
+		if skipReason == "" {
+			skipReason = GraphReasonRelationNotNeeded
+		}
+	} else if len(chatManage.EntityKBIDs) == 0 && len(chatManage.EntityKnowledge) == 0 {
+		skipReason = GraphReasonNoGraphKB
+	} else if len(chatManage.Entity) == 0 {
+		skipReason = GraphReasonNoEntities
+	} else {
+		skipReason = ""
+	}
 
 	tasks := []ParallelTask{
 		{
@@ -131,9 +148,10 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 		{
 			Name: "entity_search",
 			Run: func() *PluginError {
-				if len(chatManage.Entity) == 0 {
+				if !graphEnabled || skipReason != "" {
 					pipelineInfo(ctx, "SearchParallel", "entity_search_skip", map[string]interface{}{
-						"reason": "no_entities",
+						"reason":        skipReason,
+						"reason_legacy": skip.ReasonLegacy,
 					})
 					return nil
 				}
@@ -155,6 +173,9 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	// Merge results from both searches
 	chatManage.SearchResult = append(chunkCM.SearchResult, entityCM.SearchResult...)
 	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
+	chatManage.GraphResult = entityCM.GraphResult
+	chatManage.GraphSearchResult = entityCM.GraphSearchResult
+	chatManage.GraphContext = entityCM.GraphContext
 
 	for name, err := range errs {
 		logger.Warnf(ctx, "[SearchParallel] %s error: %v", name, err.Err)

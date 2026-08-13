@@ -1,0 +1,63 @@
+{
+  "schema_version": "weknora-baseline-freeze/v1",
+  "baseline_id": "online-expert-baseline-v1",
+  "status": "expert_inputs_frozen_formal_run_pending",
+  "frozen_at": "2026-08-12",
+  "profile": "online",
+  "source_policy": "expert_labeled_routing_and_acceptance_suite_bound_to_tenant_10000_live_kb",
+  "models": {
+    "chat": {"provider": "siliconflow", "protocol": "openai-compatible", "name": "Qwen/Qwen3.6-27B", "base_url_env": "ONLINE_LLM_MODEL_BASE_URL"},
+    "vlm": {"reuse": "chat"},
+    "verifier_1": {"provider": "siliconflow", "protocol": "openai-compatible", "name": "deepseek-ai/DeepSeek-V3.1-Terminus", "base_url_env": "ONLINE_VERIFIER_MODEL_1_BASE_URL"},
+    "verifier_2": {"provider": "siliconflow", "protocol": "openai-compatible", "name": "Qwen/Qwen3.5-9B", "base_url_env": "ONLINE_VERIFIER_MODEL_2_BASE_URL"},
+    "judge": {"provider": "siliconflow", "protocol": "openai-compatible", "name": "Qwen/Qwen3-32B", "base_url_env": "ONLINE_EVALUATION_JUDGE_MODEL_BASE_URL"},
+    "embedding": {"provider": "siliconflow", "protocol": "openai-compatible", "name": "Qwen/Qwen3-Embedding-4B", "dimension": 2560, "base_url_env": "ONLINE_EMBEDDING_MODEL_BASE_URL"},
+    "rerank": {"provider": "siliconflow", "protocol": "openai-compatible", "name": "BAAI/bge-reranker-v2-m3", "base_url_env": "ONLINE_RERANK_MODEL_BASE_URL"},
+    "asr": {"provider": "siliconflow", "protocol": "openai-compatible", "name": "FunAudioLLM/SenseVoiceSmall", "base_url_env": "ONLINE_ASR_MODEL_BASE_URL"},
+    "tts": {"provider": "siliconflow", "protocol": "openai-compatible", "name": "FunAudioLLM/CosyVoice2-0.5B", "voice_env": "ONLINE_TTS_VOICE", "base_url_env": "ONLINE_TTS_MODEL_BASE_URL"}
+  },
+  "routing": {
+    "taxonomy_id": "question-complexity",
+    "taxonomy_version": "1.0",
+    "confidence_threshold": 0.60,
+    "fallback_action": "contextual_rag",
+    "level_actions": {"L1": "quick_rag", "L2": "contextual_rag", "L3": "graph_reasoning", "L4": "verified_agent"},
+    "input_budget_chars": 12000
+  },
+  "prompts": {
+    "policy": "repository-defaults",
+    "query_understand": {"version": "query-understand/v1", "source": "internal/application/service/chat_pipeline/query_understand.go"},
+    "complexity_classifier": {"version": "question-complexity-classifier/v1", "source": "scripts/complexity-routing-benchmark.ps1"},
+    "verified_answer": {"version": "verified-answer/v1", "source": "internal/application/service/chat_pipeline/verified_answer.go"},
+    "acceptance_judge": {"version": "acceptance-judge/v1", "source": "internal/types/acceptance_benchmark.go"},
+    "voice": {"version": "voice-openai-compatible/v1", "source": "docs/voice-capabilities.md"}
+  },
+  "verification": {
+    "weights": {"fact": 0.35, "logic": 0.25, "citation": 0.25, "completeness": 0.15},
+    "pass_threshold": 0.80,
+    "reflect_threshold": 0.60,
+    "max_reflections": 1,
+    "hard_max_reflections": 2,
+    "degradation_strategy": "conservative",
+    "max_wall_clock_ms": 120000,
+    "max_model_calls": 12,
+    "max_parallel_calls": 3
+  },
+  "acceptance_gates": {
+    "accuracy_minimum": 0.90,
+    "ttft_max_ms": 15000,
+    "independent_sessions": 50,
+    "concurrent_sessions": 10
+  },
+  "datasets": {
+    "routing": "scripts/testdata/baseline-v1-routing-dataset-expert.json",
+    "acceptance": "scripts/testdata/baseline-v1-acceptance-suite-expert.json"
+  },
+  "formal_acceptance_blockers": [
+    "expert suite is grounded only in tenant 10000 verified-answering chunk; broader software-testing fixture docs are not imported",
+    "formal accuracy run against http://127.0.0.1:18080 still needs ConfirmTestEnvironment execution and report archival",
+    "50 independent authentication tokens must be regenerated/logged before each load window if tokens expire",
+    "ASR/TTS end-to-end audio fixture is not present",
+    "offline profiles require real private endpoints and live package re-runs after freeze hash changes"
+  ]
+}

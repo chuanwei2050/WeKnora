@@ -90,3 +90,31 @@ func TestHandleErrorRemainsFatal(t *testing.T) {
 		t.Fatalf("events = %#v, want one fatal error", streamManager.events)
 	}
 }
+
+func TestAgentStreamHandlerPersistsUserVisibleResponseTiming(t *testing.T) {
+	streamManager := &recordingStreamManager{}
+	acceptedAt := time.Now().UTC().Add(-time.Second)
+	message := &types.Message{ID: "message-1"}
+	handler := &AgentStreamHandler{
+		ctx:                context.Background(),
+		sessionID:          "session-1",
+		assistantMessageID: "message-1",
+		assistantMessage:   message,
+		streamManager:      streamManager,
+		eventStartTimes:    map[string]time.Time{},
+		acceptedAt:         acceptedAt,
+	}
+	if err := handler.handleFinalAnswer(context.Background(), event.Event{ID: "answer-1", Data: event.AgentFinalAnswerData{Content: "visible", Done: false}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.handleComplete(context.Background(), event.Event{ID: "complete-1", Data: event.AgentCompleteData{MessageID: "message-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	timing, err := message.ResponseTiming.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if timing["accepted_at"] == nil || timing["first_visible_at"] == nil || timing["completed_at"] == nil {
+		t.Fatalf("response timing missing lifecycle timestamps: %#v", timing)
+	}
+}

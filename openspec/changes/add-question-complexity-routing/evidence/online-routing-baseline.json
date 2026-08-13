@@ -1,0 +1,346 @@
+{
+  "schema_version": "question-complexity-routing-benchmark/v1",
+  "profile": "online",
+  "taxonomy": {
+    "id": "question-complexity",
+    "version": "1.0"
+  },
+  "model": {
+    "protocol": "openai-compatible",
+    "endpoint": "https://api.siliconflow.cn/v1",
+    "name": "Qwen/Qwen3.6-27B"
+  },
+  "started_at": "2026-08-12T04:12:18.859634+00:00",
+  "completed_at": "2026-08-12T04:13:49.5713704+00:00",
+  "sample_count": 20,
+  "valid_count": 20,
+  "invalid_count": 0,
+  "accuracy": 0.7,
+  "confusion_matrix": {
+    "L1": {
+      "L1": 5,
+      "L2": 0,
+      "L3": 0,
+      "L4": 0
+    },
+    "L2": {
+      "L1": 0,
+      "L2": 0,
+      "L3": 5,
+      "L4": 0
+    },
+    "L3": {
+      "L1": 0,
+      "L2": 0,
+      "L3": 5,
+      "L4": 0
+    },
+    "L4": {
+      "L1": 0,
+      "L2": 0,
+      "L3": 1,
+      "L4": 4
+    }
+  },
+  "per_level": {
+    "L1": {
+      "support": 5,
+      "precision": 1,
+      "recall": 1
+    },
+    "L2": {
+      "support": 5,
+      "precision": 0,
+      "recall": 0
+    },
+    "L3": {
+      "support": 5,
+      "precision": 0.45454545454545453,
+      "recall": 1
+    },
+    "L4": {
+      "support": 5,
+      "precision": 1,
+      "recall": 0.8
+    }
+  },
+  "routing_baseline": {
+    "action_by_level": {
+      "L1": "quick_rag",
+      "L2": "contextual_rag",
+      "L3": "graph_reasoning",
+      "L4": "verified_agent"
+    },
+    "action_accuracy": 0.7,
+    "action_confusion_matrix": {
+      "quick_rag": {
+        "quick_rag": 5,
+        "contextual_rag": 0,
+        "graph_reasoning": 0,
+        "verified_agent": 0
+      },
+      "contextual_rag": {
+        "quick_rag": 0,
+        "contextual_rag": 0,
+        "graph_reasoning": 5,
+        "verified_agent": 0
+      },
+      "graph_reasoning": {
+        "quick_rag": 0,
+        "contextual_rag": 0,
+        "graph_reasoning": 5,
+        "verified_agent": 0
+      },
+      "verified_agent": {
+        "quick_rag": 0,
+        "contextual_rag": 0,
+        "graph_reasoning": 1,
+        "verified_agent": 4
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "std-l1-001",
+      "expert_level": "L1",
+      "predicted_level": "L1",
+      "predicted_subtype": "explicit_fact",
+      "confidence": 0.99,
+      "predicted_action": "quick_rag",
+      "expected_action": "quick_rag",
+      "classification_ms": 5022,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "std-l1-002",
+      "expert_level": "L1",
+      "predicted_level": "L1",
+      "predicted_subtype": "explicit_single_hop_fact",
+      "confidence": 0.95,
+      "predicted_action": "quick_rag",
+      "expected_action": "quick_rag",
+      "classification_ms": 5540,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "std-l1-003",
+      "expert_level": "L1",
+      "predicted_level": "L1",
+      "predicted_subtype": "explicit_fact",
+      "confidence": 0.95,
+      "predicted_action": "quick_rag",
+      "expected_action": "quick_rag",
+      "classification_ms": 3544,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "std-l1-004",
+      "expert_level": "L1",
+      "predicted_level": "L1",
+      "predicted_subtype": "explicit_fact",
+      "confidence": 0.95,
+      "predicted_action": "quick_rag",
+      "expected_action": "quick_rag",
+      "classification_ms": 2473,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "std-l1-005",
+      "expert_level": "L1",
+      "predicted_level": "L1",
+      "predicted_subtype": "explicit_fact",
+      "confidence": 0.95,
+      "predicted_action": "quick_rag",
+      "expected_action": "quick_rag",
+      "classification_ms": 2090,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "foundation-l2-001",
+      "expert_level": "L2",
+      "predicted_level": "L3",
+      "predicted_subtype": "explainable_reasoning",
+      "confidence": 0.95,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "contextual_rag",
+      "classification_ms": 2711,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "foundation-l2-002",
+      "expert_level": "L2",
+      "predicted_level": "L3",
+      "predicted_subtype": "explainable_reasoning",
+      "confidence": 0.95,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "contextual_rag",
+      "classification_ms": 1507,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "foundation-l2-003",
+      "expert_level": "L2",
+      "predicted_level": "L3",
+      "predicted_subtype": "explainable_reasoning",
+      "confidence": 0.9,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "contextual_rag",
+      "classification_ms": 8219,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "foundation-l2-004",
+      "expert_level": "L2",
+      "predicted_level": "L3",
+      "predicted_subtype": "explainable_reasoning",
+      "confidence": 0.95,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "contextual_rag",
+      "classification_ms": 18085,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "foundation-l2-005",
+      "expert_level": "L2",
+      "predicted_level": "L3",
+      "predicted_subtype": "explainable_reasoning",
+      "confidence": 0.9,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "contextual_rag",
+      "classification_ms": 22866,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "internal-l3-001",
+      "expert_level": "L3",
+      "predicted_level": "L3",
+      "predicted_subtype": "comparison",
+      "confidence": 0.95,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "graph_reasoning",
+      "classification_ms": 2336,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "internal-l3-002",
+      "expert_level": "L3",
+      "predicted_level": "L3",
+      "predicted_subtype": "multi-hop",
+      "confidence": 0.95,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "graph_reasoning",
+      "classification_ms": 1424,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "internal-l3-003",
+      "expert_level": "L3",
+      "predicted_level": "L3",
+      "predicted_subtype": "comparison",
+      "confidence": 0.95,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "graph_reasoning",
+      "classification_ms": 2892,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "internal-l3-004",
+      "expert_level": "L3",
+      "predicted_level": "L3",
+      "predicted_subtype": "comparison",
+      "confidence": 0.9,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "graph_reasoning",
+      "classification_ms": 1861,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "internal-l3-005",
+      "expert_level": "L3",
+      "predicted_level": "L3",
+      "predicted_subtype": "explainable_reasoning",
+      "confidence": 0.95,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "graph_reasoning",
+      "classification_ms": 2035,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "experience-l4-001",
+      "expert_level": "L4",
+      "predicted_level": "L4",
+      "predicted_subtype": "hypothetical",
+      "confidence": 0.95,
+      "predicted_action": "verified_agent",
+      "expected_action": "verified_agent",
+      "classification_ms": 1910,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "experience-l4-002",
+      "expert_level": "L4",
+      "predicted_level": "L4",
+      "predicted_subtype": "hypothetical",
+      "confidence": 0.95,
+      "predicted_action": "verified_agent",
+      "expected_action": "verified_agent",
+      "classification_ms": 1406,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "experience-l4-003",
+      "expert_level": "L4",
+      "predicted_level": "L3",
+      "predicted_subtype": "explainable_reasoning",
+      "confidence": 0.9,
+      "predicted_action": "graph_reasoning",
+      "expected_action": "verified_agent",
+      "classification_ms": 1561,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "experience-l4-004",
+      "expert_level": "L4",
+      "predicted_level": "L4",
+      "predicted_subtype": "hypothetical",
+      "confidence": 0.95,
+      "predicted_action": "verified_agent",
+      "expected_action": "verified_agent",
+      "classification_ms": 1630,
+      "valid": true,
+      "error": null
+    },
+    {
+      "id": "experience-l4-005",
+      "expert_level": "L4",
+      "predicted_level": "L4",
+      "predicted_subtype": "hypothetical",
+      "confidence": 0.9,
+      "predicted_action": "verified_agent",
+      "expected_action": "verified_agent",
+      "classification_ms": 1530,
+      "valid": true,
+      "error": null
+    }
+  ],
+  "gate": "failed",
+  "integrity_sha256": "ec3ec40cf0bfa7cb56c85f468f5a80dfa3c1ab7c9fa4d1bf485badb4479de7fc"
+}

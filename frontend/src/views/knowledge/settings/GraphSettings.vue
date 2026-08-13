@@ -70,6 +70,68 @@
         </div>
       </div>
 
+      <!-- 实体类型白名单 -->
+      <div v-if="localGraphExtract.enabled" class="setting-row vertical">
+        <div class="setting-info">
+          <label>{{ t('graphSettings.entityTypesLabel') }}</label>
+          <p class="desc">{{ t('graphSettings.entityTypesDescription') }}</p>
+        </div>
+        <div class="setting-control full-width">
+          <t-select
+            v-model="localGraphExtract.entity_types"
+            multiple
+            :placeholder="t('graphSettings.entityTypesPlaceholder')"
+            clearable
+            creatable
+            filterable
+            @change="handleEntityTypesChange"
+            style="width: 100%; min-width: 400px;"
+          />
+        </div>
+      </div>
+
+      <!-- 严格 schema -->
+      <div v-if="localGraphExtract.enabled" class="setting-row">
+        <div class="setting-info">
+          <label>{{ t('graphSettings.strictSchemaLabel') }}</label>
+          <p class="desc">{{ t('graphSettings.strictSchemaDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-switch
+            v-model="localGraphExtract.strict_schema"
+            @change="handleStrictSchemaChange"
+          />
+        </div>
+      </div>
+
+      <!-- 三元组人工审核 -->
+      <div v-if="localGraphExtract.enabled" class="setting-row">
+        <div class="setting-info">
+          <label>{{ t('graphSettings.requireTripleReviewLabel') }}</label>
+          <p class="desc">{{ t('graphSettings.requireTripleReviewDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-switch
+            v-model="localGraphExtract.require_triple_review"
+            @change="handleConfigChange"
+          />
+        </div>
+      </div>
+
+      <!-- 入库规则说明 + 测评预设 -->
+      <div v-if="localGraphExtract.enabled" class="setting-row vertical">
+        <div class="setting-info">
+          <label>{{ t('graphSettings.rulesLabel') }}</label>
+          <p class="desc">{{ t('graphSettings.rulesDescription') }}</p>
+          <p class="desc">{{ t('graphSettings.defaultsHint') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-button theme="default" @click="loadSoftwareTestingPreset">
+            {{ t('graphSettings.loadSoftwareTestingPreset') }}
+          </t-button>
+        </div>
+      </div>
+
       <!-- 示例文本 -->
       <div v-if="localGraphExtract.enabled" class="setting-row vertical">
         <div class="setting-info">
@@ -298,6 +360,9 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { extractTextRelations, fabriText, fabriTag, type Node, type Relation } from '@/api/initialization'
 import { getSystemInfo } from '@/api/system'
+import {
+  applySoftwareTestingGraphDefaults,
+} from '@/constants/software-testing-graph-preset'
 
 const { t } = useI18n()
 
@@ -305,6 +370,9 @@ interface GraphExtractConfig {
   enabled: boolean
   text: string
   tags: string[]
+  entity_types: string[]
+  strict_schema: boolean
+  require_triple_review: boolean
   nodes: Node[]
   relations: Relation[]
 }
@@ -330,6 +398,10 @@ const modelStatus = computed(() => ({
 // 本地状态
 const localGraphExtract = ref<GraphExtractConfig>({
   ...props.graphExtract,
+  tags: props.graphExtract.tags || [],
+  entity_types: props.graphExtract.entity_types || [],
+  strict_schema: !!props.graphExtract.strict_schema,
+  require_triple_review: !!props.graphExtract.require_triple_review,
   nodes: props.graphExtract.nodes || [],
   relations: props.graphExtract.relations || []
 })
@@ -351,6 +423,10 @@ const isGraphDatabaseEnabled = computed(() => {
 watch(() => props.graphExtract, (newVal) => {
   localGraphExtract.value = {
     ...newVal,
+    tags: newVal.tags || [],
+    entity_types: newVal.entity_types || [],
+    strict_schema: !!newVal.strict_schema,
+    require_triple_review: !!newVal.require_triple_review,
     nodes: newVal.nodes || [],
     relations: newVal.relations || []
   }
@@ -367,14 +443,40 @@ const handleEnabledChange = () => {
   if (!localGraphExtract.value.enabled) {
     localGraphExtract.value.text = ''
     localGraphExtract.value.tags = []
+    localGraphExtract.value.entity_types = []
+    localGraphExtract.value.strict_schema = false
+    localGraphExtract.value.require_triple_review = false
     localGraphExtract.value.nodes = []
     localGraphExtract.value.relations = []
+  } else {
+    // 首次开启：若白名单为空，填充软件测评默认值（严格 schema 默认开）
+    Object.assign(
+      localGraphExtract.value,
+      applySoftwareTestingGraphDefaults(localGraphExtract.value)
+    )
   }
   handleConfigChange()
 }
 
 const handleTagsChange = () => {
   handleConfigChange()
+}
+
+const handleEntityTypesChange = () => {
+  handleConfigChange()
+}
+
+const handleStrictSchemaChange = () => {
+  handleConfigChange()
+}
+
+const loadSoftwareTestingPreset = () => {
+  Object.assign(
+    localGraphExtract.value,
+    applySoftwareTestingGraphDefaults(localGraphExtract.value, { force: true })
+  )
+  handleConfigChange()
+  MessagePlugin.success(t('graphSettings.presetLoaded'))
 }
 
 const handleTextChange = () => {
@@ -528,6 +630,7 @@ const defaultExtractExample = () => {
 const clearExtractExample = () => {
   localGraphExtract.value.text = ''
   localGraphExtract.value.tags = []
+  localGraphExtract.value.entity_types = []
   localGraphExtract.value.nodes = []
   localGraphExtract.value.relations = []
   handleNodesChange()
