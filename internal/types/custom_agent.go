@@ -214,6 +214,7 @@ type CustomAgentConfig struct {
 	// Verification is opt-in; reflection_enabled is retained as a compatibility alias.
 	VerifiedAnswer     VerifiedAnswerConfig `yaml:"verified_answer" json:"verified_answer"`
 	ReflectionEnabled  bool                 `yaml:"reflection_enabled" json:"reflection_enabled"`
+	// Voice input/output (UI default: enabled for new agents and builtin quick/smart agents)
 	VoiceInputEnabled  bool                 `yaml:"voice_input_enabled" json:"voice_input_enabled"`
 	VoiceOutputEnabled bool                 `yaml:"voice_output_enabled" json:"voice_output_enabled"`
 	TTSModelID         string               `yaml:"tts_model_id" json:"tts_model_id"`

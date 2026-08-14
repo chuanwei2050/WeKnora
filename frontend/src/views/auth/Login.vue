@@ -198,7 +198,6 @@
               type="password"
               size="large"
               :disabled="loading"
-              @keydown.enter="handleLogin"
             />
           </t-form-item>
 

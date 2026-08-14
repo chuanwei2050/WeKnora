@@ -111,7 +111,12 @@ const selectedAgent = computed(() => {
     id: BUILTIN_QUICK_ANSWER_ID,
     name: t('input.normalMode'),
     is_builtin: true,
-    config: { agent_mode: 'quick-answer' as const }
+    config: {
+      agent_mode: 'quick-answer' as const,
+      voice_input_enabled: true,
+      voice_output_enabled: true,
+      audio_upload_enabled: true,
+    }
   } as CustomAgent;
 });
 
@@ -137,10 +142,40 @@ const currentAgentConfig = computed(() => {
   const agent = selectedAgent.value;
   if (agent?.is_builtin) {
     const builtinAgent = agents.value.find(a => a.id === agent.id);
-    return builtinAgent?.config || {};
+    return builtinAgent?.config || agent?.config || {};
   }
   return agent?.config || {};
 });
+
+const availableAsrModels = ref<ModelConfig[]>([]);
+const availableTtsModels = ref<ModelConfig[]>([]);
+const pickPreferredModelId = (models: ModelConfig[]) => {
+  if (!models.length) return '';
+  const byDefault = models.find((m) => m.is_default);
+  return byDefault?.id || models[0]?.id || '';
+};
+// Voice defaults: when agent enables voice but leaves ASR/TTS empty, use tenant default/first model.
+const resolvedAsrModelId = computed(() => {
+  const cfg = currentAgentConfig.value || {};
+  if (cfg.asr_model_id) return String(cfg.asr_model_id);
+  if (cfg.voice_input_enabled || cfg.audio_upload_enabled) {
+    return pickPreferredModelId(availableAsrModels.value);
+  }
+  return '';
+});
+const resolvedTtsModelId = computed(() => {
+  const cfg = currentAgentConfig.value || {};
+  if (cfg.tts_model_id) return String(cfg.tts_model_id);
+  if (cfg.voice_output_enabled) {
+    return pickPreferredModelId(availableTtsModels.value);
+  }
+  return '';
+});
+const effectiveVoiceConfig = computed(() => ({
+  ...(currentAgentConfig.value || {}),
+  asr_model_id: resolvedAsrModelId.value || currentAgentConfig.value?.asr_model_id || '',
+  tts_model_id: resolvedTtsModelId.value || currentAgentConfig.value?.tts_model_id || '',
+}));
 
 // 智能体预配置的知识库 IDs
 const agentKnowledgeBases = computed(() => {
@@ -353,12 +388,12 @@ const props = defineProps({
 
 const voiceConversation = useVoiceConversation(
   props.sessionId || '',
-  () => String(currentAgentConfig.value?.asr_model_id || '')
+  () => String(resolvedAsrModelId.value || '')
 );
 const voiceInputAvailable = computed(() => Boolean(
   props.sessionId &&
   currentAgentConfig.value?.voice_input_enabled &&
-  currentAgentConfig.value?.asr_model_id &&
+  resolvedAsrModelId.value &&
   voiceConversation.supported.value
 ));
 const voiceTranscript = computed(() => voiceConversation.finalText.value);
@@ -708,12 +743,17 @@ const loadChatModels = async () => {
   if (modelsLoading.value) return;
   modelsLoading.value = true;
   try {
-    const models = await listModels('KnowledgeQA');
-    availableModels.value = Array.isArray(models) ? models : [];
+    const models = await listModels();
+    const list = Array.isArray(models) ? models : [];
+    availableModels.value = list.filter((m) => m.type === 'KnowledgeQA');
+    availableAsrModels.value = list.filter((m) => m.type === 'ASR');
+    availableTtsModels.value = list.filter((m) => m.type === 'TTS');
     ensureModelSelection();
   } catch (error) {
     console.error('Failed to load chat models:', error);
     availableModels.value = [];
+    availableAsrModels.value = [];
+    availableTtsModels.value = [];
   } finally {
     modelsLoading.value = false;
   }
@@ -1502,7 +1542,7 @@ const emit = defineEmits<{
   (e: 'stop-generation'): void;
 }>();
 
-watch(currentAgentConfig, (config) => {
+watch(effectiveVoiceConfig, (config) => {
   emit('voice-config', config || {});
 }, { immediate: true, deep: true });
 
