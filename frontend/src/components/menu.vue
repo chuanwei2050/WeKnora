@@ -8,7 +8,7 @@
                     <span class="bidreview-logo-text">知识库</span>
                 </template>
                 <template v-else>
-                    <img class="logo" src="@/assets/img/weknora.png" alt="">
+                    <span class="brand-logo-text">知识问答智能体</span>
                     <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
                 </template>
             </div>
@@ -889,6 +889,15 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
             height: auto;
         }
 
+        .brand-logo-text {
+            color: var(--td-text-color-primary);
+            font-size: 16px;
+            font-weight: 600;
+            line-height: 1.2;
+            white-space: nowrap;
+            letter-spacing: 0.02em;
+        }
+
         .bidreview-logo-mark {
             width: 30px;
             height: 30px;
@@ -1349,10 +1358,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 </style>
 <style lang="less">
 // Dark mode: invert dark logo to light
-html[theme-mode="dark"] .aside_box .logo_box .logo {
-    filter: invert(1) hue-rotate(180deg);
-}
-
 // Dark mode: make SVG icons match text color (loaded via <img>, currentColor won't work)
 html[theme-mode="dark"] .aside_box .menu_icon img.icon {
     filter: invert(1);

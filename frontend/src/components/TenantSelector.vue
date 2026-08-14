@@ -1,5 +1,5 @@
 <template>
-  <div class="tenant-selector" ref="selectorRef">
+  <div v-if="!crossTenantDisabled" class="tenant-selector" ref="selectorRef">
     <div class="tenant-trigger" @click="toggleDropdown">
       <div class="tenant-info">
         <div class="tenant-label">{{ $t('tenant.currentTenant') }}</div>
@@ -99,6 +99,8 @@ const pageSize = ref(20)
 const total = ref(0)
 const loading = ref(false)
 const searchTimer = ref<number | null>(null)
+const CROSS_TENANT_DISABLED_KEY = 'weknora.crossTenantDisabled'
+const crossTenantDisabled = ref(sessionStorage.getItem(CROSS_TENANT_DISABLED_KEY) === '1')
 
 const selectedTenantId = computed(() => authStore.selectedTenantId)
 const defaultTenantId = computed(() => authStore.tenant?.id ? Number(authStore.tenant.id) : null)
@@ -176,6 +178,7 @@ const selectTenant = (tenantId: number) => {
 
 const loadTenants = async (append = false) => {
   if (loading.value) return
+  if (crossTenantDisabled.value) return
   
   loading.value = true
   try {
@@ -206,7 +209,14 @@ const loadTenants = async (append = false) => {
     } else {
       MessagePlugin.error(response.message || t('tenant.loadTenantsFailed'))
     }
-  } catch (error) {
+  } catch (error: any) {
+    const msg = String(error?.message || error || '')
+    // Server-side cross-tenant gate off: stop polling and hide selector noise.
+    if (msg.includes('Cross-tenant') || error?.response?.status === 403 || error?.status === 403) {
+      crossTenantDisabled.value = true
+      sessionStorage.setItem(CROSS_TENANT_DISABLED_KEY, '1')
+      return
+    }
     console.error('Failed to load tenants:', error)
     MessagePlugin.error(t('tenant.loadTenantsFailed'))
   } finally {
@@ -240,8 +250,8 @@ const handleScroll = () => {
 }
 
 onMounted(() => {
-  // 预加载租户列表
-  loadTenants()
+  // Do not preload: cross-tenant may be disabled server-side even when
+  // can_access_all_tenants is true. Load only when the user opens the dropdown.
 })
 
 onUnmounted(() => {

@@ -151,11 +151,11 @@ type CustomAgentConfig struct {
 	RetainRetrievalHistory bool `yaml:"retain_retrieval_history" json:"retain_retrieval_history"`
 
 	// ===== Image Upload / Multimodal Settings =====
-	// Whether image upload is enabled for this agent (default: false)
+	// Whether image upload is enabled for this agent (UI default: true for new agents)
 	ImageUploadEnabled bool `yaml:"image_upload_enabled" json:"image_upload_enabled"`
 	// VLM model ID for image analysis (optional, falls back to tenant-level VLM)
 	VLMModelID string `yaml:"vlm_model_id" json:"vlm_model_id"`
-	// Whether audio upload (ASR transcription) is enabled for this agent (default: false)
+	// Whether audio upload (ASR transcription) is enabled for this agent (UI default: true for new agents)
 	AudioUploadEnabled bool `yaml:"audio_upload_enabled" json:"audio_upload_enabled"`
 	// ASR model ID for audio transcription (optional)
 	ASRModelID string `yaml:"asr_model_id" json:"asr_model_id"`

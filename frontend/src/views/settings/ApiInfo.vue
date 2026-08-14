@@ -427,7 +427,7 @@ const loadInfo = async () => {
 }
 
 const openApiDoc = () => {
-  window.open('https://github.com/Tencent/WeKnora/blob/main/docs/api/README.md', '_blank')
+  window.open('/swagger/index.html', '_blank')
 }
 
 const fallbackCopyText = (text: string) => {

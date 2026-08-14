@@ -4,15 +4,15 @@
       <h2>{{ $t('modelSettings.title') }}</h2>
       <p class="section-description">{{ $t('modelSettings.description') }}</p>
 
-      <div class="profile-status-banner" role="status">
+      <div v-if="profileStatus" class="profile-status-banner" role="status">
         <div class="profile-status-row">
-          <span class="profile-badge">{{ $t('modelSettings.modelProfile.profileLabel') }}: {{ profileStatus?.profile || '—' }}</span>
-          <span class="airgap-badge" :class="{ on: profileStatus?.air_gapped }">
-            {{ profileStatus?.air_gapped ? $t('modelSettings.modelProfile.airGappedOn') : $t('modelSettings.modelProfile.airGappedOff') }}
+          <span class="profile-badge">{{ $t('modelSettings.modelProfile.profileLabel') }}: {{ profileStatus.profile || '—' }}</span>
+          <span class="airgap-badge" :class="{ on: profileStatus.air_gapped }">
+            {{ profileStatus.air_gapped ? $t('modelSettings.modelProfile.airGappedOn') : $t('modelSettings.modelProfile.airGappedOff') }}
           </span>
-          <span v-if="profileStatus && !profileStatus.profile_valid" class="warn-badge">{{ $t('modelSettings.modelProfile.invalidProfile') }}</span>
+          <span v-if="!profileStatus.profile_valid" class="warn-badge">{{ $t('modelSettings.modelProfile.invalidProfile') }}</span>
         </div>
-        <p v-if="profileStatus" class="profile-summary">
+        <p class="profile-summary">
           {{ $t('modelSettings.modelProfile.summary', {
             missingEnv: profileStatus.summary.missing_env,
             missingReg: profileStatus.summary.missing_registration,
@@ -24,7 +24,7 @@
         <t-button theme="default" variant="text" size="small" @click="profileExpanded = !profileExpanded">
           {{ profileExpanded ? $t('modelSettings.modelProfile.collapse') : $t('modelSettings.modelProfile.expand') }}
         </t-button>
-        <div v-if="profileExpanded && profileStatus" class="profile-role-list">
+        <div v-if="profileExpanded" class="profile-role-list">
           <div v-for="role in profileStatus.roles" :key="role.role" class="profile-role-row">
             <div class="profile-role-main">
               <strong>{{ role.role }}</strong>
@@ -55,14 +55,6 @@
       <div class="builtin-models-hint" role="note">
         <p class="builtin-hint-label">{{ $t('modelSettings.builtinModels.title') }}</p>
         <p class="builtin-hint-text">{{ $t('modelSettings.builtinModels.description') }}</p>
-        <a
-          class="builtin-hint-link"
-          href="https://github.com/Tencent/WeKnora/blob/main/docs/BUILTIN_MODELS.md"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          {{ $t('modelSettings.builtinModels.viewGuide') }}
-        </a>
       </div>
     </div>
 
@@ -485,13 +477,31 @@ const loadModels = async () => {
   }
 }
 
+const PROFILE_STATUS_UNAVAILABLE_KEY = 'weknora.modelProfileStatusUnavailable'
+
 const loadProfileStatus = async () => {
+  if (sessionStorage.getItem(PROFILE_STATUS_UNAVAILABLE_KEY) === '1') {
+    profileStatus.value = null
+    return
+  }
   try {
     const res = await getModelProfileStatus()
     profileStatus.value = res.data
   } catch (error: any) {
-    console.error('加载 profile 状态失败:', error)
-    MessagePlugin.warning(error?.message || t('modelSettings.modelProfile.loadFailed'))
+    // Running backends without this route (404) or older builds: hide banner quietly.
+    profileStatus.value = null
+    const status = error?.status ?? error?.response?.status ?? error?.code
+    const msg = String(error?.message || '')
+    const missing =
+      status === 404 ||
+      msg.includes('404') ||
+      msg.includes('Not Found') ||
+      msg.includes('page not found')
+    if (missing) {
+      sessionStorage.setItem(PROFILE_STATUS_UNAVAILABLE_KEY, '1')
+      return
+    }
+    // Non-404 failures stay silent in console to avoid noise during normal settings use.
   }
 }
 

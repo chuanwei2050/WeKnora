@@ -68,9 +68,7 @@
       >
         <template #message>
           <div>{{ $t('settings.memoryRequiresNeo4j') }}</div>
-          <t-link theme="primary" href="https://github.com/Tencent/WeKnora/blob/main/docs/KnowledgeGraph.md" target="_blank">
-            {{ $t('settings.memoryHowToEnable') }}
-          </t-link>
+          <div>{{ $t('settings.memoryHowToEnable') }}</div>
         </template>
       </t-alert>
 

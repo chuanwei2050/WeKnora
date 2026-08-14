@@ -1499,9 +1499,7 @@
                     <h2>{{ $t('agentEditor.im.title') }}</h2>
                     <p class="section-description">
                       {{ $t('agentEditor.im.description') }}
-                      <a href="https://github.com/Tencent/WeKnora/blob/main/docs/IM%E9%9B%86%E6%88%90%E5%BC%80%E5%8F%91%E6%96%87%E6%A1%A3.md" target="_blank" rel="noopener noreferrer" class="section-doc-link">
-                        <t-icon name="link" class="link-icon" />{{ $t('agentEditor.im.docLink') }}
-                      </a>
+
                     </p>
                   </div>
                   <div class="settings-group">
@@ -1582,6 +1580,40 @@ const currentSection = ref(props.initialSection || 'basic');
 const saving = ref(false);
 const allModels = ref<ModelConfig[]>([]);
 const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq'; count?: number; shared?: boolean; orgName?: string; ragEnabled?: boolean; wikiEnabled?: boolean; capabilities?: KBCapabilities }[]>([]);
+
+// Prefer tenant default, then Qwen3.6-27B (aligned with ONLINE_*_MODEL_NAME), else first match.
+const DEFAULT_CHAT_VLM_NAMES = ['Qwen/Qwen3.6-27B', 'Qwen3.6-27B']
+const pickDefaultModelId = (
+  type: ModelConfig['type'],
+  preferredNames: string[] = [],
+) => {
+  const candidates = allModels.value.filter((m) => m.type === type)
+  if (!candidates.length) return ''
+  const byDefault = candidates.find((m) => m.is_default)
+  if (byDefault?.id) return byDefault.id
+  for (const name of preferredNames) {
+    const hit = candidates.find((m) => m.name === name || m.name.includes(name))
+    if (hit?.id) return hit.id
+  }
+  return candidates[0]?.id || ''
+}
+const applyDefaultModelSelections = (cfg: Record<string, any>) => {
+  if (!cfg.model_id) {
+    cfg.model_id = pickDefaultModelId('KnowledgeQA', DEFAULT_CHAT_VLM_NAMES)
+  }
+  if (!cfg.vlm_model_id) {
+    cfg.vlm_model_id = pickDefaultModelId('VLLM', DEFAULT_CHAT_VLM_NAMES)
+  }
+  if (!cfg.asr_model_id) {
+    cfg.asr_model_id = pickDefaultModelId('ASR')
+  }
+  if (!cfg.tts_model_id) {
+    cfg.tts_model_id = pickDefaultModelId('TTS')
+  }
+  if (!cfg.rerank_model_id) {
+    cfg.rerank_model_id = pickDefaultModelId('Rerank')
+  }
+}
 
 // 智能体类型预设（仅 smart-reasoning 模式下展示）
 const agentTypePresets = ref<AgentTypePreset[]>([]);
@@ -2013,8 +2045,8 @@ const defaultFormData = {
     // 编辑既有 agent 时会被 agent 自己保存的 agent_type 覆盖。
     agent_type: 'rag-qa' as AgentType,
     system_prompt_id: '' as string,
-    // 图片上传/多模态设置
-                    image_upload_enabled: false,
+    // 图片上传/多模态设置（与语音一样默认开启；模型 ID 在新建时按租户默认/Qwen3.6-27B 回填）
+                    image_upload_enabled: true,
                     vlm_model_id: '',
                     image_storage_provider: '',
                     audio_upload_enabled: true,
@@ -2436,6 +2468,8 @@ watch(() => props.visible, async (val) => {
         }
       }
       formData.value = newFormData;
+      // 新建智能体：按租户已注册模型回填 chat / VLLM / ASR / TTS / Rerank
+      applyDefaultModelSelections(formData.value.config);
       // 新建智能体：知识库默认 "全部"，MCP / Skills 仍默认 "不使用"。
       kbSelectionMode.value = 'all';
       mcpSelectionMode.value = 'none';

@@ -42,7 +42,7 @@
                       <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                       <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                     </svg>
-                    <!-- WeKnora Cloud 使用自定义 W 图标 -->
+                    <!-- 云服务自定义图标 -->
                     <svg
                       v-else-if="item.key === 'weknoracloud'"
                       width="18"
@@ -97,7 +97,7 @@
                   <OllamaSettings />
                 </div>
 
-                <!-- WeKnora Cloud -->
+                <!-- 云服务 -->
                 <div v-if="currentSection === 'weknoracloud'" class="section">
                   <WeKnoraCloudSettings />
                 </div>
@@ -219,7 +219,7 @@ const navItems = computed<SettingsNavItem[]>(() => {
   const items: SettingsNavItem[] = [
     { key: 'general', icon: 'setting', label: t('general.title') },
     { key: 'ollama', icon: 'server', label: 'Ollama' },
-    { key: 'weknoracloud', icon: '', label: 'WeKnora Cloud' },
+    { key: 'weknoracloud', icon: '', label: t('settings.weknoraCloud.title') },
     { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
     { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig')  },
     { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
