@@ -449,10 +449,10 @@ const handleEnabledChange = () => {
     localGraphExtract.value.nodes = []
     localGraphExtract.value.relations = []
   } else {
-    // 首次开启：若白名单为空，填充软件测评默认值（严格 schema 默认开）
+    // 首次开启：填充软件测评默认白名单 / 节点关系 / 三元组审核
     Object.assign(
       localGraphExtract.value,
-      applySoftwareTestingGraphDefaults(localGraphExtract.value)
+      applySoftwareTestingGraphDefaults(localGraphExtract.value, { force: true })
     )
   }
   handleConfigChange()

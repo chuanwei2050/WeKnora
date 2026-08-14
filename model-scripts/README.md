@@ -81,7 +81,7 @@ export AIR_GAPPED_MODE=true
 python deploy.py deploy \
   --bundle /tmp/offline-bundle.tar.gz \
   --data-dir /mnt/models \
-  --host 192.168.1.100
+  --host 192.168.10.232
 ```
 
 `deploy` 会自动：解压 → 校验权重 → `docker load` → `docker compose up -d`。

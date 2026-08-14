@@ -1,81 +1,81 @@
-﻿{
+{
   "approved_endpoints": [
     {
       "id": "model-embedding",
       "scheme": "http",
-      "host": "192.168.1.100",
+      "host": "192.168.10.232",
       "port": 8001,
       "protocol": "openai-compatible",
       "tls_required": false,
       "category": "model",
       "allowed_uses": ["embedding", "model"],
       "allowed_model_roles": ["embedding"],
-      "endpoint_url": "http://192.168.1.100:8001/v1",
+      "endpoint_url": "http://192.168.10.232:8001/v1",
       "notes": "禁止用途: object-storage, data-connector, search; quant=awq-int4"
     },
     {
       "id": "model-rerank",
       "scheme": "http",
-      "host": "192.168.1.100",
+      "host": "192.168.10.232",
       "port": 8002,
       "protocol": "openai-compatible",
       "tls_required": false,
       "category": "model",
       "allowed_uses": ["rerank", "model"],
       "allowed_model_roles": ["rerank"],
-      "endpoint_url": "http://192.168.1.100:8002/v1",
+      "endpoint_url": "http://192.168.10.232:8002/v1",
       "notes": "禁止用途: object-storage, data-connector; quant=onnx-int8"
     },
     {
       "id": "model-verifier",
       "scheme": "http",
-      "host": "192.168.1.100",
+      "host": "192.168.10.232",
       "port": 8003,
       "protocol": "openai-compatible",
       "tls_required": false,
       "category": "model",
       "allowed_uses": ["verifier", "evaluation_judge", "chat", "model"],
       "allowed_model_roles": ["verifier", "evaluation_judge"],
-      "endpoint_url": "http://192.168.1.100:8003/v1",
+      "endpoint_url": "http://192.168.10.232:8003/v1",
       "notes": "对应 OFFLINE_VERIFIER_MODEL_2 / EVALUATION_JUDGE；quant=awq (tclf90/Qwen3.5-9B-AWQ)"
     },
     {
       "id": "model-chat",
       "scheme": "http",
-      "host": "192.168.1.100",
+      "host": "192.168.10.232",
       "port": 8000,
       "protocol": "openai-compatible",
       "tls_required": false,
       "category": "model",
       "allowed_uses": ["chat", "vlm", "model"],
       "allowed_model_roles": ["chat", "vlm"],
-      "endpoint_url": "http://192.168.1.100:8000/v1",
+      "endpoint_url": "http://192.168.10.232:8000/v1",
       "notes": "Chat 与 VLM 共用；默认未部署，但量化已配置为 FP8（Qwen/Qwen3.6-27B-FP8）"
     },
     {
       "id": "model-asr",
       "scheme": "http",
-      "host": "192.168.1.100",
+      "host": "192.168.10.232",
       "port": 8004,
       "protocol": "openai-compatible",
       "tls_required": false,
       "category": "model",
       "allowed_uses": ["asr", "model"],
       "allowed_model_roles": ["asr"],
-      "endpoint_url": "http://192.168.1.100:8004/v1",
+      "endpoint_url": "http://192.168.10.232:8004/v1",
       "notes": "禁止用途: object-storage; quant=onnx-int8"
     },
     {
       "id": "model-tts",
       "scheme": "http",
-      "host": "192.168.1.100",
+      "host": "192.168.10.232",
       "port": 8005,
       "protocol": "openai-compatible",
       "tls_required": false,
       "category": "model",
       "allowed_uses": ["tts", "model"],
       "allowed_model_roles": ["tts"],
-      "endpoint_url": "http://192.168.1.100:8005/v1",
+      "endpoint_url": "http://192.168.10.232:8005/v1",
       "notes": "禁止用途: object-storage; quant=fp16（无可用 CosyVoice2 INT8）"
     }
   ],
@@ -83,7 +83,7 @@
     {
       "role": "embedding",
       "model_name": "qwen3-embedding-4b",
-      "endpoint_url": "http://192.168.1.100:8001/v1",
+      "endpoint_url": "http://192.168.10.232:8001/v1",
       "approved_endpoint_id": "model-embedding",
       "engine": "vllm",
       "quant": "awq-int4"
@@ -91,7 +91,7 @@
     {
       "role": "rerank",
       "model_name": "bge-reranker-v2-m3",
-      "endpoint_url": "http://192.168.1.100:8002/v1",
+      "endpoint_url": "http://192.168.10.232:8002/v1",
       "approved_endpoint_id": "model-rerank",
       "engine": "container",
       "quant": "onnx-int8"
@@ -99,7 +99,7 @@
     {
       "role": "verifier",
       "model_name": "qwen3.5-9b",
-      "endpoint_url": "http://192.168.1.100:8003/v1",
+      "endpoint_url": "http://192.168.10.232:8003/v1",
       "approved_endpoint_id": "model-verifier",
       "engine": "vllm",
       "quant": "awq",
@@ -108,7 +108,7 @@
     {
       "role": "evaluation_judge",
       "model_name": "qwen3.5-9b",
-      "endpoint_url": "http://192.168.1.100:8003/v1",
+      "endpoint_url": "http://192.168.10.232:8003/v1",
       "approved_endpoint_id": "model-verifier",
       "engine": "vllm",
       "quant": "awq",
@@ -117,7 +117,7 @@
     {
       "role": "chat",
       "model_name": "qwen3.6-27b",
-      "endpoint_url": "http://192.168.1.100:8000/v1",
+      "endpoint_url": "http://192.168.10.232:8000/v1",
       "approved_endpoint_id": "model-chat",
       "engine": "vllm",
       "quant": "fp8",
@@ -128,7 +128,7 @@
     {
       "role": "vlm",
       "model_name": "qwen3.6-27b",
-      "endpoint_url": "http://192.168.1.100:8000/v1",
+      "endpoint_url": "http://192.168.10.232:8000/v1",
       "approved_endpoint_id": "model-chat",
       "engine": "vllm",
       "quant": "fp8",
@@ -139,7 +139,7 @@
     {
       "role": "asr",
       "model_name": "sensevoice-small",
-      "endpoint_url": "http://192.168.1.100:8004/v1",
+      "endpoint_url": "http://192.168.10.232:8004/v1",
       "approved_endpoint_id": "model-asr",
       "engine": "container",
       "quant": "onnx-int8"
@@ -147,7 +147,7 @@
     {
       "role": "tts",
       "model_name": "cosyvoice2-0.5b",
-      "endpoint_url": "http://192.168.1.100:8005/v1",
+      "endpoint_url": "http://192.168.10.232:8005/v1",
       "approved_endpoint_id": "model-tts",
       "engine": "container",
       "quant": "fp16"

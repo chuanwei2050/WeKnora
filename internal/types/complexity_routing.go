@@ -119,7 +119,11 @@ func DefaultComplexityRoutingConfig() ComplexityRoutingConfig {
 			RoutingGraphReasoning: {RoutingGraphReasoning, RoutingContextualRAG, RoutingQuickRAG},
 			RoutingVerifiedAgent:  {RoutingVerifiedAgent, RoutingGraphReasoning, RoutingContextualRAG, RoutingQuickRAG},
 		},
-		Capabilities: RoutingCapabilities{QuickRAG: true, ContextualRAG: true}, InputBudgetChars: 12000,
+		// Research stack defaults: all routing actions available; degrade only when truly missing.
+		Capabilities: RoutingCapabilities{
+			QuickRAG: true, ContextualRAG: true, GraphReasoning: true, VerifiedAgent: true,
+		},
+		InputBudgetChars: 12000,
 		BudgetByAction: map[RoutingAction]RoutingBudget{
 			RoutingQuickRAG:       {RetrievalTopK: 5},
 			RoutingContextualRAG:  {QueryExpansion: true, RetrievalTopK: 10},
@@ -157,6 +161,11 @@ func (c *ComplexityRoutingConfig) EnsureDefaults() {
 	}
 	if c.BudgetByAction == nil {
 		c.BudgetByAction = d.BudgetByAction
+	}
+	// Zero capabilities would make every action fail Supports(); fill research defaults.
+	if !c.Capabilities.QuickRAG && !c.Capabilities.ContextualRAG &&
+		!c.Capabilities.GraphReasoning && !c.Capabilities.VerifiedAgent {
+		c.Capabilities = d.Capabilities
 	}
 }
 

@@ -1,11 +1,11 @@
-﻿# WeKnora 模型管理 UI 登记数据结构示例
+# WeKnora 模型管理 UI 登记数据结构示例
 # VLM 与 Chat 共用主模型端点（无独立 VLM 服务）
 # Verifier 与 Evaluation Judge 共用 8003
 
 models:
   - role: embedding
     model_name: qwen3-embedding-4b
-    endpoint_url: http://192.168.1.100:8001/v1
+    endpoint_url: http://192.168.10.232:8001/v1
     approved_endpoint_id: model-embedding
     protocol: openai-compatible
     engine: vllm
@@ -13,7 +13,7 @@ models:
 
   - role: rerank
     model_name: bge-reranker-v2-m3
-    endpoint_url: http://192.168.1.100:8002/v1
+    endpoint_url: http://192.168.10.232:8002/v1
     approved_endpoint_id: model-rerank
     protocol: openai-compatible
     engine: container
@@ -21,7 +21,7 @@ models:
 
   - role: verifier
     model_name: qwen3.5-9b
-    endpoint_url: http://192.168.1.100:8003/v1
+    endpoint_url: http://192.168.10.232:8003/v1
     approved_endpoint_id: model-verifier
     protocol: openai-compatible
     engine: vllm
@@ -30,7 +30,7 @@ models:
 
   - role: evaluation_judge
     model_name: qwen3.5-9b
-    endpoint_url: http://192.168.1.100:8003/v1
+    endpoint_url: http://192.168.10.232:8003/v1
     approved_endpoint_id: model-verifier
     protocol: openai-compatible
     engine: vllm
@@ -40,7 +40,7 @@ models:
   # 主模型默认未部署；量化已预置 FP8。启用后 Chat / VLM 指向同一 endpoint
   - role: chat
     model_name: qwen3.6-27b
-    endpoint_url: http://192.168.1.100:8000/v1
+    endpoint_url: http://192.168.10.232:8000/v1
     approved_endpoint_id: model-chat
     protocol: openai-compatible
     engine: vllm
@@ -50,7 +50,7 @@ models:
 
   - role: vlm
     model_name: qwen3.6-27b
-    endpoint_url: http://192.168.1.100:8000/v1
+    endpoint_url: http://192.168.10.232:8000/v1
     approved_endpoint_id: model-chat
     protocol: openai-compatible
     engine: vllm
@@ -60,7 +60,7 @@ models:
 
   - role: asr
     model_name: sensevoice-small
-    endpoint_url: http://192.168.1.100:8004/v1
+    endpoint_url: http://192.168.10.232:8004/v1
     approved_endpoint_id: model-asr
     protocol: openai-compatible
     engine: container
@@ -68,7 +68,7 @@ models:
 
   - role: tts
     model_name: cosyvoice2-0.5b
-    endpoint_url: http://192.168.1.100:8005/v1
+    endpoint_url: http://192.168.10.232:8005/v1
     approved_endpoint_id: model-tts
     protocol: openai-compatible
     engine: container

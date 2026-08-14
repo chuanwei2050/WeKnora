@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
@@ -89,6 +90,14 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 		kb.CreatedBy = userID
 	}
 	kb.EnsureDefaults()
+	// New document KBs enable software-testing governance by default when unset.
+	if kb.Type != types.KnowledgeBaseTypeFAQ && !kb.Governance.Enabled && strings.TrimSpace(kb.Governance.ProfileID) == "" {
+		kb.Governance = types.KnowledgeGovernanceConfig{
+			Enabled:        true,
+			ProfileID:      "software-testing",
+			ProfileVersion: "1.0",
+		}
+	}
 
 	logger.Infof(ctx, "Creating knowledge base, ID: %s, tenant ID: %d, name: %s", kb.ID, kb.TenantID, kb.Name)
 

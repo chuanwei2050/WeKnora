@@ -502,21 +502,17 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       language: ''
     },
     nodeExtractConfig: {
-      enabled: false,
-      text: '',
+      enabled: true,
+      text: SOFTWARE_TESTING_GRAPH_PRESET.text,
       tags: [...SOFTWARE_TESTING_GRAPH_PRESET.tags],
       entity_types: [...SOFTWARE_TESTING_GRAPH_PRESET.entity_types],
       strict_schema: SOFTWARE_TESTING_GRAPH_PRESET.strict_schema,
-      require_triple_review: false,
-      nodes: [] as Array<{
-        name: string
-        attributes: string[]
-      }>,
-      relations: [] as Array<{
-        node1: string
-        node2: string
-        type: string
-      }>
+      require_triple_review: SOFTWARE_TESTING_GRAPH_PRESET.require_triple_review,
+      nodes: SOFTWARE_TESTING_GRAPH_PRESET.nodes.map((n) => ({
+        name: n.name,
+        attributes: [...n.attributes],
+      })),
+      relations: SOFTWARE_TESTING_GRAPH_PRESET.relations.map((r) => ({ ...r })),
     },
     questionGenerationConfig: {
       enabled: true,
@@ -531,7 +527,12 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       vectorEnabled: true,
       keywordEnabled: true,
       wikiEnabled: false,
-      graphEnabled: false,
+      graphEnabled: true,
+    },
+    governance: {
+      enabled: true,
+      profile_id: 'software-testing',
+      profile_version: '1.0',
     },
   }
 }
@@ -632,7 +633,12 @@ const loadKBData = async () => {
         vectorEnabled: kb.indexing_strategy?.vector_enabled ?? true,
         keywordEnabled: kb.indexing_strategy?.keyword_enabled ?? true,
         wikiEnabled: kb.indexing_strategy?.wiki_enabled ?? false,
-        graphEnabled: kb.indexing_strategy?.graph_enabled ?? false,
+        graphEnabled: kb.indexing_strategy?.graph_enabled ?? (!!kb.extract_config?.enabled),
+      },
+      governance: {
+        enabled: !!kb.governance?.enabled,
+        profile_id: kb.governance?.profile_id || 'software-testing',
+        profile_version: kb.governance?.profile_version || '1.0',
       },
     }
     initialStorageProvider.value = formData.value.storageProvider
@@ -775,6 +781,8 @@ const handleQuestionGenerationUpdate = (config: any) => {
 const handleNodeExtractUpdate = (config: any) => {
   if (formData.value) {
     formData.value.nodeExtractConfig = { ...config }
+    // Keep indexing strategy in sync with GraphSettings enable switch
+    formData.value.indexingStrategy.graphEnabled = !!config?.enabled
   }
 }
 
@@ -931,6 +939,15 @@ const buildSubmitData = () => {
     }
   }
 
+  // OpenSpec research defaults: software-testing knowledge governance on for new/edited KBs
+  if (formData.value.governance) {
+    data.governance = {
+      enabled: !!formData.value.governance.enabled,
+      profile_id: formData.value.governance.profile_id || 'software-testing',
+      profile_version: formData.value.governance.profile_version || '1.0',
+    }
+  }
+
   return data
 }
 
@@ -1010,6 +1027,13 @@ const doSubmit = async () => {
           keyword_enabled: formData.value.indexingStrategy?.keywordEnabled ?? true,
           wiki_enabled: formData.value.indexingStrategy?.wikiEnabled ?? false,
           graph_enabled: formData.value.indexingStrategy?.graphEnabled ?? false,
+        }
+        if (formData.value.governance) {
+          updateConfig.governance = {
+            enabled: !!formData.value.governance.enabled,
+            profile_id: formData.value.governance.profile_id || 'software-testing',
+            profile_version: formData.value.governance.profile_version || '1.0',
+          }
         }
       }
       await updateKnowledgeBase(props.kbId, {

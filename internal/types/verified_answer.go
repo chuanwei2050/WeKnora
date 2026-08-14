@@ -363,7 +363,7 @@ type VerifiedAnswerConfig struct {
 }
 
 // NormalizeLegacy maps the historical reflection flag to the new verification
-// configuration without changing the default-off behavior for new agents.
+// configuration. New agents default verification on in the editor / builtin YAML.
 func (c *VerifiedAnswerConfig) NormalizeLegacy(reflectionEnabled bool) {
 	if c == nil {
 		return

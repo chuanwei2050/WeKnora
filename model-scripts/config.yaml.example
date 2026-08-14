@@ -23,7 +23,7 @@ bundle:
 
 deploy:
   data_dir: /mnt/models
-  host: 192.168.1.100
+  host: 192.168.10.232
   scheme: http
   compose_project: weknora-models
   auto_start: true

@@ -46,6 +46,13 @@ export interface CustomAgentConfig {
 	  confidence_threshold?: number;
 	  fallback_action?: 'quick_rag' | 'contextual_rag' | 'graph_reasoning' | 'verified_agent';
 	  level_actions?: Partial<Record<'L1' | 'L2' | 'L3' | 'L4', 'quick_rag' | 'contextual_rag' | 'graph_reasoning' | 'verified_agent'>>;
+	  capabilities?: {
+	    quick_rag?: boolean;
+	    contextual_rag?: boolean;
+	    graph_reasoning?: boolean;
+	    verified_agent?: boolean;
+	  };
+	  few_shot?: Array<{ question: string; level: string; subtype?: string }>;
 	};
   // MCP服务选择模式：all=全部启用的MCP服务, selected=指定服务, none=不使用MCP
   mcp_selection_mode?: 'all' | 'selected' | 'none';

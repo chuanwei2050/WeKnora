@@ -45,6 +45,28 @@ builtin_agents:
       enable_query_expansion: true
       enable_rewrite: true
       fallback_strategy: "model"
+      reflection_enabled: true
+      complexity_routing:
+        enabled: true
+        confidence_threshold: 0.6
+        fallback_action: contextual_rag
+        level_actions:
+          L1: quick_rag
+          L2: contextual_rag
+          L3: graph_reasoning
+          L4: verified_agent
+        capabilities:
+          quick_rag: true
+          contextual_rag: true
+          graph_reasoning: true
+          verified_agent: true
+      verified_answer:
+        enabled: true
+        max_reflections: 1
+        degradation_strategy: conservative
+      voice_input_enabled: true
+      voice_output_enabled: true
+      audio_upload_enabled: true
 
   - id: "builtin-smart-reasoning"
     avatar: ""
@@ -82,7 +104,28 @@ builtin_agents:
         - "get_document_info"
       web_search_enabled: true
       web_search_max_results: 5
-      reflection_enabled: false
+      reflection_enabled: true
+      complexity_routing:
+        enabled: true
+        confidence_threshold: 0.6
+        fallback_action: contextual_rag
+        level_actions:
+          L1: quick_rag
+          L2: contextual_rag
+          L3: graph_reasoning
+          L4: verified_agent
+        capabilities:
+          quick_rag: true
+          contextual_rag: true
+          graph_reasoning: true
+          verified_agent: true
+      verified_answer:
+        enabled: true
+        max_reflections: 1
+        degradation_strategy: conservative
+      voice_input_enabled: true
+      voice_output_enabled: true
+      audio_upload_enabled: true
       multi_turn_enabled: true
       history_turns: 5
       faq_priority_enabled: true

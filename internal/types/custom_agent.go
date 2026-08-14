@@ -312,8 +312,8 @@ func (a *CustomAgent) EnsureDefaults() {
 	}
 }
 
-// Validate checks opt-in routing and verification settings at the persistence
-// boundary. Legacy agents remain valid because both features default off.
+// Validate checks routing and verification settings at the persistence
+// boundary. New agents default these features on; legacy agents keep saved values.
 func (c CustomAgentConfig) Validate() error {
 	if c.ComplexityRouting.Enabled {
 		if err := c.ComplexityRouting.Validate(); err != nil {

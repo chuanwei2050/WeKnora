@@ -78,7 +78,7 @@ type KnowledgeBase struct {
 	VectorStoreID *string `yaml:"vector_store_id"         json:"vector_store_id,omitempty" gorm:"column:vector_store_id;type:varchar(36);<-:create"`
 	// Extract config
 	ExtractConfig *ExtractConfig `yaml:"extract_config"          json:"extract_config"          gorm:"column:extract_config;type:json"`
-	// Governance is opt-in so legacy knowledge bases keep their existing import path.
+	// Governance configures immutable-version review; new document KBs default on via UI/create path.
 	Governance KnowledgeGovernanceConfig `yaml:"governance" json:"governance" gorm:"column:governance;type:json"`
 	// FAQConfig stores FAQ specific configuration such as indexing strategy
 	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"              gorm:"column:faq_config;type:json"`
