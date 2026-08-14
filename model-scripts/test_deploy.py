@@ -85,6 +85,44 @@ class TestConfigAndCompose(unittest.TestCase):
         self.assertEqual(set(chat_ep["allowed_model_roles"]), {"chat", "vlm"})
         self.assertEqual(chat_ep["port"], 8000)
 
+    def test_verifier_awq_and_shared_judge(self) -> None:
+        cfg = deploy.load_config(ROOT / "config.yaml.example", prefer_as_base=True)
+        self.assertIn("verifier", cfg["models"])
+        specs = deploy.parse_models(cfg)
+        verifier = next(s for s in specs if s.key == "verifier")
+        self.assertTrue(verifier.enabled)
+        self.assertEqual(verifier.quant, "awq")
+        self.assertEqual(verifier.download_id, "tclf90/Qwen3.5-9B-AWQ")
+        self.assertEqual(verifier.hub_id_hf, "QuantTrio/Qwen3.5-9B-AWQ")
+        self.assertEqual(verifier.port, 8003)
+        self.assertIn("evaluation_judge", verifier.all_roles)
+        deploy.validate_specs_for_prepare([s for s in specs if s.enabled])
+        reg = deploy.render_approved_endpoints(cfg, specs)
+        roles = {m["role"] for m in reg["model_registry"]}
+        self.assertIn("verifier", roles)
+        self.assertIn("evaluation_judge", roles)
+        ep = next(e for e in reg["approved_endpoints"] if e["id"] == "model-verifier")
+        self.assertEqual(ep["port"], 8003)
+        text = deploy.render_compose(cfg, Path("/mnt/models"), specs)
+        self.assertIn("verifier:", text)
+        self.assertIn("8003:8000", text)
+        self.assertIn("reasoning-parser", text)
+
+    def test_prefer_quantized_variants(self) -> None:
+        cfg = deploy.load_config(ROOT / "config.yaml.example", prefer_as_base=True)
+        specs = {s.key: s for s in deploy.parse_models(cfg)}
+        self.assertTrue(specs["embedding"].quant.startswith("awq"))
+        self.assertIn("AWQ", specs["embedding"].hub_id.upper())
+        self.assertTrue(specs["rerank"].quant.startswith("onnx"))
+        self.assertIn("ONNX", specs["rerank"].hub_id.upper())
+        self.assertTrue(specs["asr"].quant.startswith("onnx"))
+        self.assertIn("onnx", specs["asr"].hub_id.lower())
+        self.assertEqual(specs["tts"].quant, "fp16")
+        text = deploy.render_compose(cfg, Path("/mnt/models"), list(specs.values()))
+        self.assertIn("--quantization", text)
+        self.assertIn("awq", text)
+        self.assertIn("QUANT=onnx-int8", text)
+
     def test_limit_mm_dict_to_json(self) -> None:
         cfg = deploy.load_config(ROOT / "config.yaml", prefer_as_base=True)
         cfg["models"]["chat"]["enabled"] = True
@@ -194,6 +232,133 @@ class TestSafeExtract(unittest.TestCase):
             dest.mkdir()
             with self.assertRaises(RuntimeError):
                 deploy.safe_extract_tar(evil, dest)
+
+
+class TestSkipDownload(unittest.TestCase):
+    def test_missing_source_marker_never_skips(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)
+            (dest / "a.bin").write_bytes(b"abc")
+            deploy.write_checksums(dest)
+            skip, reason = deploy.should_skip_model_download(
+                dest, "new-hub|awq||modelscope"
+            )
+            self.assertFalse(skip)
+            self.assertEqual(reason, "missing-source-marker")
+            self.assertFalse((dest / ".airgap_source").exists())
+
+    def test_matching_source_skips_when_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)
+            (dest / "a.bin").write_bytes(b"abc")
+            deploy.write_checksums(dest)
+            expected = "hub|awq||hf"
+            (dest / ".airgap_source").write_text(expected + "\n", encoding="utf-8")
+            skip, reason = deploy.should_skip_model_download(dest, expected)
+            self.assertTrue(skip)
+            self.assertTrue(reason.startswith("verified:"))
+
+    def test_source_change_forces_redownload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)
+            (dest / "a.bin").write_bytes(b"abc")
+            deploy.write_checksums(dest)
+            (dest / ".airgap_source").write_text("old|fp16||hf\n", encoding="utf-8")
+            skip, reason = deploy.should_skip_model_download(dest, "new|awq||hf")
+            self.assertFalse(skip)
+            self.assertTrue(reason.startswith("source-changed:"))
+
+
+class TestPickBaseImage(unittest.TestCase):
+    def test_prefers_preferred_even_if_fallback_local(self) -> None:
+        calls: list[str] = []
+
+        def fake_exists(image: str) -> bool:
+            calls.append(image)
+            return image == "vllm/vllm-openai:latest"
+
+        def fake_require(_action: str) -> None:
+            raise RuntimeError("offline")
+
+        original_exists = deploy.docker_image_exists
+        original_require = deploy.require_online
+        original_run = deploy.run_cmd
+        try:
+            deploy.docker_image_exists = fake_exists  # type: ignore[assignment]
+            deploy.require_online = fake_require  # type: ignore[assignment]
+            deploy.run_cmd = lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("no"))  # type: ignore[assignment]
+            chosen = deploy.pick_local_base_image(
+                "pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime",
+                ["vllm/vllm-openai:latest"],
+            )
+            self.assertEqual(chosen, "vllm/vllm-openai:latest")
+            self.assertEqual(calls[0], "pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime")
+        finally:
+            deploy.docker_image_exists = original_exists  # type: ignore[assignment]
+            deploy.require_online = original_require  # type: ignore[assignment]
+            deploy.run_cmd = original_run  # type: ignore[assignment]
+
+    def test_returns_preferred_when_local(self) -> None:
+        original = deploy.docker_image_exists
+        try:
+            deploy.docker_image_exists = lambda image: image.startswith("pytorch/")  # type: ignore[assignment]
+            chosen = deploy.pick_local_base_image(
+                "pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime",
+                ["vllm/vllm-openai:latest"],
+            )
+            self.assertEqual(chosen, "pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime")
+        finally:
+            deploy.docker_image_exists = original  # type: ignore[assignment]
+
+
+class TestSingleGpuDefaults(unittest.TestCase):
+    def test_verifier_defaults_to_gpu0(self) -> None:
+        cfg = deploy.load_config(ROOT / "config.yaml.example", prefer_as_base=True)
+        self.assertEqual(cfg.get("docker", {}).get("gpu_count"), 1)
+        specs = {s.key: s for s in deploy.parse_models(cfg)}
+        self.assertEqual(specs["verifier"].device_ids, [0])
+        self.assertEqual(specs["embedding"].device_ids, [0])
+        text = deploy.render_compose(cfg, Path("/mnt/models"), list(specs.values()))
+        self.assertIn('device_ids: ["0"]', text)
+        self.assertNotIn('device_ids: ["1"]', text)
+
+
+class TestDownloadCleanup(unittest.TestCase):
+    def test_auto_ms_failure_clears_dest_before_hf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "model"
+            dest.mkdir()
+            (dest / "partial.bin").write_bytes(b"dirty")
+
+            def boom(*_a, **_k):
+                raise RuntimeError("ms down")
+
+            def hf_ok(model_id, dest_path, **_k):
+                ensure = dest_path
+                ensure.mkdir(parents=True, exist_ok=True)
+                (ensure / "ok.bin").write_bytes(b"hf")
+                return ensure
+
+            original_ms = deploy.download_model_ms
+            original_hf = deploy.download_model_hf
+            try:
+                deploy.download_model_ms = boom  # type: ignore[assignment]
+                deploy.download_model_hf = hf_ok  # type: ignore[assignment]
+                out = deploy.download_model(
+                    "ms/id",
+                    dest,
+                    source="auto",
+                    revision=None,
+                    retries=1,
+                    delay=0,
+                    hf_model_id="hf/id",
+                )
+                self.assertEqual(out, dest)
+                self.assertFalse((dest / "partial.bin").exists())
+                self.assertTrue((dest / "ok.bin").exists())
+            finally:
+                deploy.download_model_ms = original_ms  # type: ignore[assignment]
+                deploy.download_model_hf = original_hf  # type: ignore[assignment]
 
 
 class TestYamlQuote(unittest.TestCase):

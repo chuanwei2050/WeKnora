@@ -10,7 +10,7 @@
 
 | 步骤 | 在哪跑 | 命令 |
 |------|--------|------|
-| **① 一键下载 + 打包** | 联网机 | `python deploy.py prepare --output-dir ./offline-bundle --clean` |
+| **① 一键下载 + 打包** | 联网机 | `python deploy.py prepare --output-dir ./offline-bundle` |
 | **② 传到服务器** | — | 拷贝 `offline-bundle.tar.gz`（U 盘 / 专线均可） |
 | **③ 一键部署启动** | 内网服务器 | `python deploy.py deploy --bundle /tmp/offline-bundle.tar.gz --data-dir /mnt/models --host <内网IP>` |
 
@@ -19,6 +19,8 @@
 ```bash
 python deploy.py verify --data-dir /mnt/models
 ```
+
+> 首次准备可用 `--clean` 清空输出目录；**增量重跑不要加 `--clean`**（会删掉已下权重）。`--clean` 不会清理 `.cache/` 或本机 Docker 镜像。
 
 ---
 
@@ -34,18 +36,39 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 cp config.yaml.example config.yaml
-# 按需改 config.yaml：deploy.host、是否启用 chat 等
-# 可选: export HF_TOKEN=xxx
+# 按需改 config.yaml：deploy.host、GPU 数量、是否启用 chat 等
+# 可选: export HF_TOKEN=xxx / MODELSCOPE_TOKEN=xxx
 
-python deploy.py prepare --output-dir ./offline-bundle --clean
+# 增量准备（已有权重会跳过；Hub 不可达时会复用本地基础镜像）
+python deploy.py prepare --output-dir ./offline-bundle
 ```
+
+常用开关：
+
+| 参数 | 作用 |
+|------|------|
+| `--clean` | 清空 `offline-bundle/` 后重建（慎用） |
+| `--force-download` | 强制重下全部启用模型 |
+| `--skip-docker` | 跳过镜像 pull/build/save（只更权重/配置/打包） |
+| `--skip-docker-build` | 仍处理 vLLM 镜像，跳过 rerank/asr/tts 构建 |
+| `--skip-pip` | 跳过工具自身 `offline_packages` 下载 |
+| `--no-archive` | 不生成 `.tar.gz` |
 
 产物：
 
 - `offline-bundle/` — 权重、镜像 tar、compose、登记文件
 - `offline-bundle.tar.gz` — **拷到内网的这一份**
 
-`prepare` 会自动：下载模型 → pull/build Docker 镜像并 `docker save` → 打 tar.gz。
+包内镜像（`offline-bundle/images/`）：
+
+| 文件 | 用途 |
+|------|------|
+| `vllm-openai.tar` | Embedding / Verifier /（可选）Chat |
+| `weknora-rerank.tar` | Rerank（ONNX INT8） |
+| `weknora-asr.tar` | ASR（ONNX INT8） |
+| `weknora-tts.tar` | TTS（fp16） |
+
+`prepare` 会：下载模型 → pull/build Docker 镜像并 `docker save` → 打 tar.gz。Docker Hub 短暂失败时，若本机已有同名镜像会复用并重新 `docker save`；业务镜像基础层也会优先选用本机已有 `python`/`pytorch`（或兼容镜像）。
 
 ### 内网服务器（部署）
 
@@ -75,18 +98,24 @@ docker compose -p weknora-models -f /mnt/models/docker-compose.airgap.override.y
 
 ## 默认服务端口
 
-| 角色 | 端口 | 说明 |
-|------|------|------|
-| Chat + VLM | 8000 | 默认关闭；VLM **共用**主 Chat，不单独部署 |
-| Embedding | 8001 | vLLM 容器 |
-| Rerank | 8002 | `weknora-rerank:airgap` |
-| ASR | 8004 | `weknora-asr:airgap` |
-| TTS | 8005 | `weknora-tts:airgap` |
+| 角色 | 端口 | 量化选择 | 说明 |
+|------|------|----------|------|
+| Chat + VLM | 8000 | **FP8** | 默认不下载；配置已写好 `Qwen/Qwen3.6-27B-FP8`，启用即按 FP8 |
+| Embedding | 8001 | **AWQ-INT4** | 约 2.7GB，优于官方 bf16≈7.5GB |
+| Rerank | 8002 | **ONNX INT8** | 约 0.5GB，优于官方≈2GB |
+| Verifier + Judge | 8003 | **AWQ** | `Qwen3.5-9B`（默认与 Embedding 同 GPU0；双卡可改 `["1"]`） |
+| ASR | 8004 | **ONNX INT8** | 约 0.23GB，优于官方≈0.9GB |
+| TTS | 8005 | fp16 | 暂无可用 CosyVoice2 INT8 制品 |
+
+策略：**能量化且有优势（体积/显存/速度）且栈可加载 → 用量化；否则用官方全精度。**
+
+> 默认按 **单卡**（Embedding + Verifier 均 `device_ids: ["0"]`，显存占用已调低）。双卡可将 verifier 改为 `["1"]` 并提高双方 `gpu_memory_utilization`。
 
 健康检查示例：
 
 ```bash
 curl -s http://127.0.0.1:8001/v1/models
+curl -s http://127.0.0.1:8003/v1/models
 curl -s http://127.0.0.1:8002/healthz
 ```
 
@@ -105,6 +134,8 @@ model-scripts/
 ├── templates/                # WeKnora 批准端点 / 模型登记示例
 ├── systemd/                  # 遗留兜底（主路径用 compose，一般不用）
 ├── test_deploy.py            # 离线单测
+├── .cache/                   # Hub/临时缓存（gitignore，落项目盘）
+├── offline-bundle/           # prepare 产物（gitignore）
 └── README.md
 ```
 
@@ -113,10 +144,15 @@ model-scripts/
 ## 配置要点（config.yaml）
 
 - 先 `cp config.yaml.example config.yaml` 再改
-- `models.chat.enabled: true` 才下载/部署主模型；VLM 通过 `roles: [vlm]` 共用，**不要**单独配 VLM 服务
-- `engine: vllm` = Embedding/Chat；`engine: container` = Rerank/ASR/TTS
-- 量化权重用 `download_id`；写了 `fp8/awq/...` 却不填 `download_id`，`prepare` 会失败
-- 单卡默认 ASR/TTS `needs_gpu: false`，避免和 Embedding 抢 GPU；多卡可改 `true` 并设 `device_ids`
+- **量化优先（有优势才切）**：Embedding/Rerank/ASR/Verifier 已用量化仓；Chat 27B 虽默认不下载，配置已固定 **FP8**（`Qwen/Qwen3.6-27B-FP8`）；TTS 仍为 fp16（无可用 INT8）
+- 切换 `download_id`/`quant`/`revision` 后，`prepare` 会检测 `.airgap_source` 变更并自动重下（也可 `--force-download`）
+- `models.verifier` 对应平台 `OFFLINE_VERIFIER_MODEL_2` / `OFFLINE_EVALUATION_JUDGE`（同端点，`roles: [evaluation_judge]`）
+- `models.chat.enabled: true` 才下载/部署主模型（按已配 FP8）；VLM 通过 `roles: [vlm]` 共用，**不要**单独配 VLM 服务
+- `engine: vllm` = Embedding / Verifier / Chat；`engine: container` = Rerank/ASR/TTS
+- 量化权重必须填 `download_id`；写了 `fp8/awq/onnx-int8/...` 却不填，`prepare` 会失败
+- **下载缓存默认在 `model-scripts/.cache/`**（项目盘），不写 `C:\Users\...`；可用 `bundle.hub_cache_dir` 改路径
+- 默认单卡：Embedding / Verifier 均 → `device_ids: ["0"]`；双卡可将 verifier 改为 `["1"]` 并提高 `gpu_memory_utilization`
+- 默认 ASR/TTS `needs_gpu: false`，避免和 Embedding 抢 GPU；多卡可改 `true` 并设 `device_ids`
 
 密钥只用环境变量，**不要写进配置或打包介质**：
 
@@ -131,6 +167,7 @@ model-scripts/
 | 阶段 | 路径 |
 |------|------|
 | prepare | `model-scripts/offline-bundle/`、`*.tar.gz`（已 ignore） |
+| Hub 缓存 | `model-scripts/.cache/`（HF / ModelScope / tmp，已 ignore） |
 | deploy | `/mnt/models/models/<角色>/`、compose、registry |
 
 部署后平台登记文件：

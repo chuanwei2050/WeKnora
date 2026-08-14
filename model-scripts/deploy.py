@@ -13,6 +13,9 @@
   HF_TOKEN / HUGGING_FACE_HUB_TOKEN  — Hugging Face 访问令牌（不进包）
   MODELSCOPE_TOKEN                   — ModelScope 令牌（可选）
   AIR_GAPPED_MODE=true               — 跳过一切互联网请求
+
+下载缓存默认落在 model-scripts/.cache（项目盘），可通过 bundle.hub_cache_dir 覆盖；
+不会写入 C:\\Users\\...\\.cache，除非你自行设置了 HF_HOME / MODELSCOPE_CACHE。
 """
 
 from __future__ import annotations
@@ -280,6 +283,8 @@ class ModelSpec:
     served_model_name: str
     revision: Optional[str] = None
     download_id: Optional[str] = None
+    # auto 源下 ModelScope 失败后，优先用该 ID 回退 Hugging Face（如 tclf90 → QuantTrio）
+    download_id_hf: Optional[str] = None
     max_model_len: int = 8192
     gpu_memory_utilization: float = 0.9
     dtype: str = "auto"
@@ -294,6 +299,10 @@ class ModelSpec:
     @property
     def hub_id(self) -> str:
         return (self.download_id or self.model_id).strip()
+
+    @property
+    def hub_id_hf(self) -> str:
+        return (self.download_id_hf or self.download_id or self.model_id).strip()
 
     @property
     def local_dirname(self) -> str:
@@ -325,6 +334,9 @@ def parse_models(cfg: Dict[str, Any]) -> List[ModelSpec]:
         download_id = raw.get("download_id")
         if download_id is not None:
             download_id = str(download_id).strip() or None
+        download_id_hf = raw.get("download_id_hf")
+        if download_id_hf is not None:
+            download_id_hf = str(download_id_hf).strip() or None
         limit_mm = raw.get("limit_mm_per_prompt")
         if isinstance(limit_mm, (dict, list)):
             limit_mm = json.dumps(limit_mm, ensure_ascii=False, separators=(",", ":"))
@@ -344,6 +356,7 @@ def parse_models(cfg: Dict[str, Any]) -> List[ModelSpec]:
                 served_model_name=str(raw.get("served_model_name") or key),
                 revision=raw.get("revision"),
                 download_id=download_id,
+                download_id_hf=download_id_hf,
                 max_model_len=int(raw.get("max_model_len") or 8192),
                 gpu_memory_utilization=float(raw.get("gpu_memory_utilization") or 0.9),
                 dtype=str(raw.get("dtype") or "auto"),
@@ -416,6 +429,56 @@ def load_config(path: Optional[Path], *, prefer_as_base: bool = False) -> Dict[s
 # ---------------------------------------------------------------------------
 
 
+def hub_cache_root(cfg: Optional[Dict[str, Any]] = None) -> Path:
+    """项目内 Hub 缓存根目录（默认 model-scripts/.cache，避免落到 C:\\Users\\...）。"""
+    bundle = (cfg or {}).get("bundle") or {}
+    raw = bundle.get("hub_cache_dir")
+    if raw:
+        root = Path(str(raw))
+        if not root.is_absolute():
+            root = SCRIPT_DIR / root
+    else:
+        root = SCRIPT_DIR / ".cache"
+    return ensure_dir(root.resolve())
+
+
+def configure_project_hub_env(
+    cfg: Optional[Dict[str, Any]] = None,
+    *,
+    force: bool = False,
+) -> Path:
+    """
+    强制 Hugging Face / ModelScope / 临时文件写入项目盘。
+    force=False（默认）：不覆盖用户已显式设置的同名环境变量。
+    force=True（prepare）：一律改写到项目内，避免落到 C:\\Users\\...\\Temp / .cache。
+    """
+    root = hub_cache_root(cfg)
+    hf = ensure_dir(root / "huggingface")
+    ms = ensure_dir(root / "modelscope")
+    tmp = ensure_dir(root / "tmp")
+
+    defaults = {
+        "HF_HOME": str(hf),
+        "HUGGINGFACE_HUB_CACHE": str(hf / "hub"),
+        "HF_HUB_CACHE": str(hf / "hub"),
+        "TRANSFORMERS_CACHE": str(hf / "transformers"),
+        "MODELSCOPE_CACHE": str(ms),
+        "MODELSCOPE_CACHE_DIR": str(ms),
+        "TMPDIR": str(tmp),
+        "TEMP": str(tmp),
+        "TMP": str(tmp),
+    }
+    applied = []
+    for key, value in defaults.items():
+        if force or not os.environ.get(key):
+            os.environ[key] = value
+            applied.append(key)
+    print(f"Hub 缓存目录: {root}（模型与下载缓存均在项目内，不写用户主目录）")
+    if applied:
+        print(f"已设置环境变量: {', '.join(applied)}")
+    return root
+
+
 def download_model_hf(
     model_id: str,
     dest: Path,
@@ -423,14 +486,21 @@ def download_model_hf(
     revision: Optional[str] = None,
     retries: int = 3,
     delay: float = 5.0,
+    cfg: Optional[Dict[str, Any]] = None,
 ) -> Path:
     require_online(f"huggingface download {model_id}")
+    configure_project_hub_env(cfg, force=True)
     try:
         from huggingface_hub import snapshot_download
     except ImportError as exc:
         raise RuntimeError("缺少 huggingface_hub，请先安装 requirements.txt") from exc
 
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    cache_dir = Path(
+        os.environ.get("HUGGINGFACE_HUB_CACHE")
+        or (hub_cache_root(cfg) / "huggingface" / "hub")
+    )
+    ensure_dir(cache_dir)
     last_err: Optional[Exception] = None
     for attempt in range(1, retries + 1):
         try:
@@ -439,6 +509,7 @@ def download_model_hf(
             snapshot_download(
                 repo_id=model_id,
                 local_dir=str(dest),
+                cache_dir=str(cache_dir),
                 revision=revision,
                 token=token,
             )
@@ -446,6 +517,8 @@ def download_model_hf(
         except Exception as exc:  # noqa: BLE001
             last_err = exc
             eprint(f"[HF] 失败: {exc}")
+            if dest.exists():
+                shutil.rmtree(dest, ignore_errors=True)
             if attempt < retries:
                 time.sleep(delay)
     raise RuntimeError(f"Hugging Face 下载失败: {model_id}: {last_err}")
@@ -458,35 +531,56 @@ def download_model_ms(
     revision: Optional[str] = None,
     retries: int = 3,
     delay: float = 5.0,
+    cfg: Optional[Dict[str, Any]] = None,
 ) -> Path:
     require_online(f"modelscope download {model_id}")
+    configure_project_hub_env(cfg, force=True)
     try:
         from modelscope.hub.snapshot_download import snapshot_download as ms_snapshot
     except ImportError as exc:
         raise RuntimeError("缺少 modelscope，请 pip install modelscope 或改用 huggingface") from exc
 
     token = os.environ.get("MODELSCOPE_TOKEN")
+    ms_cache = Path(os.environ.get("MODELSCOPE_CACHE") or (hub_cache_root(cfg) / "modelscope"))
+    ensure_dir(ms_cache)
     last_err: Optional[Exception] = None
     for attempt in range(1, retries + 1):
         try:
             print(f"[ModelScope] 下载 {model_id} -> {dest} (尝试 {attempt}/{retries})")
             ensure_dir(dest.parent)
-            kwargs: Dict[str, Any] = {"model_id": model_id}
-            # 兼容不同 modelscope 签名
+            if token:
+                os.environ.setdefault("MODELSCOPE_API_TOKEN", token)
+            # 优先直接落到 dest，cache 也强制在项目内
+            cache_path: Any = None
             try:
-                cache_path = ms_snapshot(model_id, revision=revision, token=token)
+                cache_path = ms_snapshot(
+                    model_id,
+                    cache_dir=str(ms_cache),
+                    local_dir=str(dest),
+                    revision=revision,
+                )
             except TypeError:
-                if token:
-                    os.environ.setdefault("MODELSCOPE_API_TOKEN", token)
-                cache_path = ms_snapshot(model_id, revision=revision)
-            if Path(cache_path).resolve() != dest.resolve():
+                try:
+                    cache_path = ms_snapshot(
+                        model_id,
+                        cache_dir=str(ms_cache),
+                        revision=revision,
+                    )
+                except TypeError:
+                    cache_path = ms_snapshot(model_id, revision=revision)
+
+            src = Path(str(cache_path or dest))
+            if src.resolve() != dest.resolve():
                 if dest.exists():
                     shutil.rmtree(dest)
-                shutil.copytree(cache_path, dest)
+                shutil.copytree(src, dest)
             return dest
         except Exception as exc:  # noqa: BLE001
             last_err = exc
             eprint(f"[ModelScope] 失败: {exc}")
+            # 避免半成品污染重试 / HF auto 回退（尤其 download_id ≠ download_id_hf）
+            if dest.exists():
+                shutil.rmtree(dest, ignore_errors=True)
             if attempt < retries:
                 time.sleep(delay)
     raise RuntimeError(f"ModelScope 下载失败: {model_id}: {last_err}")
@@ -500,17 +594,30 @@ def download_model(
     revision: Optional[str],
     retries: int,
     delay: float,
+    hf_model_id: Optional[str] = None,
+    cfg: Optional[Dict[str, Any]] = None,
 ) -> Path:
     source = (source or "auto").lower()
+    hf_id = (hf_model_id or model_id).strip()
     if source == "huggingface":
-        return download_model_hf(model_id, dest, revision=revision, retries=retries, delay=delay)
+        return download_model_hf(
+            hf_id, dest, revision=revision, retries=retries, delay=delay, cfg=cfg
+        )
     if source == "modelscope":
-        return download_model_ms(model_id, dest, revision=revision, retries=retries, delay=delay)
+        return download_model_ms(
+            model_id, dest, revision=revision, retries=retries, delay=delay, cfg=cfg
+        )
     try:
-        return download_model_ms(model_id, dest, revision=revision, retries=retries, delay=delay)
+        return download_model_ms(
+            model_id, dest, revision=revision, retries=retries, delay=delay, cfg=cfg
+        )
     except Exception as ms_err:  # noqa: BLE001
-        eprint(f"[auto] ModelScope 不可用，回退 Hugging Face: {ms_err}")
-        return download_model_hf(model_id, dest, revision=revision, retries=retries, delay=delay)
+        eprint(f"[auto] ModelScope 不可用，回退 Hugging Face ({hf_id}): {ms_err}")
+        if dest.exists():
+            shutil.rmtree(dest, ignore_errors=True)
+        return download_model_hf(
+            hf_id, dest, revision=revision, retries=retries, delay=delay, cfg=cfg
+        )
 
 
 def pip_download_offline(req_files: List[Path], dest: Path) -> None:
@@ -534,10 +641,37 @@ def pip_download_offline(req_files: List[Path], dest: Path) -> None:
         )
 
 
+def docker_image_exists(image: str) -> bool:
+    proc = subprocess.run(
+        ["docker", "image", "inspect", image],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return proc.returncode == 0
+
+
 def docker_pull_and_save(image: str, tar_path: Path) -> None:
-    require_online(f"docker pull {image}")
+    """拉取并导出镜像；若 Hub 不可达但本地已有同名镜像，则复用本地并导出。"""
     ensure_dir(tar_path.parent)
-    run_cmd(["docker", "pull", image])
+    pulled = False
+    try:
+        require_online(f"docker pull {image}")
+        run_cmd(["docker", "pull", image])
+        pulled = True
+    except Exception as exc:  # noqa: BLE001
+        if docker_image_exists(image):
+            eprint(f"[docker] pull 失败，复用本地镜像 {image}: {exc}")
+        else:
+            raise RuntimeError(
+                f"docker pull 失败且本地无镜像 {image}: {exc}"
+            ) from exc
+
+    if tar_path.exists() and not pulled and docker_image_exists(image):
+        print(
+            f"本地已有镜像且导出文件存在，仍重新 docker save 以保证与本地镜像一致: {tar_path}"
+        )
+
     run_cmd(["docker", "save", "-o", str(tar_path), image])
     print(f"已导出镜像: {tar_path} ({tar_path.stat().st_size / (1024**3):.2f} GiB)")
 
@@ -548,24 +682,85 @@ def docker_build_and_save(
     dockerfile: Path,
     context: Path,
     tar_path: Path,
+    build_args: Optional[Dict[str, str]] = None,
 ) -> None:
     require_online(f"docker build {tag}")
     ensure_dir(tar_path.parent)
     if not dockerfile.exists():
         raise FileNotFoundError(f"缺少 Dockerfile: {dockerfile}")
-    run_cmd(
-        [
-            "docker",
-            "build",
-            "-t",
-            tag,
-            "-f",
-            str(dockerfile),
-            str(context),
-        ]
-    )
+    cmd = [
+        "docker",
+        "build",
+        "-t",
+        tag,
+        "-f",
+        str(dockerfile),
+    ]
+    for key, value in (build_args or {}).items():
+        cmd.extend(["--build-arg", f"{key}={value}"])
+    cmd.append(str(context))
+    run_cmd(cmd)
     run_cmd(["docker", "save", "-o", str(tar_path), tag])
     print(f"已导出镜像: {tar_path} ({tar_path.stat().st_size / (1024**3):.2f} GiB)")
+
+
+def pick_local_base_image(preferred: str, fallbacks: List[str]) -> str:
+    """优先 preferred（本地已有或可拉取）；仅 preferred 不可用时才用本地 fallback。
+
+    注意：fallback 常带不兼容 ENTRYPOINT（如 vLLM），服务 Dockerfile 须 ``ENTRYPOINT []``。
+    """
+    if docker_image_exists(preferred):
+        return preferred
+    pull_error: Optional[BaseException] = None
+    try:
+        require_online(f"docker pull {preferred}")
+        run_cmd(["docker", "pull", preferred])
+        return preferred
+    except Exception as exc:  # noqa: BLE001
+        pull_error = exc
+    for image in fallbacks:
+        if image and image != preferred and docker_image_exists(image):
+            print(
+                f"[docker] 基础镜像不可拉取，改用本地: {image}"
+                f"（原首选 {preferred}）: {pull_error}"
+            )
+            return image
+    if pull_error is not None:
+        eprint(
+            f"[docker] preferred 不可用且无本地 fallback，仍交由 build 使用 {preferred}: {pull_error}"
+        )
+    return preferred
+
+
+def should_skip_model_download(
+    dest: Path,
+    expected_source: str,
+    *,
+    force: bool = False,
+    algo: str = "sha256",
+) -> Tuple[bool, str]:
+    """决定是否跳过模型下载。
+
+    仅当 ``.airgap_source`` 已存在且与 expected_source 一致、且校验通过时才跳过。
+    旧包缺少标记时绝不补写新来源后跳过（避免把全精度权重误标为量化仓）。
+    """
+    if force:
+        return False, "force-download"
+    if not dest.exists():
+        return False, "missing"
+    source_marker = dest / ".airgap_source"
+    if not source_marker.exists():
+        return False, "missing-source-marker"
+    prev = source_marker.read_text(encoding="utf-8").strip()
+    if prev != expected_source:
+        return False, f"source-changed:{prev}->{expected_source}"
+    try:
+        ok, errors = verify_checksums(dest, algo=algo)
+    except FileNotFoundError:
+        return False, "checksum-missing"
+    if ok > 0 and not errors:
+        return True, f"verified:{ok}"
+    return False, "checksum-failed"
 
 
 def service_image_tag(cfg: Dict[str, Any], key: str) -> str:
@@ -591,9 +786,12 @@ def is_container_engine(engine: str) -> bool:
 
 def vendor_cosyvoice(target_dir: Path) -> Path:
     """将 CosyVoice 源码拉到 target_dir/CosyVoice（用于 TTS 镜像构建）。"""
-    require_online("git clone CosyVoice")
     ensure_dir(target_dir)
     target = target_dir / "CosyVoice"
+    if target.exists() and any(target.iterdir()):
+        print(f"\n=== 复用已有 CosyVoice 源码: {target} ===")
+        return target
+    require_online("git clone CosyVoice")
     if target.exists():
         shutil.rmtree(target)
     url = os.environ.get(
@@ -641,14 +839,27 @@ def prepare_container_images(
         vendor_dir = tts_ctx / "vendor"
         try:
             vendor_cosyvoice(vendor_dir)
-            # 同步一份到包内，便于审计
+            # 同步一份到包内便于审计（跳过 .git，避免 Windows 拒绝访问）
             bundle_vendor = ensure_dir(output_dir / "vendor")
             dst = bundle_vendor / "CosyVoice"
             if dst.exists():
-                shutil.rmtree(dst)
-            shutil.copytree(vendor_dir / "CosyVoice", dst)
+                shutil.rmtree(dst, ignore_errors=True)
+                if dst.exists():
+                    # 残留锁定文件时改名避开
+                    bak = bundle_vendor / f"CosyVoice.bak-{int(time.time())}"
+                    try:
+                        dst.rename(bak)
+                    except OSError:
+                        pass
+            shutil.copytree(
+                vendor_dir / "CosyVoice",
+                dst,
+                ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc"),
+            )
         except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(f"TTS 镜像构建需要 CosyVoice 源码: {exc}") from exc
+            eprint(f"[warn] 同步 CosyVoice 到包内失败（构建仍可用 services/tts/vendor）: {exc}")
+            if not (vendor_dir / "CosyVoice").exists():
+                raise RuntimeError(f"TTS 镜像构建需要 CosyVoice 源码: {exc}") from exc
 
     for key in ("rerank", "asr", "tts"):
         if not any(s.key == key and is_container_engine(s.engine) for s in enabled):
@@ -658,11 +869,26 @@ def prepare_container_images(
         tag = service_image_tag(cfg, key)
         tar_path = output_dir / service_image_tar(cfg, key)
         print(f"\n=== 构建并导出 {key} 镜像 {tag} ===")
+        if key == "rerank":
+            base = pick_local_base_image(
+                "python:3.11-slim-bookworm",
+                [
+                    "wechatopenai/weknora-app:latest",
+                    "finopssys-backend:latest",
+                ],
+            )
+        else:
+            vllm_image = str(docker_cfg.get("vllm_image") or "vllm/vllm-openai:latest")
+            base = pick_local_base_image(
+                "pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime",
+                [vllm_image] if key in {"asr", "tts"} else [],
+            )
         docker_build_and_save(
             tag=tag,
             dockerfile=dockerfile,
             context=svc_dir,
             tar_path=tar_path,
+            build_args={"BASE_IMAGE": base},
         )
 
 
@@ -747,8 +973,13 @@ def render_compose(cfg: Dict[str, Any], data_dir: Path, specs: List[ModelSpec]) 
             if spec.limit_mm_per_prompt:
                 args.extend(["--limit-mm-per-prompt", str(spec.limit_mm_per_prompt)])
             # Embedding 模型需要 pooling runner，否则 /v1/embeddings 不可用
-            if "embedding" in spec.all_roles and "--runner" not in args:
+            if "embedding" in spec.all_roles and "--runner" not in " ".join(args):
                 args.extend(["--runner", "pooling"])
+            # AWQ 社区仓通常需显式 quantization（若 extra 未指定）
+            quant_l = spec.quant.lower()
+            joined = " ".join(args + spec.extra_vllm_args)
+            if ("awq" in quant_l) and ("--quantization" not in joined):
+                args.extend(["--quantization", "awq"])
             args.extend(spec.extra_vllm_args)
             cmd_yaml = "\n".join(f"      - {yaml_quote(a)}" for a in args)
             gpu_lines = _gpu_device_block(spec, default_gpu)
@@ -985,6 +1216,7 @@ WantedBy=multi-user.target
 def cmd_prepare(args: argparse.Namespace) -> int:
     require_online("prepare")
     cfg = load_config(resolve_config_path(args.config))
+    configure_project_hub_env(cfg, force=True)
     if args.output_dir:
         cfg.setdefault("bundle", {})["output_dir"] = args.output_dir
 
@@ -1032,17 +1264,51 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     for spec in enabled:
         dest = models_root / spec.local_dirname
         print(f"\n=== 下载模型 [{spec.role}] {spec.hub_id} (quant={spec.quant}) ===")
-        download_model(
-            spec.hub_id,
+        source_marker = dest / ".airgap_source"
+        expected_source = f"{spec.hub_id}|{spec.quant}|{spec.revision or ''}|{source}".strip()
+        skip_dl, skip_reason = should_skip_model_download(
             dest,
-            source=source,
-            revision=spec.revision,
-            retries=retries,
-            delay=delay,
+            expected_source,
+            force=bool(getattr(args, "force_download", False)),
+            algo=algo,
         )
-        checksum_path = write_checksums(dest, algo=algo)
-        shutil.copy2(checksum_path, dest / ".checksums")
-        print(f"校验清单: {checksum_path}")
+        if skip_dl:
+            print(
+                f"已存在且校验通过（{skip_reason}），跳过下载。"
+                "需要重下请加 --force-download"
+            )
+        elif skip_reason.startswith("source-changed:"):
+            prev = skip_reason.split(":", 1)[1].split("->", 1)[0]
+            print(f"检测到权重来源变更（{prev} → {expected_source}），将重新下载。")
+        elif skip_reason == "missing-source-marker":
+            print(
+                f"缺少来源标记 .airgap_source，无法确认 hub/quant 是否匹配，"
+                f"将按当前配置重新下载: {expected_source}"
+            )
+        if not skip_dl:
+            if dest.exists():
+                # 避免旧全精度与新量化权重混在同一目录
+                shutil.rmtree(dest)
+            ensure_dir(dest)
+            download_model(
+                spec.hub_id,
+                dest,
+                source=source,
+                revision=spec.revision,
+                retries=retries,
+                delay=delay,
+                hf_model_id=spec.hub_id_hf,
+                cfg=cfg,
+            )
+            checksum_path = write_checksums(dest, algo=algo)
+            shutil.copy2(checksum_path, dest / ".checksums")
+            source_marker.write_text(expected_source + "\n", encoding="utf-8")
+            print(f"校验清单: {checksum_path}")
+        else:
+            checksum_path = dest / f".checksums.{algo}"
+            if checksum_path.exists():
+                shutil.copy2(checksum_path, dest / ".checksums")
+            print(f"校验清单: {checksum_path}")
 
     if args.skip_docker:
         print("跳过所有 Docker 镜像拉取/构建 (--skip-docker)")
@@ -1517,6 +1783,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="仍拉取 vLLM，但跳过 rerank/asr/tts 镜像构建",
     )
     p_prep.add_argument("--skip-pip", action="store_true", help="跳过工具 pip download")
+    p_prep.add_argument("--force-download", action="store_true", help="即使校验通过也重新下载模型")
     p_prep.add_argument("--no-archive", action="store_true", help="不生成 tar.gz")
     p_prep.set_defaults(func=cmd_prepare)
 

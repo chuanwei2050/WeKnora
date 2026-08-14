@@ -3,7 +3,12 @@
 # 用法: cp config.yaml.example config.yaml 后按需修改
 # 密钥仅通过环境变量注入（HF_TOKEN / MODELSCOPE_TOKEN）
 #
-# 一键流: prepare → 传包 → deploy（docker compose up -d）
+# 量化策略: 对比「量化 vs 非量化」——能明显省盘/显存/加速且当前栈可加载时，优先量化。
+#   Embedding  AWQ-INT4  ≈2.7GB（官方 bf16 ≈7.5GB）→ 优先 AWQ
+#   Rerank     ONNX INT8 ≈0.5GB（官方 fp ≈2GB）    → 优先 ONNX
+#   ASR        ONNX INT8 ≈0.23GB（官方 ≈0.9GB）    → 优先 ONNX
+#   TTS        无可用 CosyVoice2 INT8 制品可被本容器加载 → 保持 fp16
+#   Verifier   AWQ；Chat/VLM 预置 FP8（默认 enabled:false 不下载，启用即下 FP8）
 # =============================================================================
 
 bundle:
@@ -13,6 +18,8 @@ bundle:
   download_source: auto
   download_retries: 3
   download_retry_delay_sec: 5
+  # Hub 缓存落项目盘（默认 model-scripts/.cache）；勿指向 C:\Users\...
+  # hub_cache_dir: ./.cache
 
 deploy:
   data_dir: /mnt/models
@@ -20,16 +27,15 @@ deploy:
   scheme: http
   compose_project: weknora-models
   auto_start: true
-  # 全容器模式下无需 systemd
   install_systemd: false
 
 docker:
   vllm_image: vllm/vllm-openai:latest
   vllm_image_tar: images/vllm-openai.tar
   vllm_min_version_hint: "0.19.0"
+  # 默认按单卡可启动；双卡可将 verifier.device_ids 改为 ["1"] 并提高双方 gpu_memory_utilization
   gpu_count: 1
   shm_size: 16gb
-  # 业务服务镜像名（prepare 构建并 docker save）
   service_images:
     rerank: weknora-rerank:airgap
     asr: weknora-asr:airgap
@@ -45,13 +51,15 @@ models:
     role: embedding
     model_id: Qwen/Qwen3-Embedding-4B
     revision: null
-    quant: bf16
-    download_id: null
+    quant: awq-int4
+    download_id: drawais/Qwen3-Embedding-4B-AWQ-INT4
+    download_id_hf: drawais/Qwen3-Embedding-4B-AWQ-INT4
     engine: vllm
     port: 8001
     served_model_name: qwen3-embedding-4b
     max_model_len: 8192
-    gpu_memory_utilization: 0.45
+    # 单卡与 verifier 共享 GPU0；双卡可提高到 0.45+
+    gpu_memory_utilization: 0.28
     dtype: auto
     device_ids: ["0"]
     extra_vllm_args:
@@ -64,8 +72,9 @@ models:
     role: rerank
     model_id: BAAI/bge-reranker-v2-m3
     revision: null
-    quant: fp16
-    download_id: null
+    quant: onnx-int8
+    download_id: jiangnanboy/bge-reranker-v2-m3-ONNX-int8
+    download_id_hf: jiangnanboy/bge-reranker-v2-m3-ONNX-int8
     engine: container
     needs_gpu: false
     port: 8002
@@ -73,7 +82,33 @@ models:
     allowed_uses: [rerank, model]
     forbidden_uses: [object-storage, data-connector]
 
-  # 主 Chat；VLM 共用（roles: [vlm]）。默认不下载。
+  verifier:
+    enabled: true
+    role: verifier
+    roles: [evaluation_judge]
+    model_id: Qwen/Qwen3.5-9B
+    revision: null
+    quant: awq
+    download_id: tclf90/Qwen3.5-9B-AWQ
+    download_id_hf: QuantTrio/Qwen3.5-9B-AWQ
+    engine: vllm
+    port: 8003
+    served_model_name: qwen3.5-9b
+    max_model_len: 32768
+    # 单卡默认与 embedding 同卡；双卡改为 ["1"] 并可提高到 0.55+
+    gpu_memory_utilization: 0.45
+    dtype: auto
+    device_ids: ["0"]
+    extra_vllm_args:
+      - "--trust-remote-code"
+      - "--reasoning-parser"
+      - "qwen3"
+    allowed_uses: [verifier, evaluation_judge, chat, model]
+    forbidden_uses: [object-storage, data-connector]
+
+  # 主 Chat；VLM 共用（roles: [vlm]）。默认 enabled:false 不下载，
+  # 但量化已固定为 FP8（download_id=Qwen/Qwen3.6-27B-FP8）；以后启用无需再改 quant。
+  # 对齐 .env：OFFLINE_LLM_MODEL_NAME / OFFLINE_VLM（建议 FP8，优于全精度）。
   chat:
     enabled: false
     role: chat
@@ -82,6 +117,7 @@ models:
     revision: null
     quant: fp8
     download_id: Qwen/Qwen3.6-27B-FP8
+    download_id_hf: Qwen/Qwen3.6-27B-FP8
     engine: vllm
     port: 8000
     served_model_name: qwen3.6-27b
@@ -100,10 +136,11 @@ models:
     role: asr
     model_id: FunAudioLLM/SenseVoiceSmall
     revision: null
-    quant: fp16
-    download_id: null
+    quant: onnx-int8
+    # ModelScope 官方 ONNX INT8 导出；HF 镜像见 download_id_hf
+    download_id: iic/SenseVoiceSmall-onnx
+    download_id_hf: DennisHuang648/SenseVoiceSmall-onnx
     engine: container
-    # 单卡默认与 embedding 抢 GPU 易 OOM；有多余 GPU 再改 true 并设 device_ids
     needs_gpu: false
     port: 8004
     served_model_name: sensevoice-small
@@ -115,8 +152,10 @@ models:
     role: tts
     model_id: FunAudioLLM/CosyVoice2-0.5B
     revision: null
+    # 暂无 CosyVoice2 官方/社区 INT8 可被本容器 CosyVoice 加载器直接使用 → 保持 fp16
     quant: fp16
-    download_id: null
+    download_id: iic/CosyVoice2-0.5B
+    download_id_hf: FunAudioLLM/CosyVoice2-0.5B
     engine: container
     needs_gpu: false
     port: 8005

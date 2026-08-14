@@ -3,6 +3,7 @@ OpenAI 兼容 Rerank 服务（BAAI/bge-reranker-v2-m3）
 
 环境变量:
   MODEL_DIR, SERVED_MODEL_NAME, PORT, QUANT
+QUANT=onnx / onnx-int8 时优先加载 INT8 ONNX；否则走 Transformers。
 """
 
 from __future__ import annotations
@@ -34,6 +35,35 @@ class RerankRequest(BaseModel):
     return_documents: bool = True
 
 
+def _prefer_onnx(paths: List[Path]) -> Path:
+    """量化有优势时优先选 int8/quant 文件，避开明显的 fp32 命名。"""
+
+    def score(p: Path) -> tuple:
+        name = p.name.lower()
+        s = 0
+        if any(k in name for k in ("int8", "quant", "q8")):
+            s += 20
+        if "fp32" in name or name.endswith(".onnx_data"):
+            s -= 10
+        # 同优先级下偏小文件（通常即量化产物）
+        try:
+            size = p.stat().st_size
+        except OSError:
+            size = 0
+        return (s, -size)
+
+    return sorted(paths, key=score, reverse=True)[0]
+
+
+def _tokenizer_dir() -> Path:
+    # 部分 ONNX 仓把 tokenizer 放在根目录或与 model.onnx 同级
+    for cand in (MODEL_DIR, *MODEL_DIR.glob("**/tokenizer.json")):
+        root = cand if cand.is_dir() else cand.parent
+        if (root / "tokenizer.json").exists() or (root / "tokenizer_config.json").exists():
+            return root
+    return MODEL_DIR
+
+
 def _load() -> None:
     global _model, _tokenizer, _onnx_session, _load_error
     if _model is not None or _onnx_session is not None:
@@ -41,24 +71,27 @@ def _load() -> None:
     if not MODEL_DIR.exists():
         raise RuntimeError(f"MODEL_DIR 不存在: {MODEL_DIR}")
 
-    onnx_candidates = list(MODEL_DIR.rglob("*.onnx"))
-    if QUANT.lower().startswith("onnx"):
-        if not onnx_candidates:
-            raise RuntimeError(
-                f"QUANT={QUANT} 但 MODEL_DIR 中未找到 .onnx 文件: {MODEL_DIR}。"
-                "请放入 ONNX 权重，或将 config 中 quant 改为 fp16/torch。"
-            )
+    onnx_candidates = [p for p in MODEL_DIR.rglob("*.onnx") if p.is_file()]
+    want_onnx = QUANT.lower().startswith("onnx")
+    if want_onnx and onnx_candidates:
         import onnxruntime as ort
         from transformers import AutoTokenizer
 
-        onnx_path = onnx_candidates[0]
-        _onnx_session = ort.InferenceSession(
-            str(onnx_path),
-            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
-        )
-        _tokenizer = AutoTokenizer.from_pretrained(str(MODEL_DIR), trust_remote_code=True)
+        onnx_path = _prefer_onnx(onnx_candidates)
+        providers = ["CPUExecutionProvider"]
+        if "CUDAExecutionProvider" in ort.get_available_providers():
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        _onnx_session = ort.InferenceSession(str(onnx_path), providers=providers)
+        _tokenizer = AutoTokenizer.from_pretrained(str(_tokenizer_dir()), trust_remote_code=True)
         _load_error = None
+        print(f"[rerank] ONNX loaded: {onnx_path.name} quant={QUANT}")
         return
+
+    if QUANT.lower().startswith("onnx") and not onnx_candidates:
+        raise RuntimeError(
+            f"QUANT={QUANT} 但 MODEL_DIR 中未找到 .onnx 文件: {MODEL_DIR}。"
+            "请放入 ONNX 权重，或将 config 中 quant 改为 fp16。"
+        )
 
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
     import torch
@@ -71,6 +104,7 @@ def _load() -> None:
     if torch.cuda.is_available():
         _model = _model.cuda()
     _load_error = None
+    print(f"[rerank] Transformers loaded quant={QUANT}")
 
 
 def _score_pairs(query: str, documents: List[str]) -> List[float]:
@@ -87,12 +121,15 @@ def _score_pairs(query: str, documents: List[str]) -> List[float]:
             max_length=512,
             return_tensors="np",
         )
-        inputs = {k: v for k, v in enc.items() if k in [i.name for i in _onnx_session.get_inputs()]}
+        input_names = {i.name for i in _onnx_session.get_inputs()}
+        inputs = {k: v for k, v in enc.items() if k in input_names}
         if not inputs:
-            inputs = {
-                _onnx_session.get_inputs()[0].name: enc["input_ids"],
-                _onnx_session.get_inputs()[1].name: enc["attention_mask"],
-            }
+            ordered = list(_onnx_session.get_inputs())
+            inputs = {ordered[0].name: enc["input_ids"]}
+            if len(ordered) > 1 and "attention_mask" in enc:
+                inputs[ordered[1].name] = enc["attention_mask"]
+            if len(ordered) > 2 and "token_type_ids" in enc:
+                inputs[ordered[2].name] = enc["token_type_ids"]
         outs = _onnx_session.run(None, inputs)
         logits = np.array(outs[0]).reshape(-1)
         return logits.tolist()
@@ -124,7 +161,12 @@ def startup() -> None:
 @app.get("/healthz")
 def healthz() -> Dict[str, Any]:
     ready = (_model is not None or _onnx_session is not None) and _load_error is None
-    payload: Dict[str, Any] = {"status": "ok" if ready else "degraded", "ready": ready}
+    payload: Dict[str, Any] = {
+        "status": "ok" if ready else "degraded",
+        "ready": ready,
+        "quant": QUANT,
+        "backend": "onnx" if _onnx_session is not None else ("torch" if _model is not None else "none"),
+    }
     if _load_error:
         payload["error"] = _load_error
     return payload

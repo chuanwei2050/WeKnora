@@ -1,5 +1,5 @@
 # 静态审阅模板。运行时以 `deploy.py gen-config|deploy` 生成文件为准。
-# 全容器：Embedding(vLLM) + Rerank/ASR/TTS(自建镜像) + 可选 Chat(vLLM，含 VLM)
+# 全容器：Embedding/Verifier(vLLM) + Rerank/ASR/TTS(自建镜像) + 可选 Chat(vLLM，含 VLM)
 
 services:
   embedding:
@@ -18,6 +18,13 @@ services:
     environment:
       - MODEL_DIR=/models
       - PORT=8000
+
+  verifier:
+    image: vllm/vllm-openai:latest
+    pull_policy: never
+    ports: ["8003:8000"]
+    volumes:
+      - "${MODEL_DATA_DIR:-/mnt/models}/models/verifier:/models:ro"
 
   asr:
     image: weknora-asr:airgap

@@ -8,5 +8,6 @@ python-multipart>=0.0.9
 numpy>=1.24
 soundfile>=0.12.1
 funasr>=1.1.0
+funasr-onnx>=0.4.0
 onnxruntime-gpu>=1.17.0; platform_system!="Darwin"
 onnxruntime>=1.17.0; platform_system=="Darwin"
