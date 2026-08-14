@@ -322,8 +322,13 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	}
 	model.Parameters = req.Parameters
 
-	model.Source = req.Source
-	model.Type = req.Type
+	// Keep existing source/type when the client omits them (empty string would wipe DB values).
+	if req.Source != "" {
+		model.Source = req.Source
+	}
+	if req.Type != "" {
+		model.Type = req.Type
+	}
 
 	logger.Infof(ctx, "Updating model, ID: %s, Name: %s", id, model.Name)
 	if err := h.service.UpdateModel(ctx, model); err != nil {
