@@ -48,6 +48,9 @@ func (s *knowledgeBaseService) ResolveEmbeddingModelKeys(ctx context.Context, kb
 	uniqueRefs := make(map[modelRef]struct{})
 	kbRefs := make(map[string]modelRef, len(kbs))
 	for _, kb := range kbs {
+		if !shouldPrecomputeQueryEmbedding(kb) {
+			continue
+		}
 		ref := modelRef{ModelID: kb.EmbeddingModelID, TenantID: kb.TenantID}
 		uniqueRefs[ref] = struct{}{}
 		kbRefs[kb.ID] = ref
@@ -68,9 +71,20 @@ func (s *knowledgeBaseService) ResolveEmbeddingModelKeys(ctx context.Context, kb
 
 	result := make(map[string]string, len(kbs))
 	for _, kb := range kbs {
+		if !shouldPrecomputeQueryEmbedding(kb) {
+			continue
+		}
 		result[kb.ID] = resolvedKeys[kbRefs[kb.ID]]
 	}
 	return result
+}
+
+// shouldPrecomputeQueryEmbedding reports whether a KB has a vector index that
+// can consume a query embedding. Keyword-only KBs may retain an embedding model
+// ID from an earlier configuration, but querying that model is both unnecessary
+// and incorrect because HybridSearch will only run keyword retrieval for them.
+func shouldPrecomputeQueryEmbedding(kb *types.KnowledgeBase) bool {
+	return kb != nil && kb.IsVectorEnabled() && kb.EmbeddingModelID != ""
 }
 
 // HybridSearch performs hybrid search, including vector retrieval and keyword retrieval.
