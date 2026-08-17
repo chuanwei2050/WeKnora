@@ -40,47 +40,93 @@ set_compose_file_path() {
         return 0
     fi
 
-    if command -v wslpath &> /dev/null; then
-        DOCKER_COMPOSE_FILE="$(wslpath -w "$PROJECT_ROOT/docker-compose.dev.yml")"
+    local compose_src="$PROJECT_ROOT/docker-compose.dev.yml"
+    local converted=""
+
+    # Git Bash / MSYS 优先 cygpath，避免误走 wslpath。
+    if [[ -n "${MSYSTEM:-}" || "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]] && command -v cygpath &> /dev/null; then
+        converted="$(cygpath -w "$compose_src" 2>/dev/null || true)"
+    elif command -v wslpath &> /dev/null; then
+        converted="$(wslpath -w "$compose_src" 2>/dev/null || true)"
     elif command -v cygpath &> /dev/null; then
-        DOCKER_COMPOSE_FILE="$(cygpath -w "$PROJECT_ROOT/docker-compose.dev.yml")"
+        converted="$(cygpath -w "$compose_src" 2>/dev/null || true)"
+    fi
+
+    if [[ -n "$converted" ]]; then
+        DOCKER_COMPOSE_FILE="$converted"
     fi
 }
 
-detect_compose_cmd() {
-    if docker compose version &> /dev/null; then
-        DOCKER_COMPOSE_BIN="docker"
-        DOCKER_COMPOSE_SUBCMD="compose"
-        DOCKER_CLI_BIN="docker"
-        set_compose_file_path
+# 尝试一组 compose/cli；version 必须可用。daemon 可用则优先采用。
+# 返回：0=可用且 daemon 通；1=compose 可用但 daemon 不通；2=完全不可用
+try_compose_candidate() {
+    local bin="$1"
+    local subcmd="$2"
+    local cli="$3"
+
+    if [ -n "$subcmd" ]; then
+        "$bin" $subcmd version &> /dev/null || return 2
+    else
+        "$bin" version &> /dev/null || return 2
+    fi
+
+    DOCKER_COMPOSE_BIN="$bin"
+    DOCKER_COMPOSE_SUBCMD="$subcmd"
+    DOCKER_CLI_BIN="$cli"
+    DOCKER_COMPOSE_FILE="docker-compose.dev.yml"
+    set_compose_file_path
+
+    if [ -z "$cli" ]; then
         return 0
     fi
-    if command -v docker-compose &> /dev/null; then
-        if docker-compose version &> /dev/null; then
-            DOCKER_COMPOSE_BIN="docker-compose"
-            DOCKER_COMPOSE_SUBCMD=""
-            DOCKER_CLI_BIN="docker"
-            set_compose_file_path
-            return 0
-        fi
+    if "$cli" info &> /dev/null; then
+        return 0
     fi
-    if command -v docker.exe &> /dev/null; then
-        if docker.exe compose version &> /dev/null; then
-            DOCKER_COMPOSE_BIN="docker.exe"
-            DOCKER_COMPOSE_SUBCMD="compose"
-            DOCKER_CLI_BIN="docker.exe"
-            set_compose_file_path
+    return 1
+}
+
+detect_compose_cmd() {
+    local fallback_bin="" fallback_subcmd="" fallback_cli=""
+    local status
+
+    # 候选顺序：原生 docker → docker-compose → Windows .exe（Git Bash / 未集成 WSL）
+    local candidates=(
+        "docker|compose|docker"
+        "docker-compose||"
+        "docker.exe|compose|docker.exe"
+        "docker-compose.exe||docker.exe"
+    )
+
+    local item bin subcmd cli
+    for item in "${candidates[@]}"; do
+        IFS='|' read -r bin subcmd cli <<< "$item"
+        if ! command -v "$bin" &> /dev/null; then
+            continue
+        fi
+        # docker-compose.exe 场景：info 用 docker.exe，但 docker.exe 可能不存在
+        if [ -n "$cli" ] && ! command -v "$cli" &> /dev/null; then
+            cli=""
+        fi
+
+        try_compose_candidate "$bin" "$subcmd" "$cli"
+        status=$?
+        if [ $status -eq 0 ]; then
             return 0
         fi
-    fi
-    if command -v docker-compose.exe &> /dev/null; then
-        if docker-compose.exe version &> /dev/null; then
-            DOCKER_COMPOSE_BIN="docker-compose.exe"
-            DOCKER_COMPOSE_SUBCMD=""
-            DOCKER_CLI_BIN="docker.exe"
-            set_compose_file_path
-            return 0
+        if [ $status -eq 1 ] && [ -z "$fallback_bin" ]; then
+            fallback_bin="$DOCKER_COMPOSE_BIN"
+            fallback_subcmd="$DOCKER_COMPOSE_SUBCMD"
+            fallback_cli="$DOCKER_CLI_BIN"
         fi
+    done
+
+    if [ -n "$fallback_bin" ]; then
+        DOCKER_COMPOSE_BIN="$fallback_bin"
+        DOCKER_COMPOSE_SUBCMD="$fallback_subcmd"
+        DOCKER_CLI_BIN="$fallback_cli"
+        DOCKER_COMPOSE_FILE="docker-compose.dev.yml"
+        set_compose_file_path
+        return 0
     fi
     return 1
 }
@@ -122,15 +168,15 @@ show_help() {
 check_docker() {
     if ! detect_compose_cmd; then
         log_error "未检测到可用的 Docker Compose"
-        log_error "Windows 请使用 Git Bash，或在 Docker Desktop 中开启当前 WSL 发行版的 WSL Integration"
+        log_error "Windows 请使用 Git Bash / .\\scripts\\quick-dev.ps1，或在 Docker Desktop 中开启当前 WSL 发行版的 WSL Integration"
         return 1
     fi
-    
-    if [ "$DOCKER_CLI_BIN" != "docker-compose" ] && ! "$DOCKER_CLI_BIN" info &> /dev/null; then
+
+    if [ -n "$DOCKER_CLI_BIN" ] && ! "$DOCKER_CLI_BIN" info &> /dev/null; then
         log_error "Docker服务未运行"
         return 1
     fi
-    
+
     return 0
 }
 

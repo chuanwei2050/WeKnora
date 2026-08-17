@@ -4,7 +4,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$projectRoot = Split-Path -Parent $PSScriptRoot
+$projectRoot = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 
 $gitBashCandidates = @()
 $gitCommand = Get-Command git.exe -ErrorAction SilentlyContinue
@@ -26,8 +26,11 @@ if (-not $gitBash) {
     throw '未找到 Git Bash。请安装 Git for Windows，或直接在 Git Bash 中运行 ./scripts/quick-dev.sh。'
 }
 
-$drive = $projectRoot.Substring(0, 1).ToLowerInvariant()
-$bashRoot = "/$drive" + $projectRoot.Substring(2).Replace('\', '/')
+# Git Bash 可直接吃盘符路径（F:/...）；UNC 不支持手写转换。
+if ($projectRoot -notmatch '^[A-Za-z]:[\\/]') {
+    throw "当前仓库路径不受支持（需本地盘符路径）: $projectRoot"
+}
+$bashRoot = ($projectRoot -replace '\\', '/')
 $bashRoot = $bashRoot.Replace("'", "'\''")
 
 $command = "cd '$bashRoot' && exec ./scripts/quick-dev.sh $Action"

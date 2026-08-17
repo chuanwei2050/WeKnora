@@ -1581,8 +1581,14 @@ const saving = ref(false);
 const allModels = ref<ModelConfig[]>([]);
 const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq'; count?: number; shared?: boolean; orgName?: string; ragEnabled?: boolean; wikiEnabled?: boolean; capabilities?: KBCapabilities }[]>([]);
 
-// Prefer tenant default, then Qwen3.6-27B (aligned with ONLINE_*_MODEL_NAME), else first match.
-const DEFAULT_CHAT_VLM_NAMES = ['Qwen/Qwen3.6-27B', 'Qwen3.6-27B']
+// Prefer tenant default, then known chat/VLM names (offline 3.8 first, online 3.6 fallback), else first match.
+const DEFAULT_CHAT_VLM_NAMES = [
+  'Qwen3.8-27B-FP8',
+  'Qwen3.8-27B',
+  'Qwen/Qwen3.8-27B',
+  'Qwen/Qwen3.6-27B',
+  'Qwen3.6-27B',
+]
 const pickDefaultModelId = (
   type: ModelConfig['type'],
   preferredNames: string[] = [],
@@ -2045,7 +2051,7 @@ const defaultFormData = {
     // 编辑既有 agent 时会被 agent 自己保存的 agent_type 覆盖。
     agent_type: 'rag-qa' as AgentType,
     system_prompt_id: '' as string,
-    // 图片上传/多模态设置（与语音一样默认开启；模型 ID 在新建时按租户默认/Qwen3.6-27B 回填）
+    // 图片上传/多模态设置（与语音一样默认开启；模型 ID 在新建时按租户默认/已知 Chat·VLM 名回填）
                     image_upload_enabled: true,
                     vlm_model_id: '',
                     image_storage_provider: '',

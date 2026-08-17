@@ -100,7 +100,7 @@ docker compose -p weknora-models -f /mnt/models/docker-compose.airgap.override.y
 
 | 角色 | 端口 | 量化选择 | 说明 |
 |------|------|----------|------|
-| Chat + VLM | 8000 | **FP8** | 默认不下载；配置已写好 `Qwen/Qwen3.6-27B-FP8`，启用即按 FP8 |
+| Chat + VLM | 8000 | **FP8** | 默认不下载；配置已写好 `Qwen/Qwen3.8-27B-FP8`，启用即按 FP8 |
 | Embedding | 8001 | **AWQ-INT4** | 约 2.7GB，优于官方 bf16≈7.5GB |
 | Rerank | 8002 | **ONNX INT8** | 约 0.5GB，优于官方≈2GB |
 | Verifier + Judge | 8003 | **AWQ** | `Qwen3.5-9B`（默认与 Embedding 同 GPU0；双卡可改 `["1"]`） |
@@ -144,7 +144,7 @@ model-scripts/
 ## 配置要点（config.yaml）
 
 - 先 `cp config.yaml.example config.yaml` 再改
-- **量化优先（有优势才切）**：Embedding/Rerank/ASR/Verifier 已用量化仓；Chat 27B 虽默认不下载，配置已固定 **FP8**（`Qwen/Qwen3.6-27B-FP8`）；TTS 仍为 fp16（无可用 INT8）
+- **量化优先（有优势才切）**：Embedding/Rerank/ASR/Verifier 已用量化仓；Chat 27B 虽默认不下载，配置已固定 **FP8**（`Qwen/Qwen3.8-27B-FP8`）；TTS 仍为 fp16（无可用 INT8）
 - 切换 `download_id`/`quant`/`revision` 后，`prepare` 会检测 `.airgap_source` 变更并自动重下（也可 `--force-download`）
 - `models.verifier` 对应平台 `OFFLINE_VERIFIER_MODEL_2` / `OFFLINE_EVALUATION_JUDGE`（同端点，`roles: [evaluation_judge]`）
 - `models.chat.enabled: true` 才下载/部署主模型（按已配 FP8）；VLM 通过 `roles: [vlm]` 共用，**不要**单独配 VLM 服务

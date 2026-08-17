@@ -50,7 +50,7 @@
       "allowed_uses": ["chat", "vlm", "model"],
       "allowed_model_roles": ["chat", "vlm"],
       "endpoint_url": "http://192.168.10.232:8000/v1",
-      "notes": "Chat 与 VLM 共用；默认未部署，但量化已配置为 FP8（Qwen/Qwen3.6-27B-FP8）"
+      "notes": "Chat 与 VLM 共用；默认未部署，但量化已配置为 FP8（Qwen/Qwen3.8-27B-FP8）"
     },
     {
       "id": "model-asr",
@@ -116,23 +116,23 @@
     },
     {
       "role": "chat",
-      "model_name": "qwen3.6-27b",
+      "model_name": "Qwen3.8-27B-FP8",
       "endpoint_url": "http://192.168.10.232:8000/v1",
       "approved_endpoint_id": "model-chat",
       "engine": "vllm",
       "quant": "fp8",
-      "download_id": "Qwen/Qwen3.6-27B-FP8",
+      "download_id": "Qwen/Qwen3.8-27B-FP8",
       "shared_service": "chat",
       "notes": "主模型默认未启用；量化已预置 FP8"
     },
     {
       "role": "vlm",
-      "model_name": "qwen3.6-27b",
+      "model_name": "Qwen3.8-27B-FP8",
       "endpoint_url": "http://192.168.10.232:8000/v1",
       "approved_endpoint_id": "model-chat",
       "engine": "vllm",
       "quant": "fp8",
-      "download_id": "Qwen/Qwen3.6-27B-FP8",
+      "download_id": "Qwen/Qwen3.8-27B-FP8",
       "shared_service": "chat",
       "notes": "与 chat 共用同一端点，无独立 VLM 服务"
     },
