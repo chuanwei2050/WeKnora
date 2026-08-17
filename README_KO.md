@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-| <a href="./README.md"><b>English</b></a> | <a href="./README_CN.md"><b>简体中文</b></a> | <a href="./README_JA.md"><b>日本語</b></a> | <b>한국어</b> |
+| <a href="./README_EN.md"><b>English</b></a> | <a href="./README.md"><b>简体中文</b></a> | <a href="./README_JA.md"><b>日本語</b></a> | <b>한국어</b> |
 </p>
 
 <p align="center">

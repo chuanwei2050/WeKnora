@@ -90,6 +90,8 @@ model-scripts/offline-bundle/
 model-scripts/offline-model-bundle/
 model-scripts/offline_packages/
 model-scripts/services/*/vendor/
+# 现场一次性排障脚本（含主机路径），不入库
+model-scripts/site-232/
 
 model-scripts/images/
 model-scripts/generated/

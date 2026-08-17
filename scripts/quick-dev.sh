@@ -29,6 +29,67 @@ log_warning() {
     printf "%b\n" "${YELLOW}[WARNING]${NC} $1"
 }
 
+# 停止上一次由本脚本启动的本地进程，避免端口冲突。
+stop_process_tree() {
+    local pid="$1"
+    local child_pid
+    local child_pids
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+        return 0
+    fi
+
+    child_pids="$(ps -eo pid=,ppid= 2>/dev/null | awk -v parent="$pid" '$2 == parent {print $1}')"
+    for child_pid in $child_pids; do
+        stop_process_tree "$child_pid"
+    done
+
+    kill "$pid" 2>/dev/null || true
+    for _ in 1 2 3 4 5; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+    done
+    kill -9 "$pid" 2>/dev/null || true
+}
+
+stop_previous_process() {
+    local name="$1"
+    local pid_file="$2"
+    local marker="$3"
+    local pid
+    local command
+
+    if [ ! -f "$pid_file" ]; then
+        return 0
+    fi
+
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+        log_warning "$name PID 文件无效，已清理: $pid_file"
+        rm -f "$pid_file"
+        return 0
+    fi
+
+    command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    if [ -z "$command" ]; then
+        log_info "$name 上次进程已退出，清理旧 PID 文件"
+        rm -f "$pid_file"
+        return 0
+    fi
+
+    if [[ "$command" != *"$marker"* ]]; then
+        log_warning "$name PID $pid 不是本脚本启动的进程，跳过停止"
+        rm -f "$pid_file"
+        return 0
+    fi
+
+    log_info "停止上一次的 $name 进程 (PID: $pid)..."
+    stop_process_tree "$pid"
+    rm -f "$pid_file"
+}
+
 echo ""
 printf "%b\n" "${GREEN}========================================${NC}"
 printf "%b\n" "${GREEN}  WeKnora 快速开发环境启动${NC}"
@@ -38,9 +99,33 @@ echo ""
 # 检查是否在项目根目录
 cd "$PROJECT_ROOT"
 
+# 创建后台服务的日志和 PID 目录
+mkdir -p "$PROJECT_ROOT/logs" "$PROJECT_ROOT/tmp"
+
+ACTION="${1:-start}"
+case "$ACTION" in
+    start)
+        ;;
+    stop)
+        stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "scripts/dev.sh app"
+        stop_previous_process "前端" "$PROJECT_ROOT/tmp/frontend.pid" "scripts/dev.sh frontend"
+        bash "$PROJECT_ROOT/scripts/dev.sh" stop
+        exit $?
+        ;;
+    *)
+        log_error "未知命令: $ACTION"
+        echo "用法: bash ./scripts/quick-dev.sh [start|stop]"
+        exit 1
+        ;;
+esac
+
+# 仅停止本脚本上次记录的后端和前端，不影响其他进程或 Docker 依赖容器。
+stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "scripts/dev.sh app"
+stop_previous_process "前端" "$PROJECT_ROOT/tmp/frontend.pid" "scripts/dev.sh frontend"
+
 # 1. 启动基础设施
 log_info "步骤 1/3: 启动基础设施服务..."
-./scripts/dev.sh start
+bash "$PROJECT_ROOT/scripts/dev.sh" start
 if [ $? -ne 0 ]; then
     log_error "基础设施启动失败"
     exit 1
@@ -50,43 +135,23 @@ fi
 log_info "等待服务启动完成..."
 sleep 5
 
-# 2. 询问是否启动后端
+# 2. 自动启动后端
 echo ""
-log_info "步骤 2/3: 启动后端应用"
-printf "%b" "${YELLOW}是否在当前终端启动后端? (y/N): ${NC}"
-read -r start_backend
+log_info "步骤 2/3: 启动后端应用..."
+nohup bash -c 'cd "$1" && exec bash "$1/scripts/dev.sh" app' _ "$PROJECT_ROOT" > "$PROJECT_ROOT/logs/backend.log" 2>&1 &
+BACKEND_PID=$!
+echo $BACKEND_PID > "$PROJECT_ROOT/tmp/backend.pid"
+log_success "后端已在后台启动 (PID: $BACKEND_PID)"
+log_info "查看后端日志: tail -f $PROJECT_ROOT/logs/backend.log"
 
-if [ "$start_backend" = "y" ] || [ "$start_backend" = "Y" ]; then
-    log_info "启动后端..."
-    # 在后台启动后端
-    nohup bash -c 'cd "'$PROJECT_ROOT'" && ./scripts/dev.sh app' > "$PROJECT_ROOT/logs/backend.log" 2>&1 &
-    BACKEND_PID=$!
-    echo $BACKEND_PID > "$PROJECT_ROOT/tmp/backend.pid"
-    log_success "后端已在后台启动 (PID: $BACKEND_PID)"
-    log_info "查看后端日志: tail -f $PROJECT_ROOT/logs/backend.log"
-else
-    log_warning "跳过后端启动"
-    log_info "稍后在新终端运行: make dev-app 或 ./scripts/dev.sh app"
-fi
-
-# 3. 询问是否启动前端
+# 3. 自动启动前端
 echo ""
-log_info "步骤 3/3: 启动前端应用"
-printf "%b" "${YELLOW}是否在当前终端启动前端? (y/N): ${NC}"
-read -r start_frontend
-
-if [ "$start_frontend" = "y" ] || [ "$start_frontend" = "Y" ]; then
-    log_info "启动前端..."
-    # 在后台启动前端
-    nohup bash -c 'cd "'$PROJECT_ROOT'/frontend" && npm run dev' > "$PROJECT_ROOT/logs/frontend.log" 2>&1 &
-    FRONTEND_PID=$!
-    echo $FRONTEND_PID > "$PROJECT_ROOT/tmp/frontend.pid"
-    log_success "前端已在后台启动 (PID: $FRONTEND_PID)"
-    log_info "查看前端日志: tail -f $PROJECT_ROOT/logs/frontend.log"
-else
-    log_warning "跳过前端启动"
-    log_info "稍后在新终端运行: make dev-frontend 或 ./scripts/dev.sh frontend"
-fi
+log_info "步骤 3/3: 启动前端应用..."
+nohup bash -c 'cd "$1" && exec bash "$1/scripts/dev.sh" frontend' _ "$PROJECT_ROOT" > "$PROJECT_ROOT/logs/frontend.log" 2>&1 &
+FRONTEND_PID=$!
+echo $FRONTEND_PID > "$PROJECT_ROOT/tmp/frontend.pid"
+log_success "前端已在后台启动 (PID: $FRONTEND_PID)"
+log_info "查看前端日志: tail -f $PROJECT_ROOT/logs/frontend.log"
 
 # 显示总结
 echo ""
@@ -103,22 +168,14 @@ echo "  - Jaeger UI: http://localhost:16686"
 echo ""
 
 log_info "管理命令:"
-echo "  - 查看服务状态: make dev-status"
-echo "  - 查看日志: make dev-logs"
-echo "  - 停止所有服务: make dev-stop"
+echo "  - 查看服务状态: bash ./scripts/dev.sh status"
+echo "  - 查看依赖日志: bash ./scripts/dev.sh logs"
+echo "  - 停止所有服务: bash ./scripts/quick-dev.sh stop"
 echo ""
 
-if [ -f "$PROJECT_ROOT/tmp/backend.pid" ] || [ -f "$PROJECT_ROOT/tmp/frontend.pid" ]; then
-    log_warning "停止后台进程:"
-    if [ -f "$PROJECT_ROOT/tmp/backend.pid" ]; then
-        echo "  - 停止后端: kill \$(cat $PROJECT_ROOT/tmp/backend.pid)"
-    fi
-    if [ -f "$PROJECT_ROOT/tmp/frontend.pid" ]; then
-        echo "  - 停止前端: kill \$(cat $PROJECT_ROOT/tmp/frontend.pid)"
-    fi
-fi
+log_warning "停止后台进程:"
+echo "  - 推荐执行: bash ./scripts/quick-dev.sh stop"
 
 echo ""
 log_success "开发环境已就绪，开始编码吧！"
 echo ""
-
