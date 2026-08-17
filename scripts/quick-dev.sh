@@ -121,7 +121,8 @@ wait_for_http() {
             log_error "$name 进程已退出，请查看日志: $log_file"
             return 1
         fi
-        if curl -fsS --max-time 2 "$url" > /dev/null 2>&1; then
+        # 本地服务不应经过终端配置的 HTTP 代理；WSL 中代理会将 localhost 请求转发后返回 502。
+        if curl --noproxy '*' -fsS --max-time 2 "$url" > /dev/null 2>&1; then
             log_success "$name 已就绪: $url"
             return 0
         fi

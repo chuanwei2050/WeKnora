@@ -399,6 +399,8 @@ docker_host_path() {
 
     if [[ -n "${MSYSTEM:-}" || "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]] && command -v cygpath &> /dev/null; then
         cygpath -w "$source_path"
+    elif command -v wslpath &> /dev/null; then
+        wslpath -w "$source_path"
     else
         printf '%s\n' "$source_path"
     fi
