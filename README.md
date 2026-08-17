@@ -371,7 +371,7 @@ make dev-frontend
 .\scripts\quick-dev.ps1
 ```
 
-该入口会自动调用 Git Bash，不依赖 PowerShell 中的 `bash` 是否指向 WSL。
+该入口会自动调用 Git Bash，不依赖 PowerShell 中的 `bash` 是否指向 WSL。在 Windows/WSL 中，脚本会自动在 Docker 内运行 Linux Go + Air，规避 DuckDB/SQLite 的 Windows CGO 链接问题；代码仍挂载自本地目录，后端修改会自动重启。首次启动会构建一次开发镜像，后续会复用。
 
 在 Git Bash 中也可以直接运行：
 
@@ -400,7 +400,7 @@ bash ./scripts/quick-dev.sh stop
 
 - ✅ 前端修改自动热重载（无需重启）
 - ✅ 后端修改快速重启（5-10秒，支持 Air 热重载）
-- ✅ 无需重新构建 Docker 镜像
+- ✅ 一键模式首次构建后复用开发镜像
 - ✅ 支持 IDE 断点调试
 
 **详细文档：** [开发环境快速入门](./docs/开发指南.md)

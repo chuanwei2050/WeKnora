@@ -29,6 +29,15 @@ log_warning() {
     printf "%b\n" "${YELLOW}[WARNING]${NC} $1"
 }
 
+use_container_backend() {
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*)
+            return 0
+            ;;
+    esac
+    grep -qiE '(microsoft|wsl)' /proc/version 2> /dev/null
+}
+
 # 停止上一次由本脚本启动的本地进程，避免端口冲突。
 stop_process_tree() {
     local pid="$1"
@@ -95,6 +104,7 @@ wait_for_http() {
     local pid="$2"
     local url="$3"
     local log_file="$4"
+    local timeout="${5:-60}"
 
     if ! kill -0 "$pid" 2>/dev/null; then
         log_error "$name 进程已退出，请查看日志: $log_file"
@@ -106,7 +116,7 @@ wait_for_http() {
         return 0
     fi
 
-    for _ in $(seq 1 60); do
+    for _ in $(seq 1 "$timeout"); do
         if ! kill -0 "$pid" 2>/dev/null; then
             log_error "$name 进程已退出，请查看日志: $log_file"
             return 1
@@ -118,7 +128,7 @@ wait_for_http() {
         sleep 1
     done
 
-    log_error "$name 在 60 秒内未就绪，请查看日志: $log_file"
+    log_error "$name 在 ${timeout} 秒内未就绪，请查看日志: $log_file"
     return 1
 }
 
@@ -135,11 +145,20 @@ cd "$PROJECT_ROOT"
 mkdir -p "$PROJECT_ROOT/logs" "$PROJECT_ROOT/tmp"
 
 ACTION="${1:-start}"
+BACKEND_COMMAND="app"
+BACKEND_MARKER="scripts/dev.sh app"
+BACKEND_READY_TIMEOUT=60
+if use_container_backend; then
+    BACKEND_COMMAND="app-container"
+    BACKEND_MARKER="scripts/dev.sh app-container"
+    BACKEND_READY_TIMEOUT=240
+fi
+
 case "$ACTION" in
     start)
         ;;
     stop)
-        stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "scripts/dev.sh app"
+        stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "$BACKEND_MARKER"
         stop_previous_process "前端" "$PROJECT_ROOT/tmp/frontend.pid" "scripts/dev.sh frontend"
         bash "$PROJECT_ROOT/scripts/dev.sh" stop
         exit $?
@@ -164,7 +183,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # 仅在依赖启动成功后停止本脚本上次记录的后端和前端，避免依赖失败时破坏可用的本地服务。
-stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "scripts/dev.sh app"
+stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "$BACKEND_MARKER"
 stop_previous_process "前端" "$PROJECT_ROOT/tmp/frontend.pid" "scripts/dev.sh frontend"
 
 # 等待服务就绪
@@ -174,14 +193,14 @@ sleep 5
 # 2. 自动启动后端
 echo ""
 log_info "步骤 2/3: 启动后端应用..."
-nohup bash -c 'cd "$1" && exec bash "$1/scripts/dev.sh" app' _ "$PROJECT_ROOT" > "$PROJECT_ROOT/logs/backend.log" 2>&1 &
+nohup bash -c 'cd "$1" && exec bash "$1/scripts/dev.sh" "$2"' _ "$PROJECT_ROOT" "$BACKEND_COMMAND" > "$PROJECT_ROOT/logs/backend.log" 2>&1 &
 BACKEND_PID=$!
 echo $BACKEND_PID > "$PROJECT_ROOT/tmp/backend.pid"
 log_success "后端已在后台启动 (PID: $BACKEND_PID)"
 log_info "查看后端日志: tail -f $PROJECT_ROOT/logs/backend.log"
 
-if ! wait_for_http "后端" "$BACKEND_PID" "http://127.0.0.1:8080/health" "$PROJECT_ROOT/logs/backend.log"; then
-    stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "scripts/dev.sh app"
+if ! wait_for_http "后端" "$BACKEND_PID" "http://127.0.0.1:8080/health" "$PROJECT_ROOT/logs/backend.log" "$BACKEND_READY_TIMEOUT"; then
+    stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "$BACKEND_MARKER"
     exit 1
 fi
 
@@ -196,7 +215,7 @@ log_info "查看前端日志: tail -f $PROJECT_ROOT/logs/frontend.log"
 
 if ! wait_for_http "前端" "$FRONTEND_PID" "http://127.0.0.1:5173/" "$PROJECT_ROOT/logs/frontend.log"; then
     stop_previous_process "前端" "$PROJECT_ROOT/tmp/frontend.pid" "scripts/dev.sh frontend"
-    stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "scripts/dev.sh app"
+    stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "$BACKEND_MARKER"
     exit 1
 fi
 

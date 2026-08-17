@@ -34,6 +34,8 @@ DOCKER_COMPOSE_BIN=""
 DOCKER_COMPOSE_SUBCMD=""
 DOCKER_COMPOSE_FILE="docker-compose.dev.yml"
 DOCKER_CLI_BIN=""
+DEV_APP_CONTAINER="WeKnora-app-dev"
+DEV_APP_IMAGE="weknora-dev-go:1.24"
 
 set_compose_file_path() {
     if [[ "$DOCKER_COMPOSE_BIN" != "docker.exe" && "$DOCKER_COMPOSE_BIN" != "docker-compose.exe" ]]; then
@@ -143,6 +145,7 @@ show_help() {
     echo "  logs       查看服务日志"
     echo "  status     查看服务状态"
     echo "  app        启动后端应用（本地运行）"
+    echo "  app-container 启动后端应用（Docker 热重载）"
     echo "  frontend   启动前端开发服务器（本地运行）"
     echo "  help       显示此帮助信息"
     echo ""
@@ -284,6 +287,7 @@ stop_services() {
         return 1
     fi
     
+    stop_app_container
     cd "$PROJECT_ROOT"
     "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f "$DOCKER_COMPOSE_FILE" down
     
@@ -390,6 +394,73 @@ start_app() {
     fi
 }
 
+docker_host_path() {
+    local source_path="$1"
+
+    if [[ -n "${MSYSTEM:-}" || "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]] && command -v cygpath &> /dev/null; then
+        cygpath -w "$source_path"
+    else
+        printf '%s\n' "$source_path"
+    fi
+}
+
+resolve_dev_network() {
+    local project_name="${COMPOSE_PROJECT_NAME:-$(basename "$PROJECT_ROOT")}"
+    project_name="$(printf '%s' "$project_name" | tr '[:upper:]' '[:lower:]')"
+    printf '%s_WeKnora-network-dev\n' "$project_name"
+}
+
+stop_app_container() {
+    if ! detect_compose_cmd || [ -z "$DOCKER_CLI_BIN" ]; then
+        return 0
+    fi
+    "$DOCKER_CLI_BIN" rm -f "$DEV_APP_CONTAINER" > /dev/null 2>&1 || true
+}
+
+# 使用 Linux Go 工具链启动后端，规避 Windows CGO 与 DuckDB 静态库的 ABI 问题。
+start_app_container() {
+    log_info "启动后端应用（Docker 热重载模式）..."
+    check_docker || return 1
+    cd "$PROJECT_ROOT"
+
+    if [ ! -f ".env" ]; then
+        log_error ".env 文件不存在，请先创建配置文件"
+        return 1
+    fi
+
+    local network_name
+    local host_project_root
+    network_name="$(resolve_dev_network)"
+    host_project_root="$(docker_host_path "$PROJECT_ROOT")"
+
+    if ! "$DOCKER_CLI_BIN" image inspect "$DEV_APP_IMAGE" > /dev/null 2>&1; then
+        log_info "构建后端开发镜像（首次启动仅需一次）..."
+        MSYS_NO_PATHCONV=1 "$DOCKER_CLI_BIN" build \
+            -t "$DEV_APP_IMAGE" \
+            -f "$host_project_root/docker/Dockerfile.dev" \
+            "$host_project_root" || return 1
+    fi
+
+    if ! "$DOCKER_CLI_BIN" network inspect "$network_name" > /dev/null 2>&1; then
+        log_error "未找到开发网络: $network_name，请先执行 $0 start"
+        return 1
+    fi
+
+    stop_app_container
+    log_info "使用 $DEV_APP_IMAGE（Air 轮询监听，支持 Windows 文件变更）"
+    MSYS_NO_PATHCONV=1 exec "$DOCKER_CLI_BIN" run --rm \
+        --name "$DEV_APP_CONTAINER" \
+        --network "$network_name" \
+        -p 8080:8080 \
+        -v "${host_project_root}:/workspace" \
+        -v weknora-go-mod-dev:/go/pkg/mod \
+        -v weknora-go-build-dev:/root/.cache/go-build \
+        -v weknora-go-bin-dev:/go/bin \
+        -w /workspace \
+        "$DEV_APP_IMAGE" \
+        bash /workspace/scripts/app-container-entrypoint.sh
+}
+
 # 启动前端（本地）
 start_frontend() {
     log_info "启动前端开发服务器..."
@@ -435,6 +506,9 @@ case "$CMD" in
         ;;
     app)
         start_app
+        ;;
+    app-container)
+        start_app_container
         ;;
     frontend)
         start_frontend
