@@ -90,6 +90,38 @@ stop_previous_process() {
     rm -f "$pid_file"
 }
 
+wait_for_http() {
+    local name="$1"
+    local pid="$2"
+    local url="$3"
+    local log_file="$4"
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+        log_error "$name 进程已退出，请查看日志: $log_file"
+        return 1
+    fi
+
+    if ! command -v curl &> /dev/null; then
+        log_warning "未检测到 curl，跳过 $name HTTP 就绪检查"
+        return 0
+    fi
+
+    for _ in $(seq 1 60); do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            log_error "$name 进程已退出，请查看日志: $log_file"
+            return 1
+        fi
+        if curl -fsS --max-time 2 "$url" > /dev/null 2>&1; then
+            log_success "$name 已就绪: $url"
+            return 0
+        fi
+        sleep 1
+    done
+
+    log_error "$name 在 60 秒内未就绪，请查看日志: $log_file"
+    return 1
+}
+
 echo ""
 printf "%b\n" "${GREEN}========================================${NC}"
 printf "%b\n" "${GREEN}  WeKnora 快速开发环境启动${NC}"
@@ -119,10 +151,6 @@ case "$ACTION" in
         ;;
 esac
 
-# 仅停止本脚本上次记录的后端和前端，不影响其他进程或 Docker 依赖容器。
-stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "scripts/dev.sh app"
-stop_previous_process "前端" "$PROJECT_ROOT/tmp/frontend.pid" "scripts/dev.sh frontend"
-
 # 1. 启动基础设施
 log_info "步骤 1/3: 启动基础设施服务..."
 bash "$PROJECT_ROOT/scripts/dev.sh" start
@@ -130,6 +158,10 @@ if [ $? -ne 0 ]; then
     log_error "基础设施启动失败"
     exit 1
 fi
+
+# 仅在依赖启动成功后停止本脚本上次记录的后端和前端，避免依赖失败时破坏可用的本地服务。
+stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "scripts/dev.sh app"
+stop_previous_process "前端" "$PROJECT_ROOT/tmp/frontend.pid" "scripts/dev.sh frontend"
 
 # 等待服务就绪
 log_info "等待服务启动完成..."
@@ -152,6 +184,18 @@ FRONTEND_PID=$!
 echo $FRONTEND_PID > "$PROJECT_ROOT/tmp/frontend.pid"
 log_success "前端已在后台启动 (PID: $FRONTEND_PID)"
 log_info "查看前端日志: tail -f $PROJECT_ROOT/logs/frontend.log"
+
+if ! wait_for_http "后端" "$BACKEND_PID" "http://127.0.0.1:8080/health" "$PROJECT_ROOT/logs/backend.log"; then
+    stop_previous_process "前端" "$PROJECT_ROOT/tmp/frontend.pid" "scripts/dev.sh frontend"
+    stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "scripts/dev.sh app"
+    exit 1
+fi
+
+if ! wait_for_http "前端" "$FRONTEND_PID" "http://127.0.0.1:5173/" "$PROJECT_ROOT/logs/frontend.log"; then
+    stop_previous_process "前端" "$PROJECT_ROOT/tmp/frontend.pid" "scripts/dev.sh frontend"
+    stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "scripts/dev.sh app"
+    exit 1
+fi
 
 # 显示总结
 echo ""

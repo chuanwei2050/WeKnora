@@ -348,7 +348,7 @@ make dev-app
 make dev-frontend
 ```
 
-**Windows：** PowerShell 默认没有 `make`，且 Makefile 依赖 bash。请用 **Git Bash**（或 WSL）直接跑脚本：
+**Windows：** PowerShell 默认没有 `make`，且 Makefile 依赖 bash。请优先使用 **Git Bash**；只有在 Docker Desktop 已开启当前发行版 WSL Integration 时才直接使用 WSL：
 
 ```bash
 # 启动基础设施
@@ -361,20 +361,25 @@ make dev-frontend
 ./scripts/dev.sh frontend
 ```
 
-在 PowerShell 中也可调用：
+在 PowerShell 中不建议直接调用 `bash`，因为它可能被解析为 WSL；如果该 WSL 发行版没有 Docker Desktop 集成，依赖服务会启动失败。
+
+如果希望一条命令启动完整开发环境，可使用一键脚本。
+
+在 Windows PowerShell 中运行：
 
 ```powershell
-bash ./scripts/dev.sh start
-bash ./scripts/dev.sh app
-bash ./scripts/dev.sh frontend
+.\scripts\quick-dev.ps1
 ```
 
-如果希望一条命令启动完整开发环境，可使用一键脚本：
+该入口会自动调用 Git Bash，不依赖 PowerShell 中的 `bash` 是否指向 WSL。
+
+在 Git Bash 中也可以直接运行：
 
 ```bash
-# Git Bash / WSL
 bash ./scripts/quick-dev.sh
 ```
+
+如果从 WSL 直接运行，需要先在 Docker Desktop 的 Settings → Resources → WSL Integration 中开启当前发行版；否则 WSL 可能找不到可用的 Docker Compose。
 
 脚本会先停止上一次由它启动的后端和前端进程，再启动新的进程；已经运行的 Docker 依赖服务会复用，不会重复重启。日志和 PID 文件分别位于：
 

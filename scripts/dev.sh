@@ -32,17 +32,53 @@ log_warning() {
 # 选择可用的 Docker Compose 命令
 DOCKER_COMPOSE_BIN=""
 DOCKER_COMPOSE_SUBCMD=""
+DOCKER_COMPOSE_FILE="docker-compose.dev.yml"
+DOCKER_CLI_BIN=""
+
+set_compose_file_path() {
+    if [[ "$DOCKER_COMPOSE_BIN" != "docker.exe" && "$DOCKER_COMPOSE_BIN" != "docker-compose.exe" ]]; then
+        return 0
+    fi
+
+    if command -v wslpath &> /dev/null; then
+        DOCKER_COMPOSE_FILE="$(wslpath -w "$PROJECT_ROOT/docker-compose.dev.yml")"
+    elif command -v cygpath &> /dev/null; then
+        DOCKER_COMPOSE_FILE="$(cygpath -w "$PROJECT_ROOT/docker-compose.dev.yml")"
+    fi
+}
 
 detect_compose_cmd() {
     if docker compose version &> /dev/null; then
         DOCKER_COMPOSE_BIN="docker"
         DOCKER_COMPOSE_SUBCMD="compose"
+        DOCKER_CLI_BIN="docker"
+        set_compose_file_path
         return 0
     fi
     if command -v docker-compose &> /dev/null; then
         if docker-compose version &> /dev/null; then
             DOCKER_COMPOSE_BIN="docker-compose"
             DOCKER_COMPOSE_SUBCMD=""
+            DOCKER_CLI_BIN="docker"
+            set_compose_file_path
+            return 0
+        fi
+    fi
+    if command -v docker.exe &> /dev/null; then
+        if docker.exe compose version &> /dev/null; then
+            DOCKER_COMPOSE_BIN="docker.exe"
+            DOCKER_COMPOSE_SUBCMD="compose"
+            DOCKER_CLI_BIN="docker.exe"
+            set_compose_file_path
+            return 0
+        fi
+    fi
+    if command -v docker-compose.exe &> /dev/null; then
+        if docker-compose.exe version &> /dev/null; then
+            DOCKER_COMPOSE_BIN="docker-compose.exe"
+            DOCKER_COMPOSE_SUBCMD=""
+            DOCKER_CLI_BIN="docker.exe"
+            set_compose_file_path
             return 0
         fi
     fi
@@ -84,17 +120,13 @@ show_help() {
 
 # 检查 Docker
 check_docker() {
-    if ! command -v docker &> /dev/null; then
-        log_error "未安装Docker，请先安装Docker"
-        return 1
-    fi
-    
     if ! detect_compose_cmd; then
-        log_error "未检测到 Docker Compose"
+        log_error "未检测到可用的 Docker Compose"
+        log_error "Windows 请使用 Git Bash，或在 Docker Desktop 中开启当前 WSL 发行版的 WSL Integration"
         return 1
     fi
     
-    if ! docker info &> /dev/null; then
+    if [ "$DOCKER_CLI_BIN" != "docker-compose" ] && ! "$DOCKER_CLI_BIN" info &> /dev/null; then
         log_error "Docker服务未运行"
         return 1
     fi
@@ -159,7 +191,7 @@ start_services() {
     done
     
     # 启动服务
-    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml $PROFILES up -d
+    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f "$DOCKER_COMPOSE_FILE" $PROFILES up -d
     
     if [ $? -eq 0 ]; then
         log_success "基础设施服务已启动"
@@ -207,7 +239,7 @@ stop_services() {
     fi
     
     cd "$PROJECT_ROOT"
-    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml down
+    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f "$DOCKER_COMPOSE_FILE" down
     
     if [ $? -eq 0 ]; then
         log_success "所有服务已停止"
@@ -227,14 +259,16 @@ restart_services() {
 
 # 查看日志
 show_logs() {
+    check_docker || return 1
     cd "$PROJECT_ROOT"
-    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml logs -f
+    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f "$DOCKER_COMPOSE_FILE" logs -f
 }
 
 # 查看状态
 show_status() {
+    check_docker || return 1
     cd "$PROJECT_ROOT"
-    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml ps
+    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f "$DOCKER_COMPOSE_FILE" ps
 }
 
 # 启动后端应用（本地）
@@ -358,4 +392,4 @@ case "$CMD" in
         ;;
 esac
 
-exit 0
+exit $?
