@@ -338,7 +338,9 @@ start_app() {
     if [ -f ".env" ]; then
         log_info "加载 .env 文件..."
         set -a
-        source .env
+        # Windows 编辑器生成的 .env 可能包含 UTF-8 BOM 和 CRLF，先清理后再加载。
+        local env_bom=$'\xef\xbb\xbf'
+        source <(sed -e "1s/^${env_bom}//" -e 's/\r$//' .env)
         set +a
     else
         log_error ".env 文件不存在，请先创建配置文件"
@@ -372,10 +374,8 @@ start_app() {
 
     # 检查是否安装了 Air（热重载工具）
     local air_bin=""
-    if command -v air &> /dev/null; then
+    if [ "$go_bin" = "go" ] && command -v air &> /dev/null; then
         air_bin="air"
-    elif command -v air.exe &> /dev/null; then
-        air_bin="air.exe"
     fi
     if [ -n "$air_bin" ]; then
         log_success "检测到 Air，使用热重载模式启动..."

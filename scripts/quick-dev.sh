@@ -151,6 +151,10 @@ case "$ACTION" in
         ;;
 esac
 
+# 每次启动前清空旧日志，避免本次未启动的服务留下上一轮的误导信息。
+: > "$PROJECT_ROOT/logs/backend.log"
+: > "$PROJECT_ROOT/logs/frontend.log"
+
 # 1. 启动基础设施
 log_info "步骤 1/3: 启动基础设施服务..."
 bash "$PROJECT_ROOT/scripts/dev.sh" start
@@ -176,7 +180,12 @@ echo $BACKEND_PID > "$PROJECT_ROOT/tmp/backend.pid"
 log_success "后端已在后台启动 (PID: $BACKEND_PID)"
 log_info "查看后端日志: tail -f $PROJECT_ROOT/logs/backend.log"
 
-# 3. 自动启动前端
+if ! wait_for_http "后端" "$BACKEND_PID" "http://127.0.0.1:8080/health" "$PROJECT_ROOT/logs/backend.log"; then
+    stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "scripts/dev.sh app"
+    exit 1
+fi
+
+# 3. 自动启动前端（后端就绪后再启动，避免后端失败时额外占用前端端口）
 echo ""
 log_info "步骤 3/3: 启动前端应用..."
 nohup bash -c 'cd "$1" && exec bash "$1/scripts/dev.sh" frontend' _ "$PROJECT_ROOT" > "$PROJECT_ROOT/logs/frontend.log" 2>&1 &
@@ -184,12 +193,6 @@ FRONTEND_PID=$!
 echo $FRONTEND_PID > "$PROJECT_ROOT/tmp/frontend.pid"
 log_success "前端已在后台启动 (PID: $FRONTEND_PID)"
 log_info "查看前端日志: tail -f $PROJECT_ROOT/logs/frontend.log"
-
-if ! wait_for_http "后端" "$BACKEND_PID" "http://127.0.0.1:8080/health" "$PROJECT_ROOT/logs/backend.log"; then
-    stop_previous_process "前端" "$PROJECT_ROOT/tmp/frontend.pid" "scripts/dev.sh frontend"
-    stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "scripts/dev.sh app"
-    exit 1
-fi
 
 if ! wait_for_http "前端" "$FRONTEND_PID" "http://127.0.0.1:5173/" "$PROJECT_ROOT/logs/frontend.log"; then
     stop_previous_process "前端" "$PROJECT_ROOT/tmp/frontend.pid" "scripts/dev.sh frontend"
