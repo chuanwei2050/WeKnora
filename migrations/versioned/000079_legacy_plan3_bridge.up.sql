@@ -1,0 +1,3 @@
+-- Migration version 79 existed on the former Plan3 development line.
+-- Keep this no-op bridge so databases created by that line can continue to
+-- version 80 without rewriting their migration history.

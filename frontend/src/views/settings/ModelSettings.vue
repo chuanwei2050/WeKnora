@@ -455,6 +455,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     location: model.parameters.location,
     artifactPolicy: model.parameters.artifact_policy,
     inferenceEngine: model.parameters.inference_engine || '',
+    defaultVoice: model.parameters.extra_config?.voice || model.parameters.extra_config?.voice_name || '',
     // 将后端 map 形式转换为前端可编辑的数组形式
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
@@ -632,6 +633,11 @@ const handleModelSave = async (modelData: any) => {
         return
       }
     }
+
+    if (currentModelType.value === 'tts' && !modelData.defaultVoice?.trim()) {
+      MessagePlugin.warning('请填写默认音色')
+      return
+    }
     
     // 将前端 Key-Value 数组形式的自定义 Header 转换成后端期望的 map
     const customHeadersMap: Record<string, string> = {}
@@ -659,6 +665,9 @@ const handleModelSave = async (modelData: any) => {
         location: modelData.location,
         artifact_policy: modelData.artifactPolicy,
         inference_engine: modelData.inferenceEngine?.trim() || '',
+        ...(currentModelType.value === 'tts' ? {
+          extra_config: { voice: modelData.defaultVoice.trim() }
+        } : {}),
         ...(Object.keys(customHeadersMap).length > 0 ? { custom_headers: customHeadersMap } : {}),
         ...(currentModelType.value === 'embedding' && modelData.dimension ? {
           embedding_parameters: {

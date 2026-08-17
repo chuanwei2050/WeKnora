@@ -1,0 +1,1 @@
+-- No-op bridge; see the up migration.

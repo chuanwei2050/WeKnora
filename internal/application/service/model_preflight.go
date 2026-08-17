@@ -1,10 +1,8 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/assets"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/tts"
@@ -48,6 +47,7 @@ func (s *modelService) ProbeModelCapabilities(ctx context.Context, modelID strin
 		CheckedAt: checkedAt,
 	}
 	roles := append([]types.ModelRole(nil), model.Parameters.Capabilities.Roles...)
+	rolesInferred := len(roles) == 0
 	if len(roles) == 0 {
 		roles = []types.ModelRole{modelRoleForType(model.Type)}
 	}
@@ -66,7 +66,7 @@ func (s *modelService) ProbeModelCapabilities(ctx context.Context, modelID strin
 		}
 		started := time.Now()
 
-		if validationErr := model.Parameters.Capabilities.ValidateRole(role); validationErr != nil {
+		if validationErr := validatePreflightRole(model.Parameters.Capabilities, role, rolesInferred); validationErr != nil {
 			probe.Status = types.CapabilityProbeUnsupported
 			probe.Error = validationErr.Error()
 			probe.LatencyMs = time.Since(started).Milliseconds()
@@ -74,10 +74,7 @@ func (s *modelService) ProbeModelCapabilities(ctx context.Context, modelID strin
 			continue
 		}
 
-		probeTimeout := time.Duration(model.Parameters.Capabilities.TimeoutSeconds) * time.Second
-		if probeTimeout <= 0 || probeTimeout > 60*time.Second {
-			probeTimeout = 10 * time.Second
-		}
+		probeTimeout := modelPreflightTimeout(model.Parameters.Capabilities.TimeoutSeconds)
 		probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 		observedModel, values, probeErr := s.probeModelRole(probeCtx, model, role)
 		cancel()
@@ -113,6 +110,21 @@ func (s *modelService) ProbeModelCapabilities(ctx context.Context, modelID strin
 	result.Checks = append(result.Checks, s.runModelPreflightChecks(model, result.Probes, checkedAt)...)
 
 	return result, nil
+}
+
+func modelPreflightTimeout(seconds int) time.Duration {
+	timeout := time.Duration(seconds) * time.Second
+	if timeout <= 0 || timeout > 60*time.Second {
+		return 30 * time.Second
+	}
+	return timeout
+}
+
+func validatePreflightRole(manifest types.ModelCapabilityManifest, role types.ModelRole, inferred bool) error {
+	if inferred {
+		return nil
+	}
+	return manifest.ValidateRole(role)
 }
 
 func repositoryPreflightCheck(checkedAt time.Time) types.ModelPreflightCheckResult {
@@ -272,7 +284,7 @@ func (s *modelService) probeModelRole(ctx context.Context, model *types.Model, r
 		if err != nil {
 			return "", nil, err
 		}
-		transcription, err := asrModel.Transcribe(ctx, preflightWAV(), "weknora-preflight.wav")
+		transcription, err := asrModel.Transcribe(ctx, assets.ASRTestWAV, "weknora-preflight.wav")
 		if err != nil {
 			return asrModel.GetModelName(), nil, err
 		}
@@ -379,25 +391,4 @@ func (s *modelService) probeChatRole(ctx context.Context, model *types.Model) (s
 func preflightPNG() []byte {
 	data, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
 	return data
-}
-
-func preflightWAV() []byte {
-	const sampleRate = 8000
-	const samples = 160
-	dataSize := samples * 2
-	buffer := bytes.NewBuffer(make([]byte, 0, 44+dataSize))
-	buffer.WriteString("RIFF")
-	_ = binary.Write(buffer, binary.LittleEndian, uint32(36+dataSize))
-	buffer.WriteString("WAVEfmt ")
-	_ = binary.Write(buffer, binary.LittleEndian, uint32(16))
-	_ = binary.Write(buffer, binary.LittleEndian, uint16(1))
-	_ = binary.Write(buffer, binary.LittleEndian, uint16(1))
-	_ = binary.Write(buffer, binary.LittleEndian, uint32(sampleRate))
-	_ = binary.Write(buffer, binary.LittleEndian, uint32(sampleRate*2))
-	_ = binary.Write(buffer, binary.LittleEndian, uint16(2))
-	_ = binary.Write(buffer, binary.LittleEndian, uint16(16))
-	buffer.WriteString("data")
-	_ = binary.Write(buffer, binary.LittleEndian, uint32(dataSize))
-	buffer.Write(make([]byte, dataSize))
-	return buffer.Bytes()
 }

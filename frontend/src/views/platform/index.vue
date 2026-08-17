@@ -7,7 +7,7 @@
             <UploadMask></UploadMask>
         </div>
         <!-- 全局设置模态框，供所有 platform 子路由使用 -->
-        <Settings />
+        <Settings v-if="route.path !== '/platform/settings'" />
     </div>
 </template>
 <script setup lang="ts">

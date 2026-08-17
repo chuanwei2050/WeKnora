@@ -333,6 +333,12 @@
           <span class="tip-text">TTS 当前使用 OpenAI-compatible 远程接口。</span>
         </div>
 
+        <div v-if="modelType === 'tts'" class="form-item">
+          <label class="form-label required">默认音色</label>
+          <t-input v-model="formData.defaultVoice" placeholder="例如：alloy 或 模型名:alex" />
+          <p class="form-desc">调用方未指定音色时使用该值。</p>
+        </div>
+
         <!-- 部署策略：位置由服务端根据端点解析，不能由普通用户伪造 -->
         <div class="form-item deployment-policy-form">
           <label class="form-label">部署策略</label>
@@ -400,6 +406,7 @@ interface ModelFormData {
   location?: 'public' | 'private-network' | 'same-host' | 'unknown'
   artifactPolicy?: 'preloaded-only' | 'allow-download'
   inferenceEngine?: string
+  defaultVoice?: string
 }
 
 interface Props {
@@ -650,7 +657,8 @@ const formData = ref<ModelFormData>({
   customHeaders: [],
   protocol: 'ollama',
   artifactPolicy: 'allow-download',
-  inferenceEngine: ''
+  inferenceEngine: '',
+  defaultVoice: ''
 })
 
 const rules = computed(() => ({
@@ -823,7 +831,8 @@ const resetForm = () => {
     customHeaders: [],
     protocol: 'ollama',
     artifactPolicy: 'allow-download',
-    inferenceEngine: ''
+    inferenceEngine: '',
+    defaultVoice: ''
   }
   modelChecked.value = false
   modelAvailable.value = false

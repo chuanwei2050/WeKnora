@@ -820,7 +820,17 @@ func (s *modelService) GetTTSModel(ctx context.Context, modelId string) (tts.TTS
 	if err != nil {
 		return nil, err
 	}
-	return tts.NewOpenAITTS(tts.Config{BaseURL: model.Parameters.BaseURL, APIKey: model.Parameters.APIKey, ModelName: model.Name, ModelID: model.ID, CustomHeaders: model.Parameters.CustomHeaders, ValidateIP: validator})
+	return tts.NewOpenAITTS(tts.Config{BaseURL: model.Parameters.BaseURL, APIKey: model.Parameters.APIKey, ModelName: model.Name, ModelID: model.ID, Voice: modelDefaultTTSVoice(model), CustomHeaders: model.Parameters.CustomHeaders, ValidateIP: validator})
+}
+
+func modelDefaultTTSVoice(model *types.Model) string {
+	if model == nil {
+		return ""
+	}
+	if voice := strings.TrimSpace(model.Parameters.ExtraConfig["voice"]); voice != "" {
+		return voice
+	}
+	return strings.TrimSpace(model.Parameters.ExtraConfig["voice_name"])
 }
 
 // ProbeModelCapabilities runs a bounded, auditable preflight without

@@ -38,6 +38,28 @@ use_container_backend() {
     grep -qiE '(microsoft|wsl)' /proc/version 2> /dev/null
 }
 
+wait_for_log_pattern() {
+    local name="$1"
+    local pid="$2"
+    local log_file="$3"
+    local pattern="$4"
+    local timeout="${5:-60}"
+
+    for _ in $(seq 1 "$timeout"); do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            log_error "$name 进程已退出，请查看日志: $log_file"
+            return 1
+        fi
+        if grep -q "$pattern" "$log_file" 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+    done
+
+    log_error "$name 在 ${timeout} 秒内未完成启动，请查看日志: $log_file"
+    return 1
+}
+
 # 停止上一次由本脚本启动的本地进程，避免端口冲突。
 stop_process_tree() {
     local pid="$1"
@@ -199,6 +221,11 @@ BACKEND_PID=$!
 echo $BACKEND_PID > "$PROJECT_ROOT/tmp/backend.pid"
 log_success "后端已在后台启动 (PID: $BACKEND_PID)"
 log_info "查看后端日志: tail -f $PROJECT_ROOT/logs/backend.log"
+
+if use_container_backend && ! wait_for_log_pattern "后端" "$BACKEND_PID" "$PROJECT_ROOT/logs/backend.log" "Server is running at" "$BACKEND_READY_TIMEOUT"; then
+    stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "$BACKEND_MARKER"
+    exit 1
+fi
 
 if ! wait_for_http "后端" "$BACKEND_PID" "http://127.0.0.1:8080/health" "$PROJECT_ROOT/logs/backend.log" "$BACKEND_READY_TIMEOUT"; then
     stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "$BACKEND_MARKER"
