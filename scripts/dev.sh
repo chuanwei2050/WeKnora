@@ -323,8 +323,13 @@ start_app() {
     
     cd "$PROJECT_ROOT"
     
-    # 检查 Go 是否安装
-    if ! command -v go &> /dev/null; then
+    # 兼容 WSL：Windows 安装的 Go 可能只以 go.exe 暴露
+    local go_bin=""
+    if command -v go &> /dev/null; then
+        go_bin="go"
+    elif command -v go.exe &> /dev/null; then
+        go_bin="go.exe"
+    else
         log_error "Go 未安装"
         return 1
     fi
@@ -366,16 +371,22 @@ start_app() {
     fi
 
     # 检查是否安装了 Air（热重载工具）
+    local air_bin=""
     if command -v air &> /dev/null; then
+        air_bin="air"
+    elif command -v air.exe &> /dev/null; then
+        air_bin="air.exe"
+    fi
+    if [ -n "$air_bin" ]; then
         log_success "检测到 Air，使用热重载模式启动..."
         log_info "修改 Go 代码后将自动重新编译和重启"
-        air
+        "$air_bin"
     else
         log_info "未检测到 Air，使用普通模式启动"
         log_warning "提示: 安装 Air 可以实现代码修改后自动重启"
         log_info "安装命令: go install github.com/air-verse/air@latest"
         LDFLAGS="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
-        go run -ldflags="$LDFLAGS" ./cmd/server
+        "$go_bin" run -ldflags="$LDFLAGS" ./cmd/server
     fi
 }
 
@@ -401,7 +412,7 @@ start_frontend() {
     log_info "前端将运行在 http://localhost:5173"
     
     # 运行开发服务器
-    npm run dev
+    npm run dev -- --strictPort
 }
 
 # 解析命令
