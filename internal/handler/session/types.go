@@ -38,19 +38,19 @@ type ImageAttachment struct {
 
 // CreateKnowledgeQARequest defines the request structure for knowledge QA
 type CreateKnowledgeQARequest struct {
-	Query            string                 `json:"query"              binding:"required"` // Query text for knowledge base search
-	KnowledgeBaseIDs []string               `json:"knowledge_base_ids"`                    // Selected knowledge base ID for this request
-	KnowledgeIds     []string               `json:"knowledge_ids"`                         // Selected knowledge ID for this request
-	AgentEnabled     bool                   `json:"agent_enabled"`                         // Whether agent mode is enabled for this request
-	AgentID          string                 `json:"agent_id"`                              // Selected custom agent ID (backend resolves shared agent and its tenant from share relation)
-	WebSearchEnabled bool                   `json:"web_search_enabled"`                    // Whether web search is enabled for this request
-	SummaryModelID   string                 `json:"summary_model_id"`                      // Optional summary model ID for this request (overrides session default)
-	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // @mentioned knowledge bases and files
-	DisableTitle     bool                   `json:"disable_title"`                         // Whether to disable auto title generation
-	EnableMemory     bool                   `json:"enable_memory"`                         // Whether memory feature is enabled for this request
-	Images           []ImageAttachment      `json:"images"`                                // Attached images for multimodal chat
-	AttachmentUploads []AttachmentUpload    `json:"attachment_uploads,omitempty"`          // Attached files (documents, audio, etc.)
-	Channel          string                 `json:"channel"`                               // Source channel: "web", "api", "im", etc.
+	Query             string                 `json:"query"              binding:"required"` // Query text for knowledge base search
+	KnowledgeBaseIDs  []string               `json:"knowledge_base_ids"`                    // Selected knowledge base ID for this request
+	KnowledgeIds      []string               `json:"knowledge_ids"`                         // Selected knowledge ID for this request
+	AgentEnabled      bool                   `json:"agent_enabled"`                         // Whether agent mode is enabled for this request
+	AgentID           string                 `json:"agent_id"`                              // Selected custom agent ID (backend resolves shared agent and its tenant from share relation)
+	WebSearchEnabled  bool                   `json:"web_search_enabled"`                    // Whether web search is enabled for this request
+	SummaryModelID    string                 `json:"summary_model_id"`                      // Optional summary model ID for this request (overrides session default)
+	MentionedItems    []MentionedItemRequest `json:"mentioned_items"`                       // @mentioned knowledge bases and files
+	DisableTitle      bool                   `json:"disable_title"`                         // Whether to disable auto title generation
+	EnableMemory      bool                   `json:"enable_memory"`                         // Whether memory feature is enabled for this request
+	Images            []ImageAttachment      `json:"images"`                                // Attached images for multimodal chat
+	AttachmentUploads []AttachmentUpload     `json:"attachment_uploads,omitempty"`          // Attached files (documents, audio, etc.)
+	Channel           string                 `json:"channel"`                               // Source channel: "web", "api", "im", etc.
 }
 
 // AttachmentUpload represents a file attachment upload from the client
@@ -66,6 +66,15 @@ type SearchKnowledgeRequest struct {
 	KnowledgeBaseID  string   `json:"knowledge_base_id"`                     // Single knowledge base ID (for backward compatibility)
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`                    // IDs of knowledge bases to search (multi-KB support)
 	KnowledgeIDs     []string `json:"knowledge_ids"`                         // IDs of specific knowledge (files) to search
+}
+
+// AnalyzeKnowledgeTableRequest runs a bounded batch of fact lookups against
+// one tenant-authorized structured knowledge file.
+type AnalyzeKnowledgeTableRequest struct {
+	KnowledgeID string                     `json:"knowledge_id" binding:"required"`
+	Queries     []types.TableAnalysisQuery `json:"queries" binding:"required,min=1,max=100"`
+	MaxRows     int                        `json:"max_rows" binding:"omitempty,min=1,max=50"`
+	ModelID     string                     `json:"model_id" binding:"omitempty,max=64"`
 }
 
 // StopSessionRequest represents the stop session request

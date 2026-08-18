@@ -75,16 +75,29 @@ func TestBuildExcelCreateTableSQL_EscapesSingleQuotes(t *testing.T) {
 
 func TestSqlSingleQuoteEscape(t *testing.T) {
 	cases := map[string]string{
-		"":              "",
-		"no_quote":      "no_quote",
-		"a'b":           "a''b",
-		"''":            "''''",
-		"mix'ed'quote":  "mix''ed''quote",
+		"":               "",
+		"no_quote":       "no_quote",
+		"a'b":            "a''b",
+		"''":             "''''",
+		"mix'ed'quote":   "mix''ed''quote",
 		"中文 with 'quote": "中文 with ''quote",
 	}
 	for in, want := range cases {
 		if got := sqlSingleQuoteEscape(in); got != want {
 			t.Errorf("sqlSingleQuoteEscape(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestSessionTableSuffixIsStableAndSessionScoped(t *testing.T) {
+	first := sessionTableSuffix("session-one")
+	if first != sessionTableSuffix("session-one") {
+		t.Fatal("same session must produce a stable table suffix")
+	}
+	if first == sessionTableSuffix("session-two") {
+		t.Fatal("different sessions must not share a table suffix")
+	}
+	if len(first) != 16 {
+		t.Fatalf("expected a bounded hexadecimal suffix, got %q", first)
 	}
 }

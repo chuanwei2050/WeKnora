@@ -34,10 +34,10 @@ type qaRequestContext struct {
 	webSearchEnabled  bool
 	enableMemory      bool // Whether memory feature is enabled
 	mentionedItems    types.MentionedItems
-	effectiveTenantID uint64            // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
-	images            []ImageAttachment // Uploaded images with analysis text
-	userMessageID     string            // Created user message ID (populated after createUserMessage)
-	channel           string            // Source channel: "web", "api", "im", etc.
+	effectiveTenantID uint64                   // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
+	images            []ImageAttachment        // Uploaded images with analysis text
+	userMessageID     string                   // Created user message ID (populated after createUserMessage)
+	channel           string                   // Source channel: "web", "api", "im", etc.
 	attachments       types.MessageAttachments // Processed file attachments
 }
 
@@ -445,6 +445,35 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		"success": true,
 		"data":    searchResults,
 	})
+}
+
+// AnalyzeKnowledgeTable executes bounded, read-only structured lookups for a
+// single knowledge file. Tenant authorization is enforced by the service's
+// GetKnowledgeByID call using the authenticated request context.
+func (h *Handler) AnalyzeKnowledgeTable(c *gin.Context) {
+	ctx := c.Request.Context()
+	var request AnalyzeKnowledgeTableRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	maxRows := request.MaxRows
+	if maxRows == 0 {
+		maxRows = 20
+	}
+	result, err := h.sessionService.AnalyzeKnowledgeTable(
+		ctx,
+		request.KnowledgeID,
+		request.Queries,
+		maxRows,
+		request.ModelID,
+	)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
 
 // KnowledgeQA godoc

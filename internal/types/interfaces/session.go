@@ -41,6 +41,14 @@ type SessionService interface {
 	// knowledgeBaseIDs: list of knowledge base IDs to search (supports multi-KB)
 	// knowledgeIDs: list of specific knowledge (file) IDs to search
 	SearchKnowledge(ctx context.Context, knowledgeBaseIDs []string, knowledgeIDs []string, query string) ([]*types.SearchResult, error)
+	// AnalyzeKnowledgeTable runs bounded read-only queries against one tenant-authorized CSV/Excel file.
+	AnalyzeKnowledgeTable(
+		ctx context.Context,
+		knowledgeID string,
+		queries []types.TableAnalysisQuery,
+		maxRows int,
+		modelID string,
+	) (*types.TableAnalysisResult, error)
 	// AgentQA performs agent-based question answering with conversation history and streaming support.
 	AgentQA(ctx context.Context, req *types.QARequest, eventBus *event.EventBus) error
 	// ClearContext clears the LLM context for a session

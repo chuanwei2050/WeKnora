@@ -355,6 +355,11 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler) {
 	{
 		knowledgeSearch.POST("", handler.SearchKnowledge)
 	}
+
+	knowledgeTableAnalysis := r.Group("/knowledge-table-analysis")
+	{
+		knowledgeTableAnalysis.POST("", handler.AnalyzeKnowledgeTable)
+	}
 }
 
 // RegisterTenantRoutes 注册租户相关的路由

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -40,6 +41,8 @@ type sessionService struct {
 	webSearchProviderRepo interfaces.WebSearchProviderRepository // Repository for web search provider entities
 	kbShareService        interfaces.KBShareService              // Service for KB sharing operations
 	memoryService         interfaces.MemoryService               // Service for memory operations
+	fileService           interfaces.FileService                 // Service for structured knowledge files
+	duckDB                *sql.DB                                // Shared in-memory DuckDB for bounded table analysis
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -58,6 +61,8 @@ func NewSessionService(cfg *config.Config,
 	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 	kbShareService interfaces.KBShareService,
 	memoryService interfaces.MemoryService,
+	fileService interfaces.FileService,
+	duckDB *sql.DB,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                   cfg,
@@ -75,6 +80,8 @@ func NewSessionService(cfg *config.Config,
 		webSearchProviderRepo: webSearchProviderRepo,
 		kbShareService:        kbShareService,
 		memoryService:         memoryService,
+		fileService:           fileService,
+		duckDB:                duckDB,
 	}
 }
 

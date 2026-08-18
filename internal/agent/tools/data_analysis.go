@@ -2,7 +2,9 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
@@ -726,7 +728,12 @@ func (t *DataAnalysisTool) LoadFromTable(ctx context.Context, tableName string) 
 }
 
 func (t *DataAnalysisTool) TableName(knowledge *types.Knowledge) string {
-	return "k_" + strings.ReplaceAll(knowledge.ID, "-", "_")
+	return "k_" + strings.ReplaceAll(knowledge.ID, "-", "_") + "_" + sessionTableSuffix(t.sessionID)
+}
+
+func sessionTableSuffix(sessionID string) string {
+	digest := sha256.Sum256([]byte(sessionID))
+	return hex.EncodeToString(digest[:8])
 }
 
 // buildSchemaDescription builds a formatted schema description
