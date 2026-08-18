@@ -29,6 +29,7 @@ type DataSourceService struct {
 	connectorRegistry *datasource.ConnectorRegistry
 	scheduler         *datasource.Scheduler
 	tenantRepo        interfaces.TenantRepository
+	tenantService     interfaces.TenantService
 	tagService        interfaces.KnowledgeTagService
 	approvedEndpoints interfaces.ApprovedEndpointRepository
 }
@@ -43,6 +44,7 @@ func NewDataSourceService(
 	connectorRegistry *datasource.ConnectorRegistry,
 	scheduler *datasource.Scheduler,
 	tenantRepo interfaces.TenantRepository,
+	tenantService interfaces.TenantService,
 	tagService interfaces.KnowledgeTagService,
 	approvedEndpoints interfaces.ApprovedEndpointRepository,
 ) interfaces.DataSourceService {
@@ -55,6 +57,7 @@ func NewDataSourceService(
 		connectorRegistry: connectorRegistry,
 		scheduler:         scheduler,
 		tenantRepo:        tenantRepo,
+		tenantService:     tenantService,
 		tagService:        tagService,
 		approvedEndpoints: approvedEndpoints,
 	}
@@ -490,7 +493,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	// Set tenant context so KnowledgeService can resolve tenant info correctly
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, ds.TenantID)
 
-	tenant, err := s.tenantRepo.GetTenantByID(ctx, ds.TenantID)
+	tenant, err := s.tenantService.GetTenantByID(ctx, ds.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get tenant info: %v", err)
 		syncLog.Status = types.SyncLogStatusFailed

@@ -71,6 +71,7 @@ type RouterParams struct {
 	KnowledgeGovernanceHandler *handler.KnowledgeGovernanceHandler
 	AcceptanceBenchmarkHandler *handler.AcceptanceBenchmarkHandler
 	ApprovedEndpointHandler    *handler.ApprovedEndpointHandler
+	AdminHandler               *handler.AdminHandler
 }
 
 // NewRouter 创建新的路由
@@ -82,7 +83,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-Request-ID"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-Request-ID", "X-Tenant-ID"},
 		ExposeHeaders:    []string{"Content-Length", "Access-Control-Allow-Origin"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
@@ -165,9 +166,32 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterKnowledgeGovernanceRoutes(v1, params.KnowledgeGovernanceHandler)
 		RegisterAcceptanceBenchmarkRoutes(v1, params.AcceptanceBenchmarkHandler)
 		RegisterApprovedEndpointRoutes(v1, params.ApprovedEndpointHandler)
+		RegisterAdminRoutes(v1, params.AdminHandler)
 	}
 
 	return r
+}
+
+func RegisterAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler) {
+	if h == nil {
+		return
+	}
+	admin := r.Group("/admin")
+	tenants := admin.Group("/tenants")
+	tenants.GET("", h.ListTenants)
+	tenants.POST("", h.CreateTenant)
+	tenants.PUT("/:tenant_id", h.UpdateTenant)
+	tenants.PATCH("/:tenant_id/status", h.UpdateTenantStatus)
+	tenants.DELETE("/:tenant_id", h.DeleteTenant)
+	users := tenants.Group("/:tenant_id/users")
+	users.GET("", h.ListTenantUsers)
+	users.POST("", h.CreateTenantUser)
+	users.PUT("/:user_id", h.UpdateTenantUser)
+	users.DELETE("/:user_id", h.DeleteTenantUser)
+	users.PUT("/:user_id/password", h.ResetTenantUserPassword)
+	users.PATCH("/:user_id/role", h.UpdateTenantUserRole)
+	users.PATCH("/:user_id/status", h.UpdateTenantUserStatus)
+	tenants.GET("/:tenant_id/knowledge-bases", h.ListTenantKnowledgeBases)
 }
 
 func RegisterKnowledgeGovernanceRoutes(r *gin.RouterGroup, h *handler.KnowledgeGovernanceHandler) {
@@ -183,6 +207,7 @@ func RegisterKnowledgeGovernanceRoutes(r *gin.RouterGroup, h *handler.KnowledgeG
 	versions.POST("/:version_id/submit-review", h.SubmitReview)
 	versions.POST("/:version_id/approve", h.Approve)
 	versions.POST("/:version_id/reject", h.Reject)
+	versions.POST("/:version_id/withdraw", h.Withdraw)
 	versions.POST("/:version_id/publish", h.Publish)
 	versions.POST("/:version_id/rollback", h.Rollback)
 }

@@ -35,6 +35,20 @@
         </div>
         
         <div class="tenant-list" ref="tenantListRef" @scroll="handleScroll">
+          <div
+            :class="['tenant-item', 'platform-item', { selected: authStore.workspaceMode === 'platform' }]"
+            @click="selectPlatform"
+          >
+            <div class="tenant-item-content">
+              <div class="tenant-item-avatar platform-avatar" :class="{ active: authStore.workspaceMode === 'platform' }">平</div>
+              <div class="tenant-item-info">
+                <span class="tenant-item-name">平台管理</span>
+                <span class="tenant-item-id">返回租户管理</span>
+              </div>
+            </div>
+            <t-icon v-if="authStore.workspaceMode === 'platform'" name="check" size="16px" class="check-icon" />
+          </div>
+
           <div v-if="loading && tenants.length === 0" class="tenant-loading">
             <t-loading size="small" />
             <span>{{ $t('tenant.loading') }}</span>
@@ -82,9 +96,11 @@ import { useAuthStore } from '@/stores/auth'
 import { searchTenants, type TenantInfo } from '@/api/tenant'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { useRouter } from 'vue-router'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
+const router = useRouter()
 
 const showDropdown = ref(false)
 const searchQuery = ref('')
@@ -110,6 +126,7 @@ const currentTenantId = computed(() => {
 })
 
 const currentTenantName = computed(() => {
+  if (authStore.workspaceMode === 'platform') return '平台管理'
   if (!currentTenantId.value) return t('tenant.unknown')
   // 首先从当前加载的租户列表中查找
   const tenant = tenants.value.find(t => t.id === currentTenantId.value)
@@ -160,6 +177,13 @@ const clearSearch = () => {
   loadTenants()
 }
 
+const selectPlatform = () => {
+  authStore.setSelectedTenant(null, null)
+  closeDropdown()
+  MessagePlugin.success('已返回平台管理')
+  void router.replace('/platform/admin/tenants').then(() => window.location.reload())
+}
+
 const selectTenant = (tenantId: number) => {
   // 找到选中的租户信息
   const selectedTenant = tenants.value.find(t => t.id === tenantId)
@@ -171,9 +195,8 @@ const selectTenant = (tenantId: number) => {
   }
   closeDropdown()
   MessagePlugin.success(t('tenant.switchSuccess'))
-  setTimeout(() => {
-    window.location.reload()
-  }, 500)
+  const target = tenantId === defaultTenantId.value ? '/platform/admin/tenants' : '/platform/knowledge-bases'
+  void router.replace(target).then(() => window.location.reload())
 }
 
 const loadTenants = async (append = false) => {
@@ -451,6 +474,18 @@ onUnmounted(() => {
       font-weight: 500;
     }
   }
+}
+
+.platform-item {
+  margin-bottom: 6px;
+  padding-bottom: 10px;
+  border-bottom: .5px solid var(--td-component-stroke);
+  border-radius: 6px 6px 0 0;
+}
+
+.platform-avatar {
+  background: #e8f1fb;
+  color: #174a7c;
 }
 
 .tenant-item-content {

@@ -93,6 +93,10 @@ func envStoreReadonlyError() gin.H {
 // @Router       /vector-stores [post]
 func (h *VectorStoreHandler) CreateStore(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage vector stores"))
+		return
+	}
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
@@ -239,6 +243,10 @@ func (h *VectorStoreHandler) GetStore(c *gin.Context) {
 // @Router       /vector-stores/{id} [put]
 func (h *VectorStoreHandler) UpdateStore(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage vector stores"))
+		return
+	}
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
@@ -308,6 +316,10 @@ func (h *VectorStoreHandler) UpdateStore(c *gin.Context) {
 // @Router       /vector-stores/{id} [delete]
 func (h *VectorStoreHandler) DeleteStore(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage vector stores"))
+		return
+	}
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
@@ -366,6 +378,10 @@ func (h *VectorStoreHandler) ListStoreTypes(c *gin.Context) {
 // @Router       /vector-stores/{id}/test [post]
 func (h *VectorStoreHandler) TestStoreByID(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can test vector stores"))
+		return
+	}
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
@@ -431,6 +447,10 @@ func (h *VectorStoreHandler) TestStoreByID(c *gin.Context) {
 // @Router       /vector-stores/test [post]
 func (h *VectorStoreHandler) TestStoreRaw(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can test vector stores"))
+		return
+	}
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {

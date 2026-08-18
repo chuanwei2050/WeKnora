@@ -50,6 +50,15 @@ func NewSystemHandler(cfg *config.Config,
 	}
 }
 
+func requirePlatformAdminForSystem(c *gin.Context) bool {
+	user, ok := types.UserFromContext(c.Request.Context())
+	if ok && user.IsPlatformAdmin() {
+		return true
+	}
+	c.Error(errors.NewForbiddenError("Only platform administrators can manage system settings"))
+	return false
+}
+
 // GetSystemInfoResponse defines the response structure for system info
 type GetSystemInfoResponse struct {
 	Version             string `json:"version"`
@@ -218,6 +227,10 @@ func (h *SystemHandler) ListParserEngines(c *gin.Context) {
 // @Success      200
 // @Router       /system/docreader/reconnect [post]
 func (h *SystemHandler) ReconnectDocReader(c *gin.Context) {
+	if !requirePlatformAdminForSystem(c) {
+		return
+	}
+
 	var req struct {
 		Addr string `json:"addr" binding:"required"`
 	}
@@ -280,6 +293,10 @@ func (h *SystemHandler) ReconnectDocReader(c *gin.Context) {
 // @Success      200
 // @Router       /system/parser-engines/check [post]
 func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
+	if !requirePlatformAdminForSystem(c) {
+		return
+	}
+
 	var body types.ParserEngineConfig
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(400, gin.H{"code": 1, "msg": "请求体格式错误"})
@@ -648,6 +665,10 @@ type StorageCheckResponse struct {
 // @Success      200   {object}  StorageCheckResponse
 // @Router       /system/storage-engine-check [post]
 func (h *SystemHandler) CheckStorageEngine(c *gin.Context) {
+	if !requirePlatformAdminForSystem(c) {
+		return
+	}
+
 	ctx := logger.CloneContext(c.Request.Context())
 
 	var req StorageCheckRequest

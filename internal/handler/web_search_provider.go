@@ -76,6 +76,10 @@ func (h *WebSearchProviderHandler) getOwnedProvider(
 // CreateProvider creates a new web search provider
 func (h *WebSearchProviderHandler) CreateProvider(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage web search providers"))
+		return
+	}
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
@@ -163,6 +167,10 @@ func (h *WebSearchProviderHandler) GetProvider(c *gin.Context) {
 // UpdateProvider updates a web search provider
 func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage web search providers"))
+		return
+	}
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
@@ -214,6 +222,10 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 // DeleteProvider deletes a web search provider
 func (h *WebSearchProviderHandler) DeleteProvider(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage web search providers"))
+		return
+	}
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
@@ -249,6 +261,10 @@ func (h *WebSearchProviderHandler) ListProviderTypes(c *gin.Context) {
 // TestProviderByID tests an existing saved provider by performing a sample search
 func (h *WebSearchProviderHandler) TestProviderByID(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can test web search providers"))
+		return
+	}
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
@@ -281,6 +297,10 @@ type TestProviderRequest struct {
 // TestProviderRaw tests a provider with raw credentials (no persistence)
 func (h *WebSearchProviderHandler) TestProviderRaw(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can test web search providers"))
+		return
+	}
 
 	var req TestProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

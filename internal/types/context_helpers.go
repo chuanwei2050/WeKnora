@@ -66,10 +66,7 @@ func IsBidReviewKnowledgeAdmin(ctx context.Context) bool {
 	if !ok {
 		return false
 	}
-	if user.CanAccessAllTenants {
-		return true
-	}
-	return user.BidReviewRole == "platform_admin" || user.BidReviewRole == "tenant_admin"
+	return user.CanManageTenant()
 }
 
 // CanCreateKnowledgeBase reports whether the current user may create a knowledge base.
@@ -80,10 +77,7 @@ func CanCreateKnowledgeBase(ctx context.Context) bool {
 	if !ok {
 		return false
 	}
-	if user.BidReviewRole == "" {
-		return true
-	}
-	return IsBidReviewKnowledgeAdmin(ctx)
+	return user.CanManageTenant()
 }
 
 // CanReadKnowledgeBase reports whether an authenticated user can read a knowledge
@@ -98,7 +92,28 @@ func CanReadKnowledgeBase(ctx context.Context, kb *KnowledgeBase) bool {
 		return false
 	}
 	_, ok = UserIDFromContext(ctx)
-	return ok
+	if !ok {
+		return false
+	}
+	return IsKnowledgeBaseVisibleToUser(ctx, kb)
+}
+
+// IsKnowledgeBaseVisibleToUser applies a native member's configured scope to
+// knowledge bases owned by that user's active tenant. Internal jobs and
+// cross-tenant shared resources keep their existing authorization paths.
+func IsKnowledgeBaseVisibleToUser(ctx context.Context, kb *KnowledgeBase) bool {
+	if kb == nil {
+		return false
+	}
+	user, userOK := UserFromContext(ctx)
+	tenantID, tenantOK := TenantIDFromContext(ctx)
+	if !userOK || !tenantOK || user.CanManageTenant() {
+		return true
+	}
+	if user.TenantID != tenantID || kb.TenantID != tenantID {
+		return true
+	}
+	return user.CanAccessKnowledgeBase(kb.ID)
 }
 
 // CanManageKnowledgeBase reports whether the current user can mutate a knowledge base.
@@ -113,11 +128,53 @@ func CanManageKnowledgeBase(ctx context.Context, kb *KnowledgeBase) bool {
 	if IsBidReviewKnowledgeAdmin(ctx) {
 		return true
 	}
-	if user, ok := UserFromContext(ctx); ok && user.BidReviewRole != "" {
+	return false
+}
+
+func stringArrayContains(values StringArray, target string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
+}
+
+// CanContributeKnowledge allows administrators or explicitly permitted same-tenant members
+// to create governed drafts without granting knowledge-base management permission.
+func CanContributeKnowledge(ctx context.Context, kb *KnowledgeBase) bool {
+	if CanManageKnowledgeBase(ctx, kb) {
+		return true
+	}
+	if kb == nil || !kb.Governance.Enabled {
 		return false
 	}
-	userID, ok := UserIDFromContext(ctx)
-	return ok && kb.CreatedBy != "" && kb.CreatedBy == userID
+	tenantID, tenantOK := TenantIDFromContext(ctx)
+	userID, userOK := UserIDFromContext(ctx)
+	if !tenantOK || !userOK || tenantID != kb.TenantID {
+		return false
+	}
+	switch kb.ContributionMode {
+	case ContributionModeMembers:
+		return true
+	case ContributionModeAllowlist:
+		return stringArrayContains(kb.ContributorIDs, userID)
+	default:
+		return false
+	}
+}
+
+// CanReviewKnowledge allows tenant managers and KB-scoped reviewers.
+func CanReviewKnowledge(ctx context.Context, kb *KnowledgeBase) bool {
+	if CanManageKnowledgeBase(ctx, kb) {
+		return true
+	}
+	if kb == nil {
+		return false
+	}
+	tenantID, tenantOK := TenantIDFromContext(ctx)
+	userID, userOK := UserIDFromContext(ctx)
+	return tenantOK && userOK && tenantID == kb.TenantID && stringArrayContains(kb.ReviewerIDs, userID)
 }
 
 // SessionTenantIDFromContext extracts the session-owner tenant ID from ctx.

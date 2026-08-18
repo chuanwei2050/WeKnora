@@ -36,7 +36,16 @@ func openKnowledgeGovernanceTestDB(t *testing.T) *gorm.DB {
 		`CREATE TABLE knowledges (
 			id TEXT PRIMARY KEY,
 			tenant_id INTEGER NOT NULL,
-			current_version_id TEXT
+			current_version_id TEXT,
+			pending_version_id TEXT
+		)`,
+		`CREATE TABLE knowledge_version_reviews (
+			id TEXT PRIMARY KEY,
+			version_id TEXT NOT NULL,
+			reviewer_id TEXT NOT NULL,
+			action TEXT NOT NULL,
+			comment TEXT,
+			created_at DATETIME NOT NULL
 		)`,
 	}
 	for _, statement := range statements {
@@ -45,6 +54,35 @@ func openKnowledgeGovernanceTestDB(t *testing.T) *gorm.DB {
 		}
 	}
 	return db
+}
+
+func TestTransitionVersionWithReviewRollsBackStatusWhenAuditFails(t *testing.T) {
+	db := openKnowledgeGovernanceTestDB(t)
+	repo := NewKnowledgeGovernanceRepository(db, nil)
+	ctx := context.Background()
+	version := newGovernedTestVersion(1, "knowledge-atomic", string(types.KnowledgeVersionRejected), nil, nil)
+	if err := repo.CreateVersion(ctx, version); err != nil {
+		t.Fatal(err)
+	}
+	reviewID := uuid.NewString()
+	existing := &types.KnowledgeVersionReview{ID: reviewID, VersionID: version.ID, ReviewerID: "reviewer", Action: "existing", CreatedAt: time.Now().UTC()}
+	if err := repo.CreateReview(ctx, existing); err != nil {
+		t.Fatal(err)
+	}
+
+	err := repo.TransitionVersionWithReview(ctx, 1, version.ID, types.KnowledgeVersionPendingReview, &types.KnowledgeVersionReview{
+		ID: reviewID, VersionID: version.ID, ReviewerID: "author", Action: "submit", CreatedAt: time.Now().UTC(),
+	})
+	if err == nil {
+		t.Fatal("duplicate audit ID should fail the transaction")
+	}
+	stored, getErr := repo.GetVersion(ctx, 1, version.ID)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if stored.Status != types.KnowledgeVersionRejected {
+		t.Fatalf("status = %s, want rejected after audit rollback", stored.Status)
+	}
 }
 
 func newGovernedTestVersion(tenantID uint64, knowledgeID, status string, effectiveAt, expiresAt *time.Time) *types.KnowledgeVersion {

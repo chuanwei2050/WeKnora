@@ -44,8 +44,8 @@ func (h *ApprovedEndpointHandler) Create(c *gin.Context) {
 		c.Error(errors.NewUnauthorizedError("unauthorized"))
 		return
 	}
-	if !types.IsBidReviewKnowledgeAdmin(c.Request.Context()) {
-		c.Error(errors.NewForbiddenError("approved endpoint management requires a tenant administrator"))
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("approved endpoint management requires a platform administrator"))
 		return
 	}
 	var endpoint types.ApprovedEndpoint
@@ -53,7 +53,7 @@ func (h *ApprovedEndpointHandler) Create(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	endpoint.ID, endpoint.TenantID, endpoint.CreatedBy = uuid.NewString(), tenantID, userID
+	endpoint.ID, endpoint.TenantID, endpoint.CreatedBy = uuid.NewString(), types.PlatformScopeTenantID, userID
 	if err := endpoint.Validate(); err != nil {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
@@ -107,8 +107,8 @@ func (h *ApprovedEndpointHandler) Audits(c *gin.Context) {
 		c.Error(errors.NewUnauthorizedError("unauthorized"))
 		return
 	}
-	if !types.IsBidReviewKnowledgeAdmin(c.Request.Context()) {
-		c.Error(errors.NewForbiddenError("approved endpoint audits require a tenant administrator"))
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("approved endpoint audits require a platform administrator"))
 		return
 	}
 	audits, err := h.repo.ListAudits(c.Request.Context(), tenantID, c.Param("id"))
@@ -121,8 +121,8 @@ func (h *ApprovedEndpointHandler) Audits(c *gin.Context) {
 
 func (h *ApprovedEndpointHandler) Update(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 || !types.IsBidReviewKnowledgeAdmin(c.Request.Context()) {
-		c.Error(errors.NewForbiddenError("approved endpoint management requires a tenant administrator"))
+	if tenantID == 0 || !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("approved endpoint management requires a platform administrator"))
 		return
 	}
 	item, err := h.repo.GetByID(c.Request.Context(), tenantID, c.Param("id"))
@@ -177,8 +177,8 @@ func (h *ApprovedEndpointHandler) Delete(c *gin.Context) {
 		c.Error(errors.NewUnauthorizedError("unauthorized"))
 		return
 	}
-	if !types.IsBidReviewKnowledgeAdmin(c.Request.Context()) {
-		c.Error(errors.NewForbiddenError("approved endpoint management requires a tenant administrator"))
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("approved endpoint management requires a platform administrator"))
 		return
 	}
 	item, err := h.repo.GetByID(c.Request.Context(), tenantID, c.Param("id"))
@@ -186,7 +186,7 @@ func (h *ApprovedEndpointHandler) Delete(c *gin.Context) {
 		c.Error(errors.NewNotFoundError("approved endpoint not found"))
 		return
 	}
-	if err := h.repo.Delete(c.Request.Context(), tenantID, c.Param("id")); err != nil {
+	if err := h.repo.Delete(c.Request.Context(), types.PlatformScopeTenantID, c.Param("id")); err != nil {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}

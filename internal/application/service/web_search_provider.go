@@ -24,8 +24,12 @@ func NewWebSearchProviderService(repo interfaces.WebSearchProviderRepository, ap
 
 // CreateProvider creates a new web search provider configuration.
 func (s *webSearchProviderService) CreateProvider(ctx context.Context, provider *types.WebSearchProviderEntity) error {
-	if provider.TenantID == 0 {
-		return fmt.Errorf("tenant ID is required")
+	if !isPlatformAdmin(ctx) {
+		return fmt.Errorf("only platform administrators can manage web search providers")
+	}
+	validationTenantID := provider.TenantID
+	if validationTenantID == 0 {
+		return fmt.Errorf("tenant ID is required for endpoint validation")
 	}
 
 	if !isValidProviderType(provider.Provider) {
@@ -35,12 +39,13 @@ func (s *webSearchProviderService) CreateProvider(ctx context.Context, provider 
 	if err := validateProviderParameters(provider.Provider, provider.Parameters); err != nil {
 		return err
 	}
-	if err := s.validateApprovedEndpoint(ctx, provider.TenantID, &provider.Parameters); err != nil {
+	if err := s.validateApprovedEndpoint(ctx, validationTenantID, &provider.Parameters); err != nil {
 		return err
 	}
 
+	provider.TenantID = types.PlatformScopeTenantID
 	if provider.IsDefault {
-		if err := s.repo.ClearDefault(ctx, provider.TenantID, ""); err != nil {
+		if err := s.repo.ClearDefault(ctx, types.PlatformScopeTenantID, ""); err != nil {
 			logger.Warnf(ctx, "Failed to clear default providers: %v", err)
 		}
 	}
@@ -51,8 +56,12 @@ func (s *webSearchProviderService) CreateProvider(ctx context.Context, provider 
 
 // UpdateProvider updates an existing provider.
 func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider *types.WebSearchProviderEntity) error {
-	if provider.TenantID == 0 {
-		return fmt.Errorf("tenant ID is required")
+	if !isPlatformAdmin(ctx) {
+		return fmt.Errorf("only platform administrators can manage web search providers")
+	}
+	validationTenantID := provider.TenantID
+	if validationTenantID == 0 {
+		return fmt.Errorf("tenant ID is required for endpoint validation")
 	}
 
 	// Validate provider type if set
@@ -60,8 +69,9 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 		return fmt.Errorf("invalid provider type: %s", provider.Provider)
 	}
 
+	provider.TenantID = types.PlatformScopeTenantID
 	if provider.IsDefault {
-		if err := s.repo.ClearDefault(ctx, provider.TenantID, provider.ID); err != nil {
+		if err := s.repo.ClearDefault(ctx, types.PlatformScopeTenantID, provider.ID); err != nil {
 			logger.Warnf(ctx, "Failed to clear default providers: %v", err)
 		}
 	}
@@ -71,9 +81,10 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 			return err
 		}
 	}
-	if err := s.validateApprovedEndpoint(ctx, provider.TenantID, &provider.Parameters); err != nil {
+	if err := s.validateApprovedEndpoint(ctx, validationTenantID, &provider.Parameters); err != nil {
 		return err
 	}
+	provider.TenantID = types.PlatformScopeTenantID
 
 	logger.Infof(ctx, "Updating web search provider: tenant=%d, id=%s", provider.TenantID, provider.ID)
 	return s.repo.Update(ctx, provider)
@@ -108,8 +119,16 @@ func (s *webSearchProviderService) validateApprovedEndpoint(ctx context.Context,
 
 // DeleteProvider deletes a provider by tenant + id.
 func (s *webSearchProviderService) DeleteProvider(ctx context.Context, tenantID uint64, id string) error {
+	if !isPlatformAdmin(ctx) {
+		return fmt.Errorf("only platform administrators can manage web search providers")
+	}
 	logger.Infof(ctx, "Deleting web search provider: tenant=%d, id=%s", tenantID, id)
-	return s.repo.Delete(ctx, tenantID, id)
+	return s.repo.Delete(ctx, types.PlatformScopeTenantID, id)
+}
+
+func isPlatformAdmin(ctx context.Context) bool {
+	user, ok := types.UserFromContext(ctx)
+	return ok && user.IsPlatformAdmin()
 }
 
 // isValidProviderType checks if the given provider type is supported

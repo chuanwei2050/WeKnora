@@ -29,6 +29,13 @@ const (
 // ModelStatus represents the status of the model
 type ModelStatus string
 
+// PlatformScopeTenantID is the reserved scope for platform-managed
+// configuration records inherited by every tenant.
+const PlatformScopeTenantID uint64 = 0
+
+// PlatformModelTenantID is kept as a descriptive alias for model records.
+const PlatformModelTenantID = PlatformScopeTenantID
+
 const (
 	ModelStatusActive         ModelStatus = "active"          // Model is active
 	ModelStatusDownloading    ModelStatus = "downloading"     // Model is downloading

@@ -28,7 +28,7 @@ func (r *webSearchProviderRepository) Create(ctx context.Context, provider *type
 func (r *webSearchProviderRepository) GetByID(ctx context.Context, tenantID uint64, id string) (*types.WebSearchProviderEntity, error) {
 	var provider types.WebSearchProviderEntity
 	if err := r.db.WithContext(ctx).Where(
-		"id = ? AND tenant_id = ?", id, tenantID,
+		"id = ? AND tenant_id = ?", id, types.PlatformScopeTenantID,
 	).First(&provider).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -42,7 +42,7 @@ func (r *webSearchProviderRepository) GetByID(ctx context.Context, tenantID uint
 func (r *webSearchProviderRepository) GetDefault(ctx context.Context, tenantID uint64) (*types.WebSearchProviderEntity, error) {
 	var provider types.WebSearchProviderEntity
 	if err := r.db.WithContext(ctx).Where(
-		"tenant_id = ? AND is_default = ?", tenantID, true,
+		"tenant_id = ? AND is_default = ?", types.PlatformScopeTenantID, true,
 	).First(&provider).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -56,7 +56,7 @@ func (r *webSearchProviderRepository) GetDefault(ctx context.Context, tenantID u
 func (r *webSearchProviderRepository) List(ctx context.Context, tenantID uint64) ([]*types.WebSearchProviderEntity, error) {
 	var providers []*types.WebSearchProviderEntity
 	if err := r.db.WithContext(ctx).Where(
-		"tenant_id = ?", tenantID,
+		"tenant_id = ?", types.PlatformScopeTenantID,
 	).Order("created_at ASC").Find(&providers).Error; err != nil {
 		return nil, err
 	}
@@ -66,21 +66,21 @@ func (r *webSearchProviderRepository) List(ctx context.Context, tenantID uint64)
 // Update updates a web search provider
 func (r *webSearchProviderRepository) Update(ctx context.Context, provider *types.WebSearchProviderEntity) error {
 	return r.db.WithContext(ctx).Model(&types.WebSearchProviderEntity{}).Where(
-		"id = ? AND tenant_id = ?", provider.ID, provider.TenantID,
+		"id = ? AND tenant_id = ?", provider.ID, types.PlatformScopeTenantID,
 	).Select("*").Updates(provider).Error
 }
 
 // Delete soft-deletes a web search provider
 func (r *webSearchProviderRepository) Delete(ctx context.Context, tenantID uint64, id string) error {
 	return r.db.WithContext(ctx).Where(
-		"id = ? AND tenant_id = ?", id, tenantID,
+		"id = ? AND tenant_id = ?", id, types.PlatformScopeTenantID,
 	).Delete(&types.WebSearchProviderEntity{}).Error
 }
 
 // ClearDefault clears the default flag for all providers of a tenant, optionally excluding one
 func (r *webSearchProviderRepository) ClearDefault(ctx context.Context, tenantID uint64, excludeID string) error {
 	query := r.db.WithContext(ctx).Model(&types.WebSearchProviderEntity{}).Where(
-		"tenant_id = ? AND is_default = ?", tenantID, true,
+		"tenant_id = ? AND is_default = ?", types.PlatformScopeTenantID, true,
 	)
 	if excludeID != "" {
 		query = query.Where("id != ?", excludeID)

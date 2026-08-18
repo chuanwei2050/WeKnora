@@ -18,55 +18,45 @@
     <!-- 下拉菜单 -->
     <Transition name="dropdown">
       <div v-if="menuVisible" class="user-dropdown" @click.stop>
-        <div v-if="isBidReviewEmbedded" class="menu-item" @click="handleReturnToBidReview">
-          <t-icon name="rollback" class="menu-icon" />
-          <span>返回主系统</span>
+        <div class="menu-item" @click="profileVisible = true; menuVisible = false">
+          <t-icon name="user-circle" class="menu-icon" />
+          <span>个人信息</span>
         </div>
-        <template v-else>
-          <div class="menu-item" @click="handleQuickNav('models')">
-            <t-icon name="control-platform" class="menu-icon" />
-            <span>{{ $t('settings.modelManagement') }}</span>
-          </div>
-          <div class="menu-item" @click="handleQuickNav('websearch')">
-            <svg 
-              width="16" 
-              height="16" 
-              viewBox="0 0 18 18" 
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              class="menu-icon svg-icon"
-            >
-              <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/>
-              <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none"/>
-              <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none"/>
-              <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-              <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-            </svg>
-            <span>{{ $t('settings.webSearchConfig') }}</span>
-          </div>
-          <div class="menu-item" @click="handleQuickNav('mcp')">
-            <t-icon name="tools" class="menu-icon" />
-            <span>{{ $t('settings.mcpService') }}</span>
-          </div>
-          <div class="menu-item" @click="handleQuickNav('api')">
-            <t-icon name="secured" class="menu-icon" />
-            <span>{{ $t('settings.apiInfo') }}</span>
-          </div>
-          <div class="menu-divider"></div>
-          <div class="menu-item" @click="handleSettings">
-            <t-icon name="setting" class="menu-icon" />
-            <span>{{ $t('general.allSettings') }}</span>
-          </div>
-          <template v-if="!authStore.isLiteMode">
-            <div class="menu-divider"></div>
-            <div class="menu-item danger" @click="handleLogout">
-              <t-icon name="logout" class="menu-icon" />
-              <span>{{ $t('auth.logout') }}</span>
-            </div>
-          </template>
-        </template>
+        <div class="menu-item" @click="handleSettings">
+          <t-icon name="setting" class="menu-icon" />
+          <span>设置</span>
+        </div>
+        <div class="menu-item" @click="openPasswordDialog">
+          <t-icon name="lock-on" class="menu-icon" />
+          <span>修改密码</span>
+        </div>
+        <div class="menu-divider"></div>
+        <div class="menu-item danger" @click="handleLogout">
+          <t-icon name="logout" class="menu-icon" />
+          <span>退出登录</span>
+        </div>
       </div>
     </Transition>
+
+    <t-dialog v-model:visible="profileVisible" header="个人信息" :footer="false" width="420px">
+      <div class="profile-card">
+        <div class="profile-avatar">{{ userInitial }}</div>
+        <div class="profile-name">{{ userName }}</div>
+        <div class="profile-role">{{ roleLabel }}</div>
+        <dl class="profile-fields">
+          <div><dt>邮箱</dt><dd>{{ userEmail || '未设置' }}</dd></div>
+          <div><dt>所属租户</dt><dd>{{ authStore.workspaceMode === 'platform' ? '平台级账号' : authStore.selectedTenantName || authStore.tenant?.name || '未分配' }}</dd></div>
+        </dl>
+      </div>
+    </t-dialog>
+
+    <t-dialog v-model:visible="passwordVisible" header="修改密码" :confirm-btn="{ content: '确认修改', loading: passwordSaving }" @confirm="savePassword">
+      <t-form label-align="top">
+        <t-form-item label="当前密码" required><t-input v-model="passwordForm.current" type="password" autocomplete="current-password" /></t-form-item>
+        <t-form-item label="新密码" required><t-input v-model="passwordForm.next" type="password" autocomplete="new-password" /></t-form-item>
+        <t-form-item label="确认新密码" required><t-input v-model="passwordForm.confirm" type="password" autocomplete="new-password" /></t-form-item>
+      </t-form>
+    </t-dialog>
   </div>
 </template>
 
@@ -76,30 +66,30 @@ import { useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { getCurrentUser, logout as logoutApi } from '@/api/auth'
+import { changePassword, logout as logoutApi } from '@/api/auth'
 import { useI18n } from 'vue-i18n'
-import { isBidReviewEmbeddedMode, returnToBidReview } from '@/utils/bidreview-sso'
 
 const { t } = useI18n()
 
 const router = useRouter()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
-const isBidReviewEmbedded = computed(() => isBidReviewEmbeddedMode())
 
 const menuRef = ref<HTMLElement>()
 const menuVisible = ref(false)
+const profileVisible = ref(false)
+const passwordVisible = ref(false)
+const passwordSaving = ref(false)
+const passwordForm = ref({ current: '', next: '', confirm: '' })
 
-// 用户信息
-const userInfo = ref({
-  username: t('common.defaultUser'),
-  email: 'user@example.com',
-  avatar: ''
+const userName = computed(() => authStore.user?.username || t('common.defaultUser'))
+const userEmail = computed(() => authStore.user?.email || '')
+const userAvatar = computed(() => authStore.user?.avatar || '')
+const roleLabel = computed(() => {
+  if (authStore.user?.role === 'platform_admin') return '平台管理员'
+  if (authStore.user?.role === 'tenant_admin') return '租户管理员'
+  return '普通用户'
 })
-
-const userName = computed(() => userInfo.value.username)
-const userEmail = computed(() => userInfo.value.email)
-const userAvatar = computed(() => userInfo.value.avatar)
 
 // 用户名首字母（用于无头像时显示）
 const userInitial = computed(() => {
@@ -109,32 +99,6 @@ const userInitial = computed(() => {
 // 切换菜单显示
 const toggleMenu = () => {
   menuVisible.value = !menuVisible.value
-}
-
-// 快捷导航到设置的特定部分
-const handleQuickNav = (section: string) => {
-  menuVisible.value = false
-  uiStore.openSettings()
-  router.push('/platform/settings')
-  
-  // 延迟一下，确保设置页面已经渲染
-  setTimeout(() => {
-    // 触发设置页面切换到对应section
-    const event = new CustomEvent('settings-nav', { detail: { section } })
-    window.dispatchEvent(event)
-  }, 100)
-}
-
-// 打开设置
-const handleSettings = () => {
-  menuVisible.value = false
-  uiStore.openSettings()
-  router.push('/platform/settings')
-}
-
-const handleReturnToBidReview = () => {
-  menuVisible.value = false
-  returnToBidReview()
 }
 
 // 注销
@@ -158,45 +122,6 @@ const handleLogout = async () => {
   router.push('/login')
 }
 
-// 加载用户信息
-const loadUserInfo = async () => {
-  try {
-    const response = await getCurrentUser()
-    if (response.success && response.data && response.data.user) {
-      const user = response.data.user
-      userInfo.value = {
-        username: user.username || t('common.info'),
-        email: user.email || 'user@example.com',
-        avatar: user.avatar || ''
-      }
-      // 同时更新 authStore 中的用户信息，确保包含 can_access_all_tenants 字段
-      authStore.setUser({
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        avatar: user.avatar,
-        tenant_id: user.tenant_id,
-        can_access_all_tenants: user.can_access_all_tenants || false,
-        created_at: user.created_at,
-        updated_at: user.updated_at
-      })
-      // 如果返回了租户信息，也更新租户信息
-      if (response.data.tenant) {
-        authStore.setTenant({
-          id: String(response.data.tenant.id),
-          name: response.data.tenant.name,
-          api_key: response.data.tenant.api_key || '',
-          owner_id: user.id,
-          created_at: response.data.tenant.created_at,
-          updated_at: response.data.tenant.updated_at
-        })
-      }
-    }
-  } catch (error) {
-    console.error('Failed to load user info:', error)
-  }
-}
-
 // 点击外部关闭菜单
 const handleClickOutside = (e: MouseEvent) => {
   if (menuRef.value && !menuRef.value.contains(e.target as Node)) {
@@ -206,8 +131,47 @@ const handleClickOutside = (e: MouseEvent) => {
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
-  loadUserInfo()
 })
+
+const handleSettings = () => {
+  menuVisible.value = false
+  uiStore.openSettings()
+  void router.push('/platform/settings')
+}
+
+const openPasswordDialog = () => {
+  menuVisible.value = false
+  passwordForm.value = { current: '', next: '', confirm: '' }
+  passwordVisible.value = true
+}
+
+const savePassword = async () => {
+  const { current, next, confirm } = passwordForm.value
+  if (!current || next.length < 8 || next.length > 72) {
+    MessagePlugin.warning('新密码长度应为 8 到 72 位')
+    return
+  }
+  if (next !== confirm) {
+    MessagePlugin.warning('两次输入的新密码不一致')
+    return
+  }
+  if (current === next) {
+    MessagePlugin.warning('新密码不能与当前密码相同')
+    return
+  }
+  passwordSaving.value = true
+  try {
+    await changePassword(current, next)
+    passwordVisible.value = false
+    authStore.logout()
+    MessagePlugin.success('密码已修改，请重新登录')
+    await router.replace('/login')
+  } catch (error) {
+    MessagePlugin.error((error as { message?: string }).message || '当前密码错误或修改失败')
+  } finally {
+    passwordSaving.value = false
+  }
+}
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
@@ -434,6 +398,60 @@ onUnmounted(() => {
   height: 1px;
   background: var(--td-component-stroke);
   margin: 4px 0;
+}
+
+.profile-card {
+  padding: 8px 4px 4px;
+  text-align: center;
+}
+
+.profile-avatar {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(135deg, var(--td-brand-color), var(--td-brand-color-active));
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.profile-name {
+  color: var(--td-text-color-primary);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.profile-role {
+  margin-top: 4px;
+  color: var(--td-brand-color);
+  font-size: 13px;
+}
+
+.profile-fields {
+  margin: 20px 0 0;
+  border-top: 1px solid var(--td-component-stroke);
+  text-align: left;
+
+  > div {
+    display: grid;
+    grid-template-columns: 88px 1fr;
+    gap: 12px;
+    padding: 12px 4px;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  dt {
+    color: var(--td-text-color-secondary);
+  }
+
+  dd {
+    margin: 0;
+    color: var(--td-text-color-primary);
+    overflow-wrap: anywhere;
+  }
 }
 
 // 下拉动画

@@ -203,7 +203,7 @@ func CanTransitionKnowledgeVersion(from, to KnowledgeVersionStatus) bool {
 	case KnowledgeVersionDraft:
 		return to == KnowledgeVersionPendingReview || to == KnowledgeVersionRejected
 	case KnowledgeVersionPendingReview:
-		return to == KnowledgeVersionApproved || to == KnowledgeVersionRejected
+		return to == KnowledgeVersionApproved || to == KnowledgeVersionRejected || to == KnowledgeVersionDraft
 	case KnowledgeVersionApproved:
 		return to == KnowledgeVersionIndexing
 	case KnowledgeVersionIndexing:
@@ -216,7 +216,9 @@ func CanTransitionKnowledgeVersion(from, to KnowledgeVersionStatus) bool {
 		return to == KnowledgeVersionIndexing
 	case KnowledgeVersionSuperseded:
 		return to == KnowledgeVersionIndexing
-	case KnowledgeVersionRejected, KnowledgeVersionExpired:
+	case KnowledgeVersionRejected:
+		return to == KnowledgeVersionDraft
+	case KnowledgeVersionExpired:
 		return false
 	default:
 		return false

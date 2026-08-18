@@ -146,6 +146,19 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		EnqueueWikiIngest(ctx, s.taskEnqueuer, s.redisClient, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID)
 		logger.Infof(ctx, "[KnowledgePostProcess] Enqueued wiki ingest task for %s", payload.KnowledgeID)
 	}
+
+	if kb.Governance.Enabled && knowledge.PendingVersionID != "" {
+		publishPayload := types.KnowledgePublishPayload{
+			TenantID: payload.TenantID, KnowledgeID: knowledge.ID, VersionID: knowledge.PendingVersionID,
+		}
+		langfuse.InjectTracing(ctx, &publishPayload)
+		if payloadBytes, marshalErr := json.Marshal(publishPayload); marshalErr == nil {
+			publishTask := asynq.NewTask(types.TypeKnowledgePublish, payloadBytes, asynq.Queue("low"), asynq.ProcessIn(8*time.Second), asynq.MaxRetry(12))
+			if _, enqueueErr := s.taskEnqueuer.Enqueue(publishTask); enqueueErr != nil {
+				logger.Errorf(ctx, "[KnowledgePostProcess] Failed to enqueue governed publication for %s: %v", knowledge.ID, enqueueErr)
+			}
+		}
+	}
 	return nil
 }
 

@@ -77,6 +77,8 @@ type Knowledge struct {
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id"`
+	// CreatedBy is the original contributor. It is immutable after creation.
+	CreatedBy string `json:"created_by" gorm:"type:varchar(36);index"`
 	// Optional tag ID for categorization within a knowledge base
 	TagID string `json:"tag_id"             gorm:"type:varchar(36);index"`
 	// Type of the knowledge

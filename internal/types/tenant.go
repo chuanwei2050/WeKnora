@@ -12,6 +12,22 @@ import (
 	"gorm.io/gorm"
 )
 
+type TenantStatus string
+
+const (
+	TenantStatusActive    TenantStatus = "active"
+	TenantStatusSuspended TenantStatus = "suspended"
+)
+
+func IsTenantStatus(value string) bool {
+	switch TenantStatus(strings.TrimSpace(value)) {
+	case TenantStatusActive, TenantStatusSuspended:
+		return true
+	default:
+		return false
+	}
+}
+
 // retrieverEngineMapping maps RETRIEVE_DRIVER values to retriever engine configurations
 var retrieverEngineMapping = map[string][]RetrieverEngineParams{
 	"postgres": {
@@ -115,6 +131,41 @@ type Tenant struct {
 	UpdatedAt time.Time `yaml:"updated_at"          json:"updated_at"`
 	// Deletion time
 	DeletedAt gorm.DeletedAt `yaml:"deleted_at"          json:"deleted_at"          gorm:"index"`
+}
+
+// PlatformSettings stores the system-wide configuration managed by platform administrators.
+// Tenant records receive an effective copy of these fields at read time; tenant-specific
+// configuration fields are retained only for backward-compatible data migration.
+type PlatformSettings struct {
+	ID                  uint64               `json:"id" gorm:"primaryKey"`
+	RetrieverEngines    RetrieverEngines     `json:"retriever_engines" gorm:"type:jsonb"`
+	AgentConfig         *AgentConfig         `json:"agent_config" gorm:"type:jsonb"`
+	ContextConfig       *ContextConfig       `json:"context_config" gorm:"type:jsonb"`
+	WebSearchConfig     *WebSearchConfig     `json:"web_search_config" gorm:"type:jsonb"`
+	ConversationConfig  *ConversationConfig  `json:"conversation_config" gorm:"type:jsonb"`
+	ParserEngineConfig  *ParserEngineConfig  `json:"parser_engine_config" gorm:"type:jsonb"`
+	Credentials         *CredentialsConfig   `json:"credentials" gorm:"type:jsonb"`
+	StorageEngineConfig *StorageEngineConfig `json:"storage_engine_config" gorm:"type:jsonb"`
+	RetrievalConfig     *RetrievalConfig     `json:"retrieval_config" gorm:"type:jsonb"`
+	CreatedAt           time.Time            `json:"created_at"`
+	UpdatedAt           time.Time            `json:"updated_at"`
+}
+
+// ApplyToTenant overlays platform-managed settings onto a tenant read model.
+// The tenant identity, quota, status and data ownership fields are intentionally untouched.
+func (p *PlatformSettings) ApplyToTenant(t *Tenant) {
+	if p == nil || t == nil {
+		return
+	}
+	t.RetrieverEngines = p.RetrieverEngines
+	t.AgentConfig = p.AgentConfig
+	t.ContextConfig = p.ContextConfig
+	t.WebSearchConfig = p.WebSearchConfig
+	t.ConversationConfig = p.ConversationConfig
+	t.ParserEngineConfig = p.ParserEngineConfig
+	t.Credentials = p.Credentials
+	t.StorageEngineConfig = p.StorageEngineConfig
+	t.RetrievalConfig = p.RetrievalConfig
 }
 
 // RetrieverEngines represents the retriever engines for a tenant

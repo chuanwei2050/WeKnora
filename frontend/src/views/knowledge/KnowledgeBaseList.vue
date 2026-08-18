@@ -631,7 +631,6 @@ import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import { useI18n } from 'vue-i18n'
-import { canManageBidReviewKnowledge } from '@/utils/bidreview-sso'
 
 const router = useRouter()
 const route = useRoute()
@@ -639,7 +638,7 @@ const uiStore = useUIStore()
 const authStore = useAuthStore()
 const orgStore = useOrganizationStore()
 const { t } = useI18n()
-const canManageWorkspaceKnowledge = computed(() => canManageBidReviewKnowledge())
+const canManageWorkspaceKnowledge = computed(() => authStore.canManageTenant)
 
 // 左侧空间选择：我的 / 空间 ID（已去掉「全部」）
 const spaceSelection = ref<'all' | 'mine' | 'shared' | string>('mine')

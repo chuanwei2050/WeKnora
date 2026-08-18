@@ -419,6 +419,9 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 // @Router       /initialization/kb/{kbId} [post]
 func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
 	kbIdStr := utils.SanitizeForLog(c.Param("kbId"))
 
 	req, err := h.bindInitializationRequest(ctx, c)
@@ -467,6 +470,15 @@ func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 			"knowledge_base": kb,
 		},
 	})
+}
+
+func requirePlatformAdminForInitialization(c *gin.Context) bool {
+	user, ok := types.UserFromContext(c.Request.Context())
+	if ok && user.IsPlatformAdmin() {
+		return true
+	}
+	c.Error(errors.NewForbiddenError("Only platform administrators can manage model configurations"))
+	return false
 }
 
 func (h *InitializationHandler) bindInitializationRequest(ctx context.Context, c *gin.Context) (*InitializationRequest, error) {
@@ -963,6 +975,9 @@ func (h *InitializationHandler) CheckOllamaModels(c *gin.Context) {
 // @Router       /initialization/ollama/models/download [post]
 func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
 
 	logger.Info(ctx, "Starting async Ollama model download")
 
@@ -1554,6 +1569,9 @@ func (h *InitializationHandler) resolveTenantWeKnoraCloudCreds(ctx context.Conte
 // @Router       /initialization/models/remote/check [post]
 func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
 
 	logger.Info(ctx, "Checking remote model connection")
 
@@ -1610,6 +1628,9 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 // @Router       /initialization/models/embedding/test [post]
 func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
 
 	logger.Info(ctx, "Testing embedding model connectivity and functionality")
 
@@ -1759,6 +1780,9 @@ func (h *InitializationHandler) checkRerankModelConnection(
 // @Router       /initialization/models/rerank/check [post]
 func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
 
 	logger.Info(ctx, "Checking rerank model connection and functionality")
 
@@ -1816,6 +1840,9 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 // @Router       /initialization/models/asr/check [post]
 func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
 
 	logger.Info(ctx, "Checking ASR model connection")
 
@@ -1943,6 +1970,9 @@ type testMultimodalForm struct {
 // @Router       /initialization/multimodal/test [post]
 func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
 
 	logger.Info(ctx, "Testing multimodal functionality")
 

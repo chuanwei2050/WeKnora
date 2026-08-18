@@ -86,7 +86,7 @@
 
             <!-- 右侧内容区域 -->
             <div class="settings-content">
-              <div class="content-wrapper">
+              <div class="content-wrapper" :class="{ 'content-wrapper--review': currentSection === 'graph-triples' }">
                 <!-- 常规设置 -->
                 <div v-if="currentSection === 'general'" class="section">
                   <GeneralSettings />
@@ -179,6 +179,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
+import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 import SystemInfo from './SystemInfo.vue'
 import TenantInfo from './TenantInfo.vue'
@@ -201,6 +202,7 @@ import AcceptanceReview from './AcceptanceReview.vue'
 const route = useRoute()
 const router = useRouter()
 const uiStore = useUIStore()
+const authStore = useAuthStore()
 const { t } = useI18n()
 
 const currentSection = ref<string>('general')
@@ -234,7 +236,22 @@ const navItems = computed<SettingsNavItem[]>(() => {
     { key: 'graph-triples', icon: 'relation', label: t('settings.graphTripleReview.nav') },
     { key: 'acceptance', icon: 'chart-line', label: t('settings.graphTripleReview.acceptanceNav') }
   ]
-  return items
+  const role = authStore.user?.role === 'platform_admin' && authStore.workspaceMode === 'tenant'
+    ? 'tenant_admin'
+    : authStore.user?.role || 'member'
+  if (role === 'platform_admin') {
+    const platformSections = new Set(['general', 'ollama', 'weknoracloud', 'models', 'websearch', 'vectorstore', 'parser', 'storage', 'mcp', 'system', 'api'])
+    return items.filter(item => platformSections.has(item.key))
+  }
+  if (role === 'tenant_admin') {
+    const tenantAdminSections = new Set(['general', 'tenant', 'feedback', 'graph-triples', 'acceptance'])
+    return items.filter(item => tenantAdminSections.has(item.key))
+  }
+  // Chat history indexing depends on tenant-owned hidden knowledge bases and
+  // is not a platform infrastructure setting; do not expose its legacy
+  // tenant-level editor while system settings are platform-owned.
+  const memberSections = new Set(['general'])
+  return items.filter(item => memberSections.has(item.key))
 })
 
 // 导航项点击处理
@@ -322,7 +339,7 @@ const handleEscape = (e: KeyboardEvent) => {
 // 处理快捷导航事件
 const handleSettingsNav = (e: CustomEvent) => {
   const { section, subsection } = e.detail
-  if (section) {
+  if (section && navItems.value.some(item => item.key === section)) {
     currentSection.value = section
     // 如果有子菜单，自动展开
     const navItem = (navItems.value as any[]).find((item: any) => item.key === section)
@@ -337,6 +354,9 @@ const handleSettingsNav = (e: CustomEvent) => {
 }
 
 onMounted(() => {
+  if (!navItems.value.some(item => item.key === currentSection.value)) {
+    currentSection.value = navItems.value[0]?.key || 'general'
+  }
   window.addEventListener('keydown', handleEscape)
   window.addEventListener('settings-nav', handleSettingsNav as EventListener)
 })
@@ -547,6 +567,11 @@ onUnmounted(() => {
 .content-wrapper {
   max-width: 600px;
   padding: 40px 48px;
+}
+
+.content-wrapper--review {
+  max-width: none;
+  padding: 32px 32px 40px;
 }
 
 .section {

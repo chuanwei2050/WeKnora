@@ -109,4 +109,4 @@ extract:
 # Tenant configuration
 tenant:
   # Enable cross-tenant access (can be enabled for intranet environments)
-  enable_cross_tenant_access: false
+  enable_cross_tenant_access: true

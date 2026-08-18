@@ -115,7 +115,7 @@ func BenchmarkLanguageLocaleName(b *testing.B) {
 func knowledgeContext(tenantID uint64, userID string, role string) context.Context {
 	ctx := context.WithValue(context.Background(), TenantIDContextKey, tenantID)
 	ctx = context.WithValue(ctx, UserIDContextKey, userID)
-	ctx = context.WithValue(ctx, UserContextKey, &User{ID: userID, BidReviewRole: role})
+	ctx = context.WithValue(ctx, UserContextKey, &User{ID: userID, Role: UserRole(role), BidReviewRole: role})
 	return ctx
 }
 
@@ -142,7 +142,7 @@ func TestCanManageKnowledgeBaseCreatorAndAdmin(t *testing.T) {
 
 	nativeCtx := knowledgeContext(7, "user-a", "")
 	assert.True(t, CanManageKnowledgeBase(nativeCtx, owned))
-	assert.False(t, CanManageKnowledgeBase(nativeCtx, other))
+	assert.True(t, CanManageKnowledgeBase(nativeCtx, other))
 }
 
 func TestCanReadKnowledgeBaseForSameTenantMember(t *testing.T) {
@@ -154,9 +154,48 @@ func TestCanReadKnowledgeBaseForSameTenantMember(t *testing.T) {
 	assert.False(t, CanReadKnowledgeBase(context.WithValue(context.Background(), TenantIDContextKey, uint64(7)), &KnowledgeBase{TenantID: 7}))
 }
 
+func TestCanReadKnowledgeBaseHonorsSelectedScope(t *testing.T) {
+	user := &User{
+		ID:                      "user-a",
+		TenantID:                7,
+		Role:                    UserRoleMember,
+		KnowledgeBaseAccessMode: KnowledgeBaseAccessSelected,
+		KnowledgeBaseIDs:        StringArray{"kb-a"},
+	}
+	ctx := context.WithValue(context.Background(), TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, UserIDContextKey, user.ID)
+	ctx = context.WithValue(ctx, UserContextKey, user)
+
+	assert.True(t, CanReadKnowledgeBase(ctx, &KnowledgeBase{ID: "kb-a", TenantID: 7}))
+	assert.False(t, CanReadKnowledgeBase(ctx, &KnowledgeBase{ID: "kb-b", TenantID: 7}))
+	assert.True(t, IsKnowledgeBaseVisibleToUser(ctx, &KnowledgeBase{ID: "shared-kb", TenantID: 8}))
+}
+
 func TestCanCreateKnowledgeBaseForBidReviewRoles(t *testing.T) {
 	assert.False(t, CanCreateKnowledgeBase(knowledgeContext(7, "member-a", "member")))
 	assert.True(t, CanCreateKnowledgeBase(knowledgeContext(7, "admin-a", "tenant_admin")))
 	assert.True(t, CanCreateKnowledgeBase(knowledgeContext(7, "platform-a", "platform_admin")))
 	assert.True(t, CanCreateKnowledgeBase(knowledgeContext(7, "native-a", "")))
+}
+
+func TestKnowledgeContributionAndReviewPermissions(t *testing.T) {
+	memberCtx := knowledgeContext(7, "member-a", "member")
+	otherMemberCtx := knowledgeContext(7, "member-b", "member")
+	adminCtx := knowledgeContext(7, "admin-a", "tenant_admin")
+
+	members := &KnowledgeBase{TenantID: 7, Governance: KnowledgeGovernanceConfig{Enabled: true}, ContributionMode: ContributionModeMembers}
+	assert.True(t, CanContributeKnowledge(memberCtx, members))
+	assert.True(t, CanContributeKnowledge(adminCtx, members))
+
+	allowlist := &KnowledgeBase{TenantID: 7, Governance: KnowledgeGovernanceConfig{Enabled: true}, ContributionMode: ContributionModeAllowlist, ContributorIDs: StringArray{"member-a"}, ReviewerIDs: StringArray{"member-b"}}
+	assert.True(t, CanContributeKnowledge(memberCtx, allowlist))
+	assert.False(t, CanContributeKnowledge(otherMemberCtx, allowlist))
+	assert.True(t, CanReviewKnowledge(otherMemberCtx, allowlist))
+	assert.False(t, CanReviewKnowledge(memberCtx, allowlist))
+	assert.True(t, CanReviewKnowledge(adminCtx, allowlist))
+
+	closed := &KnowledgeBase{TenantID: 7, Governance: KnowledgeGovernanceConfig{Enabled: true}, ContributionMode: ContributionModeClosed}
+	assert.False(t, CanContributeKnowledge(memberCtx, closed))
+	assert.True(t, CanContributeKnowledge(adminCtx, closed))
+	assert.False(t, CanContributeKnowledge(knowledgeContext(8, "member-a", "member"), members))
 }

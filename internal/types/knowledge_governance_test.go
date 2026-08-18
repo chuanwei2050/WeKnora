@@ -77,13 +77,14 @@ func TestKnowledgeVersionRetrievalBoundaries(t *testing.T) {
 func TestKnowledgeVersionTransitionMatrix(t *testing.T) {
 	valid := map[KnowledgeVersionStatus][]KnowledgeVersionStatus{
 		KnowledgeVersionDraft:         {KnowledgeVersionPendingReview, KnowledgeVersionRejected},
-		KnowledgeVersionPendingReview: {KnowledgeVersionApproved, KnowledgeVersionRejected},
+		KnowledgeVersionPendingReview: {KnowledgeVersionDraft, KnowledgeVersionApproved, KnowledgeVersionRejected},
 		KnowledgeVersionApproved:      {KnowledgeVersionIndexing},
 		KnowledgeVersionIndexing:      {KnowledgeVersionActive, KnowledgeVersionScheduled, KnowledgeVersionPublishFailed},
 		KnowledgeVersionScheduled:     {KnowledgeVersionActive, KnowledgeVersionExpired},
 		KnowledgeVersionActive:        {KnowledgeVersionSuperseded, KnowledgeVersionExpired},
 		KnowledgeVersionPublishFailed: {KnowledgeVersionIndexing},
 		KnowledgeVersionSuperseded:    {KnowledgeVersionIndexing},
+		KnowledgeVersionRejected:      {KnowledgeVersionDraft},
 	}
 	for from, destinations := range valid {
 		for _, to := range destinations {
@@ -92,7 +93,7 @@ func TestKnowledgeVersionTransitionMatrix(t *testing.T) {
 			}
 		}
 	}
-	for _, from := range []KnowledgeVersionStatus{KnowledgeVersionRejected, KnowledgeVersionExpired} {
+	for _, from := range []KnowledgeVersionStatus{KnowledgeVersionExpired} {
 		if CanTransitionKnowledgeVersion(from, KnowledgeVersionIndexing) {
 			t.Errorf("terminal status %s must not transition", from)
 		}

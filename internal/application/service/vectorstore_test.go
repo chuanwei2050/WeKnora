@@ -28,6 +28,12 @@ type mockVectorStoreRepo struct {
 	existsByEndpoint    bool
 }
 
+func platformAdminTestContext() context.Context {
+	return context.WithValue(context.Background(), types.UserContextKey, &types.User{
+		Role: types.UserRolePlatformAdmin,
+	})
+}
+
 func newElasticsearchTestServer(t *testing.T) string {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -179,7 +185,7 @@ func TestCreateStore_Success(t *testing.T) {
 		},
 	}
 
-	err := svc.CreateStore(context.Background(), store)
+	err := svc.CreateStore(platformAdminTestContext(), store)
 	assert.NoError(t, err)
 	assert.Len(t, repo.stores, 1)
 }
@@ -208,7 +214,7 @@ func TestCreateStore_ValidationError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := svc.CreateStore(context.Background(), tt.store)
+			err := svc.CreateStore(platformAdminTestContext(), tt.store)
 			require.Error(t, err)
 			var appErr *errors.AppError
 			assert.ErrorAs(t, err, &appErr)
@@ -292,7 +298,7 @@ func TestCreateStore_ConnectionConfigValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := svc.CreateStore(context.Background(), tt.store)
+			err := svc.CreateStore(platformAdminTestContext(), tt.store)
 			if tt.wantError {
 				require.Error(t, err)
 			} else {
@@ -315,7 +321,7 @@ func TestCreateStore_DuplicateCheck_DBStore(t *testing.T) {
 		},
 	}
 
-	err := svc.CreateStore(context.Background(), store)
+	err := svc.CreateStore(platformAdminTestContext(), store)
 	require.Error(t, err)
 
 	var appErr *errors.AppError
@@ -338,7 +344,7 @@ func TestCreateStore_DuplicateCheck_DBError(t *testing.T) {
 		},
 	}
 
-	err := svc.CreateStore(context.Background(), store)
+	err := svc.CreateStore(platformAdminTestContext(), store)
 	require.Error(t, err)
 }
 
@@ -365,7 +371,7 @@ func TestCreateStore_DuplicateCheck_EnvStore(t *testing.T) {
 		},
 	}
 
-	err := svc.CreateStore(context.Background(), store)
+	err := svc.CreateStore(platformAdminTestContext(), store)
 	require.Error(t, err)
 
 	var appErr *errors.AppError
@@ -396,7 +402,7 @@ func TestCreateStore_DuplicateCheck_EnvStore_DifferentIndex_Allowed(t *testing.T
 		},
 	}
 
-	err := svc.CreateStore(context.Background(), store)
+	err := svc.CreateStore(platformAdminTestContext(), store)
 	assert.NoError(t, err)
 }
 
@@ -415,7 +421,7 @@ func TestCreateStore_DifferentEndpointSameIndex_Allowed(t *testing.T) {
 		},
 	}
 
-	err := svc.CreateStore(context.Background(), store)
+	err := svc.CreateStore(platformAdminTestContext(), store)
 	assert.NoError(t, err)
 }
 
@@ -439,7 +445,7 @@ func TestCreateStore_RegistersInRegistry(t *testing.T) {
 		},
 	}
 
-	err := svc.CreateStore(context.Background(), store)
+	err := svc.CreateStore(platformAdminTestContext(), store)
 	require.NoError(t, err)
 
 	// Store should be persisted AND registered in registry
@@ -464,7 +470,7 @@ func TestCreateStore_RegistryFailureDoesNotRollBackDB(t *testing.T) {
 	}
 
 	// CreateStore should succeed even if registry fails (best-effort + self-healing)
-	err := svc.CreateStore(context.Background(), store)
+	err := svc.CreateStore(platformAdminTestContext(), store)
 	assert.NoError(t, err)
 
 	// DB should have the store
@@ -488,7 +494,7 @@ func TestCreateStore_NilRegistryAndFactory(t *testing.T) {
 	}
 
 	// Should work fine without registry (degrades gracefully)
-	err := svc.CreateStore(context.Background(), store)
+	err := svc.CreateStore(platformAdminTestContext(), store)
 	assert.NoError(t, err)
 	assert.Len(t, repo.stores, 1)
 }
@@ -503,7 +509,7 @@ func TestDeleteStore_UnregistersFromRegistry(t *testing.T) {
 	registry.registered["store-1"] = true
 	svc := NewVectorStoreService(repo, registry, nil)
 
-	err := svc.DeleteStore(context.Background(), 1, "store-1")
+	err := svc.DeleteStore(platformAdminTestContext(), 1, "store-1")
 	require.NoError(t, err)
 
 	// Should be unregistered
@@ -516,7 +522,7 @@ func TestDeleteStore_NilRegistryGraceful(t *testing.T) {
 	svc := NewVectorStoreService(repo, nil, nil)
 
 	// Should not panic with nil registry
-	err := svc.DeleteStore(context.Background(), 1, "store-1")
+	err := svc.DeleteStore(platformAdminTestContext(), 1, "store-1")
 	assert.NoError(t, err)
 }
 
@@ -526,7 +532,7 @@ func TestDeleteStore_RepoErrorSkipsUnregister(t *testing.T) {
 	registry.registered["store-1"] = true
 	svc := NewVectorStoreService(repo, registry, nil)
 
-	err := svc.DeleteStore(context.Background(), 1, "store-1")
+	err := svc.DeleteStore(platformAdminTestContext(), 1, "store-1")
 	assert.Error(t, err)
 
 	// Registry should NOT be touched if DB delete fails
@@ -548,7 +554,7 @@ func TestUpdateStore_Success(t *testing.T) {
 		Name:     "updated-name",
 	}
 
-	err := svc.UpdateStore(context.Background(), store)
+	err := svc.UpdateStore(platformAdminTestContext(), store)
 	assert.NoError(t, err)
 }
 
@@ -572,7 +578,7 @@ func TestUpdateStore_ValidationError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := svc.UpdateStore(context.Background(), tt.store)
+			err := svc.UpdateStore(platformAdminTestContext(), tt.store)
 			require.Error(t, err)
 		})
 	}
@@ -586,7 +592,7 @@ func TestDeleteStore_Success(t *testing.T) {
 	repo := &mockVectorStoreRepo{}
 	svc := NewVectorStoreService(repo, nil, nil)
 
-	err := svc.DeleteStore(context.Background(), 1, "test-id")
+	err := svc.DeleteStore(platformAdminTestContext(), 1, "test-id")
 	assert.NoError(t, err)
 }
 
@@ -594,7 +600,7 @@ func TestDeleteStore_RepoError(t *testing.T) {
 	repo := &mockVectorStoreRepo{deleteErr: assert.AnError}
 	svc := NewVectorStoreService(repo, nil, nil)
 
-	err := svc.DeleteStore(context.Background(), 1, "test-id")
+	err := svc.DeleteStore(platformAdminTestContext(), 1, "test-id")
 	assert.Error(t, err)
 }
 

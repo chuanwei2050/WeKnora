@@ -80,6 +80,10 @@ export async function rejectKnowledgeVersion(knowledgeId: string, versionId: str
   return post(`/api/v1/knowledge/${encodeURIComponent(knowledgeId)}/versions/${encodeURIComponent(versionId)}/reject`, { comment })
 }
 
+export async function withdrawKnowledgeVersionReview(knowledgeId: string, versionId: string, comment = '') {
+  return post(`/api/v1/knowledge/${encodeURIComponent(knowledgeId)}/versions/${encodeURIComponent(versionId)}/withdraw`, { comment })
+}
+
 export async function publishKnowledgeVersion(knowledgeId: string, versionId: string) {
   return post(`/api/v1/knowledge/${encodeURIComponent(knowledgeId)}/versions/${encodeURIComponent(versionId)}/publish`, { index_ready: true })
 }

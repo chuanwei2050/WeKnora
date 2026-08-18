@@ -103,6 +103,11 @@ func (s *modelService) CreateModel(ctx context.Context, model *types.Model) erro
 	if model == nil {
 		return errors.New("model is required")
 	}
+	user, ok := types.UserFromContext(ctx)
+	if !ok || !user.IsPlatformAdmin() {
+		return errors.New("only platform administrators can manage models")
+	}
+	model.TenantID = types.PlatformModelTenantID
 	logger.Infof(ctx, "Creating model: %s, type: %s, source: %s", model.Name, model.Type, model.Source)
 	normalizeModelParameters(model)
 	if err := s.validateApprovedModelEndpoint(ctx, model); err != nil {
@@ -450,6 +455,10 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 	if model == nil {
 		return errors.New("model is required")
 	}
+	user, ok := types.UserFromContext(ctx)
+	if !ok || !user.IsPlatformAdmin() {
+		return errors.New("only platform administrators can manage models")
+	}
 	logger.Info(ctx, "Start updating model")
 	logger.Infof(ctx, "Updating model ID: %s, name: %s", model.ID, model.Name)
 
@@ -462,6 +471,7 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 		})
 		return err
 	}
+	model.TenantID = types.PlatformModelTenantID
 	if existingModel != nil && existingModel.IsBuiltin {
 		logger.Warnf(ctx, "Attempted to update builtin model: %s", model.ID)
 		return errors.New("builtin models cannot be updated")
@@ -496,6 +506,10 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 
 // DeleteModel removes a model from the repository
 func (s *modelService) DeleteModel(ctx context.Context, id string) error {
+	user, ok := types.UserFromContext(ctx)
+	if !ok || !user.IsPlatformAdmin() {
+		return errors.New("only platform administrators can manage models")
+	}
 	logger.Info(ctx, "Start deleting model")
 	logger.Infof(ctx, "Deleting model ID: %s", id)
 

@@ -40,7 +40,7 @@ instance.interceptors.request.use(
     // 添加跨租户访问请求头（如果选择了其他租户）
     const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
     const defaultTenantId = localStorage.getItem('weknora_tenant');
-    if (selectedTenantId) {
+    if (selectedTenantId && !config.url?.includes('/api/v1/admin/')) {
       try {
         const defaultTenant = defaultTenantId ? JSON.parse(defaultTenantId) : null;
         const defaultId = defaultTenant?.id ? String(defaultTenant.id) : null;
@@ -113,6 +113,21 @@ instance.interceptors.response.use(
     if (error.response.status === 401 && isPublicAuthRequest(originalRequest?.url)) {
       const { status, data } = error.response;
       return Promise.reject({ status, message: (typeof data === 'object' ? (data?.error?.message || data?.message) : data) || t('error.invalidCredentials') });
+    }
+
+    // A request started before login (or with an older token) may finish after
+    // the new session has already been persisted. It must not refresh or clear
+    // the current session.
+    if (error.response.status === 401) {
+      const requestAuthorization = originalRequest?.headers?.Authorization || originalRequest?.headers?.get?.('Authorization')
+      const currentToken = localStorage.getItem('weknora_token')
+      if (!requestAuthorization || (currentToken && requestAuthorization !== `Bearer ${currentToken}`)) {
+        const data = error.response.data
+        return Promise.reject({
+          status: 401,
+          message: (typeof data === 'object' ? (data?.error?.message || data?.message || data?.error) : data) || t('error.pleaseRelogin')
+        })
+      }
     }
 
     // 如果是401错误且不是刷新token的请求，尝试刷新token
@@ -256,6 +271,10 @@ export function post<T = any>(url: string, data = {}, config?: any): Promise<T> 
 
 export function put<T = any>(url: string, data = {}): Promise<T> {
   return unwrapResponse(instance.put<T>(url, data));
+}
+
+export function patch<T = any>(url: string, data = {}): Promise<T> {
+  return unwrapResponse(instance.patch<T>(url, data));
 }
 
 export function del<T = any>(url: string, data?: any): Promise<T> {

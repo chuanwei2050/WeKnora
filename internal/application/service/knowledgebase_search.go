@@ -90,6 +90,20 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	if len(searchKBIDs) == 0 {
 		searchKBIDs = []string{id}
 	}
+	requested := make(map[string]struct{}, len(searchKBIDs))
+	for _, kbID := range searchKBIDs {
+		requested[kbID] = struct{}{}
+	}
+	visibleKBs, err := s.GetKnowledgeBasesByIDsOnly(ctx, searchKBIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, kb := range visibleKBs {
+		delete(requested, kb.ID)
+	}
+	if len(requested) > 0 {
+		return nil, ErrKnowledgeBaseAccessDenied
+	}
 
 	logger.Infof(ctx, "Hybrid search parameters, knowledge base IDs: %v, query text: %s", searchKBIDs, params.QueryText)
 

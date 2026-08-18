@@ -39,6 +39,10 @@ export function createKnowledgeBase(data: {
     wiki_enabled: boolean;
     graph_enabled: boolean;
   };
+  governance?: { enabled: boolean; profile_id?: string; profile_version?: string };
+  contribution_mode?: 'closed' | 'members' | 'allowlist';
+  contributor_ids?: string[];
+  reviewer_ids?: string[];
 }) {
   return post(`/api/v1/knowledge-bases`, data);
 }
@@ -68,6 +72,10 @@ export function updateKnowledgeBase(id: string, data: {
       wiki_enabled: boolean;
       graph_enabled: boolean;
     };
+    governance?: { enabled: boolean; profile_id?: string; profile_version?: string };
+    contribution_mode?: 'closed' | 'members' | 'allowlist';
+    contributor_ids?: string[];
+    reviewer_ids?: string[];
   }
 }) {
   return put(`/api/v1/knowledge-bases/${id}` , data);

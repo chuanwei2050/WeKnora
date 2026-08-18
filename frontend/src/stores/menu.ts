@@ -22,6 +22,8 @@ export const useMenuStore = defineStore('menuStore', () => {
     { title: '', titleKey: 'menu.knowledgeSearch', icon: 'search', path: 'knowledge-search' },
     { title: '', titleKey: 'menu.agents', icon: 'agent', path: 'agents' },
     { title: '', titleKey: 'menu.organizations', icon: 'organization', path: 'organizations' },
+    { title: '租户管理', icon: 'setting', path: 'admin/tenants' },
+    { title: '用户管理', icon: 'setting', path: 'admin/users' },
     {
       title: '',
       titleKey: 'menu.chat',
@@ -63,10 +65,16 @@ export const useMenuStore = defineStore('menuStore', () => {
 
   const visibleMenuArr = computed(() => {
     const authStore = useAuthStore()
-    if (authStore.isLiteMode) {
-      return menuArr.filter(item => !liteHiddenPaths.has(item.path))
-    }
-    return menuArr
+    const role = authStore.user?.role === 'platform_admin' && authStore.workspaceMode === 'tenant'
+      ? 'tenant_admin'
+      : authStore.user?.role || 'member'
+    return menuArr.filter(item => {
+      if (authStore.isLiteMode && liteHiddenPaths.has(item.path)) return false
+      if (role === 'platform_admin') return item.path === 'admin/tenants'
+      if (item.path === 'admin/tenants' || item.path === 'organizations') return false
+      if (item.path === 'admin/users') return role === 'tenant_admin'
+      return item.path !== 'logout'
+    })
   })
 
   const chatMenuIndex = menuArr.findIndex(item => item.path === 'creatChat')

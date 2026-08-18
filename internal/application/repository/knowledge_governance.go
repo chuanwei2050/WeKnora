@@ -64,6 +64,42 @@ func (r *knowledgeGovernanceRepository) UpdateVersionStatus(ctx context.Context,
 	})
 }
 
+func (r *knowledgeGovernanceRepository) TransitionVersionWithReview(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+	status types.KnowledgeVersionStatus,
+	review *types.KnowledgeVersionReview,
+) error {
+	if review == nil {
+		return errors.New("knowledge version review is required")
+	}
+	if review.ID == "" {
+		review.ID = uuid.NewString()
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var version types.KnowledgeVersion
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("tenant_id = ? AND id = ?", tenantID, id).First(&version).Error; err != nil {
+			return err
+		}
+		if review.VersionID != version.ID {
+			return errors.New("knowledge version review does not match version")
+		}
+		if version.Status == types.KnowledgeVersionRejected && status == types.KnowledgeVersionPendingReview {
+			if err := types.TransitionKnowledgeVersion(&version, types.KnowledgeVersionDraft); err != nil {
+				return err
+			}
+		}
+		if err := types.TransitionKnowledgeVersion(&version, status); err != nil {
+			return err
+		}
+		if err := tx.Model(&types.KnowledgeVersion{}).Where("tenant_id = ? AND id = ?", tenantID, id).Update("status", status).Error; err != nil {
+			return err
+		}
+		return tx.Create(review).Error
+	})
+}
+
 // ActivateVersion switches the current version and retires the previous one
 // in one database transaction. A future-effective version remains scheduled
 // and does not change the current pointer until ActivateDueVersions runs.
@@ -83,6 +119,28 @@ func (r *knowledgeGovernanceRepository) ActivateVersion(ctx context.Context, ten
 	}
 	if err := r.db.WithContext(ctx).Table("knowledges").Select("knowledge_base_id").Where("tenant_id = ? AND id = ?", tenantID, candidate.KnowledgeID).First(&knowledge).Error; err != nil {
 		return err
+	}
+	var kb types.KnowledgeBase
+	if err := r.db.WithContext(ctx).Select("id", "indexing_strategy").Where("tenant_id = ? AND id = ?", tenantID, knowledge.KnowledgeBaseID).First(&kb).Error; err != nil {
+		return err
+	}
+	kb.EnsureDefaults()
+	if !kb.IsGraphEnabled() {
+		return r.activateVersionDB(ctx, tenantID, id, now)
+	}
+	var chunks []types.Chunk
+	if err := r.db.WithContext(ctx).Select("content").Where("tenant_id = ? AND knowledge_version_id = ?", tenantID, candidate.ID).Find(&chunks).Error; err != nil {
+		return err
+	}
+	hasGraphCandidate := false
+	for _, chunk := range chunks {
+		if types.NeedsEntityRelation(chunk.Content) {
+			hasGraphCandidate = true
+			break
+		}
+	}
+	if !hasGraphCandidate {
+		return r.activateVersionDB(ctx, tenantID, id, now)
 	}
 	namespace := types.GraphNamespaceForVersion(candidate.ID, true)
 	if err := r.graph.SwitchCanonicalNamespace(ctx, tenantID, knowledge.KnowledgeBaseID, namespace); err != nil {
@@ -147,7 +205,7 @@ func (r *knowledgeGovernanceRepository) activateVersionDB(ctx context.Context, t
 			return err
 		}
 		return tx.Table("knowledges").Where("tenant_id = ? AND id = ?", tenantID, candidate.KnowledgeID).
-			Update("current_version_id", candidate.ID).Error
+			Updates(map[string]any{"current_version_id": candidate.ID, "pending_version_id": ""}).Error
 	})
 }
 

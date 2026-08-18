@@ -52,7 +52,7 @@ func canAccessTenant(user *types.User, targetTenantID uint64, cfg *config.Config
 		return false
 	}
 	// 2. 检查用户权限
-	if !user.CanAccessAllTenants {
+	if !user.IsPlatformAdmin() {
 		return false
 	}
 	// 3. 如果目标租户是用户自己的租户，允许访问
@@ -88,6 +88,11 @@ func Auth(
 			token := strings.TrimPrefix(authHeader, "Bearer ")
 			user, err := userService.ValidateToken(c.Request.Context(), token)
 			if err == nil && user != nil {
+				if !user.IsActive {
+					c.JSON(http.StatusForbidden, gin.H{"error": "User account is disabled"})
+					c.Abort()
+					return
+				}
 				// JWT Token认证成功
 				// 检查是否有跨租户访问请求
 				targetTenantID := user.TenantID
@@ -100,7 +105,7 @@ func Auth(
 						if canAccessTenant(user, parsedTenantID, cfg) {
 							// 验证目标租户是否存在
 							targetTenant, err := tenantService.GetTenantByID(c.Request.Context(), parsedTenantID)
-							if err == nil && targetTenant != nil {
+							if err == nil && targetTenant != nil && targetTenant.Status == string(types.TenantStatusActive) {
 								targetTenantID = parsedTenantID
 								log.Printf("User %s switching to tenant %d", user.ID, targetTenantID)
 							} else {
@@ -133,14 +138,20 @@ func Auth(
 					c.Abort()
 					return
 				}
+				if tenant.Status != string(types.TenantStatusActive) {
+					c.JSON(http.StatusForbidden, gin.H{"error": "Tenant is suspended"})
+					c.Abort()
+					return
+				}
 
 				// 存储用户和租户信息到上下文
 				c.Set(types.TenantIDContextKey.String(), targetTenantID)
 				c.Set(types.TenantInfoContextKey.String(), tenant)
 				c.Set(types.UserContextKey.String(), user)
 				c.Set(types.UserIDContextKey.String(), user.ID)
+				c.Set(types.AuthenticationMethodContextKey.String(), types.AuthenticationMethodBearer)
 				c.Request = c.Request.WithContext(
-					context.WithValue(
+					context.WithValue(context.WithValue(
 						context.WithValue(
 							context.WithValue(
 								context.WithValue(c.Request.Context(), types.TenantIDContextKey, targetTenantID),
@@ -149,7 +160,7 @@ func Auth(
 							types.UserContextKey, user,
 						),
 						types.UserIDContextKey, user.ID,
-					),
+					), types.AuthenticationMethodContextKey, types.AuthenticationMethodBearer),
 				)
 				c.Next()
 				return
@@ -179,11 +190,15 @@ func Auth(
 				c.Abort()
 				return
 			}
-
 			if t == nil || subtle.ConstantTimeCompare([]byte(t.APIKey), []byte(apiKey)) != 1 {
 				c.JSON(http.StatusUnauthorized, gin.H{
 					"error": "Unauthorized: invalid API key",
 				})
+				c.Abort()
+				return
+			}
+			if t.Status != string(types.TenantStatusActive) {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Tenant is suspended"})
 				c.Abort()
 				return
 			}
@@ -212,9 +227,10 @@ func Auth(
 			}
 			c.Set(types.UserContextKey.String(), user)
 			c.Set(types.UserIDContextKey.String(), user.ID)
+			c.Set(types.AuthenticationMethodContextKey.String(), types.AuthenticationMethodAPIKey)
 			ctx = context.WithValue(
-				context.WithValue(ctx, types.UserContextKey, user),
-				types.UserIDContextKey, user.ID,
+				context.WithValue(context.WithValue(ctx, types.UserContextKey, user), types.UserIDContextKey, user.ID),
+				types.AuthenticationMethodContextKey, types.AuthenticationMethodAPIKey,
 			)
 
 			c.Request = c.Request.WithContext(ctx)

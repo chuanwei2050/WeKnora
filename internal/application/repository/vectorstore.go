@@ -29,7 +29,7 @@ func (r *vectorStoreRepository) Create(ctx context.Context, store *types.VectorS
 func (r *vectorStoreRepository) GetByID(ctx context.Context, tenantID uint64, id string) (*types.VectorStore, error) {
 	var store types.VectorStore
 	if err := r.db.WithContext(ctx).Where(
-		"id = ? AND tenant_id = ?", id, tenantID,
+		"id = ? AND tenant_id = ?", id, types.PlatformScopeTenantID,
 	).First(&store).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -43,7 +43,7 @@ func (r *vectorStoreRepository) GetByID(ctx context.Context, tenantID uint64, id
 func (r *vectorStoreRepository) List(ctx context.Context, tenantID uint64) ([]*types.VectorStore, error) {
 	var stores []*types.VectorStore
 	if err := r.db.WithContext(ctx).Where(
-		"tenant_id = ?", tenantID,
+		"tenant_id = ?", types.PlatformScopeTenantID,
 	).Order("created_at DESC").Find(&stores).Error; err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func (r *vectorStoreRepository) List(ctx context.Context, tenantID uint64) ([]*t
 // updated_at is handled by the DB trigger, so it is not included in Select.
 func (r *vectorStoreRepository) Update(ctx context.Context, store *types.VectorStore) error {
 	return r.db.WithContext(ctx).Model(&types.VectorStore{}).Where(
-		"id = ? AND tenant_id = ?", store.ID, store.TenantID,
+		"id = ? AND tenant_id = ?", store.ID, types.PlatformScopeTenantID,
 	).Select("name").Updates(store).Error
 }
 
@@ -64,14 +64,14 @@ func (r *vectorStoreRepository) Update(ctx context.Context, store *types.VectorS
 // touching user-immutable fields like engine_type or index_config.
 func (r *vectorStoreRepository) UpdateConnectionConfig(ctx context.Context, store *types.VectorStore) error {
 	return r.db.WithContext(ctx).Model(&types.VectorStore{}).Where(
-		"id = ? AND tenant_id = ?", store.ID, store.TenantID,
+		"id = ? AND tenant_id = ?", store.ID, types.PlatformScopeTenantID,
 	).Select("connection_config").Updates(store).Error
 }
 
 // Delete soft-deletes a vector store
 func (r *vectorStoreRepository) Delete(ctx context.Context, tenantID uint64, id string) error {
 	return r.db.WithContext(ctx).Where(
-		"id = ? AND tenant_id = ?", id, tenantID,
+		"id = ? AND tenant_id = ?", id, types.PlatformScopeTenantID,
 	).Delete(&types.VectorStore{}).Error
 }
 
@@ -87,7 +87,7 @@ func (r *vectorStoreRepository) ExistsByEndpointAndIndex(
 ) (bool, error) {
 	var stores []*types.VectorStore
 	if err := r.db.WithContext(ctx).Where(
-		"tenant_id = ? AND engine_type = ?", tenantID, string(engineType),
+		"tenant_id = ? AND engine_type = ?", types.PlatformScopeTenantID, string(engineType),
 	).Find(&stores).Error; err != nil {
 		return false, err
 	}

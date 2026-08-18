@@ -15,8 +15,10 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-// ErrInvalidTenantID represents an error for invalid tenant ID
-var ErrInvalidTenantID = errors.New("invalid tenant ID")
+var (
+	ErrInvalidTenantID           = errors.New("invalid tenant ID")
+	ErrKnowledgeBaseAccessDenied = errors.New("knowledge base access denied")
+)
 
 // knowledgeBaseService implements the knowledge base service interface
 type knowledgeBaseService struct {
@@ -75,7 +77,11 @@ func (s *knowledgeBaseService) GetRepository() interfaces.KnowledgeBaseRepositor
 func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb *types.KnowledgeBase,
 ) (*types.KnowledgeBase, error) {
+	kb.EnsureDefaults()
 	if err := kb.Governance.Validate(); err != nil {
+		return nil, err
+	}
+	if err := kb.ValidateContributionPolicy(); err != nil {
 		return nil, err
 	}
 	// Generate UUID and set creation timestamps
@@ -88,7 +94,6 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	if userID, ok := types.UserIDFromContext(ctx); ok {
 		kb.CreatedBy = userID
 	}
-	kb.EnsureDefaults()
 
 	logger.Infof(ctx, "Creating knowledge base, ID: %s, tenant ID: %d, name: %s", kb.ID, kb.TenantID, kb.Name)
 
@@ -152,12 +157,16 @@ func (s *knowledgeBaseService) GetKnowledgeBasesByIDsOnly(ctx context.Context, i
 	if err != nil {
 		return nil, err
 	}
+	filtered := make([]*types.KnowledgeBase, 0, len(kbs))
 	for _, kb := range kbs {
 		if kb != nil {
 			kb.EnsureDefaults()
+			if types.IsKnowledgeBaseVisibleToUser(ctx, kb) {
+				filtered = append(filtered, kb)
+			}
 		}
 	}
-	return kbs, nil
+	return filtered, nil
 }
 
 // ListKnowledgeBases returns all knowledge bases for a tenant
@@ -174,6 +183,13 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 		})
 		return nil, err
 	}
+	visible := make([]*types.KnowledgeBase, 0, len(kbs))
+	for _, kb := range kbs {
+		if types.IsKnowledgeBaseVisibleToUser(ctx, kb) {
+			visible = append(visible, kb)
+		}
+	}
+	kbs = visible
 
 	// Query knowledge count and chunk count for each knowledge base
 	for _, kb := range kbs {
@@ -339,6 +355,15 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			}
 			kb.Governance = *config.Governance
 		}
+		if config.ContributionMode != nil {
+			kb.ContributionMode = *config.ContributionMode
+		}
+		if config.ContributorIDs != nil {
+			kb.ContributorIDs = *config.ContributorIDs
+		}
+		if config.ReviewerIDs != nil {
+			kb.ReviewerIDs = *config.ReviewerIDs
+		}
 		// Update indexing strategy — syncs to ExtractConfig for backward compat
 		if config.IndexingStrategy != nil {
 			if !config.IndexingStrategy.HasAnyIndexing() {
@@ -358,8 +383,11 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			}
 		}
 	}
-	kb.UpdatedAt = time.Now()
 	kb.EnsureDefaults()
+	if err := kb.ValidateContributionPolicy(); err != nil {
+		return nil, err
+	}
+	kb.UpdatedAt = time.Now()
 
 	logger.Info(ctx, "Saving knowledge base update")
 	if err := s.repo.UpdateKnowledgeBase(ctx, kb); err != nil {

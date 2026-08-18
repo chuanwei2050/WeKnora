@@ -89,6 +89,10 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	results, err := h.service.HybridSearch(ctx, id, req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
+		if stderrors.Is(err, service.ErrKnowledgeBaseAccessDenied) {
+			c.Error(apperrors.NewForbiddenError("Knowledge base is outside the authorized scope"))
+			return
+		}
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}

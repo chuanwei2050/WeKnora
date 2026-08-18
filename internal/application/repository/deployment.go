@@ -27,7 +27,7 @@ func (r *approvedEndpointRepository) Create(ctx context.Context, endpoint *types
 
 func (r *approvedEndpointRepository) GetByID(ctx context.Context, tenantID uint64, id string) (*types.ApprovedEndpoint, error) {
 	var endpoint types.ApprovedEndpoint
-	err := r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).First(&endpoint).Error
+	err := r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", types.PlatformScopeTenantID, id).First(&endpoint).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -36,7 +36,7 @@ func (r *approvedEndpointRepository) GetByID(ctx context.Context, tenantID uint6
 
 func (r *approvedEndpointRepository) List(ctx context.Context, tenantID uint64, category types.ApprovedEndpointCategory) ([]*types.ApprovedEndpoint, error) {
 	var endpoints []*types.ApprovedEndpoint
-	query := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID)
+	query := r.db.WithContext(ctx).Where("tenant_id = ?", types.PlatformScopeTenantID)
 	if category != "" {
 		query = query.Where("category = ?", category)
 	}
@@ -45,12 +45,12 @@ func (r *approvedEndpointRepository) List(ctx context.Context, tenantID uint64, 
 
 func (r *approvedEndpointRepository) Update(ctx context.Context, endpoint *types.ApprovedEndpoint) error {
 	return r.db.WithContext(ctx).Model(&types.ApprovedEndpoint{}).
-		Where("tenant_id = ? AND id = ?", endpoint.TenantID, endpoint.ID).
+		Where("tenant_id = ? AND id = ?", types.PlatformScopeTenantID, endpoint.ID).
 		Select("*").Updates(endpoint).Error
 }
 
 func (r *approvedEndpointRepository) Delete(ctx context.Context, tenantID uint64, id string) error {
-	return r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&types.ApprovedEndpoint{}).Error
+	return r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", types.PlatformScopeTenantID, id).Delete(&types.ApprovedEndpoint{}).Error
 }
 
 func (r *approvedEndpointRepository) CreateAudit(ctx context.Context, audit *types.ApprovedEndpointAudit) error {
@@ -62,7 +62,7 @@ func (r *approvedEndpointRepository) CreateAudit(ctx context.Context, audit *typ
 
 func (r *approvedEndpointRepository) ListAudits(ctx context.Context, tenantID uint64, endpointID string) ([]*types.ApprovedEndpointAudit, error) {
 	var audits []*types.ApprovedEndpointAudit
-	err := r.db.WithContext(ctx).Where("tenant_id = ? AND endpoint_id = ?", tenantID, endpointID).Order("created_at DESC").Find(&audits).Error
+	err := r.db.WithContext(ctx).Where("tenant_id = ? AND endpoint_id = ?", types.PlatformScopeTenantID, endpointID).Order("created_at DESC").Find(&audits).Error
 	return audits, err
 }
 

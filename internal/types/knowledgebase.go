@@ -3,6 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -16,6 +17,31 @@ const (
 	KnowledgeBaseTypeFAQ      = "faq"
 	KnowledgeBaseTypeWiki     = "wiki"
 )
+
+type ContributionMode string
+
+const (
+	ContributionModeClosed    ContributionMode = "closed"
+	ContributionModeMembers   ContributionMode = "members"
+	ContributionModeAllowlist ContributionMode = "allowlist"
+)
+
+func IsContributionMode(mode ContributionMode) bool {
+	return mode == ContributionModeClosed || mode == ContributionModeMembers || mode == ContributionModeAllowlist
+}
+
+func (kb *KnowledgeBase) ValidateContributionPolicy() error {
+	if kb == nil {
+		return fmt.Errorf("knowledge base is required")
+	}
+	if !IsContributionMode(kb.ContributionMode) {
+		return fmt.Errorf("contribution_mode must be closed, members or allowlist")
+	}
+	if kb.ContributionMode != ContributionModeClosed && !kb.Governance.Enabled {
+		return fmt.Errorf("member contributions require knowledge governance to be enabled")
+	}
+	return nil
+}
 
 // FAQIndexMode represents the FAQ index mode: only index questions or index questions and answers
 type FAQIndexMode string
@@ -80,6 +106,10 @@ type KnowledgeBase struct {
 	ExtractConfig *ExtractConfig `yaml:"extract_config"          json:"extract_config"          gorm:"column:extract_config;type:json"`
 	// Governance configures immutable-version review; new document KBs default on via UI/create path.
 	Governance KnowledgeGovernanceConfig `yaml:"governance" json:"governance" gorm:"column:governance;type:json"`
+	// ContributionMode controls whether tenant members may submit governed drafts.
+	ContributionMode ContributionMode `yaml:"contribution_mode" json:"contribution_mode" gorm:"column:contribution_mode;type:varchar(20);not null;default:'closed'"`
+	ContributorIDs   StringArray      `yaml:"contributor_ids" json:"contributor_ids" gorm:"column:contributor_ids;type:json"`
+	ReviewerIDs      StringArray      `yaml:"reviewer_ids" json:"reviewer_ids" gorm:"column:reviewer_ids;type:json"`
 	// FAQConfig stores FAQ specific configuration such as indexing strategy
 	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"              gorm:"column:faq_config;type:json"`
 	// QuestionGenerationConfig stores question generation configuration for document knowledge bases
@@ -125,7 +155,10 @@ type KnowledgeBaseConfig struct {
 	// nil means "no change" when updating (preserves existing strategy).
 	IndexingStrategy *IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"`
 	// Governance enables immutable-version review and publication for the KB.
-	Governance *KnowledgeGovernanceConfig `yaml:"governance" json:"governance"`
+	Governance       *KnowledgeGovernanceConfig `yaml:"governance" json:"governance"`
+	ContributionMode *ContributionMode          `yaml:"contribution_mode" json:"contribution_mode"`
+	ContributorIDs   *StringArray               `yaml:"contributor_ids" json:"contributor_ids"`
+	ReviewerIDs      *StringArray               `yaml:"reviewer_ids" json:"reviewer_ids"`
 }
 
 // ParserEngineRule maps a set of file types to a specific parser engine.
@@ -500,6 +533,9 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	}
 	if kb.Type == "" {
 		kb.Type = KnowledgeBaseTypeDocument
+	}
+	if !IsContributionMode(kb.ContributionMode) {
+		kb.ContributionMode = ContributionModeClosed
 	}
 	// Clear type-specific configs that don't belong
 	if kb.Type != KnowledgeBaseTypeFAQ {

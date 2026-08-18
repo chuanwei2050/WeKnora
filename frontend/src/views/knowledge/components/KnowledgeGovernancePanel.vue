@@ -78,13 +78,14 @@
                 </div>
               </div>
 
-              <textarea v-model="comment" class="review-comment" rows="2" placeholder="审核意见（可选）" aria-label="审核意见" />
+              <textarea v-if="hasAvailableAction" v-model="comment" class="review-comment" rows="2" placeholder="操作意见（可选）" aria-label="操作意见" />
               <div class="action-row">
-                <button v-if="selectedVersion.status === 'draft'" type="button" class="action-button" :disabled="busy" @click="runAction('submit')">提交审核</button>
-                <button v-if="selectedVersion.status === 'pending_review'" type="button" class="action-button success" :disabled="busy" @click="runAction('approve')">批准</button>
-                <button v-if="selectedVersion.status === 'pending_review'" type="button" class="action-button danger" :disabled="busy" @click="runAction('reject')">驳回</button>
-                <button v-if="['approved', 'indexing', 'publish_failed', 'scheduled'].includes(selectedVersion.status)" type="button" class="action-button success" :disabled="busy" @click="runAction('publish')">发布（索引已就绪）</button>
-                <button v-if="selectedVersion.status === 'superseded'" type="button" class="action-button" :disabled="busy" @click="runAction('rollback')">回滚到此版本</button>
+                <button v-if="isOwnVersion && ['draft', 'rejected'].includes(selectedVersion.status)" type="button" class="action-button" :disabled="busy" @click="runAction('submit')">提交审核</button>
+                <button v-if="isOwnVersion && selectedVersion.status === 'pending_review'" type="button" class="action-button" :disabled="busy" @click="runAction('withdraw')">撤回投稿</button>
+                <button v-if="canReviewVersion && selectedVersion.status === 'pending_review'" type="button" class="action-button success" :disabled="busy" @click="runAction('approve')">批准并开始入库</button>
+                <button v-if="canReviewVersion && selectedVersion.status === 'pending_review'" type="button" class="action-button danger" :disabled="busy" @click="runAction('reject')">驳回</button>
+                <button v-if="canManage && ['indexing', 'publish_failed', 'scheduled'].includes(selectedVersion.status)" type="button" class="action-button success" :disabled="busy" @click="runAction('publish')">完成发布</button>
+                <button v-if="canManage && selectedVersion.status === 'superseded'" type="button" class="action-button" :disabled="busy" @click="runAction('rollback')">回滚到此版本</button>
               </div>
             </article>
           </div>
@@ -104,6 +105,7 @@ import {
   rejectKnowledgeVersion,
   rollbackKnowledgeVersion,
   submitKnowledgeVersionReview,
+  withdrawKnowledgeVersionReview,
   type KnowledgeVersion,
   type KnowledgeVersionStatus,
 } from '@/api/knowledge-governance'
@@ -118,6 +120,9 @@ const props = defineProps<{
   visible: boolean
   knowledgeBaseId: string
   knowledgeItems: KnowledgeItem[]
+  currentUserId: string
+  canManage: boolean
+  canReview: boolean
 }>()
 
 const emit = defineEmits<{ (event: 'update:visible', value: boolean): void }>()
@@ -130,6 +135,15 @@ const busy = ref(false)
 const errorMessage = ref('')
 
 const selectedVersion = computed(() => versions.value.find(version => version.id === selectedVersionId.value))
+const isOwnVersion = computed(() => selectedVersion.value?.created_by === props.currentUserId)
+const canReviewVersion = computed(() => props.canReview && !isOwnVersion.value)
+const hasAvailableAction = computed(() => {
+  const status = selectedVersion.value?.status
+  if (!status) return false
+  return (isOwnVersion.value && ['draft', 'rejected', 'pending_review'].includes(status)) ||
+    (canReviewVersion.value && status === 'pending_review') ||
+    (props.canManage && ['indexing', 'publish_failed', 'scheduled', 'superseded'].includes(status))
+})
 const previousVersion = computed(() => {
   const id = selectedVersion.value?.previous_version_id
   return id ? versions.value.find(version => version.id === id) : undefined
@@ -175,7 +189,7 @@ const selectVersion = async (versionId: string) => {
   }
 }
 
-const runAction = async (action: 'submit' | 'approve' | 'reject' | 'publish' | 'rollback') => {
+const runAction = async (action: 'submit' | 'withdraw' | 'approve' | 'reject' | 'publish' | 'rollback') => {
   if (!selectedKnowledgeId.value || !selectedVersion.value) return
   if (action === 'rollback' && !window.confirm('确认回滚到此版本？')) return
   busy.value = true
@@ -184,6 +198,7 @@ const runAction = async (action: 'submit' | 'approve' | 'reject' | 'publish' | '
     const knowledgeId = selectedKnowledgeId.value
     const versionId = selectedVersion.value.id
     if (action === 'submit') await submitKnowledgeVersionReview(knowledgeId, versionId, comment.value)
+    if (action === 'withdraw') await withdrawKnowledgeVersionReview(knowledgeId, versionId, comment.value)
     if (action === 'approve') await approveKnowledgeVersion(knowledgeId, versionId, comment.value)
     if (action === 'reject') await rejectKnowledgeVersion(knowledgeId, versionId, comment.value)
     if (action === 'publish') await publishKnowledgeVersion(knowledgeId, versionId)

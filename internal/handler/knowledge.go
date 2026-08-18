@@ -34,6 +34,7 @@ type KnowledgeHandler struct {
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
 	asynqClient       interfaces.TaskEnqueuer
+	governanceRepo    interfaces.KnowledgeGovernanceRepository
 }
 
 // NewKnowledgeHandler creates a new knowledge handler instance
@@ -43,6 +44,7 @@ func NewKnowledgeHandler(
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
 	asynqClient interfaces.TaskEnqueuer,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
 		kgService:         kgService,
@@ -50,7 +52,25 @@ func NewKnowledgeHandler(
 		kbShareService:    kbShareService,
 		agentShareService: agentShareService,
 		asynqClient:       asynqClient,
+		governanceRepo:    governanceRepo,
 	}
+}
+
+func (h *KnowledgeHandler) canModifyOwnContribution(ctx context.Context, knowledge *types.Knowledge, kb *types.KnowledgeBase) bool {
+	userID, ok := types.UserIDFromContext(ctx)
+	if !ok || knowledge == nil || knowledge.CreatedBy != userID || !types.CanContributeKnowledge(ctx, kb) || knowledge.PendingVersionID == "" || h.governanceRepo == nil {
+		return false
+	}
+	version, err := h.governanceRepo.GetVersion(ctx, knowledge.TenantID, knowledge.PendingVersionID)
+	return err == nil && version != nil && (version.Status == types.KnowledgeVersionDraft || version.Status == types.KnowledgeVersionRejected)
+}
+
+func (h *KnowledgeHandler) canViewGovernedKnowledge(ctx context.Context, knowledge *types.Knowledge, kb *types.KnowledgeBase) bool {
+	if knowledge == nil || kb == nil || !kb.Governance.Enabled || knowledge.CurrentVersionID != "" {
+		return true
+	}
+	userID, ok := types.UserIDFromContext(ctx)
+	return types.CanManageKnowledgeBase(ctx, kb) || types.CanReviewKnowledge(ctx, kb) || (ok && knowledge.CreatedBy == userID)
 }
 
 // validateKnowledgeBaseAccess validates access permissions to a knowledge base
@@ -132,7 +152,13 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, k
 		if types.CanManageKnowledgeBase(ctx, kb) {
 			return knowledge, context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
 		}
+		if requiredPermission == types.OrgRoleEditor && h.canModifyOwnContribution(ctx, knowledge, kb) {
+			return knowledge, context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
+		}
 		if requiredPermission == types.OrgRoleViewer && types.CanReadKnowledgeBase(ctx, kb) {
+			if !h.canViewGovernedKnowledge(ctx, knowledge, kb) {
+				return nil, ctx, errors.NewForbiddenError("Unpublished contribution is not visible")
+			}
 			return knowledge, context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
 		}
 	}
@@ -246,7 +272,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	logger.Info(ctx, "Start creating knowledge from file")
 
 	// Validate access to the knowledge base (only owner or admin/editor can create)
-	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	kb, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -254,7 +280,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
 
 	// Check write permission
-	if permission != types.OrgRoleAdmin {
+	if permission != types.OrgRoleAdmin && !types.CanContributeKnowledge(ctx, kb) {
 		c.Error(errors.NewForbiddenError("No permission to create knowledge"))
 		return
 	}
@@ -566,7 +592,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	logger.Info(ctx, "Start retrieving knowledge list")
 
 	// Validate access to the knowledge base (read access - any permission level)
-	_, kbID, effectiveTenantID, _, err := h.validateKnowledgeBaseAccess(c)
+	kb, kbID, effectiveTenantID, _, err := h.validateKnowledgeBaseAccess(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -605,6 +631,16 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
+	}
+	if items, ok := result.Data.([]*types.Knowledge); ok && kb.Governance.Enabled && !types.CanManageKnowledgeBase(ctx, kb) && !types.CanReviewKnowledge(ctx, kb) {
+		visible := make([]*types.Knowledge, 0, len(items))
+		for _, item := range items {
+			if h.canViewGovernedKnowledge(ctx, item, kb) {
+				visible = append(visible, item)
+			}
+		}
+		result.Data = visible
+		result.Total = int64(len(visible))
 	}
 
 	logger.Infof(

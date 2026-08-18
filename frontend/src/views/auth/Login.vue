@@ -1,1485 +1,592 @@
 <template>
-  <div class="login-layout">
-    <div class="animated-bg">
-      <div class="knowledge-node node-1">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-2">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-3">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-          <path d="M2 17l10 5 10-5"/>
-          <path d="M2 12l10 5 10-5"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-4">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <ellipse cx="12" cy="5" rx="9" ry="3"/>
-          <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
-          <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-5">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="11" cy="11" r="8"/>
-          <path d="m21 21-4.35-4.35"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-6">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-          <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
-          <line x1="12" y1="22.08" x2="12" y2="12"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-7">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-8">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-          <circle cx="9" cy="7" r="4"/>
-          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-9">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-10">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-11">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M9 11l3 3L22 4"/>
-          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-12">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-        </svg>
+  <main class="login-page">
+    <section class="identity-panel" aria-label="产品介绍">
+      <div class="grid-texture" aria-hidden="true"></div>
+      <div class="brand">
+        <div class="brand-mark">知</div>
+        <span>智信测评知识平台</span>
       </div>
 
-      <svg class="knowledge-lines" viewBox="0 0 100 100" preserveAspectRatio="none">
-        <line class="connection-line line-1" x1="20" y1="15" x2="35" y2="25" />
-        <line class="connection-line line-2" x1="35" y1="25" x2="55" y2="20" />
-        <line class="connection-line line-3" x1="55" y1="20" x2="85" y2="12" />
-        <line class="connection-line line-4" x1="8" y1="35" x2="25" y2="45" />
-        <line class="connection-line line-5" x1="25" y1="45" x2="65" y2="48" />
-        <line class="connection-line line-6" x1="20" y1="60" x2="60" y2="75" />
-        <line class="connection-line line-7" x1="20" y1="15" x2="20" y2="60" />
-        <line class="connection-line line-8" x1="55" y1="20" x2="45" y2="50" />
-        <line class="connection-line line-9" x1="65" y1="48" x2="90" y2="38" />
-        <line class="connection-line line-10" x1="40" y1="70" x2="75" y2="80" />
-        <line class="connection-line line-11" x1="35" y1="25" x2="25" y2="45" />
-        <line class="connection-line line-12" x1="75" y1="30" x2="65" y2="48" />
-      </svg>
-    </div>
+      <div class="identity-content">
+        <p class="eyebrow">SOFTWARE QUALITY INTELLIGENCE</p>
+        <h1>让测评知识<br />成为可追溯的答案</h1>
+        <p class="lead">
+          汇聚标准、案例与项目资料，通过知识问答和关系图谱，快速定位依据、理解关联。
+        </p>
 
-    <!-- Brand - Top Left -->
-    <div class="header-logo" title="知识问答智能体">
-      <span class="brand-text">知识问答智能体</span>
-    </div>
-
-    <!-- Header Links - Top Right -->
-    <div class="header-links">
-      <div class="language-switch">
-        <button @click="toggleLanguageMenu" class="header-link" :title="currentLangOption?.label">
-          <span class="lang-flag-icon">{{ currentLangOption?.flag }}</span>
-          <span class="link-text">{{ currentLangOption?.shortLabel }}</span>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-        </button>
-        
-        <!-- Language Dropdown -->
-        <div v-if="showLanguageMenu" class="language-dropdown">
-          <div 
-            v-for="lang in languageOptions" 
-            :key="lang.value"
-            @click="selectLanguage(lang.value)"
-            class="language-option"
-            :class="{ active: currentLanguage === lang.value }"
-          >
-            <span class="lang-flag">{{ lang.flag }}</span>
-            <span class="lang-label">{{ lang.label }}</span>
-            <span v-if="currentLanguage === lang.value" class="check-icon">✓</span>
+        <div class="capabilities" aria-label="平台能力">
+          <div class="capability">
+            <span class="capability-index">01</span>
+            <span>测评知识问答</span>
+          </div>
+          <div class="capability">
+            <span class="capability-index">02</span>
+            <span>知识关系图谱</span>
+          </div>
+          <div class="capability">
+            <span class="capability-index">03</span>
+            <span>多租户数据隔离</span>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- Left Showcase Section -->
-    <div class="showcase-section">
-      <div class="showcase-content">
-        <p class="showcase-subtitle">{{ $t('platform.subtitle') }}</p>
-        <p class="showcase-description">{{ $t('platform.description') }}</p>
-
-        <div class="feature-tags">
-          <span class="tag">{{ $t('platform.rag') }}</span>
-          <span class="tag">{{ $t('platform.hybridSearch') }}</span>
-          <span class="tag">{{ $t('platform.localDeploy') }}</span>
-        </div>
-
-        <!-- Swiper Carousel -->
-        <div class="carousel-container">
-          <swiper
-            :modules="modules"
-            :slides-per-view="1"
-            :loop="true"
-            :autoplay="{
-              delay: 4000,
-              disableOnInteraction: false,
-            }"
-            :effect="'fade'"
-            :fade-effect="{ crossFade: true }"
-            :pagination="{ clickable: true, dynamicBullets: false }"
-            :speed="800"
-            class="screenshot-swiper"
-          >
-            <swiper-slide v-for="(slide, index) in slides" :key="index">
-              <div class="slide-content">
-                <img :src="slide.image" :alt="slide.title" class="slide-image" />
-              </div>
-            </swiper-slide>
-          </swiper>
-        </div>
+      <div class="graph-motif" aria-hidden="true">
+        <span class="graph-line line-one"></span>
+        <span class="graph-line line-two"></span>
+        <span class="graph-line line-three"></span>
+        <span class="graph-node node-one"></span>
+        <span class="graph-node node-two"></span>
+        <span class="graph-node node-three"></span>
+        <span class="graph-node node-four"></span>
       </div>
-    </div>
 
-    <!-- Right Form Section -->
-    <div class="form-section">
-      <div class="form-panel">
-        <!-- Login Card -->
-        <div class="form-card" v-if="!isRegisterMode">
-                <div class="form-header">
-                  <h2 class="form-title">{{ $t('auth.login') }}</h2>
-                  <p class="form-welcome">{{ $t('auth.subtitle') }}</p>
-                </div>
+      <p class="identity-footer">私有化部署 · 数据自主可控</p>
+    </section>
 
-          <div class="form-content">
+    <section class="form-panel">
+      <div class="form-shell">
+        <header class="form-header">
+          <p class="mobile-brand">智信测评知识平台</p>
+          <h2>欢迎登录</h2>
+          <p>使用管理员分配的账号进入工作空间</p>
+        </header>
+
         <t-form
-          ref="formRef"
           :data="formData"
           :rules="formRules"
-          @submit="handleLogin"
           layout="vertical"
         >
-          <t-form-item :label="$t('auth.email')" name="email">
+          <t-form-item label="用户名" name="username">
             <t-input
-              v-model="formData.email"
-              :placeholder="$t('auth.emailPlaceholder')"
-              type="email"
+              v-model="formData.username"
               size="large"
+              placeholder="请输入用户名"
+              autocomplete="username"
               :disabled="loading"
             />
           </t-form-item>
 
-          <t-form-item :label="$t('auth.password')" name="password">
+          <t-form-item label="密码" name="password">
             <t-input
               v-model="formData.password"
-              :placeholder="$t('auth.passwordPlaceholder')"
               type="password"
               size="large"
+              placeholder="请输入登录密码"
+              autocomplete="current-password"
               :disabled="loading"
+              @keyup.enter="handleLogin"
             />
           </t-form-item>
 
           <t-button
-            type="submit"
+            type="button"
             theme="primary"
             size="large"
             block
             :loading="loading"
-                class="submit-button"
+            class="login-button"
+            @click="handleLogin"
           >
-                {{ loading ? $t('auth.loggingIn') : $t('auth.login') }}
+            进入平台
           </t-button>
+        </t-form>
 
-          <div class="form-footer login-form-footer">
-            <span>{{ $t('auth.noAccount') }}</span>
-            <a href="#" @click.prevent="toggleMode" class="link-button">
-              {{ $t('auth.registerNow') }}
-            </a>
-          </div>
-
-          <div v-if="oidcEnabled" class="oidc-divider">
-            <span>{{ $t('auth.orContinueWith') }}</span>
-          </div>
-
+        <template v-if="oidcEnabled">
+          <div class="divider"><span>或</span></div>
           <t-button
-            v-if="oidcEnabled"
-            theme="default"
+            variant="outline"
             size="large"
             block
             :loading="oidcLoading"
-            :disabled="loading"
-            class="oidc-button"
             @click="handleOIDCLogin"
           >
-            {{ oidcLoading ? $t('auth.redirectingToOIDC') : oidcLoginText }}
+            使用{{ oidcProviderName || '企业账号' }}登录
           </t-button>
-        </t-form>
+        </template>
 
-            <!-- Features list -->
-            <div class="login-features">
-              <div class="feature-item">
-                <span class="feature-icon">✓</span>
-                <span class="feature-text">{{ $t('platform.multimodalParsing') }}</span>
-              </div>
-              <div class="feature-item">
-                <span class="feature-icon">✓</span>
-                <span class="feature-text">{{ $t('platform.hybridSearchEngine') }}</span>
-              </div>
-              <div class="feature-item">
-                <span class="feature-icon">✓</span>
-                <span class="feature-text">{{ $t('platform.ragQandA') }}</span>
-              </div>
-            </div>
-      </div>
-    </div>
-
-        <!-- Register Card -->
-        <div class="form-card" v-if="isRegisterMode">
-          <div class="form-header">
-            <h2 class="form-title">{{ $t('auth.createAccount') }}</h2>
-            <p class="form-subtitle">{{ $t('auth.registerSubtitle') }}</p>
-      </div>
-
-          <div class="form-content">
-        <t-form
-          ref="registerFormRef"
-          :data="registerData"
-          :rules="registerRules"
-          @submit="handleRegister"
-          layout="vertical"
-        >
-          <t-form-item :label="$t('auth.username')" name="username">
-            <t-input
-              v-model="registerData.username"
-              :placeholder="$t('auth.usernamePlaceholder')"
-              size="large"
-              :disabled="loading"
-            />
-          </t-form-item>
-
-          <t-form-item :label="$t('auth.email')" name="email">
-            <t-input
-              v-model="registerData.email"
-              :placeholder="$t('auth.emailPlaceholder')"
-              type="email"
-              size="large"
-              :disabled="loading"
-            />
-          </t-form-item>
-
-          <t-form-item :label="$t('auth.password')" name="password">
-            <t-input
-              v-model="registerData.password"
-              :placeholder="$t('auth.passwordPlaceholder')"
-              type="password"
-              size="large"
-              :disabled="loading"
-            />
-          </t-form-item>
-
-          <t-form-item :label="$t('auth.confirmPassword')" name="confirmPassword">
-            <t-input
-              v-model="registerData.confirmPassword"
-              :placeholder="$t('auth.confirmPasswordPlaceholder')"
-              type="password"
-              size="large"
-              :disabled="loading"
-            />
-          </t-form-item>
-
-          <t-button
-            type="submit"
-            theme="primary"
-            size="large"
-            block
-            :loading="loading"
-                class="submit-button"
-          >
-            {{ loading ? $t('auth.registering') : $t('auth.register') }}
-          </t-button>
-        </t-form>
-
-            <div class="form-footer">
-          <span>{{ $t('auth.haveAccount') }}</span>
-              <a href="#" @click.prevent="toggleMode" class="link-button">
-            {{ $t('auth.backToLogin') }}
-          </a>
-        </div>
-
-            <!-- Features list for register -->
-            <div class="login-features">
-              <div class="feature-item">
-                <span class="feature-icon">✓</span>
-                <span class="feature-text">{{ $t('platform.independentTenant') }}</span>
-      </div>
-              <div class="feature-item">
-                <span class="feature-icon">✓</span>
-                <span class="feature-text">{{ $t('platform.fullApiAccess') }}</span>
-              </div>
-              <div class="feature-item">
-                <span class="feature-icon">✓</span>
-                <span class="feature-text">{{ $t('platform.knowledgeBaseManagement') }}</span>
-              </div>
-            </div>
-          </div>
+        <div class="access-note">
+          <span class="status-dot"></span>
+          <span>平台已关闭公开注册，请联系管理员开通账号</span>
         </div>
       </div>
-    </div>
-  </div>
+
+      <p class="form-footer">© 2026 智信测评知识平台</p>
+    </section>
+  </main>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { Swiper, SwiperSlide } from 'swiper/vue'
-import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
-import 'swiper/css'
-import 'swiper/css/effect-fade'
-import 'swiper/css/pagination'
-import { login, register, getOIDCAuthorizationURL, getOIDCConfig, autoSetup } from '@/api/auth'
+import {
+  autoSetup,
+  getOIDCAuthorizationURL,
+  getOIDCConfig,
+  login,
+  type LoginResponse
+} from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
-import { useI18n } from 'vue-i18n'
-
-// Import screenshot images
-import screenshot1 from '@/assets/img/screenshot-1.svg'
-import screenshot2 from '@/assets/img/screenshot-2.svg'
-import screenshot4 from '@/assets/img/screenshot-4.svg'
 
 const router = useRouter()
 const authStore = useAuthStore()
-const { t, locale } = useI18n()
-
-// Swiper modules
-const modules = [Autoplay, EffectFade, Pagination]
-
-// Carousel slides data
-const slides = [
-  {
-    image: screenshot4,
-    title: t('platform.carousel.agenticRagTitle'),
-    description: t('platform.carousel.agenticRagDesc')
-  },
-  {
-    image: screenshot2,
-    title: t('platform.carousel.hybridSearchTitle'),
-    description: t('platform.carousel.hybridSearchDesc')
-  },
-  {
-    image: screenshot1,
-    title: t('platform.carousel.smartDocRetrievalTitle'),
-    description: t('platform.carousel.smartDocRetrievalDesc')
-  }
-]
-
-// Form references
-const formRef = ref()
-const registerFormRef = ref()
-
-// State management
 const loading = ref(false)
 const oidcLoading = ref(false)
-const isRegisterMode = ref(false)
-const showLanguageMenu = ref(false)
 const oidcEnabled = ref(false)
 const oidcProviderName = ref('')
 
-// Language options
-const languageOptions = [
-  { value: 'zh-CN', label: '简体中文', shortLabel: '中文', flag: '🇨🇳' },
-  { value: 'en-US', label: 'English', shortLabel: 'EN', flag: '🇺🇸' },
-  { value: 'ru-RU', label: 'Русский', shortLabel: 'RU', flag: '🇷🇺' },
-  { value: 'ko-KR', label: '한국어', shortLabel: '한국어', flag: '🇰🇷' }
-]
-
-const currentLanguage = computed(() => locale.value)
-const oidcLoginText = computed(() => {
-  if (oidcProviderName.value) {
-    return t('auth.oidcLoginWithProvider', { provider: oidcProviderName.value })
-  }
-  return t('auth.oidcLogin')
-})
-const currentLangOption = computed(() => languageOptions.find(l => l.value === currentLanguage.value))
-
-// Login form data
-const formData = reactive<{[key: string]: any}>({
-  email: '',
-  password: '',
-})
-
-// Register form data
-const registerData = reactive<{[key: string]: any}>({
+const formData = reactive({
   username: '',
-  email: '',
-  password: '',
-  confirmPassword: ''
+  password: ''
 })
 
-// Login form validation rules
 const formRules = computed(() => ({
-  email: [
-    { required: true, message: t('auth.emailRequired'), type: 'error' },
-    { email: true, message: t('auth.emailInvalid'), type: 'error' }
-  ],
-  password: [
-    { required: true, message: t('auth.passwordRequired'), type: 'error' },
-    { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-    { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
-    { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' }
-  ]
-}))
-
-// Register form validation rules
-const registerRules = computed(() => ({
   username: [
-    { required: true, message: t('auth.usernameRequired'), type: 'error' },
-    { min: 2, message: t('auth.usernameMinLength'), type: 'error' },
-    { max: 20, message: t('auth.usernameMaxLength'), type: 'error' },
-    { 
-      pattern: /^[a-zA-Z0-9_\u4e00-\u9fa5]+$/, 
-      message: t('auth.usernameInvalid'), 
-      type: 'error' 
-    }
-  ],
-  email: [
-    { required: true, message: t('auth.emailRequired'), type: 'error' },
-    { email: true, message: t('auth.emailInvalid'), type: 'error' }
+    { required: true, message: '请输入用户名', type: 'error' },
+    { min: 2, max: 100, message: '用户名长度应为 2 到 100 个字符', type: 'error' }
   ],
   password: [
-    { required: true, message: t('auth.passwordRequired'), type: 'error' },
-    { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-    { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
-    { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' }
-  ],
-  confirmPassword: [
-    { required: true, message: t('auth.confirmPasswordRequired'), type: 'error' },
-    {
-      validator: (val: string) => val === registerData.password,
-      message: t('auth.passwordMismatch'),
-      type: 'error'
-    }
+    { required: true, message: '请输入登录密码', type: 'error' },
+    { min: 8, message: '密码至少 8 位', type: 'error' }
   ]
 }))
 
-// Toggle login/register mode
-const toggleMode = () => {
-  isRegisterMode.value = !isRegisterMode.value
-  
-  Object.keys(registerData).forEach(key => {
-    (registerData as any)[key] = ''
+const persistLoginResponse = async (response: LoginResponse) => {
+  if (!response.user || !response.tenant || !response.token) return
+
+  localStorage.removeItem('weknora_bidreview_embedded')
+  localStorage.removeItem('weknora_bidreview_role')
+  authStore.setLiteMode(false)
+
+  authStore.setUser({
+    id: response.user.id,
+    username: response.user.username,
+    email: response.user.email,
+    avatar: response.user.avatar,
+    tenant_id: String(response.tenant.id),
+    can_access_all_tenants: response.user.can_access_all_tenants || false,
+    role: response.user.role || 'member',
+    created_at: response.user.created_at,
+    updated_at: response.user.updated_at
   })
-}
-
-// Toggle language menu
-const toggleLanguageMenu = () => {
-  showLanguageMenu.value = !showLanguageMenu.value
-}
-
-// Select language
-const selectLanguage = (lang: string) => {
-  locale.value = lang
-  localStorage.setItem('locale', lang)
-  showLanguageMenu.value = false
-  MessagePlugin.success(t('language.languageSaved'))
-}
-
-// Close language menu when clicking outside
-const handleClickOutside = (event: MouseEvent) => {
-  const target = event.target as HTMLElement
-  if (!target.closest('.language-switch')) {
-    showLanguageMenu.value = false
-  }
-}
-
-// Add click outside listener
-onMounted(() => {
-  document.addEventListener('click', handleClickOutside)
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('click', handleClickOutside)
-})
-
-const persistLoginResponse = async (response: any) => {
-  if (response.user && response.tenant && response.token) {
-    authStore.setUser({
-      id: response.user.id || '',
-      username: response.user.username || '',
-      email: response.user.email || '',
-      avatar: response.user.avatar,
-      tenant_id: String(response.tenant.id) || '',
-      can_access_all_tenants: response.user.can_access_all_tenants || false,
-      created_at: response.user.created_at || new Date().toISOString(),
-      updated_at: response.user.updated_at || new Date().toISOString()
-    })
-    authStore.setToken(response.token)
-    if (response.refresh_token) {
-      authStore.setRefreshToken(response.refresh_token)
-    }
-    authStore.setTenant({
-      id: String(response.tenant.id) || '',
-      name: response.tenant.name || '',
-      api_key: response.tenant.api_key || '',
-      owner_id: response.user.id || '',
-      created_at: response.tenant.created_at || new Date().toISOString(),
-      updated_at: response.tenant.updated_at || new Date().toISOString()
-    })
-  }
+  authStore.setToken(response.token)
+  if (response.refresh_token) authStore.setRefreshToken(response.refresh_token)
+  authStore.setTenant({
+    id: String(response.tenant.id),
+    name: response.tenant.name,
+    description: response.tenant.description,
+    api_key: response.tenant.api_key,
+    status: response.tenant.status,
+    business: response.tenant.business,
+    storage_quota: response.tenant.storage_quota,
+    storage_used: response.tenant.storage_used,
+    owner_id: response.user.id,
+    created_at: response.tenant.created_at,
+    updated_at: response.tenant.updated_at
+  })
 
   await nextTick()
-  router.replace('/platform/knowledge-bases')
+  await router.replace(authStore.user?.role === 'platform_admin' ? '/platform/admin/tenants' : '/platform/knowledge-bases')
 }
 
-const getBackendOIDCRedirectURI = () => `${window.location.origin}/api/v1/auth/oidc/callback`
+const handleLogin = async () => {
+  const username = formData.username.trim()
+  if (username.length < 2) {
+    MessagePlugin.warning('请输入有效用户名')
+    return
+  }
+  if (formData.password.length < 8) {
+    MessagePlugin.warning('密码至少 8 位')
+    return
+  }
+  formData.username = username
 
-const loadOIDCConfig = async () => {
+  loading.value = true
   try {
-    const response = await getOIDCConfig()
-    oidcEnabled.value = !!response.success && !!response.enabled
-    oidcProviderName.value = response.provider_display_name || ''
-  } catch {
-    oidcEnabled.value = false
-    oidcProviderName.value = ''
+    const response = await login(formData)
+    if (!response.success) {
+      MessagePlugin.error(response.message || '用户名或密码错误')
+      return
+    }
+    MessagePlugin.success('登录成功')
+    await persistLoginResponse(response)
+  } catch (error) {
+    console.error('登录失败:', error)
+    MessagePlugin.error('登录失败，请稍后重试')
+  } finally {
+    loading.value = false
   }
 }
 
 const handleOIDCLogin = async () => {
+  oidcLoading.value = true
   try {
-    oidcLoading.value = true
-		const response = await getOIDCAuthorizationURL(getBackendOIDCRedirectURI())
-    const authorizationURL = response.authorization_url
-
-    if (!response.success || !authorizationURL) {
-      MessagePlugin.error(response.message || t('auth.oidcLoginFailed'))
+    const redirectURI = `${window.location.origin}/api/v1/auth/oidc/callback`
+    const response = await getOIDCAuthorizationURL(redirectURI)
+    if (!response.success || !response.authorization_url) {
+      MessagePlugin.error(response.message || '企业登录暂不可用')
       return
     }
-
-    window.location.href = authorizationURL
-  } catch (error: any) {
-    console.error('OIDC 登录跳转失败:', error)
-    MessagePlugin.error(error.message || t('auth.oidcLoginFailed'))
+    window.location.href = response.authorization_url
+  } catch (error) {
+    console.error('企业登录失败:', error)
+    MessagePlugin.error('企业登录暂不可用')
   } finally {
     oidcLoading.value = false
   }
 }
 
-// Handle login
-const handleLogin = async () => {
+const loadOIDCConfig = async () => {
   try {
-    const valid = await formRef.value?.validate()
-    if (valid !== true) return
-
-    loading.value = true
-    
-    const response = await login({
-      email: formData.email,
-      password: formData.password,
-    })
-
-    if (response.success) {
-      MessagePlugin.success(t('auth.loginSuccess'))
-      await persistLoginResponse(response)
-    } else {
-      MessagePlugin.error(response.message || t('auth.loginError'))
-    }
-  } catch (error: any) {
-    console.error('登录错误:', error)
-    MessagePlugin.error(error.message || t('auth.loginErrorRetry'))
-  } finally {
-    loading.value = false
+    const response = await getOIDCConfig()
+    oidcEnabled.value = response.success && response.enabled
+    oidcProviderName.value = response.provider_display_name || ''
+  } catch {
+    oidcEnabled.value = false
   }
 }
 
-// Handle registration
-const handleRegister = async () => {
-  try {
-    const valid = await registerFormRef.value?.validate()
-    if (valid !== true) return
-
-    loading.value = true
-    
-    const response = await register({
-      username: registerData.username,
-      email: registerData.email,
-      password: registerData.password
-    })
-
-    if (response.success) {
-      MessagePlugin.success(t('auth.registerSuccess'))
-      
-      // Switch to login mode and fill in email
-      isRegisterMode.value = false
-      formData.email = registerData.email
-      
-      // Clear register form
-      Object.keys(registerData).forEach(key => {
-        (registerData as any)[key] = ''
-      })
-    } else {
-      MessagePlugin.error(response.message || t('auth.registerFailed'))
-    }
-  } catch (error: any) {
-    console.error('注册错误:', error)
-    MessagePlugin.error(error.message || t('auth.registerError'))
-  } finally {
-    loading.value = false
-  }
-}
-
-// Check if already logged in; for lite edition, attempt transparent auto-setup
 onMounted(async () => {
   if (authStore.isLoggedIn) {
-    router.replace('/platform/knowledge-bases')
+    await router.replace(authStore.user?.role === 'platform_admin' ? '/platform/admin/tenants' : '/platform/knowledge-bases')
     return
   }
 
-  const AUTO_SETUP_FAILED_KEY = 'weknora_auto_setup_failed'
-  if (localStorage.getItem(AUTO_SETUP_FAILED_KEY) !== 'true') {
+  const failureKey = 'weknora_auto_setup_failed'
+  if (localStorage.getItem(failureKey) !== 'true') {
     try {
       const response = await autoSetup()
       if (response.success) {
         authStore.setLiteMode(true)
         await persistLoginResponse(response)
         return
-      } else {
-        localStorage.setItem(AUTO_SETUP_FAILED_KEY, 'true')
       }
+      localStorage.setItem(failureKey, 'true')
     } catch {
-      localStorage.setItem(AUTO_SETUP_FAILED_KEY, 'true')
+      localStorage.setItem(failureKey, 'true')
     }
   }
 
-  loadOIDCConfig()
+  await loadOIDCConfig()
 })
 </script>
 
-<style lang="less" scoped>
-.login-layout {
-  display: flex;
-  width: 100%;
+<style scoped lang="less">
+.login-page {
   min-height: 100vh;
-  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(460px, 1.08fr) minmax(440px, 0.92fr);
+  background: #f3f6fb;
+  color: #14213d;
+}
+
+.identity-panel {
   position: relative;
-  background: linear-gradient(225deg, #022c22 0%, #064e3b 15%, #065f46 25%, #047857 38%, #0d355f 50%, #07C05F 65%, #10B981 78%, #34D399 90%, #6EE7B7 100%);
-
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.06) 0%, transparent 50%),
-                radial-gradient(circle at 80% 50%, rgba(255, 255, 255, 0.04) 0%, transparent 50%);
-    pointer-events: none;
-  }
-}
-
-.animated-bg {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  pointer-events: none;
-  z-index: 1;
-  overflow: hidden;
-  contain: strict;
-}
-
-.knowledge-node {
-  position: absolute;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.15);
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  box-shadow:
-    0 0 15px rgba(255, 255, 255, 0.35),
-    0 0 30px rgba(16, 185, 129, 0.2),
-    inset 0 0 8px rgba(255, 255, 255, 0.1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: nodePulse 5s infinite ease-in-out;
-  will-change: transform, opacity;
-}
-
-.node-icon {
-  width: 20px;
-  height: 20px;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.node-1  { top: 15%; left: 20%;  animation-delay: 0s; }
-.node-2  { top: 25%; left: 35%;  animation-delay: 0.5s; }
-.node-3  { top: 20%; left: 55%;  animation-delay: 1s; }
-.node-4  { top: 30%; left: 75%;  animation-delay: 1.5s; }
-.node-5  { top: 45%; left: 25%;  animation-delay: 2s; }
-.node-6  { top: 50%; left: 45%;  animation-delay: 2.5s; }
-.node-7  { top: 48%; left: 65%;  animation-delay: 3s; }
-.node-8  { top: 60%; left: 20%;  animation-delay: 0.3s; }
-.node-9  { top: 12%; right: 15%; animation-delay: 1.8s; }
-.node-10 { top: 38%; right: 10%; animation-delay: 2.3s; }
-.node-11 { top: 70%; left: 40%;  animation-delay: 0.8s; }
-.node-12 { top: 65%; left: 80%;  animation-delay: 1.3s; }
-
-@keyframes nodePulse {
-  0%, 100% { transform: scale(1); opacity: 0.65; }
-  50% { transform: scale(1.08); opacity: 0.9; }
-}
-
-.knowledge-lines {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0.35;
-}
-
-.connection-line {
-  stroke: rgba(255, 255, 255, 0.5);
-  stroke-width: 1.5;
-  stroke-dasharray: 6, 3;
-  stroke-linecap: round;
-  animation: lineFlow 10s infinite linear;
-  will-change: stroke-dashoffset;
-}
-
-.line-1  { animation-delay: 0s; }
-.line-2  { animation-delay: 0.5s; }
-.line-3  { animation-delay: 1s; }
-.line-4  { animation-delay: 0.3s; }
-.line-5  { animation-delay: 0.8s; }
-.line-6  { animation-delay: 1.3s; }
-.line-7  { animation-delay: 1.8s; }
-.line-8  { animation-delay: 2.3s; }
-.line-9  { animation-delay: 0.2s; }
-.line-10 { animation-delay: 0.7s; }
-.line-11 { animation-delay: 0.9s; }
-.line-12 { animation-delay: 1.5s; }
-
-@keyframes lineFlow {
-  0% { stroke-dashoffset: 0; }
-  100% { stroke-dashoffset: 18; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .knowledge-node { animation: none; opacity: 0.65; }
-  .connection-line { animation: none; }
-}
-
-/* Left Showcase Section */
-.showcase-section {
-  flex: 0 0 52%;
-  display: flex;
-  align-items: flex-end;
-  padding: 100px 30px 100px 50px;
-  box-sizing: border-box;
-  position: relative;
-}
-
-.showcase-content {
-  width: 100%;
-  max-width: 600px;
-  position: relative;
-  z-index: 2;
+  min-height: 100vh;
+  padding: 48px clamp(48px, 6vw, 96px);
   display: flex;
   flex-direction: column;
-  margin-bottom: 60px;
-}
-
-.showcase-subtitle {
-  margin-top: 0;
-  font-size: 22px;
-  color: rgba(255, 255, 255, 0.95);
-  margin: 0 0 8px 0;
-  font-family: "PingFang SC", sans-serif;
-  line-height: 1.4;
-  font-weight: 500;
-}
-
-.showcase-description {
-  font-size: 15px;
-  color: rgba(255, 255, 255, 0.8);
-  margin: 0 0 28px 0;
-  font-family: "PingFang SC", sans-serif;
-  line-height: 1.5;
-}
-
-.feature-tags {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 40px;
-  flex-wrap: wrap;
-}
-
-.tag {
-  display: inline-block;
-  padding: 8px 20px;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 20px;
-  color: var(--td-text-color-anti);
-  font-size: 14px;
-  font-weight: 500;
-  font-family: "PingFang SC", sans-serif;
-}
-
-/* Carousel */
-.carousel-container {
-  width: 100%;
-  margin-top: 48px;
-}
-
-.screenshot-swiper {
-  width: 100%;
-  border-radius: 16px;
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  padding-bottom: 40px;
-
-  :deep(.swiper-wrapper) {
-    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  :deep(.swiper-pagination) {
-    bottom: 15px !important;
-    z-index: 10;
-  }
-
-  :deep(.swiper-pagination-bullet) {
-    width: 10px;
-    height: 10px;
-    background: rgba(255, 255, 255, 0.5);
-    opacity: 1;
-    transition: all 0.3s ease;
-    margin: 0 6px !important;
-  }
-
-  :deep(.swiper-pagination-bullet-active) {
-    background: var(--td-bg-color-container);
-    width: 28px;
-    border-radius: 5px;
-  }
+  color: #f4f8ff;
+  background:
+    radial-gradient(circle at 82% 76%, rgba(84, 151, 232, 0.25), transparent 30%),
+    linear-gradient(145deg, #0b2855 0%, #103d7a 56%, #0b2e63 100%);
 }
 
-.slide-content {
-  width: 100%;
-  height: 100%;
-  background: var(--td-bg-color-container);
-  border-radius: 16px;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.grid-texture {
+  position: absolute;
+  inset: 0;
+  opacity: 0.08;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.8) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.8) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(to bottom right, black, transparent 72%);
 }
 
-.slide-image {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: contain;
-}
-
-/* Right Form Section */
-.form-section {
-  flex: 0 0 48%;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 40px 50px 100px 30px;
-  box-sizing: border-box;
-  position: relative;
-}
-
-.form-panel {
-  width: 100%;
-  max-width: 480px;
-  margin-bottom: 60px;
+.brand,
+.identity-content,
+.identity-footer {
   position: relative;
   z-index: 2;
 }
 
-.header-logo {
-  position: fixed;
-  top: 32px;
-  left: 50px;
-  z-index: 100;
-
-  .brand-text {
-    color: var(--td-text-color-anti);
-    font-size: 20px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.25);
-  }
-}
-
-.header-links {
-  position: fixed;
-  top: 28px;
-  right: 28px;
+.brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  z-index: 100;
-}
-
-.header-link {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 9px 15px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  color: var(--td-text-color-anti);
-  text-decoration: none;
-  font-size: 13px;
+  gap: 14px;
+  font-size: 16px;
   font-weight: 600;
-  font-family: "PingFang SC", sans-serif;
-  letter-spacing: 0.2px;
-  cursor: pointer;
-  position: relative;
-
-  svg { flex-shrink: 0; }
-  .link-text { line-height: 1; }
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.3);
-    border-color: rgba(255, 255, 255, 0.4);
-    color: var(--td-text-color-anti);
-  }
+  letter-spacing: 0.06em;
 }
 
-.language-switch {
-  position: relative;
-
-  button {
-    background: rgba(255, 255, 255, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    color: var(--td-text-color-anti);
-
-    .lang-flag-icon {
-      font-size: 16px;
-      line-height: 1;
-      flex-shrink: 0;
-    }
-
-    &:hover {
-      background: rgba(255, 255, 255, 0.3);
-      border-color: rgba(255, 255, 255, 0.4);
-    }
-
-    svg:last-child {
-      margin-left: 2px;
-      flex-shrink: 0;
-    }
-  }
+.brand-mark {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.1);
+  font-family: Georgia, serif;
+  font-size: 20px;
 }
 
-.language-dropdown {
+.identity-content {
+  width: min(610px, 100%);
+  margin: auto 0;
+  padding: 76px 0 92px;
+}
+
+.eyebrow {
+  margin: 0 0 24px;
+  color: #9fc8fb;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+}
+
+h1 {
+  margin: 0;
+  font-family: "TencentSans", "Microsoft YaHei", sans-serif;
+  font-size: clamp(44px, 5vw, 72px);
+  font-weight: 650;
+  line-height: 1.16;
+  letter-spacing: -0.035em;
+}
+
+.lead {
+  max-width: 520px;
+  margin: 28px 0 0;
+  color: rgba(231, 240, 254, 0.78);
+  font-size: 16px;
+  line-height: 1.85;
+}
+
+.capabilities {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-top: 56px;
+}
+
+.capability {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 13px;
+}
+
+.capability-index {
+  color: #8dbcf4;
+  font-family: Georgia, serif;
+  font-size: 11px;
+}
+
+.identity-footer {
+  margin: 0;
+  color: rgba(226, 238, 254, 0.55);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.graph-motif {
   position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  min-width: 160px;
-  background: rgba(255, 255, 255, 0.97);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  overflow: hidden;
-  z-index: 1000;
+  right: 5%;
+  bottom: 7%;
+  width: 250px;
+  height: 220px;
+  opacity: 0.35;
+  transform: rotate(-8deg);
 }
 
-.language-option {
+.graph-node {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #9bc4f5;
+  border-radius: 50%;
+  background: #103d7a;
+}
+
+.node-one { left: 12px; top: 118px; }
+.node-two { left: 104px; top: 48px; }
+.node-three { right: 22px; top: 100px; }
+.node-four { left: 116px; bottom: 12px; }
+
+.graph-line {
+  position: absolute;
+  height: 1px;
+  background: #9bc4f5;
+  transform-origin: left center;
+}
+
+.line-one { width: 118px; left: 21px; top: 123px; transform: rotate(-37deg); }
+.line-two { width: 125px; left: 114px; top: 57px; transform: rotate(24deg); }
+.line-three { width: 125px; left: 122px; top: 62px; transform: rotate(86deg); }
+
+.form-panel {
+  position: relative;
+  min-height: 100vh;
+  padding: 56px clamp(44px, 7vw, 112px);
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  cursor: pointer;
-  font-size: 13px;
-  font-family: "PingFang SC", sans-serif;
-  color: var(--td-text-color-primary);
-
-  .lang-flag { font-size: 16px; flex-shrink: 0; }
-  .lang-label { flex: 1; }
-
-  .check-icon {
-    color: var(--td-success-color);
-    font-weight: 700;
-    font-size: 14px;
-    flex-shrink: 0;
-  }
-
-  &:hover { background: var(--td-bg-color-secondarycontainer); }
-  &.active { background: var(--td-success-color-light); color: var(--td-brand-color-active); }
+  justify-content: center;
 }
 
-.form-card {
-  background: rgba(255, 255, 255, 0.97);
-  border-radius: 16px;
-  padding: 40px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
-  box-sizing: border-box;
-  border: none;
-  width: 100%;
+.form-shell {
+  width: min(420px, 100%);
 }
 
 .form-header {
-  text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 38px;
 }
 
-.form-title {
-  font-size: 24px;
-    font-weight: 600;
-  color: var(--td-text-color-primary);
-  margin: 0 0 6px 0;
-  font-family: "PingFang SC", sans-serif;
+.form-header h2 {
+  margin: 0 0 12px;
+  font-size: 34px;
+  font-weight: 650;
+  letter-spacing: -0.04em;
 }
 
-.form-welcome {
-  font-size: 13px;
-  color: var(--td-text-color-secondary);
-    margin: 0;
-  font-family: "PingFang SC", sans-serif;
-}
-
-.form-subtitle {
-  font-size: 13px;
-  color: var(--td-text-color-secondary);
+.form-header p {
   margin: 0;
-  font-family: "PingFang SC", sans-serif;
+  color: #687892;
+  font-size: 14px;
 }
 
-.form-content {
-  :deep(.t-form-item__label) {
-    font-size: 14px;
-    color: var(--td-text-color-primary);
-    font-weight: 500;
-    margin-bottom: 8px;
-    font-family: "PingFang SC", sans-serif;
-    display: block;
-    text-align: left;
-  }
-
-  :deep(.t-input) {
-    border: 1px solid var(--td-component-stroke);
-    border-radius: 8px;
-    background: var(--td-bg-color-container);
-    transition: all 0.2s;
-    
-    &:focus-within {
-      border-color: var(--td-brand-color);
-      box-shadow: 0 0 0 3px rgba(23, 74, 124, 0.1);
-    }
-    
-    &:hover {
-      border-color: var(--td-brand-color);
-    }
-    
-    .t-input__inner {
-      border: none !important;
-      box-shadow: none !important;
-      outline: none !important;
-      background: transparent;
-      font-size: 15px;
-      font-family: "PingFang SC", sans-serif;
-      
-      &:focus {
-        border: none !important;
-        box-shadow: none !important;
-        outline: none !important;
-      }
-    }
-    
-    .t-input__wrap {
-      border: none !important;
-      box-shadow: none !important;
-    }
-  }
-
-  :deep(.t-form-item) {
-    margin-bottom: 18px;
-    
-    &:last-child {
-      margin-bottom: 0;
-    }
-  }
-  
-  :deep(.t-form-item__control) {
-    width: 100%;
-  }
+.mobile-brand {
+  display: none;
 }
 
-.submit-button {
-  height: 46px;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 500;
-  font-family: "PingFang SC", sans-serif;
-  margin: 20px 0 16px 0;
+:deep(.t-form__label) {
+  padding-bottom: 9px;
+  color: #2f3f5d;
+  font-size: 13px;
+  font-weight: 600;
 }
 
-.oidc-divider {
-  position: relative;
-  margin: 4px 0 6px;
-  text-align: center;
-  color: var(--td-text-color-placeholder);
+:deep(.t-form__item) {
+  margin-bottom: 28px;
+}
+
+:deep(.t-input) {
+  height: 48px;
+  border-radius: 4px;
+  background: #fff;
+}
+
+:deep(.t-input--focused) {
+  box-shadow: 0 0 0 2px rgba(38, 105, 201, 0.12);
+}
+
+.login-button {
+  height: 50px;
+  margin-top: 24px;
+  border-radius: 4px;
+  background: #1f63bd;
+  border-color: #1f63bd;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.login-button:hover {
+  background: #174f9a;
+  border-color: #174f9a;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 26px 0;
+  color: #8b98ac;
   font-size: 12px;
-
-  span {
-    position: relative;
-    z-index: 1;
-    padding: 0 12px;
-    background: rgba(255, 255, 255, 0.95);
-  }
-
-  &::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 50%;
-    border-top: 1px solid var(--td-component-stroke);
-  }
 }
 
-.oidc-button {
-  height: 46px;
-  border-radius: 8px;
-  font-size: 15px;
-  font-weight: 500;
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #d9e1ed;
+}
+
+.access-note {
+  margin-top: 32px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #d6e0ed;
+  background: rgba(255, 255, 255, 0.48);
+  color: #66758c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #4384d5;
+  box-shadow: 0 0 0 4px rgba(67, 132, 213, 0.13);
 }
 
 .form-footer {
-  text-align: center;
-  font-size: 14px;
-  color: var(--td-text-color-secondary);
-  font-family: "PingFang SC", sans-serif;
-  margin-top: 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--td-component-stroke);
+  position: absolute;
+  right: clamp(44px, 7vw, 112px);
+  bottom: 32px;
+  margin: 0;
+  color: #a2aaa6;
+  font-size: 11px;
+}
 
-  .link-button {
-    color: var(--td-brand-color);
-    text-decoration: none;
-    margin-left: 4px;
-    font-weight: 500;
-    transition: all 0.2s;
-
-    &:hover {
-      color: var(--td-brand-color);
-      text-decoration: underline;
-    }
+@media (max-width: 900px) {
+  .login-page {
+    grid-template-columns: 1fr;
   }
-}
 
-.login-form-footer {
-  border-bottom: none;
-  padding-bottom: 8px;
-  margin-top: 12px;
-}
-
-.login-features {
-  margin-top: 20px;
-  padding: 0;
-
-  .feature-item {
-    display: flex;
-    align-items: center;
-    margin-bottom: 12px;
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
-    font-family: "PingFang SC", sans-serif;
-
-    &:last-child {
-      margin-bottom: 0;
-    }
-
-    .feature-icon {
-      width: 20px;
-      height: 20px;
-      border-radius: 50%;
-      background: var(--td-success-color-light);
-      color: var(--td-brand-color-active);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      font-weight: 700;
-      margin-right: 10px;
-      flex-shrink: 0;
-    }
-
-    .feature-text {
-      line-height: 1.4;
-    }
+  .identity-panel {
+    min-height: auto;
+    padding: 28px 32px;
   }
-}
 
-/* Responsive Design */
-@media (max-width: 1024px) {
-  .knowledge-node:nth-of-type(n + 13) {
+  .identity-content,
+  .identity-footer,
+  .graph-motif {
     display: none;
   }
 
-  .connection-line:nth-of-type(n + 13) {
-    display: none;
-  }
-
-  .showcase-subtitle {
-    font-size: 18px;
-  }
-
-  .header-logo {
-    top: 26px;
-    left: 40px;
-
-    .brand-text {
-      font-size: 18px;
-    }
-  }
-
-  .header-links {
-    top: 22px;
-    right: 22px;
-    gap: 8px;
-
-    .link-text {
-      display: none;
-    }
-
-    .header-link {
-      padding: 10px;
-      gap: 0;
-    }
+  .form-panel {
+    min-height: calc(100vh - 94px);
+    padding: 48px 28px 80px;
   }
 }
 
-@media (max-width: 768px) {
-  .login-layout {
-    flex-direction: column;
-  }
-
-  .knowledge-node:nth-of-type(n + 9) {
+@media (max-width: 560px) {
+  .identity-panel {
     display: none;
   }
 
-  .connection-line:nth-of-type(n + 9) {
-    display: none;
+  .form-panel {
+    min-height: 100vh;
+    align-items: flex-start;
+    padding-top: 14vh;
   }
 
-  .showcase-section {
-    flex: 0 0 auto;
-    min-height: 50vh;
-    padding: 40px 24px;
+  .mobile-brand {
+    display: block;
+    margin-bottom: 36px !important;
+    color: #1f63bd !important;
+    font-weight: 700;
+    letter-spacing: 0.06em;
   }
 
-  .showcase-content {
-    max-width: 100%;
-  }
-
-  .header-logo {
-    top: 22px;
-    left: 30px;
-
-    .brand-text {
-      font-size: 16px;
-    }
-  }
-
-  .showcase-subtitle {
-    font-size: 16px;
-    margin-bottom: 24px;
-  }
-
-  .feature-tags {
-    margin-bottom: 24px;
-  }
-
-  .carousel-container {
-    margin-top: 24px;
-  }
-
-  .form-section {
-    flex: 0 0 auto;
-    padding: 24px;
-  }
-
-  .header-links {
-    top: 18px;
-    right: 18px;
-    gap: 8px;
-
-    .link-text {
-      display: inline;
-    }
-
-    .header-link {
-      padding: 8px 12px;
-      font-size: 12px;
-    }
-  }
-
-  .form-card {
-    padding: 32px 24px;
-  }
-
-  .form-title {
-    font-size: 22px;
-  }
-}
-
-@media (max-width: 480px) {
-  .animated-bg {
-    display: none;
-  }
-
-  .showcase-section {
-    padding: 32px 20px;
-  }
-
-  .header-logo {
-    top: 18px;
-    left: 20px;
-
-    .brand-text {
-      font-size: 15px;
-    }
-  }
-
-  .showcase-subtitle {
-    font-size: 14px;
-  }
-
-  .tag {
-    font-size: 12px;
-    padding: 6px 16px;
-  }
-
-  .form-section {
-    padding: 20px;
-  }
-
-  .header-links {
-    top: 14px;
-    right: 14px;
-    gap: 6px;
-    flex-wrap: wrap;
-
-    .header-link {
-      padding: 7px 10px;
-      font-size: 11px;
-    }
-  }
-
-  .form-card {
-    padding: 28px 20px;
-  }
-
-  .form-header {
-    margin-bottom: 24px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .knowledge-node,
-  .connection-line {
-    animation: none !important;
-    transition: none !important;
-  }
-
-  .animated-bg {
-    display: none;
-  }
-}
-</style>
-
-<style lang="less">
-html[theme-mode="dark"] {
-  .login-layout {
-    background: linear-gradient(225deg, #011a14 0%, #032e22 15%, #043a2c 25%, #05503d 38%, #046647 50%, #038a56 65%, #049b60 78%, #06a06a 90%, #07b074 100%);
-  }
-
-  .knowledge-node {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.2);
-    box-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
-  }
-
-  .connection-line {
-    stroke: rgba(255, 255, 255, 0.25);
-  }
-
-  .header-logo .brand-text {
-    color: var(--td-text-color-primary);
-    text-shadow: none;
-  }
-
-  .header-link {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.15);
-    &:hover { background: rgba(255, 255, 255, 0.2); }
-  }
-
-  .language-switch button {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.15);
-    &:hover { background: rgba(255, 255, 255, 0.2); }
-  }
-
-  .language-dropdown {
-    background: rgba(36, 36, 36, 0.97) !important;
-    border-color: var(--td-component-stroke) !important;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
-  }
-
-  .tag { background: rgba(255, 255, 255, 0.12); }
-
-  .form-card {
-    background: rgba(36, 36, 36, 0.97) !important;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4) !important;
-  }
-
-  .form-content .t-input {
-    background: var(--td-bg-color-page) !important;
-    border-color: rgba(255, 255, 255, 0.1) !important;
-    &:hover { border-color: var(--td-brand-color) !important; }
-    &:focus-within { border-color: var(--td-brand-color) !important; }
-  }
-
-  .screenshot-swiper .swiper-pagination-bullet-active {
-    background: rgba(255, 255, 255, 0.9) !important;
-  }
-
-  .login-features .feature-icon {
-    background: rgba(6, 176, 77, 0.15);
+  .form-footer {
+    right: 28px;
   }
 }
 </style>

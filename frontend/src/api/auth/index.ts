@@ -3,9 +3,11 @@ import i18n from '@/i18n'
 
 const t = (key: string) => i18n.global.t(key)
 
+export type UserRole = 'platform_admin' | 'tenant_admin' | 'member'
+
 // 用户登录接口
 export interface LoginRequest {
-  email: string
+  username: string
   password: string
 }
 
@@ -19,6 +21,7 @@ export interface LoginResponse {
     avatar?: string
     tenant_id: number
     can_access_all_tenants?: boolean
+    role: UserRole
     is_active: boolean
     created_at: string
     updated_at: string
@@ -85,6 +88,7 @@ export interface UserInfo {
   avatar?: string
   tenant_id: string
   can_access_all_tenants?: boolean
+  role: UserRole
   created_at: string
   updated_at: string
 }
@@ -281,6 +285,13 @@ export async function logout(): Promise<{ success: boolean; message?: string }> 
       message: error.message || t('error.auth.logoutFailed')
     }
   }
+}
+
+export async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
+  await post('/api/v1/auth/change-password', {
+    old_password: oldPassword,
+    new_password: newPassword
+  })
 }
 
 /**

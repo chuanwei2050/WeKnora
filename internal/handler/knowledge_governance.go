@@ -64,15 +64,28 @@ func (h *KnowledgeGovernanceHandler) tenantID(c *gin.Context) (uint64, string, b
 }
 
 func (h *KnowledgeGovernanceHandler) canManageKnowledge(c *gin.Context, knowledgeID string) bool {
+	_, kb, ok := h.knowledgeScope(c, knowledgeID)
+	return ok && types.CanManageKnowledgeBase(c.Request.Context(), kb)
+}
+
+func (h *KnowledgeGovernanceHandler) knowledgeScope(c *gin.Context, knowledgeID string) (*types.Knowledge, *types.KnowledgeBase, bool) {
 	if h.knowledge == nil || h.knowledgeBases == nil {
-		return false
+		return nil, nil, false
 	}
 	knowledge, err := h.knowledge.GetKnowledgeByID(c.Request.Context(), knowledgeID)
 	if err != nil || knowledge == nil {
-		return false
+		return nil, nil, false
 	}
 	kb, err := h.knowledgeBases.GetKnowledgeBaseByID(c.Request.Context(), knowledge.KnowledgeBaseID)
-	return err == nil && kb != nil && types.CanManageKnowledgeBase(c.Request.Context(), kb)
+	return knowledge, kb, err == nil && kb != nil
+}
+
+func (h *KnowledgeGovernanceHandler) canReadGovernance(c *gin.Context, knowledge *types.Knowledge, kb *types.KnowledgeBase) bool {
+	if knowledge == nil || kb == nil {
+		return false
+	}
+	userID, ok := types.UserIDFromContext(c.Request.Context())
+	return types.CanManageKnowledgeBase(c.Request.Context(), kb) || types.CanReviewKnowledge(c.Request.Context(), kb) || (ok && knowledge.CreatedBy == userID)
 }
 
 func knowledgeIDFromPath(c *gin.Context) string {
@@ -85,7 +98,9 @@ func knowledgeIDFromPath(c *gin.Context) string {
 func (h *KnowledgeGovernanceHandler) CreateVersion(c *gin.Context) {
 	tenantID, userID, ok := h.tenantID(c)
 	knowledgeID := knowledgeIDFromPath(c)
-	if !ok || !h.canManageKnowledge(c, knowledgeID) {
+	knowledge, kb, scopeOK := h.knowledgeScope(c, knowledgeID)
+	canCreate := scopeOK && (types.CanManageKnowledgeBase(c.Request.Context(), kb) || (knowledge.CreatedBy == userID && types.CanContributeKnowledge(c.Request.Context(), kb)))
+	if !ok || !canCreate {
 		c.Error(errors.NewForbiddenError("knowledge governance permission denied"))
 		return
 	}
@@ -137,7 +152,7 @@ func (h *KnowledgeGovernanceHandler) CreateVersion(c *gin.Context) {
 		c.Error(errors.NewNotFoundError("knowledge not found"))
 		return
 	}
-	kb, err := h.knowledgeBases.GetKnowledgeBaseByID(c.Request.Context(), knowledgeForVersion.KnowledgeBaseID)
+	kb, err = h.knowledgeBases.GetKnowledgeBaseByID(c.Request.Context(), knowledgeForVersion.KnowledgeBaseID)
 	if err != nil || kb == nil || !kb.Governance.Enabled {
 		c.Error(errors.NewBadRequestError("knowledge governance is not enabled for this knowledge base"))
 		return
@@ -146,14 +161,9 @@ func (h *KnowledgeGovernanceHandler) CreateVersion(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
-	knowledge := knowledgeForVersion
-	knowledge.PendingVersionID = version.ID
-	if err := h.knowledge.UpdateKnowledge(c.Request.Context(), knowledge); err != nil {
+	knowledgeForVersion.PendingVersionID = version.ID
+	if err := h.knowledge.UpdateKnowledge(c.Request.Context(), knowledgeForVersion); err != nil {
 		c.Error(errors.NewInternalServerError("failed to stage governed version"))
-		return
-	}
-	if _, err := h.knowledge.ReparseKnowledge(c.Request.Context(), knowledge.ID); err != nil {
-		c.Error(errors.NewInternalServerError("failed to enqueue governed parsing"))
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"success": true, "data": version})
@@ -163,6 +173,11 @@ func (h *KnowledgeGovernanceHandler) ListVersions(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
 		c.Error(errors.NewUnauthorizedError("unauthorized"))
+		return
+	}
+	knowledge, kb, ok := h.knowledgeScope(c, knowledgeIDFromPath(c))
+	if !ok || !h.canReadGovernance(c, knowledge, kb) {
+		c.Error(errors.NewForbiddenError("knowledge governance permission denied"))
 		return
 	}
 	versions, err := h.repo.ListVersions(c.Request.Context(), tenantID, knowledgeIDFromPath(c))
@@ -177,6 +192,11 @@ func (h *KnowledgeGovernanceHandler) GetVersion(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
 		c.Error(errors.NewUnauthorizedError("unauthorized"))
+		return
+	}
+	knowledge, kb, ok := h.knowledgeScope(c, knowledgeIDFromPath(c))
+	if !ok || !h.canReadGovernance(c, knowledge, kb) {
+		c.Error(errors.NewForbiddenError("knowledge governance permission denied"))
 		return
 	}
 	version, err := h.repo.GetVersion(c.Request.Context(), tenantID, c.Param("version_id"))
@@ -207,9 +227,24 @@ func (h *KnowledgeGovernanceHandler) transition(c *gin.Context, next types.Knowl
 		c.Error(errors.NewNotFoundError("knowledge version not found"))
 		return
 	}
-	if !h.canManageKnowledge(c, version.KnowledgeID) {
+	knowledge, kb, scopeOK := h.knowledgeScope(c, version.KnowledgeID)
+	if !scopeOK {
+		c.Error(errors.NewNotFoundError("knowledge not found"))
+		return
+	}
+	canAct := false
+	switch action {
+	case "submit", "withdraw":
+		canAct = knowledge.CreatedBy == userID && version.CreatedBy == userID && types.CanContributeKnowledge(c.Request.Context(), kb)
+	case "approve", "reject":
+		canAct = types.CanReviewKnowledge(c.Request.Context(), kb)
+	}
+	if !canAct {
 		c.Error(errors.NewForbiddenError("knowledge governance permission denied"))
 		return
+	}
+	if action == "submit" && version.Status == types.KnowledgeVersionRejected {
+		version.Status = types.KnowledgeVersionDraft
 	}
 	if err := types.ValidateKnowledgeVersionReview(version, userID, next); err != nil {
 		c.Error(errors.NewForbiddenError(err.Error()))
@@ -219,21 +254,27 @@ func (h *KnowledgeGovernanceHandler) transition(c *gin.Context, next types.Knowl
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	if err := h.repo.UpdateVersionStatus(c.Request.Context(), tenantID, version.ID, next); err != nil {
-		c.Error(errors.NewInternalServerError(err.Error()))
-		return
-	}
 	comment := ""
 	var request reviewKnowledgeVersionRequest
 	if c.Request.ContentLength > 0 && c.ShouldBindJSON(&request) == nil {
 		comment = strings.TrimSpace(request.Comment)
 	}
-	if action != "" {
-		if err := h.repo.CreateReview(c.Request.Context(), &types.KnowledgeVersionReview{ID: uuid.NewString(), VersionID: version.ID, ReviewerID: userID, Action: action, Comment: comment, CreatedAt: time.Now().UTC()}); err != nil {
-			c.Error(errors.NewInternalServerError(err.Error()))
+	if err := h.repo.TransitionVersionWithReview(c.Request.Context(), tenantID, version.ID, next, &types.KnowledgeVersionReview{ID: uuid.NewString(), VersionID: version.ID, ReviewerID: userID, Action: action, Comment: comment, CreatedAt: time.Now().UTC()}); err != nil {
+		c.Error(errors.NewConflictError(err.Error()))
+		return
+	}
+	if action == "approve" {
+		if err := h.repo.UpdateVersionStatus(c.Request.Context(), tenantID, version.ID, types.KnowledgeVersionIndexing); err != nil {
+			c.Error(errors.NewConflictError(err.Error()))
+			return
+		}
+		if _, err := h.knowledge.ReparseKnowledge(c.Request.Context(), knowledge.ID); err != nil {
+			_ = h.repo.UpdateVersionStatus(c.Request.Context(), tenantID, version.ID, types.KnowledgeVersionPublishFailed)
+			c.Error(errors.NewConflictError("approved but parsing could not be started: " + err.Error()))
 			return
 		}
 	}
+	version, _ = h.repo.GetVersion(c.Request.Context(), tenantID, version.ID)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": version})
 }
 
@@ -247,6 +288,10 @@ func (h *KnowledgeGovernanceHandler) Approve(c *gin.Context) {
 
 func (h *KnowledgeGovernanceHandler) Reject(c *gin.Context) {
 	h.transition(c, types.KnowledgeVersionRejected, "reject")
+}
+
+func (h *KnowledgeGovernanceHandler) Withdraw(c *gin.Context) {
+	h.transition(c, types.KnowledgeVersionDraft, "withdraw")
 }
 
 func (h *KnowledgeGovernanceHandler) Publish(c *gin.Context) {

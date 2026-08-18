@@ -38,6 +38,10 @@ func NewMCPServiceHandler(mcpServiceService interfaces.MCPServiceService) *MCPSe
 // @Router       /mcp-services [post]
 func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage MCP services"))
+		return
+	}
 
 	var service types.MCPService
 	if err := c.ShouldBindJSON(&service); err != nil {
@@ -166,6 +170,10 @@ func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 // @Router       /mcp-services/{id} [put]
 func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage MCP services"))
+		return
+	}
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
 
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -307,6 +315,10 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 // @Router       /mcp-services/{id} [delete]
 func (h *MCPServiceHandler) DeleteMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage MCP services"))
+		return
+	}
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
 
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -343,6 +355,10 @@ func (h *MCPServiceHandler) DeleteMCPService(c *gin.Context) {
 // @Router       /mcp-services/{id}/test [post]
 func (h *MCPServiceHandler) TestMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can test MCP services"))
+		return
+	}
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
 
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -388,6 +404,10 @@ func (h *MCPServiceHandler) TestMCPService(c *gin.Context) {
 // @Router       /mcp-services/{id}/tools [get]
 func (h *MCPServiceHandler) GetMCPServiceTools(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can inspect MCP services"))
+		return
+	}
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
 
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -424,6 +444,10 @@ func (h *MCPServiceHandler) GetMCPServiceTools(c *gin.Context) {
 // @Router       /mcp-services/{id}/resources [get]
 func (h *MCPServiceHandler) GetMCPServiceResources(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can inspect MCP services"))
+		return
+	}
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
 
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())

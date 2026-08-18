@@ -13,6 +13,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useSettingsStore } from '@/stores/settings';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
 import KnowledgeGovernancePanel from './components/KnowledgeGovernancePanel.vue';
+import { submitKnowledgeVersionReview } from '@/api/knowledge-governance';
 const usemenuStore = useMenuStore();
 const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
@@ -207,13 +208,23 @@ const isOwner = computed(() => {
 
 // Can edit: owner, admin, or editor
 const canEdit = computed(() => {
-  return canManageBidReviewKnowledge() && orgStore.canEditKB(kbId.value, isOwner.value);
+  return authStore.canManageTenant && canManageBidReviewKnowledge() && orgStore.canEditKB(kbId.value, isOwner.value);
 });
 
 // Can manage (delete, settings, etc.): owner or admin
 const canManage = computed(() => {
-  return canManageBidReviewKnowledge() && orgStore.canManageKB(kbId.value, isOwner.value);
+  return authStore.canManageTenant && canManageBidReviewKnowledge() && orgStore.canManageKB(kbId.value, isOwner.value);
 });
+
+const canContribute = computed(() => {
+  if (authStore.user?.role !== 'member' || !kbInfo.value?.governance?.enabled) return false;
+  if (Number(kbInfo.value.tenant_id) !== Number(authStore.effectiveTenantId)) return false;
+  const mode = kbInfo.value.contribution_mode || 'closed';
+  return mode === 'members' || (mode === 'allowlist' && (kbInfo.value.contributor_ids || []).includes(authStore.currentUserId));
+});
+const canReview = computed(() => canManage.value || (kbInfo.value?.reviewer_ids || []).includes(authStore.currentUserId));
+const canUseGovernance = computed(() => !isFAQ.value && (canManage.value || canContribute.value || canReview.value));
+const canUploadDocument = computed(() => canEdit.value || canContribute.value);
 
 // Current KB's shared record (when accessed via organization share)
 const currentSharedKb = computed(() =>
@@ -1270,12 +1281,16 @@ const documentTitle = computed(() => {
 });
 
 // 文档操作下拉菜单选项
-const documentActionOptions = computed(() => [
-  { content: t('upload.uploadDocument'), value: 'upload', prefixIcon: () => h(TIcon, { name: 'upload', size: '16px' }) },
-  { content: t('upload.uploadFolder'), value: 'uploadFolder', prefixIcon: () => h(TIcon, { name: 'folder-add', size: '16px' }) },
-  { content: t('knowledgeBase.importURL'), value: 'importURL', prefixIcon: () => h(TIcon, { name: 'link', size: '16px' }) },
-  { content: t('upload.onlineEdit'), value: 'manualCreate', prefixIcon: () => h(TIcon, { name: 'edit', size: '16px' }) },
-]);
+const documentActionOptions = computed(() => {
+  const upload = { content: canContribute.value && !canEdit.value ? '投稿文件' : t('upload.uploadDocument'), value: 'upload', prefixIcon: () => h(TIcon, { name: 'upload', size: '16px' }) };
+  if (!canEdit.value) return [upload];
+  return [
+    upload,
+    { content: t('upload.uploadFolder'), value: 'uploadFolder', prefixIcon: () => h(TIcon, { name: 'folder-add', size: '16px' }) },
+    { content: t('knowledgeBase.importURL'), value: 'importURL', prefixIcon: () => h(TIcon, { name: 'link', size: '16px' }) },
+    { content: t('upload.onlineEdit'), value: 'manualCreate', prefixIcon: () => h(TIcon, { name: 'edit', size: '16px' }) },
+  ];
+});
 
 // 处理文档操作下拉菜单选择
 const handleDocumentActionSelect = (data: { value: string }) => {
@@ -1420,9 +1435,19 @@ const handleDocumentUpload = async (event: Event) => {
 
   for (const file of validFiles) {
     try {
-      const responseData: any = await uploadKnowledgeFile(kbId.value, { file, tag_id: tagIdToUpload });
+      const metadata = kbInfo.value?.governance?.enabled ? JSON.stringify({
+        layer: 'experience',
+        source_category: canContribute.value && !canEdit.value ? 'member_contribution' : 'managed_upload',
+        version_label: `${file.name}-${new Date().toISOString()}`,
+        authority_level: 'internal',
+      }) : undefined;
+      const responseData: any = await uploadKnowledgeFile(kbId.value, { file, tag_id: tagIdToUpload, metadata });
       const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
       if (isSuccess) {
+        const created = responseData?.data || responseData;
+        if (canContribute.value && !canEdit.value && created?.id && created?.pending_version_id) {
+          await submitKnowledgeVersionReview(created.id, created.pending_version_id, '普通用户文件投稿');
+        }
         successCount++;
       } else {
         failCount++;
@@ -2018,7 +2043,7 @@ async function createNewSession(value: string): Promise<void> {
               </button>
             </t-tooltip>
             <button
-              v-if="canManage && !isFAQ"
+              v-if="canUseGovernance"
               type="button"
               class="kb-governance-button"
               :disabled="!kbId"
@@ -2303,8 +2328,8 @@ async function createNewSession(value: string): Promise<void> {
                   </button>
                 </t-tooltip>
               </div>
-              <div v-if="canEdit" class="doc-filter-actions">
-                <t-tooltip :content="$t('knowledgeBase.addDocument')" placement="top">
+              <div v-if="canUploadDocument" class="doc-filter-actions">
+                <t-tooltip :content="canContribute && !canEdit ? '投稿文件（需管理员审核）' : $t('knowledgeBase.addDocument')" placement="top">
                   <t-dropdown
                     :options="documentActionOptions"
                     trigger="click"
@@ -2743,6 +2768,9 @@ async function createNewSession(value: string): Promise<void> {
     :visible="governanceVisible"
     :knowledge-base-id="kbId"
     :knowledge-items="cardList"
+    :current-user-id="authStore.currentUserId"
+    :can-manage="canManage"
+    :can-review="canReview"
     @update:visible="governanceVisible = $event"
   />
 </template>

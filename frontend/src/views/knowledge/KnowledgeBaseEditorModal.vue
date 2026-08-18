@@ -313,6 +313,38 @@
                   />
                 </div>
 
+                <div v-if="!isFAQ && formData" v-show="currentSection === 'governance'" class="section">
+                  <div class="section-content">
+                    <div class="section-header">
+                      <h3 class="section-title">投稿与审核</h3>
+                      <p class="section-desc">普通用户只能提交待审稿，审核通过后才开始解析、索引和图谱构建。</p>
+                    </div>
+                    <div class="section-body">
+                      <div class="form-item">
+                        <label class="form-label">知识版本治理</label>
+                        <t-switch v-model="formData.governance.enabled" />
+                        <p class="form-tip">开放投稿时必须启用；已发布内容在新版本审核期间保持可用。</p>
+                      </div>
+                      <div class="form-item">
+                        <label class="form-label">投稿范围</label>
+                        <t-radio-group v-model="formData.contributionMode">
+                          <t-radio-button value="closed">仅管理员</t-radio-button>
+                          <t-radio-button value="members">全部普通用户</t-radio-button>
+                          <t-radio-button value="allowlist">指定贡献者</t-radio-button>
+                        </t-radio-group>
+                      </div>
+                      <div v-if="formData.contributionMode === 'allowlist'" class="form-item">
+                        <label class="form-label">知识贡献者</label>
+                        <t-select v-model="formData.contributorIds" :options="memberOptions" multiple filterable clearable placeholder="选择可投稿的普通用户" />
+                      </div>
+                      <div class="form-item">
+                        <label class="form-label">指定审核人</label>
+                        <t-select v-model="formData.reviewerIds" :options="reviewerOptions" multiple filterable clearable placeholder="可选；租户管理员默认可以审核" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- 高级设置 -->
                 <div v-if="!isFAQ" v-show="currentSection === 'advanced'" class="section">
                   <KBAdvancedSettings
@@ -371,6 +403,7 @@ import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
 import { SOFTWARE_TESTING_GRAPH_PRESET } from '@/constants/software-testing-graph-preset'
 import { useI18n } from 'vue-i18n'
+import { listTenantUsers, type AdminUser } from '@/api/admin'
 
 const uiStore = useUIStore()
 const { t } = useI18n()
@@ -430,6 +463,7 @@ const navItems = computed(() => {
       { key: 'storage', icon: 'cloud', label: t('knowledgeEditor.sidebar.storage') },
       { key: 'chunking', icon: 'file-copy', label: t('knowledgeEditor.sidebar.chunking') },
       { key: 'graph', icon: 'chart-bubble', label: t('knowledgeEditor.sidebar.graph') },
+      { key: 'governance', icon: 'usergroup', label: '投稿与审核' },
       { key: 'advanced', icon: 'setting', label: t('knowledgeEditor.sidebar.advanced') }
     )
     if (props.mode === 'edit' && props.kbId) {
@@ -449,6 +483,18 @@ const advancedSettingsRef = ref<InstanceType<typeof KBAdvancedSettings>>()
 // 表单数据
 const formData = ref<any>(null)
 const isFAQ = computed(() => formData.value?.type === 'faq')
+const tenantUsers = ref<AdminUser[]>([])
+const memberOptions = computed(() => tenantUsers.value.filter(user => user.is_active && user.role === 'member').map(user => ({ label: `${user.username}（${user.email}）`, value: user.id })))
+const reviewerOptions = computed(() => tenantUsers.value.filter(user => user.is_active).map(user => ({ label: `${user.username}（${user.role === 'tenant_admin' ? '租户管理员' : '普通用户'}）`, value: user.id })))
+
+const loadTenantUsers = async (tenantId: number) => {
+  if (!tenantId) return
+  try {
+    tenantUsers.value = (await listTenantUsers(tenantId, { page: 1, pageSize: 500 })).items
+  } catch {
+    tenantUsers.value = []
+  }
+}
 
 watch(
   () => formData.value?.type,
@@ -534,6 +580,9 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       profile_id: 'software-testing',
       profile_version: '1.0',
     },
+    contributionMode: 'closed' as 'closed' | 'members' | 'allowlist',
+    contributorIds: [] as string[],
+    reviewerIds: [] as string[],
   }
 }
 
@@ -640,7 +689,11 @@ const loadKBData = async () => {
         profile_id: kb.governance?.profile_id || 'software-testing',
         profile_version: kb.governance?.profile_version || '1.0',
       },
+      contributionMode: kb.contribution_mode || 'closed',
+      contributorIds: kb.contributor_ids || [],
+      reviewerIds: kb.reviewer_ids || [],
     }
+    await loadTenantUsers(Number(kb.tenant_id))
     initialStorageProvider.value = formData.value.storageProvider
     initialIndexingStrategy.value = { ...formData.value.indexingStrategy }
   } catch (error) {
@@ -834,6 +887,19 @@ const validateForm = (): boolean => {
     return false
   }
 
+  if (formData.value.type !== 'faq' && formData.value.contributionMode !== 'closed') {
+    if (!formData.value.governance?.enabled) {
+      MessagePlugin.warning('开放投稿必须启用知识版本治理')
+      currentSection.value = 'governance'
+      return false
+    }
+    if (formData.value.contributionMode === 'allowlist' && !formData.value.contributorIds?.length) {
+      MessagePlugin.warning('请至少选择一名知识贡献者')
+      currentSection.value = 'governance'
+      return false
+    }
+  }
+
   return true
 }
 
@@ -947,6 +1013,9 @@ const buildSubmitData = () => {
       profile_version: formData.value.governance.profile_version || '1.0',
     }
   }
+  data.contribution_mode = formData.value.contributionMode || 'closed'
+  data.contributor_ids = formData.value.contributorIds || []
+  data.reviewer_ids = formData.value.reviewerIds || []
 
   return data
 }
@@ -1034,6 +1103,9 @@ const doSubmit = async () => {
             profile_id: formData.value.governance.profile_id || 'software-testing',
             profile_version: formData.value.governance.profile_version || '1.0',
           }
+          updateConfig.contribution_mode = formData.value.contributionMode || 'closed'
+          updateConfig.contributor_ids = formData.value.contributorIds || []
+          updateConfig.reviewer_ids = formData.value.reviewerIds || []
         }
       }
       await updateKnowledgeBase(props.kbId, {

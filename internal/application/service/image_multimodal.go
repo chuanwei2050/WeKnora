@@ -59,6 +59,7 @@ type ImageMultimodalService struct {
 	kbService      interfaces.KnowledgeBaseService
 	knowledgeRepo  interfaces.KnowledgeRepository
 	tenantRepo     interfaces.TenantRepository
+	tenantService  interfaces.TenantService
 	retrieveEngine interfaces.RetrieveEngineRegistry
 	ollamaService  *ollama.OllamaService
 	taskEnqueuer   interfaces.TaskEnqueuer
@@ -71,6 +72,7 @@ func NewImageMultimodalService(
 	kbService interfaces.KnowledgeBaseService,
 	knowledgeRepo interfaces.KnowledgeRepository,
 	tenantRepo interfaces.TenantRepository,
+	tenantService interfaces.TenantService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ollamaService *ollama.OllamaService,
 	taskEnqueuer interfaces.TaskEnqueuer,
@@ -82,6 +84,7 @@ func NewImageMultimodalService(
 		kbService:      kbService,
 		knowledgeRepo:  knowledgeRepo,
 		tenantRepo:     tenantRepo,
+		tenantService:  tenantService,
 		retrieveEngine: retrieveEngine,
 		ollamaService:  ollamaService,
 		taskEnqueuer:   taskEnqueuer,
@@ -159,7 +162,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			prompt = vlmOCRScannedPDFPrompt
 			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
 		}
-		
+
 		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
@@ -283,7 +286,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 		return
 	}
 
-	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get tenant for indexing: %v", err)
 		return
@@ -357,7 +360,7 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID string) (v
 
 // resolveFileServiceForPayload resolves tenant/KB scoped file service for reading provider:// URLs.
 func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Context, payload types.ImageMultimodalPayload) interfaces.FileService {
-	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenant, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil || tenant == nil {
 		logger.Warnf(ctx, "[ImageMultimodal] GetTenantByID failed: tenant=%d err=%v", payload.TenantID, err)
 		return nil
@@ -394,7 +397,7 @@ func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, 
 	}
 
 	redisKey := fmt.Sprintf("multimodal:pending:%s", payload.KnowledgeID)
-	
+
 	pendingCount, err := s.redisClient.Decr(ctx, redisKey).Result()
 	if err != nil && err != redis.Nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to decrement pending count for %s: %v", payload.KnowledgeID, err)
@@ -413,7 +416,7 @@ func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(ctx context.Con
 	if s.taskEnqueuer == nil {
 		return
 	}
-	
+
 	taskPayload := types.KnowledgePostProcessPayload{
 		TenantID:        payload.TenantID,
 		KnowledgeID:     payload.KnowledgeID,

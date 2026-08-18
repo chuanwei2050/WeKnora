@@ -11,9 +11,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -21,11 +24,14 @@ import (
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/config"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+var loginUsernamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{1,99}$`)
 
 type oidcAuthorizationState struct {
 	Nonce       string `json:"nonce"`
@@ -60,6 +66,7 @@ type userService struct {
 	userRepo      interfaces.UserRepository
 	tokenRepo     interfaces.AuthTokenRepository
 	tenantService interfaces.TenantService
+	kbRepo        interfaces.KnowledgeBaseRepository
 	config        *config.Config
 }
 
@@ -69,13 +76,101 @@ func NewUserService(
 	userRepo interfaces.UserRepository,
 	tokenRepo interfaces.AuthTokenRepository,
 	tenantService interfaces.TenantService,
+	kbRepo interfaces.KnowledgeBaseRepository,
 ) interfaces.UserService {
 	return &userService{
 		userRepo:      userRepo,
 		tokenRepo:     tokenRepo,
 		tenantService: tenantService,
+		kbRepo:        kbRepo,
 		config:        configInfo,
 	}
+}
+
+const (
+	defaultAdminUsername = "admin"
+	defaultAdminEmail    = "admin@weknora.local"
+	defaultAdminPassword = "Admin@123456"
+)
+
+// EnsureDefaultAdmin creates the configured bootstrap administrator only for an empty installation.
+func (s *userService) EnsureDefaultAdmin(ctx context.Context) error {
+	if value := strings.TrimSpace(os.Getenv("DEFAULT_ADMIN_ENABLED")); value != "" && !strings.EqualFold(value, "true") {
+		return nil
+	}
+
+	users, err := s.userRepo.ListUsers(ctx, 0, 1)
+	if err != nil {
+		return fmt.Errorf("check whether default administrator bootstrap is needed: %w", err)
+	}
+	if len(users) > 0 {
+		return nil
+	}
+
+	username := envOrDefault("DEFAULT_ADMIN_USERNAME", defaultAdminUsername)
+	email := envOrDefault("DEFAULT_ADMIN_EMAIL", defaultAdminEmail)
+	password := envOrDefault("DEFAULT_ADMIN_PASSWORD", defaultAdminPassword)
+
+	admin, err := s.userRepo.GetUserByUsername(ctx, username)
+	if err == nil && admin != nil {
+		return s.ensurePlatformAdminRole(ctx, admin)
+	}
+	if err != nil && !isUserLookupNotFound(err) {
+		return fmt.Errorf("check default administrator by username: %w", err)
+	}
+
+	admin, err = s.userRepo.GetUserByEmail(ctx, email)
+	if err == nil && admin != nil {
+		hashedPassword, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return fmt.Errorf("reset legacy default administrator password: %w", hashErr)
+		}
+		admin.Username = username
+		admin.PasswordHash = string(hashedPassword)
+		if roleErr := s.ensurePlatformAdminRole(ctx, admin); roleErr != nil {
+			return roleErr
+		}
+		logger.Warnf(ctx, "Legacy default administrator normalized to username %s; change the default password before production use", secutils.SanitizeForLog(username))
+		return nil
+	}
+	if err != nil && !isUserLookupNotFound(err) {
+		return fmt.Errorf("check default administrator by email: %w", err)
+	}
+
+	admin, err = s.Register(ctx, &types.RegisterRequest{
+		Username: username,
+		Email:    email,
+		Password: password,
+	})
+	if err != nil {
+		return fmt.Errorf("create default administrator: %w", err)
+	}
+	if err := s.ensurePlatformAdminRole(ctx, admin); err != nil {
+		return err
+	}
+
+	logger.Warnf(ctx, "Default administrator created for %s; change the default password before production use", secutils.SanitizeForLog(email))
+	return nil
+}
+
+func (s *userService) ensurePlatformAdminRole(ctx context.Context, admin *types.User) error {
+	if admin.Role == types.UserRolePlatformAdmin && admin.CanAccessAllTenants {
+		return nil
+	}
+	admin.Role = types.UserRolePlatformAdmin
+	admin.CanAccessAllTenants = true
+	admin.UpdatedAt = time.Now()
+	if err := s.userRepo.UpdateUser(ctx, admin); err != nil {
+		return fmt.Errorf("grant platform administrator role: %w", err)
+	}
+	return nil
+}
+
+func envOrDefault(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
 }
 
 // Register creates a new user account
@@ -127,6 +222,7 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 		PasswordHash: string(hashedPassword),
 		TenantID:     createdTenant.ID,
 		IsActive:     true,
+		Role:         types.UserRoleTenantAdmin,
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
@@ -144,20 +240,20 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 // Login authenticates a user and returns tokens
 func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*types.LoginResponse, error) {
 	logger.Info(ctx, "Start user login")
-	// Get user by email
-	user, err := s.userRepo.GetUserByEmail(ctx, req.Email)
+	// Get user by username
+	user, err := s.userRepo.GetUserByUsername(ctx, req.Username)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get user by email: %v", err)
+		logger.Errorf(ctx, "Failed to get user by username: %v", err)
 		return &types.LoginResponse{
 			Success: false,
-			Message: "Invalid email or password",
+			Message: "Invalid username or password",
 		}, nil
 	}
 	if user == nil {
-		logger.Warn(ctx, "User not found for email")
+		logger.Warn(ctx, "User not found for username")
 		return &types.LoginResponse{
 			Success: false,
-			Message: "Invalid email or password",
+			Message: "Invalid username or password",
 		}, nil
 	}
 
@@ -176,30 +272,30 @@ func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*type
 		logger.Warn(ctx, "Password verification failed")
 		return &types.LoginResponse{
 			Success: false,
-			Message: "Invalid email or password",
+			Message: "Invalid username or password",
 		}, nil
 	}
 	logger.Info(ctx, "Password verification successful")
+
+	// Verify the tenant before issuing any token.
+	tenant, err := s.tenantService.GetTenantByID(ctx, user.TenantID)
+	if err != nil || tenant == nil || tenant.Status != string(types.TenantStatusActive) {
+		logger.Warn(ctx, "User tenant is unavailable or suspended")
+		return &types.LoginResponse{
+			Success: false,
+			Message: "Tenant is suspended",
+		}, nil
+	}
 
 	// Generate tokens
 	logger.Info(ctx, "Generating tokens")
 	accessToken, refreshToken, err := s.GenerateTokens(ctx, user)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate tokens: %v", err)
-		return &types.LoginResponse{
-			Success: false,
-			Message: "Login failed",
-		}, nil
+		return &types.LoginResponse{Success: false, Message: "Login failed"}, nil
 	}
 	logger.Info(ctx, "Tokens generated successfully")
-
-	// Get tenant information
-	tenant, err := s.tenantService.GetTenantByID(ctx, user.TenantID)
-	if err != nil {
-		logger.Warn(ctx, "Failed to get tenant info")
-	} else {
-		logger.Info(ctx, "Tenant information retrieved successfully")
-	}
+	logger.Info(ctx, "Tenant information retrieved successfully")
 
 	logger.Info(ctx, "User logged in successfully")
 	return &types.LoginResponse{
@@ -374,6 +470,7 @@ func (s *userService) LoginWithBidReviewSSO(
 			PasswordHash:  string(hashedPassword),
 			TenantID:      tenant.ID,
 			IsActive:      true,
+			Role:          types.UserRole(bidReviewRole),
 			BidReviewRole: bidReviewRole,
 			CreatedAt:     time.Now(),
 			UpdatedAt:     time.Now(),
@@ -393,6 +490,10 @@ func (s *userService) LoginWithBidReviewSSO(
 		}
 		if user.BidReviewRole != bidReviewRole {
 			user.BidReviewRole = bidReviewRole
+			changed = true
+		}
+		if user.Role != types.UserRole(bidReviewRole) {
+			user.Role = types.UserRole(bidReviewRole)
 			changed = true
 		}
 		if changed {
@@ -453,12 +554,437 @@ func (s *userService) GetUserByTenantID(ctx context.Context, tenantID uint64) (*
 // UpdateUser updates user information
 func (s *userService) UpdateUser(ctx context.Context, user *types.User) error {
 	user.UpdatedAt = time.Now()
-	return s.userRepo.UpdateUser(ctx, user)
+	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+		return err
+	}
+	return s.tokenRepo.RevokeTokensByUserID(ctx, user.ID)
 }
 
 // DeleteUser deletes a user
 func (s *userService) DeleteUser(ctx context.Context, id string) error {
 	return s.userRepo.DeleteUser(ctx, id)
+}
+
+func authorizeTenantUserManagement(actor *types.User, tenantID uint64) error {
+	if actor == nil {
+		return werrors.NewUnauthorizedError("Authentication required")
+	}
+	if !actor.CanManageTenant() {
+		return werrors.NewForbiddenError("Tenant administrator permission required")
+	}
+	if !actor.IsPlatformAdmin() && actor.TenantID != tenantID {
+		return werrors.NewForbiddenError("Cross-tenant user management is forbidden")
+	}
+	return nil
+}
+
+func (s *userService) tenantUser(ctx context.Context, tenantID uint64, userID string) (*types.User, error) {
+	user, err := s.userRepo.GetUserByID(ctx, userID)
+	if err != nil || user == nil {
+		return nil, werrors.NewNotFoundError("User not found")
+	}
+	if user.TenantID != tenantID {
+		return nil, werrors.NewForbiddenError("Cross-tenant user management is forbidden")
+	}
+	if user.IsPlatformAdmin() {
+		return nil, werrors.NewForbiddenError("Platform administrators cannot be changed through tenant user management")
+	}
+	return user, nil
+}
+
+func (s *userService) ListTenantUsers(ctx context.Context, actor *types.User, tenantID uint64, query string, offset, limit int) ([]*types.User, int64, error) {
+	if err := authorizeTenantUserManagement(actor, tenantID); err != nil {
+		return nil, 0, err
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return s.userRepo.ListUsersByTenant(ctx, tenantID, query, offset, limit)
+}
+
+func (s *userService) CreateTenantUser(ctx context.Context, actor *types.User, tenantID uint64, req *types.CreateTenantUserRequest) (*types.User, error) {
+	if err := authorizeTenantUserManagement(actor, tenantID); err != nil {
+		return nil, err
+	}
+	if req == nil || !types.IsTenantUserRole(req.Role) {
+		return nil, werrors.NewValidationError("Role must be tenant_admin or member")
+	}
+	if !actor.IsPlatformAdmin() && req.Role != types.UserRoleMember {
+		return nil, werrors.NewForbiddenError("Tenant administrators can only create member accounts")
+	}
+	if err := validateManagedPassword(req.Password); err != nil {
+		return nil, err
+	}
+	username := strings.TrimSpace(req.Username)
+	if err := validateManagedUsername(username); err != nil {
+		return nil, err
+	}
+	if existing, err := s.userRepo.GetUserByUsername(ctx, username); err == nil && existing != nil {
+		return nil, werrors.NewConflictError("Username already exists")
+	} else if err != nil && !isUserLookupNotFound(err) {
+		return nil, err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	mode := req.KnowledgeBaseAccessMode
+	ids := types.StringArray{}
+	if req.Role == types.UserRoleMember {
+		if mode == "" {
+			mode = types.KnowledgeBaseAccessAll
+		}
+		ids, err = s.validateKnowledgeBaseScope(ctx, tenantID, mode, req.KnowledgeBaseIDs)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		mode = types.KnowledgeBaseAccessAll
+	}
+	now := time.Now()
+	userID := uuid.NewString()
+	user := &types.User{
+		ID: userID, Username: username, Email: userID + "@users.weknora.invalid", PasswordHash: string(hash),
+		TenantID: tenantID, IsActive: true, Role: req.Role, KnowledgeBaseAccessMode: mode,
+		KnowledgeBaseIDs: ids, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.userRepo.CreateUser(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func validateManagedPassword(password string) error {
+	if password == "" {
+		return nil
+	}
+	if len(password) < 8 || len(password) > 72 {
+		return werrors.NewValidationError("Password must be 8 to 72 characters")
+	}
+	hasLetter, hasDigit := false, false
+	for _, r := range password {
+		if unicode.IsSpace(r) {
+			return werrors.NewValidationError("Password cannot contain whitespace")
+		}
+		if r < '!' || r > '~' {
+			return werrors.NewValidationError("Password may only contain ASCII letters, numbers and special characters")
+		}
+		if r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' {
+			hasLetter = true
+		}
+		if r >= '0' && r <= '9' {
+			hasDigit = true
+		}
+	}
+	if !hasLetter || !hasDigit {
+		return werrors.NewValidationError("Password must contain both letters and numbers")
+	}
+	return nil
+}
+
+func validateManagedUsername(username string) error {
+	if !loginUsernamePattern.MatchString(strings.TrimSpace(username)) {
+		return werrors.NewValidationError("Username must be 2-100 characters and contain only letters, numbers, dots, underscores or hyphens")
+	}
+	return nil
+}
+
+func normalizeKnowledgeBaseIDs(values []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		id := strings.TrimSpace(value)
+		if id == "" {
+			return nil, werrors.NewValidationError("Knowledge base IDs cannot be empty")
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	return result, nil
+}
+
+func validateManagedRoleChange(currentRole, nextRole types.UserRole) error {
+	if !types.IsTenantUserRole(nextRole) {
+		return werrors.NewValidationError("Role must be tenant_admin or member")
+	}
+	if currentRole != types.UserRoleMember && nextRole != currentRole {
+		return werrors.NewForbiddenError("Administrator roles cannot be changed")
+	}
+	return nil
+}
+
+func (s *userService) validateKnowledgeBaseScope(ctx context.Context, tenantID uint64, mode types.KnowledgeBaseAccessMode, values []string) (types.StringArray, error) {
+	if !types.IsKnowledgeBaseAccessMode(mode) {
+		return nil, werrors.NewValidationError("Knowledge base access mode must be all or selected")
+	}
+	if mode == types.KnowledgeBaseAccessAll {
+		return types.StringArray{}, nil
+	}
+	ids, err := normalizeKnowledgeBaseIDs(values)
+	if err != nil || len(ids) == 0 {
+		return types.StringArray(ids), err
+	}
+	kbs, err := s.kbRepo.GetKnowledgeBaseByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	if len(kbs) != len(ids) {
+		return nil, werrors.NewValidationError("One or more knowledge bases do not exist")
+	}
+	for _, kb := range kbs {
+		if kb == nil || kb.TenantID != tenantID {
+			return nil, werrors.NewForbiddenError("Knowledge base belongs to another tenant")
+		}
+	}
+	return types.StringArray(ids), nil
+}
+
+func (s *userService) UpdateTenantUser(ctx context.Context, actor *types.User, tenantID uint64, userID string, req *types.UpdateTenantUserRequest) (*types.User, error) {
+	if err := authorizeTenantUserManagement(actor, tenantID); err != nil {
+		return nil, err
+	}
+	if req == nil || !types.IsTenantUserRole(req.Role) {
+		return nil, werrors.NewValidationError("Role must be tenant_admin or member")
+	}
+	username := strings.TrimSpace(req.Username)
+	if err := validateManagedUsername(username); err != nil {
+		return nil, err
+	}
+	if err := validateManagedPassword(req.Password); err != nil {
+		return nil, err
+	}
+	user, err := s.tenantUser(ctx, tenantID, userID)
+	if err != nil {
+		return nil, err
+	}
+	currentRole := user.EffectiveRole()
+	if err := validateManagedRoleChange(currentRole, req.Role); err != nil {
+		return nil, err
+	}
+	if existing, lookupErr := s.userRepo.GetUserByUsername(ctx, username); lookupErr == nil && existing != nil && existing.ID != user.ID {
+		return nil, werrors.NewConflictError("Username already exists")
+	} else if lookupErr != nil && !isUserLookupNotFound(lookupErr) {
+		return nil, lookupErr
+	}
+
+	mode := req.KnowledgeBaseAccessMode
+	ids := types.StringArray{}
+	if req.Role == types.UserRoleMember {
+		ids, err = s.validateKnowledgeBaseScope(ctx, tenantID, mode, req.KnowledgeBaseIDs)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		mode = types.KnowledgeBaseAccessAll
+	}
+
+	user.Username = username
+	user.Role = req.Role
+	user.CanAccessAllTenants = false
+	user.KnowledgeBaseAccessMode = mode
+	user.KnowledgeBaseIDs = ids
+	if req.Password != "" {
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return nil, hashErr
+		}
+		user.PasswordHash = string(hash)
+	}
+	user.UpdatedAt = time.Now()
+	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+		return nil, err
+	}
+	if req.Password != "" || req.Role != currentRole {
+		if err := s.tokenRepo.RevokeTokensByUserID(ctx, user.ID); err != nil {
+			return nil, err
+		}
+	}
+	return user, nil
+}
+
+func (s *userService) CanDeleteTenantUser(ctx context.Context, actor *types.User, tenantID uint64, userID string) (bool, error) {
+	if err := authorizeTenantUserManagement(actor, tenantID); err != nil {
+		return false, err
+	}
+	user, err := s.tenantUser(ctx, tenantID, userID)
+	if err != nil {
+		return false, err
+	}
+	if user.ID == actor.ID || user.EffectiveRole() != types.UserRoleMember {
+		return false, nil
+	}
+	hasActivity, err := s.userRepo.HasUserDocumentActivity(ctx, user.ID)
+	if err != nil {
+		return false, err
+	}
+	return !hasActivity, nil
+}
+
+func (s *userService) DeleteTenantUser(ctx context.Context, actor *types.User, tenantID uint64, userID string) error {
+	canDelete, err := s.CanDeleteTenantUser(ctx, actor, tenantID, userID)
+	if err != nil {
+		return err
+	}
+	if !canDelete {
+		return werrors.NewConflictError("User has document activity or cannot be deleted")
+	}
+	if err := s.tokenRepo.RevokeTokensByUserID(ctx, userID); err != nil {
+		return err
+	}
+	return s.userRepo.DeleteUser(ctx, userID)
+}
+
+func (s *userService) SetTenantAdminCredentials(ctx context.Context, actor *types.User, tenantID uint64, username, password string) (*types.User, error) {
+	if actor == nil || !actor.IsPlatformAdmin() {
+		return nil, werrors.NewForbiddenError("Platform administrator permission required")
+	}
+	username = strings.TrimSpace(username)
+	if username == "" {
+		username = "tenant_admin_" + strconv.FormatUint(tenantID, 10)
+	}
+	if err := validateManagedUsername(username); err != nil {
+		return nil, err
+	}
+	users, _, err := s.userRepo.ListUsersByTenant(ctx, tenantID, "", 0, 100)
+	if err != nil {
+		return nil, err
+	}
+	var admin *types.User
+	for _, user := range users {
+		if user.Role == types.UserRoleTenantAdmin {
+			admin = user
+			break
+		}
+	}
+	if existing, lookupErr := s.userRepo.GetUserByUsername(ctx, username); lookupErr == nil && existing != nil && (admin == nil || existing.ID != admin.ID) {
+		return nil, werrors.NewConflictError("Username already exists")
+	} else if lookupErr != nil && !isUserLookupNotFound(lookupErr) {
+		return nil, lookupErr
+	}
+	if admin == nil {
+		if password == "" {
+			password = defaultAdminPassword
+		}
+		return s.CreateTenantUser(ctx, actor, tenantID, &types.CreateTenantUserRequest{
+			Username: username, Password: password, Role: types.UserRoleTenantAdmin,
+		})
+	}
+	admin.Username = username
+	admin.UpdatedAt = time.Now()
+	if password != "" {
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return nil, hashErr
+		}
+		admin.PasswordHash = string(hash)
+	}
+	if err := s.userRepo.UpdateUser(ctx, admin); err != nil {
+		return nil, err
+	}
+	if password != "" {
+		if err := s.tokenRepo.RevokeTokensByUserID(ctx, admin.ID); err != nil {
+			return nil, err
+		}
+	}
+	return admin, nil
+}
+
+func (s *userService) ResetTenantUserPassword(ctx context.Context, actor *types.User, tenantID uint64, userID, password string) error {
+	if err := authorizeTenantUserManagement(actor, tenantID); err != nil {
+		return err
+	}
+	if err := validateManagedPassword(password); err != nil {
+		return err
+	}
+	user, err := s.tenantUser(ctx, tenantID, userID)
+	if err != nil {
+		return err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	user.PasswordHash = string(hash)
+	user.UpdatedAt = time.Now()
+	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+		return err
+	}
+	return s.tokenRepo.RevokeTokensByUserID(ctx, user.ID)
+}
+
+func (s *userService) ensureNotLastTenantAdmin(ctx context.Context, user *types.User) error {
+	if user.Role != types.UserRoleTenantAdmin || !user.IsActive {
+		return nil
+	}
+	count, err := s.userRepo.CountActiveTenantAdmins(ctx, user.TenantID, user.ID)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return werrors.NewConflictError("At least one active tenant administrator is required")
+	}
+	return nil
+}
+
+func (s *userService) UpdateTenantUserRole(ctx context.Context, actor *types.User, tenantID uint64, userID string, role types.UserRole) (*types.User, error) {
+	if err := authorizeTenantUserManagement(actor, tenantID); err != nil {
+		return nil, err
+	}
+	if !types.IsTenantUserRole(role) {
+		return nil, werrors.NewValidationError("Role must be tenant_admin or member")
+	}
+	user, err := s.tenantUser(ctx, tenantID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateManagedRoleChange(user.EffectiveRole(), role); err != nil {
+		return nil, err
+	}
+	if user.Role == types.UserRoleTenantAdmin && role != types.UserRoleTenantAdmin {
+		if err := s.ensureNotLastTenantAdmin(ctx, user); err != nil {
+			return nil, err
+		}
+	}
+	user.Role = role
+	user.CanAccessAllTenants = false
+	user.UpdatedAt = time.Now()
+	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+		return nil, err
+	}
+	if err := s.tokenRepo.RevokeTokensByUserID(ctx, user.ID); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (s *userService) UpdateTenantUserStatus(ctx context.Context, actor *types.User, tenantID uint64, userID string, active bool) (*types.User, error) {
+	if err := authorizeTenantUserManagement(actor, tenantID); err != nil {
+		return nil, err
+	}
+	user, err := s.tenantUser(ctx, tenantID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !active {
+		if err := s.ensureNotLastTenantAdmin(ctx, user); err != nil {
+			return nil, err
+		}
+	}
+	user.IsActive = active
+	user.UpdatedAt = time.Now()
+	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+		return nil, err
+	}
+	if err := s.tokenRepo.RevokeTokensByUserID(ctx, user.ID); err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 // ChangePassword changes user password
@@ -587,7 +1113,14 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 		return nil, errors.New("token is revoked")
 	}
 
-	return s.userRepo.GetUserByID(ctx, userID)
+	user, err := s.userRepo.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !user.IsActive {
+		return nil, errors.New("user account is disabled")
+	}
+	return user, nil
 }
 
 // RefreshToken refreshes access token using refresh token
@@ -631,6 +1164,13 @@ func (s *userService) RefreshToken(
 	user, err := s.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
 		return "", "", err
+	}
+	if !user.IsActive {
+		return "", "", errors.New("user account is disabled")
+	}
+	tenant, err := s.tenantService.GetTenantByID(ctx, user.TenantID)
+	if err != nil || tenant == nil || tenant.Status != string(types.TenantStatusActive) {
+		return "", "", errors.New("tenant is suspended")
 	}
 
 	// Revoke old refresh token

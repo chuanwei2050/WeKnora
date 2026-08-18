@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/common"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -486,11 +487,12 @@ func (s *sessionService) buildSearchTargets(
 		}
 		userID, _ := types.UserIDFromContext(ctx)
 		for _, kbID := range knowledgeBaseIDs {
-			fullKBSet[kbID] = true
 			kb := kbByID[kbID]
 			if kb == nil {
-				kbTenantMap[kbID] = tenantID
-			} else if kb.TenantID == tenantID {
+				return nil, werrors.NewForbiddenError("Knowledge base is outside the authorized scope")
+			}
+			fullKBSet[kbID] = true
+			if kb.TenantID == tenantID {
 				kbTenantMap[kbID] = tenantID
 			} else if s.kbShareService != nil && userID != "" {
 				hasAccess, _ := s.kbShareService.HasKBPermission(ctx, kbID, userID, types.OrgRoleViewer)

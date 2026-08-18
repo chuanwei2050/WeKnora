@@ -16,6 +16,8 @@ const (
 	UserContextKey ContextKey = "User"
 	// UserIDContextKey is the context key for user ID
 	UserIDContextKey ContextKey = "UserID"
+	// AuthenticationMethodContextKey identifies the credential validated at the HTTP boundary.
+	AuthenticationMethodContextKey ContextKey = "AuthenticationMethod"
 	// SessionTenantIDContextKey is the context key for session owner's tenant ID.
 	// When set (e.g. in pipeline with shared agent), session/message lookups use this instead of TenantIDContextKey.
 	SessionTenantIDContextKey ContextKey = "SessionTenantID"
@@ -33,6 +35,13 @@ const (
 	// request lifecycle. Defined here (not inside the langfuse package) so
 	// that logger.CloneContext can preserve it without importing langfuse.
 	LangfuseTraceContextKey ContextKey = "LangfuseTrace"
+)
+
+type AuthenticationMethod string
+
+const (
+	AuthenticationMethodBearer AuthenticationMethod = "bearer"
+	AuthenticationMethodAPIKey AuthenticationMethod = "api_key"
 )
 
 // String returns the string representation of the context key

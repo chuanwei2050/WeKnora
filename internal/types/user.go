@@ -1,10 +1,60 @@
 package types
 
 import (
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 )
+
+type UserRole string
+
+type KnowledgeBaseAccessMode string
+
+const (
+	UserRolePlatformAdmin UserRole = "platform_admin"
+	UserRoleTenantAdmin   UserRole = "tenant_admin"
+	UserRoleMember        UserRole = "member"
+
+	KnowledgeBaseAccessAll      KnowledgeBaseAccessMode = "all"
+	KnowledgeBaseAccessSelected KnowledgeBaseAccessMode = "selected"
+)
+
+func IsTenantUserRole(role UserRole) bool {
+	return role == UserRoleTenantAdmin || role == UserRoleMember
+}
+
+func IsKnowledgeBaseAccessMode(mode KnowledgeBaseAccessMode) bool {
+	return mode == KnowledgeBaseAccessAll || mode == KnowledgeBaseAccessSelected
+}
+
+type CreateTenantUserRequest struct {
+	Username                string                  `json:"username" binding:"required,min=2,max=100"`
+	Password                string                  `json:"password" binding:"required,min=8,max=72"`
+	Role                    UserRole                `json:"role" binding:"required"`
+	KnowledgeBaseAccessMode KnowledgeBaseAccessMode `json:"knowledge_base_access_mode"`
+	KnowledgeBaseIDs        []string                `json:"knowledge_base_ids"`
+}
+
+type ResetTenantUserPasswordRequest struct {
+	Password string `json:"password" binding:"required,min=8,max=72"`
+}
+
+type UpdateTenantUserRequest struct {
+	Username                string                  `json:"username" binding:"required,min=2,max=100"`
+	Password                string                  `json:"password" binding:"omitempty,min=8,max=72"`
+	Role                    UserRole                `json:"role" binding:"required"`
+	KnowledgeBaseAccessMode KnowledgeBaseAccessMode `json:"knowledge_base_access_mode" binding:"required"`
+	KnowledgeBaseIDs        []string                `json:"knowledge_base_ids"`
+}
+
+type UpdateTenantUserRoleRequest struct {
+	Role UserRole `json:"role" binding:"required"`
+}
+
+type UpdateTenantUserStatusRequest struct {
+	IsActive *bool `json:"is_active" binding:"required"`
+}
 
 // User represents a user in the system
 type User struct {
@@ -24,6 +74,12 @@ type User struct {
 	IsActive bool `json:"is_active"  gorm:"default:true"`
 	// Whether the user can access all tenants (cross-tenant access)
 	CanAccessAllTenants bool `json:"can_access_all_tenants" gorm:"default:false"`
+	// Role controls platform-wide and tenant-scoped management permissions.
+	Role UserRole `json:"role" gorm:"type:varchar(32);not null;default:'member';index"`
+	// KnowledgeBaseAccessMode controls whether a member sees all or selected tenant knowledge bases.
+	KnowledgeBaseAccessMode KnowledgeBaseAccessMode `json:"knowledge_base_access_mode" gorm:"column:knowledge_base_access_mode;type:varchar(16);not null;default:'all'"`
+	// KnowledgeBaseIDs stores the selected scope when KnowledgeBaseAccessMode is selected.
+	KnowledgeBaseIDs StringArray `json:"knowledge_base_ids" gorm:"column:knowledge_base_ids;type:json"`
 	// BidReview role from SSO, used by embedded-mode permission gates.
 	BidReviewRole string `json:"bidreview_role,omitempty" gorm:"column:bidreview_role;type:varchar(32);default:'member'"`
 	// Creation time of the user
@@ -35,6 +91,60 @@ type User struct {
 
 	// Association relationship, not stored in the database
 	Tenant *Tenant `json:"tenant,omitempty" gorm:"foreignKey:TenantID"`
+}
+
+// EffectiveRole normalizes persisted and legacy role data at the database boundary.
+func (u *User) EffectiveRole() UserRole {
+	if u == nil {
+		return UserRoleMember
+	}
+	if u.CanAccessAllTenants || u.BidReviewRole == string(UserRolePlatformAdmin) {
+		return UserRolePlatformAdmin
+	}
+	if u.BidReviewRole == string(UserRoleTenantAdmin) {
+		return UserRoleTenantAdmin
+	}
+	switch UserRole(strings.TrimSpace(string(u.Role))) {
+	case UserRolePlatformAdmin:
+		return UserRolePlatformAdmin
+	case UserRoleTenantAdmin:
+		return UserRoleTenantAdmin
+	case UserRoleMember:
+		return UserRoleMember
+	}
+	if u.Role == "" && u.BidReviewRole == "" {
+		return UserRoleTenantAdmin
+	}
+	return UserRoleMember
+}
+
+func (u *User) IsPlatformAdmin() bool {
+	return u.EffectiveRole() == UserRolePlatformAdmin
+}
+
+func (u *User) CanManageTenant() bool {
+	role := u.EffectiveRole()
+	return role == UserRolePlatformAdmin || role == UserRoleTenantAdmin
+}
+
+func (u *User) EffectiveKnowledgeBaseAccessMode() KnowledgeBaseAccessMode {
+	if u == nil || u.CanManageTenant() {
+		return KnowledgeBaseAccessAll
+	}
+	if u.KnowledgeBaseAccessMode == KnowledgeBaseAccessSelected {
+		return KnowledgeBaseAccessSelected
+	}
+	return KnowledgeBaseAccessAll
+}
+
+func (u *User) CanAccessKnowledgeBase(knowledgeBaseID string) bool {
+	if u == nil || strings.TrimSpace(knowledgeBaseID) == "" {
+		return false
+	}
+	if u.EffectiveKnowledgeBaseAccessMode() == KnowledgeBaseAccessAll {
+		return true
+	}
+	return stringArrayContains(u.KnowledgeBaseIDs, knowledgeBaseID)
 }
 
 // AuthToken represents an authentication token
@@ -62,7 +172,7 @@ type AuthToken struct {
 
 // LoginRequest represents a login request
 type LoginRequest struct {
-	Email    string `json:"email"    binding:"required,email"`
+	Username string `json:"username" binding:"required,min=2,max=100"`
 	Password string `json:"password" binding:"required,min=6"`
 }
 
@@ -133,30 +243,37 @@ type RegisterResponse struct {
 
 // UserInfo represents user information for API responses
 type UserInfo struct {
-	ID                  string    `json:"id"`
-	Username            string    `json:"username"`
-	Email               string    `json:"email"`
-	Avatar              string    `json:"avatar"`
-	TenantID            uint64    `json:"tenant_id"`
-	IsActive            bool      `json:"is_active"`
-	CanAccessAllTenants bool      `json:"can_access_all_tenants"`
-	BidReviewRole       string    `json:"bidreview_role,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID                      string                  `json:"id"`
+	Username                string                  `json:"username"`
+	Email                   string                  `json:"email"`
+	Avatar                  string                  `json:"avatar"`
+	TenantID                uint64                  `json:"tenant_id"`
+	IsActive                bool                    `json:"is_active"`
+	CanAccessAllTenants     bool                    `json:"can_access_all_tenants"`
+	Role                    UserRole                `json:"role"`
+	KnowledgeBaseAccessMode KnowledgeBaseAccessMode `json:"knowledge_base_access_mode"`
+	KnowledgeBaseIDs        StringArray             `json:"knowledge_base_ids"`
+	CanDelete               bool                    `json:"can_delete"`
+	BidReviewRole           string                  `json:"bidreview_role,omitempty"`
+	CreatedAt               time.Time               `json:"created_at"`
+	UpdatedAt               time.Time               `json:"updated_at"`
 }
 
 // ToUserInfo converts User to UserInfo (without sensitive data)
 func (u *User) ToUserInfo() *UserInfo {
 	return &UserInfo{
-		ID:                  u.ID,
-		Username:            u.Username,
-		Email:               u.Email,
-		Avatar:              u.Avatar,
-		TenantID:            u.TenantID,
-		IsActive:            u.IsActive,
-		CanAccessAllTenants: u.CanAccessAllTenants,
-		BidReviewRole:       u.BidReviewRole,
-		CreatedAt:           u.CreatedAt,
-		UpdatedAt:           u.UpdatedAt,
+		ID:                      u.ID,
+		Username:                u.Username,
+		Email:                   u.Email,
+		Avatar:                  u.Avatar,
+		TenantID:                u.TenantID,
+		IsActive:                u.IsActive,
+		CanAccessAllTenants:     u.CanAccessAllTenants,
+		Role:                    u.EffectiveRole(),
+		KnowledgeBaseAccessMode: u.EffectiveKnowledgeBaseAccessMode(),
+		KnowledgeBaseIDs:        u.KnowledgeBaseIDs,
+		BidReviewRole:           u.BidReviewRole,
+		CreatedAt:               u.CreatedAt,
+		UpdatedAt:               u.UpdatedAt,
 	}
 }

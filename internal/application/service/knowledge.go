@@ -202,6 +202,11 @@ func defaultChannel(ch string) string {
 	return ch
 }
 
+func currentUserID(ctx context.Context) string {
+	userID, _ := types.UserIDFromContext(ctx)
+	return userID
+}
+
 func governanceSourceMetadata(metadata map[string]string) (types.KnowledgeSourceMetadata, error) {
 	value := func(key string) string { return strings.TrimSpace(metadata[key]) }
 	result := types.KnowledgeSourceMetadata{
@@ -407,6 +412,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	knowledge := &types.Knowledge{
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		CreatedBy:        currentUserID(ctx),
 		TagID:            tagID, // 设置分类ID，用于知识分类管理
 		Type:             "file",
 		Channel:          defaultChannel(channel),
@@ -476,6 +482,9 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 			_ = s.repo.DeleteKnowledge(ctx, tenantID, knowledge.ID)
 			return nil, err
 		}
+		// Governed uploads stay as immutable drafts. Parsing, indexing and graph
+		// extraction start only after an authorized reviewer approves the version.
+		return knowledge, nil
 	}
 
 	// Enqueue document processing task to Asynq
@@ -634,6 +643,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		CreatedBy:        currentUserID(ctx),
 		Type:             "url",
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -855,6 +865,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		CreatedBy:        currentUserID(ctx),
 		Type:             "file_url",
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -996,6 +1007,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 	knowledge := &types.Knowledge{
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		CreatedBy:        currentUserID(ctx),
 		Type:             types.KnowledgeTypeManual,
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -1080,6 +1092,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 		ID:               uuid.New().String(),
 		TenantID:         ctx.Value(types.TenantIDContextKey).(uint64),
 		KnowledgeBaseID:  kbID,
+		CreatedBy:        currentUserID(ctx),
 		Type:             "passage",
 		Channel:          defaultChannel(channel),
 		ParseStatus:      "pending",
@@ -1969,7 +1982,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		stagingVersionID = strings.TrimSpace(knowledge.PendingVersionID)
 	}
 	isGovernedStaging := stagingVersionID != ""
-	if kb.NeedsEmbeddingModel() && !isGovernedStaging {
+	if kb.NeedsEmbeddingModel() {
 		var err error
 		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 		if err != nil {
@@ -2205,7 +2218,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Create index information and perform vector/keyword indexing when enabled.
 	// Chunks are ALWAYS saved to DB (above) because wiki and graph need them even without vector indexing.
 	var totalStorageSize int64
-	if !isGovernedStaging && (kb.IsVectorEnabled() || kb.IsKeywordEnabled()) {
+	if kb.IsVectorEnabled() || kb.IsKeywordEnabled() {
 		// Create index information — only for child/flat chunks, NOT parent chunks.
 		// Parent chunks are stored for context retrieval but do not need vector embeddings.
 		// Prepend the document title to improve semantic alignment between
@@ -2234,7 +2247,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			totalStorageSize = retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfoList)
 			if tenantInfo.StorageQuota > 0 {
 				// Re-fetch tenant storage information
-				tenantInfo, err = s.tenantRepo.GetTenantByID(ctx, tenantInfo.ID)
+				tenantInfo, err = s.tenantService.GetTenantByID(ctx, tenantInfo.ID)
 				if err != nil {
 					knowledge.ParseStatus = types.ParseStatusFailed
 					knowledge.ErrorMessage = err.Error()
@@ -2312,7 +2325,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			return
 		}
 	} else if isGovernedStaging {
-		logger.Infof(ctx, "Governed version %s parsed into staging chunks; production indexes remain unchanged", stagingVersionID)
+		logger.Infof(ctx, "Governed version %s parsed into version-scoped staging chunks", stagingVersionID)
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping BatchIndex", kb.ID)
 	}
@@ -2677,7 +2690,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		}
 
 		// Index summary chunk
-		tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+		tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to get tenant info: %v", err)
 			return fmt.Errorf("failed to get tenant info: %w", err)
@@ -2846,7 +2859,7 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 		return fmt.Errorf("failed to get embedding model: %w", err)
 	}
 
-	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		exitStatus = "get_tenant_failed"
 		logger.Errorf(ctx, "Failed to get tenant info: %v", err)
@@ -6721,6 +6734,7 @@ func (s *knowledgeService) ensureFAQKnowledge(
 	knowledge := &types.Knowledge{
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kb.ID,
+		CreatedBy:        currentUserID(ctx),
 		Type:             types.KnowledgeTypeFAQ,
 		Channel:          types.ChannelWeb,
 		Title:            fmt.Sprintf("%s - FAQ", kb.Name),
@@ -7993,7 +8007,7 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	ctx = logger.WithField(ctx, "manual_process", payload.KnowledgeID)
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 
-	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "ProcessManualUpdate: failed to get tenant: %v", err)
 		return nil
@@ -8077,7 +8091,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	maxRetry, _ := asynq.GetMaxRetry(ctx)
 	isLastRetry := retryCount >= maxRetry
 
-	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get tenant: %v", err)
 		return nil
@@ -8653,7 +8667,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	maxRetry, _ := asynq.GetMaxRetry(ctx)
 	isLastRetry := retryCount >= maxRetry
 
-	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get tenant: %v", err)
 		return nil
@@ -9091,7 +9105,7 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 
 	// Get tenant info and add to context
-	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get tenant info: %v", err)
 		return fmt.Errorf("failed to get tenant info: %w", err)
@@ -9466,6 +9480,7 @@ func (s *knowledgeService) getOrCreateFAQKnowledge(ctx context.Context, kb *type
 		ID:               uuid.New().String(),
 		TenantID:         kb.TenantID,
 		KnowledgeBaseID:  kb.ID,
+		CreatedBy:        currentUserID(ctx),
 		Type:             types.KnowledgeTypeFAQ,
 		Channel:          types.ChannelWeb,
 		Title:            "FAQ",
@@ -9576,7 +9591,7 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 
 	// Get tenant info and add to context
-	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "ProcessKnowledgeMove: failed to get tenant info: %v", err)
 		return fmt.Errorf("failed to get tenant info: %w", err)
@@ -9968,7 +9983,7 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 	logger.Infof(ctx, "Processing knowledge list delete task for %d knowledge items", len(payload.KnowledgeIDs))
 
 	// Get tenant info
-	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenant, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get tenant %d: %v", payload.TenantID, err)
 		return err

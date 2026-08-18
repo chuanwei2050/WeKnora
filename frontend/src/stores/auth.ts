@@ -35,7 +35,15 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
   const canAccessAllTenants = computed(() => {
-    return user.value?.can_access_all_tenants || false
+    return user.value?.role === 'platform_admin'
+  })
+
+  const canManageTenant = computed(() => {
+    return user.value?.role === 'platform_admin' || user.value?.role === 'tenant_admin'
+  })
+
+  const workspaceMode = computed<'platform' | 'tenant'>(() => {
+    return user.value?.role === 'platform_admin' && selectedTenantId.value === null ? 'platform' : 'tenant'
   })
 
   const effectiveTenantId = computed(() => {
@@ -234,6 +242,8 @@ export const useAuthStore = defineStore('auth', () => {
     currentTenantId,
     currentUserId,
     canAccessAllTenants,
+    canManageTenant,
+    workspaceMode,
     effectiveTenantId,
     isLiteMode,
     

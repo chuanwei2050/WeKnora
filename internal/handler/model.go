@@ -32,8 +32,8 @@ func NewModelHandler(service interfaces.ModelService) *ModelHandler {
 
 // hideSensitiveInfo hides sensitive information (APIKey, BaseURL) for builtin models
 // Returns a copy of the model with sensitive fields cleared if it's a builtin model
-func hideSensitiveInfo(model *types.Model) *types.Model {
-	if !model.IsBuiltin {
+func hideSensitiveInfo(model *types.Model, hideCredentials bool) *types.Model {
+	if !model.IsBuiltin && !(hideCredentials && model.TenantID == types.PlatformModelTenantID) {
 		return model
 	}
 
@@ -59,10 +59,28 @@ func hideSensitiveInfo(model *types.Model) *types.Model {
 			Capabilities:        model.Parameters.Capabilities,
 		},
 		IsBuiltin: model.IsBuiltin,
+		IsDefault: model.IsDefault,
 		Status:    model.Status,
 		CreatedAt: model.CreatedAt,
 		UpdatedAt: model.UpdatedAt,
 	}
+}
+
+func isPlatformAdmin(c *gin.Context) bool {
+	method, ok := c.Request.Context().Value(types.AuthenticationMethodContextKey).(types.AuthenticationMethod)
+	if !ok || method != types.AuthenticationMethodBearer {
+		return false
+	}
+	user, ok := types.UserFromContext(c.Request.Context())
+	return ok && user.IsPlatformAdmin()
+}
+
+func requirePlatformAdmin(c *gin.Context) bool {
+	if isPlatformAdmin(c) {
+		return true
+	}
+	c.Error(errors.NewForbiddenError("Only platform administrators can manage models"))
+	return false
 }
 
 // CreateModelRequest defines the structure for model creation requests
@@ -89,6 +107,9 @@ type CreateModelRequest struct {
 // @Router       /models [post]
 func (h *ModelHandler) CreateModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdmin(c) {
+		return
+	}
 
 	logger.Info(ctx, "Start creating model")
 
@@ -98,15 +119,8 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		logger.Error(ctx, "Tenant ID is empty")
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
-		return
-	}
-
 	logger.Infof(ctx, "Creating model, Tenant ID: %d, Model name: %s, Model type: %s",
-		tenantID, secutils.SanitizeForLog(req.Name), secutils.SanitizeForLog(string(req.Type)))
+		types.PlatformModelTenantID, secutils.SanitizeForLog(req.Name), secutils.SanitizeForLog(string(req.Type)))
 
 	// SSRF validation for model BaseURL
 	if req.Parameters.BaseURL != "" {
@@ -118,7 +132,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	}
 
 	model := &types.Model{
-		TenantID:    tenantID,
+		TenantID:    types.PlatformModelTenantID,
 		Name:        secutils.SanitizeForLog(req.Name),
 		Type:        types.ModelType(secutils.SanitizeForLog(string(req.Type))),
 		Source:      req.Source,
@@ -140,7 +154,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	)
 
 	// Hide sensitive information for builtin models (though newly created models are unlikely to be builtin)
-	responseModel := hideSensitiveInfo(model)
+	responseModel := hideSensitiveInfo(model, false)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
@@ -188,7 +202,7 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 	logger.Infof(ctx, "Retrieved model successfully, ID: %s, Name: %s", model.ID, model.Name)
 
 	// Hide sensitive information for builtin models
-	responseModel := hideSensitiveInfo(model)
+	responseModel := hideSensitiveInfo(model, !isPlatformAdmin(c))
 	if model.IsBuiltin {
 		logger.Infof(ctx, "Builtin model detected, hiding sensitive information for model: %s", model.ID)
 	}
@@ -234,7 +248,7 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 	// Hide sensitive information for builtin models in the list
 	responseModels := make([]*types.Model, len(models))
 	for i, model := range models {
-		responseModels[i] = hideSensitiveInfo(model)
+		responseModels[i] = hideSensitiveInfo(model, !isPlatformAdmin(c))
 		if model.IsBuiltin {
 			logger.Infof(ctx, "Builtin model detected in list, hiding sensitive information for model: %s", model.ID)
 		}
@@ -271,6 +285,9 @@ type UpdateModelRequest struct {
 // @Router       /models/{id} [put]
 func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdmin(c) {
+		return
+	}
 
 	logger.Info(ctx, "Start updating model")
 
@@ -340,7 +357,7 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	logger.Infof(ctx, "Model updated successfully, ID: %s", id)
 
 	// Hide sensitive information for builtin models (though builtin models cannot be updated)
-	responseModel := hideSensitiveInfo(model)
+	responseModel := hideSensitiveInfo(model, false)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -362,6 +379,9 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 // @Router       /models/{id} [delete]
 func (h *ModelHandler) DeleteModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdmin(c) {
+		return
+	}
 
 	logger.Info(ctx, "Start deleting model")
 

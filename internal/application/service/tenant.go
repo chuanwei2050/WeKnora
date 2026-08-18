@@ -112,6 +112,9 @@ func (s *tenantService) GetTenantByID(ctx context.Context, id uint64) (*types.Te
 		})
 		return nil, err
 	}
+	if err := s.applyPlatformSettings(ctx, tenant); err != nil {
+		return nil, err
+	}
 	if err := s.hydrateStorageEndpointApprovals(ctx, tenant); err != nil {
 		return nil, err
 	}
@@ -144,6 +147,15 @@ func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) 
 	}
 
 	logger.Infof(ctx, "Updating tenant, ID: %d, name: %s", tenant.ID, tenant.Name)
+
+	// Platform configuration is stored separately. Preserve the persisted
+	// platform fields when a normal tenant update receives an effective read model;
+	// tenant-owned fields such as chat history remain writable by their own flow.
+	storedTenant, err := s.repo.GetTenantByID(ctx, tenant.ID)
+	if err != nil {
+		return nil, err
+	}
+	copyTenantScopedSettings(storedTenant, tenant)
 
 	if err := s.validateStorageBucketUniqueness(ctx, tenant); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -341,8 +353,8 @@ func (s *tenantService) ListAllTenants(ctx context.Context) ([]*types.Tenant, er
 }
 
 // SearchTenants searches tenants with pagination and filters
-func (s *tenantService) SearchTenants(ctx context.Context, keyword string, tenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error) {
-	tenants, total, err := s.repo.SearchTenants(ctx, keyword, tenantID, page, pageSize)
+func (s *tenantService) SearchTenants(ctx context.Context, keyword string, tenantID, excludeTenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error) {
+	tenants, total, err := s.repo.SearchTenants(ctx, keyword, tenantID, excludeTenantID, page, pageSize)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"keyword":  keyword,
@@ -372,6 +384,9 @@ func (s *tenantService) GetTenantByIDForUser(ctx context.Context, tenantID uint6
 			"tenant_id": tenantID,
 			"user_id":   userID,
 		})
+		return nil, err
+	}
+	if err := s.applyPlatformSettings(ctx, tenant); err != nil {
 		return nil, err
 	}
 	if err := s.hydrateStorageEndpointApprovals(ctx, tenant); err != nil {
@@ -467,11 +482,50 @@ func (s *tenantService) GetWeKnoraCloudCredentials(ctx context.Context) *types.W
 		return nil
 	}
 
-	tenant, err := s.repo.GetTenantByID(ctx, tenantID)
+	tenant, err := s.GetTenantByID(ctx, tenantID)
 	if err != nil || tenant == nil {
 		return nil
 	}
 	return tenant.Credentials.GetWeKnoraCloud()
+}
+
+func (s *tenantService) GetPlatformSettings(ctx context.Context) (*types.PlatformSettings, error) {
+	return s.repo.GetPlatformSettings(ctx)
+}
+
+func (s *tenantService) UpdatePlatformSettings(ctx context.Context, settings *types.PlatformSettings) (*types.PlatformSettings, error) {
+	user, ok := types.UserFromContext(ctx)
+	if !ok || !user.IsPlatformAdmin() {
+		return nil, werrors.NewForbiddenError("Only platform administrators can update platform settings")
+	}
+	if err := s.repo.UpdatePlatformSettings(ctx, settings); err != nil {
+		return nil, err
+	}
+	return s.repo.GetPlatformSettings(ctx)
+}
+
+func (s *tenantService) applyPlatformSettings(ctx context.Context, tenant *types.Tenant) error {
+	settings, err := s.repo.GetPlatformSettings(ctx)
+	if err != nil {
+		return err
+	}
+	settings.ApplyToTenant(tenant)
+	return nil
+}
+
+func copyTenantScopedSettings(from, to *types.Tenant) {
+	if from == nil || to == nil {
+		return
+	}
+	to.RetrieverEngines = from.RetrieverEngines
+	to.AgentConfig = from.AgentConfig
+	to.ContextConfig = from.ContextConfig
+	to.WebSearchConfig = from.WebSearchConfig
+	to.ConversationConfig = from.ConversationConfig
+	to.ParserEngineConfig = from.ParserEngineConfig
+	to.Credentials = from.Credentials
+	to.StorageEngineConfig = from.StorageEngineConfig
+	to.RetrievalConfig = from.RetrievalConfig
 }
 
 func (s *tenantService) validateStorageBucketUniqueness(ctx context.Context, tenant *types.Tenant) error {
