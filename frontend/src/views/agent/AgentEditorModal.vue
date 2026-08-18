@@ -1581,34 +1581,21 @@ const saving = ref(false);
 const allModels = ref<ModelConfig[]>([]);
 const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq'; count?: number; shared?: boolean; orgName?: string; ragEnabled?: boolean; wikiEnabled?: boolean; capabilities?: KBCapabilities }[]>([]);
 
-// Prefer tenant default, then known chat/VLM names (offline 3.8 first, online 3.6 fallback), else first match.
-const DEFAULT_CHAT_VLM_NAMES = [
-  'Qwen3.8-27B-FP8',
-  'Qwen3.8-27B',
-  'Qwen/Qwen3.8-27B',
-  'Qwen/Qwen3.6-27B',
-  'Qwen3.6-27B',
-]
 const pickDefaultModelId = (
   type: ModelConfig['type'],
-  preferredNames: string[] = [],
 ) => {
   const candidates = allModels.value.filter((m) => m.type === type)
   if (!candidates.length) return ''
   const byDefault = candidates.find((m) => m.is_default)
   if (byDefault?.id) return byDefault.id
-  for (const name of preferredNames) {
-    const hit = candidates.find((m) => m.name === name || m.name.includes(name))
-    if (hit?.id) return hit.id
-  }
   return candidates[0]?.id || ''
 }
 const applyDefaultModelSelections = (cfg: Record<string, any>) => {
   if (!cfg.model_id) {
-    cfg.model_id = pickDefaultModelId('KnowledgeQA', DEFAULT_CHAT_VLM_NAMES)
+    cfg.model_id = pickDefaultModelId('KnowledgeQA')
   }
   if (!cfg.vlm_model_id) {
-    cfg.vlm_model_id = pickDefaultModelId('VLLM', DEFAULT_CHAT_VLM_NAMES)
+    cfg.vlm_model_id = pickDefaultModelId('VLLM')
   }
   if (!cfg.asr_model_id) {
     cfg.asr_model_id = pickDefaultModelId('ASR')

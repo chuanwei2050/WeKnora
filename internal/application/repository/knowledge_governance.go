@@ -29,6 +29,12 @@ func (r *knowledgeGovernanceRepository) CreateVersion(ctx context.Context, versi
 	return r.db.WithContext(ctx).Create(version).Error
 }
 
+func (r *knowledgeGovernanceRepository) DeleteDraftVersion(ctx context.Context, tenantID uint64, id string) error {
+	return r.db.WithContext(ctx).
+		Where("tenant_id = ? AND id = ? AND status = ?", tenantID, id, types.KnowledgeVersionDraft).
+		Delete(&types.KnowledgeVersion{}).Error
+}
+
 func (r *knowledgeGovernanceRepository) GetVersion(ctx context.Context, tenantID uint64, id string) (*types.KnowledgeVersion, error) {
 	var version types.KnowledgeVersion
 	err := r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).First(&version).Error

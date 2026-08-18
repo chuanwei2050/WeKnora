@@ -1,5 +1,5 @@
 [Unit]
-Description=WeKnora Airgap Rerank (bge-reranker-v2-m3)
+Description=WeKnora Airgap Rerank
 After=network.target
 Wants=network-online.target
 
@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 Environment=AIR_GAPPED_MODE=true
 Environment=MODEL_DIR=@DATA_DIR@/models/rerank
-Environment=SERVED_MODEL_NAME=bge-reranker-v2-m3
+Environment=SERVED_MODEL_NAME=model
 Environment=PORT=8002
 Environment=QUANT=onnx-int8
 WorkingDirectory=@DATA_DIR@/services/rerank

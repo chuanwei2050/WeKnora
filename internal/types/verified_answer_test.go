@@ -59,6 +59,41 @@ func TestStructuredParsersRejectTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestVerifiedAnswerCoordinatorBudgetsDeduplicatedValidatorModels(t *testing.T) {
+	config := VerifiedAnswerConfig{
+		Enabled:          true,
+		StrictMultiModel: true,
+		Budget:           VerificationBudget{MaxModelCalls: 4, MaxParallelCalls: 2},
+	}
+	identities := []ModelIdentity{
+		NormalizeModelIdentity("openai", "http://27b", "27b", "1"),
+		NormalizeModelIdentity("openai", "http://27b", "27b", "1"),
+		NormalizeModelIdentity("openai", "http://9b", "9b", "1"),
+	}
+	validated := false
+	answer, err := NewVerifiedAnswerCoordinator(config).Execute(context.Background(), "query", identities, VerificationHooks{
+		Retrieve: func(context.Context, string) (EvidenceBundle, error) {
+			return EvidenceBundle{Items: []Evidence{{ID: "e1", Content: "evidence"}}}, nil
+		},
+		Draft: func(context.Context, string, EvidenceBundle) (DraftAnswer, error) {
+			return DraftAnswer{Text: "answer"}, nil
+		},
+		EstimateValidationBudget: func(DraftAnswer, EvidenceBundle) VerificationBudgetEstimate {
+			return VerificationBudgetEstimate{ModelCalls: 2, InputTokens: 10, OutputTokens: 10}
+		},
+		ValidateMany: func(context.Context, DraftAnswer, EvidenceBundle) ([]ValidationReport, error) {
+			validated = true
+			return []ValidationReport{
+				{Model: identities[0], FactScore: 1, LogicScore: 1, CitationScore: 1, CompletenessScore: 1},
+				{Model: identities[2], FactScore: 1, LogicScore: 1, CitationScore: 1, CompletenessScore: 1},
+			}, nil
+		},
+	})
+	if err != nil || !validated || answer.Decision != VerificationPassed {
+		t.Fatalf("expected deduplicated validators to fit parallel budget: answer=%+v err=%v validated=%v", answer, err, validated)
+	}
+}
+
 func TestConservativeResultPreservesVerificationAudit(t *testing.T) {
 	config := VerifiedAnswerConfig{
 		Enabled:        true,

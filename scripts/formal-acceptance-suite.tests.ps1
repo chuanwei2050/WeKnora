@@ -1,6 +1,6 @@
 ﻿$ErrorActionPreference = 'Stop'
 $script = Join-Path $PSScriptRoot 'formal-acceptance-suite.ps1'
-$suite = Join-Path $PSScriptRoot 'testdata/baseline-v1-acceptance-suite.json'
+$suite = Join-Path $PSScriptRoot 'testdata/baseline-v1-acceptance-suite-expert.json'
 $freezeScript = Join-Path $PSScriptRoot 'freeze-acceptance-inputs.ps1'
 $freeze = Join-Path ([System.IO.Path]::GetTempPath()) ('weknora-frozen-inputs-' + [Guid]::NewGuid().ToString('N') + '.json')
 $token = Join-Path $PSScriptRoot 'testdata/formal-acceptance-token.test'

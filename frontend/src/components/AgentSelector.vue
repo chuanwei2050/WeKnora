@@ -350,8 +350,8 @@ const isMyAgentSelected = (agent: CustomAgent) =>
   props.currentAgentId === agent.id && !currentAgentSourceTenantId.value;
 
 // 获取知识库能力描述
-const getKbCapability = (agent: CustomAgent): string => {
-  const config = agent.config || {};
+const getKbCapability = (agent: CustomAgent | SharedAgentInfo['agent']): string => {
+  const config = 'config' in agent && agent.config ? agent.config : {};
   if (config.kb_selection_mode === 'none') {
     return '';
   } else if (config.knowledge_bases && config.knowledge_bases.length > 0) {
@@ -363,8 +363,8 @@ const getKbCapability = (agent: CustomAgent): string => {
 };
 
 // 获取 MCP 能力描述（更详细：全部 / 指定 N 个）
-const getMcpCapability = (agent: CustomAgent): string => {
-  const config = agent.config || {};
+const getMcpCapability = (agent: CustomAgent | SharedAgentInfo['agent']): string => {
+  const config = 'config' in agent && agent.config ? agent.config : {};
   if (config.mcp_selection_mode === 'none' || (!config.mcp_services?.length && config.mcp_selection_mode !== 'all')) {
     return '';
   }

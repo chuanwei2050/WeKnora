@@ -1,5 +1,5 @@
 """
-OpenAI 兼容 Rerank 服务（BAAI/bge-reranker-v2-m3）
+OpenAI 兼容 Rerank 服务
 
 环境变量:
   MODEL_DIR, SERVED_MODEL_NAME, PORT, QUANT
@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "./model"))
-SERVED_MODEL_NAME = os.environ.get("SERVED_MODEL_NAME", "bge-reranker-v2-m3")
+SERVED_MODEL_NAME = os.environ.get("SERVED_MODEL_NAME", "model")
 PORT = int(os.environ.get("PORT", "8002"))
 QUANT = os.environ.get("QUANT", "fp16")
 

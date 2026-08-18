@@ -25,6 +25,12 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
 export NEO4J_URI=bolt://neo4j:7687
 export QDRANT_HOST=qdrant
 
+if [ "${WEKNORA_APP_HOT_RELOAD:-true}" != "true" ]; then
+    echo '[INFO] 使用稳定模式启动后端，跳过 Air 文件监听。'
+    go build -ldflags="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'" -o ./tmp/main ./cmd/server
+    exec ./tmp/main
+fi
+
 if ! command -v air > /dev/null 2>&1; then
     go install github.com/air-verse/air@v1.61.7
 fi

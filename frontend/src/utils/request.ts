@@ -1,5 +1,5 @@
 // src/utils/request.js
-import axios from "axios";
+import axios, { type AxiosResponse } from "axios";
 import { generateRandomString } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
@@ -97,7 +97,7 @@ instance.interceptors.response.use(
     // 根据业务状态码处理逻辑
     const { status, data } = response;
     if (status >= 200 && status < 300) {
-      return data;
+      return response;
     } else {
       return Promise.reject(data);
     }
@@ -123,7 +123,7 @@ instance.interceptors.response.use(
           failedQueue.push({ resolve, reject });
         }).then(token => {
           originalRequest.headers['Authorization'] = 'Bearer ' + token;
-          return instance(originalRequest);
+          return instance(originalRequest).then(response => response.data);
         }).catch(err => {
           return Promise.reject(err);
         });
@@ -153,7 +153,7 @@ instance.interceptors.response.use(
             // 处理队列中的请求
             processQueue(null, token);
             
-            return instance(originalRequest);
+            return instance(originalRequest).then(response => response.data);
           } else {
             throw new Error(response.message || t('error.tokenRefreshFailed'));
           }
@@ -217,44 +217,47 @@ instance.interceptors.response.use(
   }
 );
 
+function unwrapResponse<T>(request: Promise<AxiosResponse<T>>): Promise<T> {
+  return request.then(response => response.data);
+}
+
 export function get<T = any>(url: string): Promise<T> {
-  return instance.get<T, T>(url);
+  return unwrapResponse(instance.get<T>(url));
 }
 
 export async function getDown<T = Blob>(url: string): Promise<T> {
-  const res = await instance.get<Blob, T>(url, {
+  return unwrapResponse(instance.get<T>(url, {
     responseType: "blob",
-  });
-  return res
+  }));
 }
 
-export function postUpload(url: string, data = {}, onUploadProgress?: (progressEvent: any) => void) {
-  return instance.post(url, data, {
+export function postUpload<T = any>(url: string, data = {}, onUploadProgress?: (progressEvent: any) => void): Promise<T> {
+  return unwrapResponse(instance.post<T>(url, data, {
     headers: {
       "Content-Type": "multipart/form-data",
       "X-Request-ID": `${generateRandomString(12)}`,
     },
     onUploadProgress,
-  });
+  }));
 }
 
-export function postChat(url: string, data = {}) {
-  return instance.post(url, data, {
+export function postChat<T = any>(url: string, data = {}): Promise<T> {
+  return unwrapResponse(instance.post<T>(url, data, {
     headers: {
       "Content-Type": "text/event-stream;charset=utf-8",
       "X-Request-ID": `${generateRandomString(12)}`,
     },
-  });
+  }));
 }
 
 export function post<T = any>(url: string, data = {}, config?: any): Promise<T> {
-  return instance.post<unknown, T>(url, data, config);
+  return unwrapResponse(instance.post<T>(url, data, config));
 }
 
 export function put<T = any>(url: string, data = {}): Promise<T> {
-  return instance.put<unknown, T>(url, data);
+  return unwrapResponse(instance.put<T>(url, data));
 }
 
 export function del<T = any>(url: string, data?: any): Promise<T> {
-  return instance.delete<unknown, T>(url, { data });
+  return unwrapResponse(instance.delete<T>(url, { data }));
 }

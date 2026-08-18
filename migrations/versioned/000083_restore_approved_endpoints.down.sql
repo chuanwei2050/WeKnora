@@ -1,0 +1,2 @@
+-- Compatibility migration is intentionally irreversible. These tables may
+-- predate this repair migration and may contain application data.

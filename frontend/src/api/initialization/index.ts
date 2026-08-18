@@ -57,6 +57,9 @@ export interface InitializationConfig {
         enabled: boolean,
         text: string,
         tags: string[],
+        entity_types?: string[],
+        strict_schema?: boolean,
+        require_triple_review?: boolean,
         nodes: Node[],
         relations: Relation[]
     }
@@ -104,6 +107,9 @@ export interface KBModelConfigRequest {
         enabled: boolean
         text: string
         tags: string[]
+        entity_types?: string[]
+        strict_schema?: boolean
+        require_triple_review?: boolean
         nodes: Node[]
         relations: Relation[]
     }

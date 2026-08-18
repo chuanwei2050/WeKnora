@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -515,6 +516,13 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	streamChan := make(chan types.StreamResponse)
 
 	stream, err := c.client.CreateChatCompletionStream(ctx, req)
+	if err != nil && isRetryableStreamError(err) {
+		// Some OpenAI-compatible gateways close an idle keep-alive connection
+		// after a long stream. Retry once with a fresh connection before
+		// surfacing a transient EOF to the caller.
+		c.httpClient.CloseIdleConnections()
+		stream, err = c.client.CreateChatCompletionStream(ctx, req)
+	}
 	if err != nil {
 		if isMultimodalNotSupportedError(err) {
 			logger.Warnf(ctx, "[LLM Stream] Model %s does not support multimodal, retrying without images", c.modelName)
@@ -531,6 +539,10 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	go c.processStream(ctx, stream, streamChan)
 
 	return streamChan, nil
+}
+
+func isRetryableStreamError(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // chatStreamWithRawHTTP 使用原始 HTTP 请求进行流式聊天

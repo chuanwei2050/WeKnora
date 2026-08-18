@@ -1,0 +1,3 @@
+-- Compatibility migration is intentionally irreversible. These tables may
+-- have been created by the original OpenSpec migration line and may contain
+-- application data, so this migration cannot safely claim ownership of them.

@@ -74,6 +74,7 @@ type knowledgeService struct {
 	tagService     interfaces.KnowledgeTagService
 	fileSvc        interfaces.FileService
 	modelService   interfaces.ModelService
+	governanceRepo interfaces.KnowledgeGovernanceRepository
 	task           interfaces.TaskEnqueuer
 	graphEngine    interfaces.RetrieveGraphRepository
 	redisClient    *redis.Client
@@ -107,6 +108,7 @@ func NewKnowledgeService(
 	tagService interfaces.KnowledgeTagService,
 	fileSvc interfaces.FileService,
 	modelService interfaces.ModelService,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
 	task interfaces.TaskEnqueuer,
 	graphEngine interfaces.RetrieveGraphRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
@@ -129,6 +131,7 @@ func NewKnowledgeService(
 		tagService:     tagService,
 		fileSvc:        fileSvc,
 		modelService:   modelService,
+		governanceRepo: governanceRepo,
 		task:           task,
 		graphEngine:    graphEngine,
 		retrieveEngine: retrieveEngine,
@@ -199,6 +202,39 @@ func defaultChannel(ch string) string {
 	return ch
 }
 
+func governanceSourceMetadata(metadata map[string]string) (types.KnowledgeSourceMetadata, error) {
+	value := func(key string) string { return strings.TrimSpace(metadata[key]) }
+	result := types.KnowledgeSourceMetadata{
+		Layer:          types.KnowledgeLayer(value("layer")),
+		SourceCategory: value("source_category"),
+		StandardNumber: value("standard_number"),
+		VersionLabel:   value("version_label"),
+		AuthorityLevel: value("authority_level"),
+		Department:     value("department"),
+	}
+	for key, target := range map[string]**time.Time{
+		"effective_at": &result.EffectiveAt,
+		"expires_at":   &result.ExpiresAt,
+	} {
+		text := value(key)
+		if text == "" {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339, text)
+		if err != nil {
+			return types.KnowledgeSourceMetadata{}, werrors.NewBadRequestError(fmt.Sprintf("治理元数据 %s 必须是 RFC3339 时间", key))
+		}
+		*target = &parsed
+	}
+	if result.VersionLabel == "" {
+		return types.KnowledgeSourceMetadata{}, werrors.NewBadRequestError("治理元数据缺少 version_label")
+	}
+	if err := result.Validate(); err != nil {
+		return types.KnowledgeSourceMetadata{}, werrors.NewBadRequestError("治理来源元数据无效: " + err.Error())
+	}
+	return result, nil
+}
+
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagID string, channel string,
@@ -234,6 +270,17 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 
 	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
+	}
+	var sourceMetadata types.KnowledgeSourceMetadata
+	if kb.Governance.Enabled {
+		var metadataErr error
+		sourceMetadata, metadataErr = governanceSourceMetadata(metadata)
+		if metadataErr != nil {
+			return nil, metadataErr
+		}
+		if s.governanceRepo == nil {
+			return nil, werrors.NewInternalServerError("治理版本仓储未初始化")
+		}
 	}
 
 	// 检查多模态配置完整性 - 只在图片文件时校验
@@ -383,9 +430,11 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	}
 	// Save the file to storage (use KB-level storage engine if configured)
 	logger.Infof(ctx, "Saving file, knowledge ID: %s", knowledge.ID)
-	filePath, err := s.resolveFileService(ctx, kb).SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
+	fileService := s.resolveFileService(ctx, kb)
+	filePath, err := fileService.SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to save file, knowledge ID: %s, error: %v", knowledge.ID, err)
+		_ = s.repo.DeleteKnowledge(ctx, tenantID, knowledge.ID)
 		return nil, err
 	}
 	knowledge.FilePath = filePath
@@ -394,7 +443,39 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	logger.Info(ctx, "Updating knowledge record with file path")
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge with file path, ID: %s, error: %v", knowledge.ID, err)
+		_ = fileService.DeleteFile(ctx, filePath)
+		_ = s.repo.DeleteKnowledge(ctx, tenantID, knowledge.ID)
 		return nil, err
+	}
+
+	if kb.Governance.Enabled {
+		createdBy, _ := types.UserIDFromContext(ctx)
+		version := &types.KnowledgeVersion{
+			ID:             uuid.NewString(),
+			TenantID:       tenantID,
+			KnowledgeID:    knowledge.ID,
+			VersionLabel:   sourceMetadata.VersionLabel,
+			ContentHash:    hash,
+			SnapshotRef:    filePath,
+			SourceMetadata: sourceMetadata,
+			Status:         types.KnowledgeVersionDraft,
+			CreatedBy:      createdBy,
+			CreatedAt:      time.Now().UTC(),
+			EffectiveAt:    sourceMetadata.EffectiveAt,
+			ExpiresAt:      sourceMetadata.ExpiresAt,
+		}
+		if err := s.governanceRepo.CreateVersion(ctx, version); err != nil {
+			_ = fileService.DeleteFile(ctx, filePath)
+			_ = s.repo.DeleteKnowledge(ctx, tenantID, knowledge.ID)
+			return nil, err
+		}
+		knowledge.PendingVersionID = version.ID
+		if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+			_ = s.governanceRepo.DeleteDraftVersion(ctx, tenantID, version.ID)
+			_ = fileService.DeleteFile(ctx, filePath)
+			_ = s.repo.DeleteKnowledge(ctx, tenantID, knowledge.ID)
+			return nil, err
+		}
 	}
 
 	// Enqueue document processing task to Asynq

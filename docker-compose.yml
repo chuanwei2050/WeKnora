@@ -388,6 +388,8 @@ services:
       - "5556:5556"
     volumes:
       - ./misc/dex-config.yaml:/etc/dex/config.yaml
+    environment:
+      WEKNORA_DEX_CLIENT_SECRET: ${WEKNORA_DEX_CLIENT_SECRET:?WEKNORA_DEX_CLIENT_SECRET must be set}
     command: ["dex", "serve", "/etc/dex/config.yaml"]
     profiles:
       - dex

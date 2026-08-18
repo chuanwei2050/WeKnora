@@ -59,6 +59,32 @@ func newGovernedTestVersion(tenantID uint64, knowledgeID, status string, effecti
 	}
 }
 
+func TestDeleteDraftVersionDoesNotDeletePublishedVersion(t *testing.T) {
+	db := openKnowledgeGovernanceTestDB(t)
+	repo := NewKnowledgeGovernanceRepository(db, nil)
+	ctx := context.Background()
+	draft := newGovernedTestVersion(1, "knowledge-1", string(types.KnowledgeVersionDraft), nil, nil)
+	active := newGovernedTestVersion(1, "knowledge-1", string(types.KnowledgeVersionActive), nil, nil)
+	if err := repo.CreateVersion(ctx, draft); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateVersion(ctx, active); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteDraftVersion(ctx, 1, draft.ID); err != nil {
+		t.Fatal(err)
+	}
+	if stored, err := repo.GetVersion(ctx, 1, draft.ID); err != nil || stored != nil {
+		t.Fatalf("draft cleanup = %#v, err=%v", stored, err)
+	}
+	if err := repo.DeleteDraftVersion(ctx, 1, active.ID); err != nil {
+		t.Fatal(err)
+	}
+	if stored, err := repo.GetVersion(ctx, 1, active.ID); err != nil || stored == nil {
+		t.Fatalf("active version must remain: %#v, err=%v", stored, err)
+	}
+}
+
 func TestKnowledgeGovernanceActivationKeepsFutureVersionScheduled(t *testing.T) {
 	db := openKnowledgeGovernanceTestDB(t)
 	repo := NewKnowledgeGovernanceRepository(db, nil)

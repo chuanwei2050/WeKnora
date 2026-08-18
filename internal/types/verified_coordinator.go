@@ -66,7 +66,13 @@ func (c *VerifiedAnswerCoordinator) Execute(ctx context.Context, query string, i
 			estimate = hooks.EstimateValidationBudget(draft, evidence)
 		}
 		if hooks.ValidateMany != nil {
-			calls = len(identities)
+			// ValidateMany deduplicates models by identity before issuing calls.
+			// The budget must track those actual calls, rather than the configured
+			// validator slots, which may contain the same model more than once.
+			calls = estimate.ModelCalls
+			if calls == 0 {
+				calls = len(identities)
+			}
 			if calls < 1 {
 				calls = 1
 			}
@@ -173,10 +179,7 @@ func (c *VerifiedAnswerCoordinator) Execute(ctx context.Context, query string, i
 			evidence = mergeEvidenceBundles(evidence, more)
 			if hooks.RetrieveMore != nil && len(evidence.Items) == before {
 				answer.ReflectionActions = append(answer.ReflectionActions, "no_new_evidence")
-				conservative, _ := c.conservative(draft, evidence, fmt.Errorf("no_new_evidence"))
-				conservative.ExecutionPath = answer.ExecutionPath
-				conservative.ReflectionActions = append([]string(nil), answer.ReflectionActions...)
-				conservative.RetrievalCount = answer.RetrievalCount
+				conservative, _ := c.conservativeFromAnswer(answer, draft, evidence, fmt.Errorf("no_new_evidence"))
 				return conservative, nil
 			}
 			answer.RetrievalCount++

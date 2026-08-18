@@ -449,10 +449,18 @@ start_app_container() {
     fi
 
     stop_app_container
-    log_info "使用 $DEV_APP_IMAGE（Air 轮询监听，支持 Windows 文件变更）"
+    local hot_reload="${WEKNORA_APP_HOT_RELOAD:-true}"
+    if [ "$hot_reload" = "true" ]; then
+        log_info "使用 $DEV_APP_IMAGE（Air 轮询监听，支持 Windows 文件变更）"
+    else
+        log_info "使用 $DEV_APP_IMAGE（稳定模式，跳过 Air 文件监听）"
+    fi
     MSYS_NO_PATHCONV=1 exec "$DOCKER_CLI_BIN" run --rm \
         --name "$DEV_APP_CONTAINER" \
         --network "$network_name" \
+        --add-host "host.docker.internal:host-gateway" \
+        -e "WEKNORA_APP_HOT_RELOAD=$hot_reload" \
+        -e "SSRF_WHITELIST=${SSRF_WHITELIST:-}" \
         -p 8080:8080 \
         -v "${host_project_root}:/workspace" \
         -v weknora-go-mod-dev:/go/pkg/mod \

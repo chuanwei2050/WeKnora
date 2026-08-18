@@ -12,7 +12,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TRANSFORMERS_OFFLINE=1 \
     MODEL_DIR=/models \
     PORT=8000 \
-    SERVED_MODEL_NAME=sensevoice-small \
+    SERVED_MODEL_NAME=model \
     QUANT=onnx-int8
 
 WORKDIR /app

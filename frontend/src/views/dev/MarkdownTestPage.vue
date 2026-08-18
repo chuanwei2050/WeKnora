@@ -94,7 +94,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue';
+import { ref, onMounted, nextTick } from 'vue';
 import { marked } from 'marked';
 import markedKatex from 'marked-katex-extension';
 import DOMPurify from 'dompurify';
@@ -126,7 +126,7 @@ const preprocessMathDelimiters = (rawText: string): string => {
 const render = (raw: string): string => {
   if (!raw) return '';
   const processed = preprocessMathDelimiters(raw);
-  const html = marked.parse(processed, { renderer: mermaidRenderer }) as string;
+  const html = marked.parse(processed, { renderer: mermaidRenderer, async: false });
   return DOMPurify.sanitize(html, { USE_PROFILES: { html: true, svg: true, mathMl: true } });
 };
 
@@ -280,7 +280,6 @@ const doMermaid = async () => {
 };
 
 onMounted(doMermaid);
-watch(mermaidSample, doMermaid);
 </script>
 
 <style lang="less" scoped>

@@ -701,6 +701,7 @@ let savedSystemPrompt = ''
 // 普通模式本地状态
 const localContextTemplate = ref('')
 const localSystemPromptNormal = ref('')
+const getActivePromptRef = () => activeTab.value === 'normal' ? localSystemPromptNormal : localSystemPrompt
 const localTemperatureNormal = ref(0.3)
 const localMaxCompletionTokens = ref(2048)
 let savedContextTemplate = ''

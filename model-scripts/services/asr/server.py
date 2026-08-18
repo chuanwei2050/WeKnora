@@ -1,5 +1,5 @@
 """
-OpenAI 兼容 ASR 服务（FunAudioLLM/SenseVoiceSmall）
+OpenAI 兼容 ASR 服务
 
 POST /v1/audio/transcriptions
 GET  /v1/models
@@ -19,7 +19,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "./model"))
-SERVED_MODEL_NAME = os.environ.get("SERVED_MODEL_NAME", "sensevoice-small")
+SERVED_MODEL_NAME = os.environ.get("SERVED_MODEL_NAME", "model")
 PORT = int(os.environ.get("PORT", "8004"))
 QUANT = os.environ.get("QUANT", "fp16")
 

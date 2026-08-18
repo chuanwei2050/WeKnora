@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 Environment=AIR_GAPPED_MODE=true
 Environment=MODEL_DIR=@DATA_DIR@/models/asr
-Environment=SERVED_MODEL_NAME=sensevoice-small
+Environment=SERVED_MODEL_NAME=model
 Environment=PORT=8004
 Environment=QUANT=onnx-int8
 WorkingDirectory=@DATA_DIR@/services/asr

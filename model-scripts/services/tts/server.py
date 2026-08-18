@@ -21,9 +21,13 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "./model"))
-SERVED_MODEL_NAME = os.environ.get("SERVED_MODEL_NAME", "cosyvoice2-0.5b")
+SERVED_MODEL_NAME = os.environ.get("SERVED_MODEL_NAME", "model")
 PORT = int(os.environ.get("PORT", "8005"))
 QUANT = os.environ.get("QUANT", "fp16")
+PROMPT_WAV = Path(
+    os.environ.get("PROMPT_WAV", "/opt/CosyVoice/asset/zero_shot_prompt.wav")
+)
+PROMPT_TEXT = os.environ.get("PROMPT_TEXT", "希望你以后能够做的比我还好呦。")
 
 app = FastAPI(title="Airgap TTS", version="1.0.0")
 _tts = None
@@ -47,12 +51,27 @@ def _cuda_available() -> bool:
         return False
 
 
+def _block_runtime_model_downloads() -> None:
+    if os.environ.get("AIR_GAPPED_MODE", "").lower() not in {"1", "true", "yes"}:
+        return
+    try:
+        import modelscope
+    except ImportError:
+        return
+
+    def blocked_snapshot_download(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("AIR_GAPPED_MODE=true 禁止 TTS 运行时下载模型或文本前端资源")
+
+    modelscope.snapshot_download = blocked_snapshot_download
+
+
 def _load() -> None:
     global _tts, _load_error
     if _tts is not None:
         return
     if not MODEL_DIR.exists():
         raise RuntimeError(f"MODEL_DIR 不存在: {MODEL_DIR}")
+    _block_runtime_model_downloads()
 
     errors = []
     for import_path, cls_name in (
@@ -76,12 +95,20 @@ def _load() -> None:
 
 def _synthesize(text: str, voice: str) -> Tuple[np.ndarray, int]:
     _load()
-    if hasattr(_tts, "inference_sft"):
-        gen = _tts.inference_sft(text, voice)
-    elif hasattr(_tts, "inference_zero_shot"):
-        gen = _tts.inference_zero_shot(text, "", "")
+    available_spks = list(_tts.list_available_spks()) if hasattr(_tts, "list_available_spks") else []
+    selected_voice = voice if voice in available_spks else None
+    if selected_voice is None and voice == "default" and available_spks:
+        selected_voice = available_spks[0]
+
+    if selected_voice and hasattr(_tts, "inference_sft"):
+        gen = _tts.inference_sft(text, selected_voice)
+    elif hasattr(_tts, "inference_zero_shot") and PROMPT_WAV.is_file() and PROMPT_TEXT:
+        gen = _tts.inference_zero_shot(text, PROMPT_TEXT, str(PROMPT_WAV))
     else:
-        raise RuntimeError("CosyVoice 实例缺少 inference_sft / inference_zero_shot")
+        raise RuntimeError(
+            "TTS 没有可用预置音色，且 zero-shot prompt 未配置或文件不存在: "
+            f"{PROMPT_WAV}"
+        )
 
     chunks = []
     sample_rate = 22050
@@ -125,7 +152,7 @@ def _to_mp3_bytes(audio: np.ndarray, sr: int) -> bytes:
         encoder.set_in_sample_rate(sr)
         encoder.set_channels(1)
         encoder.set_quality(2)
-        return encoder.encode(pcm) + encoder.flush()
+        return bytes(encoder.encode(pcm) + encoder.flush())
     except Exception as lame_err:  # noqa: BLE001
         try:
             from pydub import AudioSegment

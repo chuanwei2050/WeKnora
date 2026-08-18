@@ -132,13 +132,26 @@ func BuildSubQuestionPlan(ctx context.Context, model chat.Chat, query string, co
 }
 
 func conservativeRoutingDecision(chatManage *types.ChatManage, reason types.DegradationReason) types.RoutingDecision {
-	decision := types.PlanRouting(types.QuestionComplexity{}, chatManage.ComplexityRouting)
+	decision := types.PlanRouting(conservativeRoutingClassification(chatManage), chatManage.ComplexityRouting)
 	if reason != "" {
 		decision.DegradationReason = reason
 	}
 	chatManage.RoutingDecision = &decision
 	chatManage.ApplyRoutingDecision()
 	return decision
+}
+
+func conservativeRoutingClassification(chatManage *types.ChatManage) types.QuestionComplexity {
+	if chatManage != nil && (types.NeedsEntityRelation(chatManage.Query) || types.NeedsEntityRelation(chatManage.RewriteQuery)) {
+		// A parse failure must not erase an explicit relation request. This is a
+		// deterministic boundary hint, not a model-derived confidence score.
+		return types.QuestionComplexity{
+			Level: types.ComplexityL3, Subtype: types.SubtypeMultiHop,
+			NeedsEntityRelation: true, Confidence: 1,
+			RationaleSummary: "问题明确包含实体关系或多跳查询信号",
+		}
+	}
+	return types.QuestionComplexity{}
 }
 
 // ActivationEvents returns the list of event types this plugin responds to.
@@ -507,7 +520,7 @@ func (p *PluginQueryUnderstand) parseOutput(chatManage *types.ChatManage, raw st
 			if fallbackOutput, ok := parseStructuredQueryOutput(content); ok {
 				applyQueryUnderstandOutput(chatManage, fallbackOutput, false)
 			}
-			decision := types.PlanRouting(types.QuestionComplexity{}, chatManage.ComplexityRouting)
+			decision := types.PlanRouting(conservativeRoutingClassification(chatManage), chatManage.ComplexityRouting)
 			decision.DegradationReason = types.DegradationParseFailed
 			chatManage.RoutingDecision = &decision
 			chatManage.ApplyRoutingDecision()

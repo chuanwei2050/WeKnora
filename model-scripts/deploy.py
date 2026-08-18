@@ -31,10 +31,13 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.error
+import urllib.request
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import quote, urlparse
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -295,6 +298,8 @@ class ModelSpec:
     forbidden_uses: List[str] = field(default_factory=list)
     # 额外角色（与主 role 共用同一端点/权重），例如主模型 roles 含 vlm
     roles: List[str] = field(default_factory=list)
+    # 模型运行时所需但不一定位于量化仓库中的附加文件。
+    extra_files: List[Dict[str, str]] = field(default_factory=list)
 
     @property
     def hub_id(self) -> str:
@@ -343,6 +348,11 @@ def parse_models(cfg: Dict[str, Any]) -> List[ModelSpec]:
         elif limit_mm is not None:
             limit_mm = str(limit_mm)
         extra_roles = list(raw.get("roles") or [])
+        extra_files = [
+            {str(k): str(v) for k, v in item.items() if v is not None}
+            for item in (raw.get("extra_files") or [])
+            if isinstance(item, dict)
+        ]
         # 兼容 roles: [chat, vlm] 写法：若含主 role 则去重保留其余
         specs.append(
             ModelSpec(
@@ -366,6 +376,7 @@ def parse_models(cfg: Dict[str, Any]) -> List[ModelSpec]:
                 allowed_uses=list(raw.get("allowed_uses") or [raw.get("role") or key]),
                 forbidden_uses=list(raw.get("forbidden_uses") or []),
                 roles=[str(r) for r in extra_roles if str(r).strip()],
+                extra_files=extra_files,
             )
         )
     return specs
@@ -618,6 +629,84 @@ def download_model(
         return download_model_hf(
             hf_id, dest, revision=revision, retries=retries, delay=delay, cfg=cfg
         )
+
+
+def download_extra_files(
+    spec: ModelSpec,
+    dest: Path,
+    *,
+    source: str,
+    retries: int,
+    delay: float,
+) -> bool:
+    """Download configured runtime sidecars without coupling code to one model."""
+    changed = False
+    for item in spec.extra_files:
+        relative = (item.get("target") or item.get("path") or "").strip()
+        if not relative:
+            raise RuntimeError(f"模型 {spec.key} 的 extra_files 缺少 path/target")
+        target = (dest / relative).resolve()
+        try:
+            target.relative_to(dest.resolve())
+        except ValueError as exc:
+            raise RuntimeError(f"模型 {spec.key} 的 extra_files 路径越界: {relative}") from exc
+        if target.exists():
+            continue
+        if is_air_gapped():
+            raise RuntimeError(f"模型 {spec.key} 缺少离线附加文件: {relative}")
+
+        model_id = (item.get("model_id") or spec.model_id).strip()
+        file_path = (item.get("path") or relative).strip().lstrip("/")
+        revision = (item.get("revision") or spec.revision or "master").strip()
+        item_source = (item.get("source") or source or "auto").strip().lower()
+        direct_url = item.get("url", "").strip()
+        urls = [direct_url] if direct_url else []
+        if not direct_url and item_source in {"modelscope", "auto"}:
+            urls.append(
+                f"https://www.modelscope.cn/models/{model_id}/resolve/{quote(revision, safe='')}/{quote(file_path, safe='/')}"
+            )
+        if not direct_url and item_source in {"huggingface", "auto"}:
+            urls.append(
+                f"https://huggingface.co/{model_id}/resolve/{quote(revision, safe='')}/{quote(file_path, safe='/')}"
+            )
+        if not urls:
+            raise RuntimeError(f"模型 {spec.key} 的 extra_files 没有可用下载来源: {relative}")
+
+        last_error: Optional[Exception] = None
+        for attempt in range(1, retries + 1):
+            for url in urls:
+                temp = target.with_name(target.name + ".part")
+                try:
+                    print(f"[extra] 下载 {url} -> {target} (尝试 {attempt}/{retries})")
+                    ensure_dir(target.parent)
+                    request = urllib.request.Request(url, headers=extra_file_auth_headers(url))
+                    with urllib.request.urlopen(request, timeout=120) as response, temp.open("wb") as output:
+                        shutil.copyfileobj(response, output)
+                    temp.replace(target)
+                    changed = True
+                    last_error = None
+                    break
+                except (OSError, urllib.error.URLError) as exc:
+                    last_error = exc
+                    temp.unlink(missing_ok=True)
+            if last_error is None:
+                break
+            if attempt < retries:
+                time.sleep(delay)
+        if last_error is not None:
+            raise RuntimeError(f"模型 {spec.key} 附加文件下载失败 {relative}: {last_error}") from last_error
+    return changed
+
+
+def extra_file_auth_headers(url: str) -> Dict[str, str]:
+    """Return only the credential owned by the target model hub."""
+    host = (urlparse(url).hostname or "").lower()
+    token = None
+    if host == "modelscope.cn" or host.endswith(".modelscope.cn"):
+        token = os.environ.get("MODELSCOPE_TOKEN")
+    elif host == "huggingface.co" or host.endswith(".huggingface.co"):
+        token = os.environ.get("HF_TOKEN")
+    return {"Authorization": f"Bearer {token}"} if token else {}
 
 
 def pip_download_offline(req_files: List[Path], dest: Path) -> None:
@@ -919,7 +1008,7 @@ def _gpu_device_block(spec: ModelSpec, default_count: Any) -> List[str]:
 
 def _compose_health_vllm() -> str:
     return (
-        '      test: ["CMD", "python", "-c", '
+        '      test: ["CMD", "python3", "-c", '
         '"import urllib.request; urllib.request.urlopen(\'http://127.0.0.1:8000/v1/models\')"]'
     )
 
@@ -1300,15 +1389,22 @@ def cmd_prepare(args: argparse.Namespace) -> int:
                 hf_model_id=spec.hub_id_hf,
                 cfg=cfg,
             )
+        else:
+            checksum_path = dest / f".checksums.{algo}"
+        extra_changed = download_extra_files(
+            spec,
+            dest,
+            source=source,
+            retries=retries,
+            delay=delay,
+        )
+        if not skip_dl or extra_changed:
             checksum_path = write_checksums(dest, algo=algo)
             shutil.copy2(checksum_path, dest / ".checksums")
             source_marker.write_text(expected_source + "\n", encoding="utf-8")
-            print(f"校验清单: {checksum_path}")
-        else:
-            checksum_path = dest / f".checksums.{algo}"
-            if checksum_path.exists():
-                shutil.copy2(checksum_path, dest / ".checksums")
-            print(f"校验清单: {checksum_path}")
+        elif checksum_path.exists():
+            shutil.copy2(checksum_path, dest / ".checksums")
+        print(f"校验清单: {checksum_path}")
 
     if args.skip_docker:
         print("跳过所有 Docker 镜像拉取/构建 (--skip-docker)")

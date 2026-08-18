@@ -293,6 +293,24 @@ func TestCanonicalEdgeFromRelationship(t *testing.T) {
 	}
 }
 
+func TestCanonicalEdgeFromRelationNode(t *testing.T) {
+	t.Parallel()
+	source := neo4j.Node{Props: map[string]interface{}{"canonical_key": "a"}}
+	target := neo4j.Node{Props: map[string]interface{}{"canonical_key": "b"}}
+	relation := neo4j.Node{Props: map[string]interface{}{
+		"relation_key":  "rel-key",
+		"source":        "a",
+		"target":        "b",
+		"relation_type": "uses",
+		"direction":     string(types.GraphDirectionOutgoing),
+		"weight":        2.5,
+	}}
+	edge := canonicalEdgeFromRelationNode(relation, source, target)
+	if edge.ID != "rel-key" || edge.Source != "a" || edge.Target != "b" || edge.RelationType != "uses" || edge.Weight != 2.5 {
+		t.Fatalf("canonicalEdgeFromRelationNode() = %+v", edge)
+	}
+}
+
 func TestGraphEvidenceFromNode(t *testing.T) {
 	t.Parallel()
 	node := neo4j.Node{Props: map[string]interface{}{

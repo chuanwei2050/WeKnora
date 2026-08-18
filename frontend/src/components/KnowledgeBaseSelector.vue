@@ -202,14 +202,15 @@ const updateDropdownPosition = () => {
   let rect: DOMRect | null = null
   try {
     if (typeof anchor.getBoundingClientRect === 'function') {
-      rect = anchor.getBoundingClientRect()
+      const measuredRect = anchor.getBoundingClientRect()
+      rect = measuredRect
       console.log('[KB Selector] Button rect:', {
-        top: rect.top,
-        bottom: rect.bottom,
-        left: rect.left,
-        right: rect.right,
-        width: rect.width,
-        height: rect.height
+        top: measuredRect.top,
+        bottom: measuredRect.bottom,
+        left: measuredRect.left,
+        right: measuredRect.right,
+        width: measuredRect.width,
+        height: measuredRect.height
       })
     } else if (anchor.width !== undefined && anchor.left !== undefined) {
       // 已经是 DOMRect
@@ -223,13 +224,14 @@ const updateDropdownPosition = () => {
     applyFallback()
     return
   }
+  const resolvedRect = rect
 
   const vw = window.innerWidth
   const vh = window.innerHeight
   
   // 左对齐到触发元素的左边缘
   // 使用 Math.floor 而不是 Math.round，避免像素对齐问题
-  let left = Math.floor(rect.left)
+  let left = Math.floor(resolvedRect.left)
   
   // 边界处理：不超出视口左右（留 16px margin）
   const minLeft = 16
@@ -241,8 +243,8 @@ const updateDropdownPosition = () => {
   const maxDropdownHeight = 360 // 最大高度
   const minDropdownHeight = 200 // 最小高度
   const topMargin = 20 // 顶部留白
-  const spaceBelow = vh - rect.bottom // 下方剩余空间
-  const spaceAbove = rect.top // 上方剩余空间
+  const spaceBelow = vh - resolvedRect.bottom // 下方剩余空间
+  const spaceAbove = resolvedRect.top // 上方剩余空间
   
   console.log('[KB Selector] Space check:', {
     spaceBelow,
@@ -276,7 +278,7 @@ const updateDropdownPosition = () => {
   // 根据弹出方向使用不同的定位方式
   if (shouldOpenBelow) {
     // 向下弹出：使用 top 定位
-    const top = Math.floor(rect.bottom + offsetY)
+    const top = Math.floor(resolvedRect.bottom + offsetY)
     console.log('[KB Selector] Opening below, top:', top)
     dropdownStyle.value = {
       position: 'fixed',

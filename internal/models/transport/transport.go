@@ -107,39 +107,42 @@ func NewHTTPClient(config Config) *http.Client {
 	for _, host := range config.AllowedHosts {
 		allowedHosts[strings.ToLower(strings.TrimSpace(host))] = true
 	}
-	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req == nil || req.URL == nil || (req.URL.Scheme != "http" && req.URL.Scheme != "https") {
-			err := fmt.Errorf("request target has unsupported scheme")
-			var target *url.URL
-			if req != nil {
-				target = req.URL
+	client := &http.Client{Transport: roundTripFunc{
+		roundTrip: func(req *http.Request) (*http.Response, error) {
+			if req == nil || req.URL == nil || (req.URL.Scheme != "http" && req.URL.Scheme != "https") {
+				err := fmt.Errorf("request target has unsupported scheme")
+				var target *url.URL
+				if req != nil {
+					target = req.URL
+				}
+				emitOutboundAudit(OutboundAuditEvent{At: time.Now().UTC(), URL: auditURL(target), Error: err.Error()})
+				return nil, err
 			}
-			emitOutboundAudit(OutboundAuditEvent{At: time.Now().UTC(), URL: auditURL(target), Error: err.Error()})
-			return nil, err
-		}
-		if len(allowedHosts) > 0 && !allowedHosts[strings.ToLower(req.URL.Hostname())] {
-			err := fmt.Errorf("request target host is not approved")
-			emitOutboundAudit(OutboundAuditEvent{At: time.Now().UTC(), URL: auditURL(req.URL), Error: err.Error()})
-			return nil, err
-		}
-		if config.ValidateURL != nil {
-			if err := config.ValidateURL(req.URL); err != nil {
-				err = fmt.Errorf("request target is not approved: %w", err)
+			if len(allowedHosts) > 0 && !allowedHosts[strings.ToLower(req.URL.Hostname())] {
+				err := fmt.Errorf("request target host is not approved")
 				emitOutboundAudit(OutboundAuditEvent{At: time.Now().UTC(), URL: auditURL(req.URL), Error: err.Error()})
 				return nil, err
 			}
-		}
-		response, err := transport.RoundTrip(req)
-		event := OutboundAuditEvent{At: time.Now().UTC(), URL: auditURL(req.URL), Allowed: err == nil, Error: ""}
-		if err != nil {
-			event.Error = err.Error()
-		}
-		if response != nil {
-			event.StatusCode = response.StatusCode
-		}
-		emitOutboundAudit(event)
-		return response, err
-	}), Timeout: config.Timeout, CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+			if config.ValidateURL != nil {
+				if err := config.ValidateURL(req.URL); err != nil {
+					err = fmt.Errorf("request target is not approved: %w", err)
+					emitOutboundAudit(OutboundAuditEvent{At: time.Now().UTC(), URL: auditURL(req.URL), Error: err.Error()})
+					return nil, err
+				}
+			}
+			response, err := transport.RoundTrip(req)
+			event := OutboundAuditEvent{At: time.Now().UTC(), URL: auditURL(req.URL), Allowed: err == nil, Error: ""}
+			if err != nil {
+				event.Error = err.Error()
+			}
+			if response != nil {
+				event.StatusCode = response.StatusCode
+			}
+			emitOutboundAudit(event)
+			return response, err
+		},
+		closeIdle: transport.CloseIdleConnections,
+	}, Timeout: config.Timeout, CheckRedirect: func(req *http.Request, _ []*http.Request) error {
 		if req.URL == nil || (req.URL.Scheme != "http" && req.URL.Scheme != "https") {
 			err := fmt.Errorf("redirect target has unsupported scheme")
 			emitOutboundAudit(OutboundAuditEvent{At: time.Now().UTC(), URL: auditURL(req.URL), Error: err.Error()})
@@ -174,10 +177,19 @@ func isPrivateNetworkIP(ip net.IP) bool {
 	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
 }
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
+type roundTripFunc struct {
+	roundTrip func(*http.Request) (*http.Response, error)
+	closeIdle func()
+}
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return f(req)
+	return f.roundTrip(req)
+}
+
+func (f roundTripFunc) CloseIdleConnections() {
+	if f.closeIdle != nil {
+		f.closeIdle()
+	}
 }
 
 func NewEndpointHTTPClient(rawURL string, timeout time.Duration) (*http.Client, error) {

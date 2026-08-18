@@ -1,8 +1,9 @@
-# Ensures Windows CGO can compile packages that depend on pg_query_go
+# Ensures Windows CGO can compile packages that depend on pg_query_go and DuckDB
 # (internal/utils SQL helpers, and anything importing them such as internal/handler).
 #
-# Root cause: go env CC may point at MSYS2 gcc, but cgo still fails with
-# "cgo.exe: exit status 2" when that gcc's bin directory is not on PATH.
+# DuckDB's Windows static archives currently require GCC 15 emutls symbols;
+# MSYS2 GCC 16 can therefore fail at link time even when cgo itself is found.
+# The compatible side-by-side toolchain is preferred when installed.
 #
 # Usage (current PowerShell session):
 #   . .\scripts\ensure-cgo-windows.ps1
@@ -24,6 +25,15 @@ $ErrorActionPreference = 'Stop'
 
 function Resolve-MsysGccBin {
   $candidates = @()
+
+  # DuckDB's Windows static archives currently require the GCC 15 emutls
+  # symbols. Prefer the isolated compatible toolchain when it is installed;
+  # WEKNORA_CGO_TOOLCHAIN_BIN can override this path on another machine.
+  $preferredBin = [Environment]::GetEnvironmentVariable('WEKNORA_CGO_TOOLCHAIN_BIN')
+  if ($preferredBin) {
+    $candidates += $preferredBin
+  }
+  $candidates += 'F:\AI\MSYS2\ucrt64-gcc15\bin'
 
   try {
     $cc = (& go env CC 2>$null | Out-String).Trim()
@@ -66,6 +76,10 @@ Packages such as github.com/pganalyze/pg_query_go require a working C compiler.
 $bin = $resolved.Bin
 $usrBin = Join-Path (Split-Path -Parent (Split-Path -Parent $bin)) 'usr\bin'
 $prepend = @($bin)
+$nativeBin = 'F:\AI\MSYS2\ucrt64\bin'
+if ((Test-Path -LiteralPath $nativeBin) -and ($nativeBin -notin $prepend)) {
+  $prepend += $nativeBin
+}
 if (Test-Path -LiteralPath $usrBin) {
   $prepend += $usrBin
 }

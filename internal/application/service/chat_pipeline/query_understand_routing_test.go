@@ -151,6 +151,26 @@ func TestClassifyQueryParseFailureAppliesConservativeBudget(t *testing.T) {
 	}
 }
 
+func TestClassifyQueryParseFailurePreservesExplicitRelationRoute(t *testing.T) {
+	model := &validationChatStub{content: `{"rewrite_query":"A和B的关系"}`}
+	appConfig := &appconfig.Config{Conversation: &appconfig.ConversationConfig{RewritePromptSystem: "system", RewritePromptUser: "query={{query}}"}}
+	manage := &types.ChatManage{PipelineRequest: types.PipelineRequest{
+		Query:             "请查询A和B的关系",
+		ComplexityRouting: types.DefaultComplexityRoutingConfig(),
+	}}
+	manage.ComplexityRouting.Enabled = true
+	decision, err := ClassifyQuery(context.Background(), model, appConfig, manage)
+	if err == nil {
+		t.Fatal("expected strict routing parse error")
+	}
+	if decision == nil || decision.DegradationReason != types.DegradationParseFailed || decision.ActualAction != types.RoutingGraphReasoning {
+		t.Fatalf("explicit relation signal must preserve graph fallback: %#v", decision)
+	}
+	if !decision.Classification.NeedsEntityRelation {
+		t.Fatalf("expected relation classification: %#v", decision.Classification)
+	}
+}
+
 func TestClassifyQueryMissingModelReturnsConservativeDecision(t *testing.T) {
 	manage := &types.ChatManage{PipelineRequest: types.PipelineRequest{
 		Query:                "比较两个方案",

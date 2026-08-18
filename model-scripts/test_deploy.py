@@ -5,11 +5,13 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
@@ -123,6 +125,47 @@ class TestConfigAndCompose(unittest.TestCase):
         self.assertIn("awq", text)
         self.assertIn("QUANT=onnx-int8", text)
 
+    def test_asr_runtime_sidecar_is_configured(self) -> None:
+        cfg = deploy.load_config(ROOT / "config.yaml.example", prefer_as_base=True)
+        asr = next(s for s in deploy.parse_models(cfg) if s.key == "asr")
+        self.assertEqual(asr.extra_files[0]["model_id"], "iic/SenseVoiceSmall")
+        self.assertEqual(asr.extra_files[0]["path"], "chn_jpn_yue_eng_ko_spectok.bpe.model")
+
+    def test_runtime_sidecar_path_cannot_escape_model_dir(self) -> None:
+        spec = deploy.ModelSpec(
+            key="test",
+            enabled=True,
+            role="test",
+            model_id="test/model",
+            quant="fp16",
+            engine="container",
+            port=8000,
+            served_model_name="test-model",
+            extra_files=[{"path": "../escape.bin"}],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(RuntimeError):
+                deploy.download_extra_files(spec, Path(tmp), source="auto", retries=1, delay=0)
+
+    def test_runtime_sidecar_tokens_are_scoped_to_their_hub(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {"MODELSCOPE_TOKEN": "ms-secret", "HF_TOKEN": "hf-secret"},
+            clear=False,
+        ):
+            self.assertEqual(
+                deploy.extra_file_auth_headers("https://www.modelscope.cn/models/a/b"),
+                {"Authorization": "Bearer ms-secret"},
+            )
+            self.assertEqual(
+                deploy.extra_file_auth_headers("https://huggingface.co/a/b"),
+                {"Authorization": "Bearer hf-secret"},
+            )
+            self.assertEqual(
+                deploy.extra_file_auth_headers("https://downloads.example.com/a.bin"),
+                {},
+            )
+
     def test_limit_mm_dict_to_json(self) -> None:
         cfg = deploy.load_config(ROOT / "config.yaml", prefer_as_base=True)
         cfg["models"]["chat"]["enabled"] = True
@@ -155,21 +198,23 @@ class TestConfigAndCompose(unittest.TestCase):
 
 class TestCli(unittest.TestCase):
     def test_config_before_subcommand(self) -> None:
-        # --config 在子命令前：由 main() 预处理注入
-        code = deploy.main(
-            [
-                "--config",
-                str(ROOT / "config.yaml"),
-                "gen-config",
-                "--output-dir",
-                str(ROOT / "generated"),
-                "--host",
-                "10.0.0.9",
-            ]
-        )
-        self.assertEqual(code, 0)
-        data = json.loads((ROOT / "generated" / "approved_endpoints.json").read_text(encoding="utf-8"))
-        self.assertEqual(data["meta"]["host"], "10.0.0.9")
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            # --config 在子命令前：由 main() 预处理注入
+            code = deploy.main(
+                [
+                    "--config",
+                    str(ROOT / "config.yaml"),
+                    "gen-config",
+                    "--output-dir",
+                    str(out),
+                    "--host",
+                    "10.0.0.9",
+                ]
+            )
+            self.assertEqual(code, 0)
+            data = json.loads((out / "approved_endpoints.json").read_text(encoding="utf-8"))
+            self.assertEqual(data["meta"]["host"], "10.0.0.9")
 
     def test_config_after_subcommand(self) -> None:
         parser = deploy.build_parser()
@@ -190,28 +235,27 @@ class TestCli(unittest.TestCase):
             os.environ.pop("AIR_GAPPED_MODE", None)
 
     def test_gen_config_cli(self) -> None:
-        out = ROOT / "generated"
-        if out.exists():
-            shutil.rmtree(out)
-        code = deploy.main(
-            [
-                "gen-config",
-                "--config",
-                str(ROOT / "config.yaml"),
-                "--output-dir",
-                str(out),
-                "--host",
-                "10.0.0.8",
-                "--data-dir",
-                "/mnt/models",
-            ]
-        )
-        self.assertEqual(code, 0)
-        compose = out / "docker-compose.airgap.override.yml"
-        self.assertTrue(compose.exists())
-        text = compose.read_text(encoding="utf-8")
-        self.assertIn("pooling", text)
-        self.assertIn("10.0.0.8", (out / "approved_endpoints.json").read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            code = deploy.main(
+                [
+                    "gen-config",
+                    "--config",
+                    str(ROOT / "config.yaml"),
+                    "--output-dir",
+                    str(out),
+                    "--host",
+                    "10.0.0.8",
+                    "--data-dir",
+                    "/mnt/models",
+                ]
+            )
+            self.assertEqual(code, 0)
+            compose = out / "docker-compose.airgap.override.yml"
+            self.assertTrue(compose.exists())
+            text = compose.read_text(encoding="utf-8")
+            self.assertIn("pooling", text)
+            self.assertIn("10.0.0.8", (out / "approved_endpoints.json").read_text(encoding="utf-8"))
 
 
 class TestSafeExtract(unittest.TestCase):

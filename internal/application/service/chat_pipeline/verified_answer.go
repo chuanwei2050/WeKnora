@@ -22,6 +22,8 @@ type PluginVerifiedAnswer struct {
 	modelService interfaces.ModelService
 }
 
+const verificationValidatorMaxTokens = 2048
+
 func NewPluginVerifiedAnswer(eventManager *EventManager, modelService interfaces.ModelService) *PluginVerifiedAnswer {
 	plugin := &PluginVerifiedAnswer{modelService: modelService}
 	eventManager.Register(plugin)
@@ -72,7 +74,7 @@ func (p *PluginVerifiedAnswer) execute(ctx context.Context, chatManage *types.Ch
 			if len(verificationModels) == 0 {
 				return types.VerificationBudgetEstimate{}
 			}
-			return types.VerificationBudgetEstimate{ModelCalls: len(verificationModels), InputTokens: verificationInputTokenEstimate(draft, evidence), OutputTokens: 512}
+			return types.VerificationBudgetEstimate{ModelCalls: len(verificationModels), InputTokens: verificationInputTokenEstimate(draft, evidence), OutputTokens: verificationValidatorMaxTokens}
 		},
 		EstimateReflectionBudget: func(draft types.DraftAnswer, evidence types.EvidenceBundle, reports []types.ValidationReport) types.VerificationBudgetEstimate {
 			modelCalls := 0
@@ -84,7 +86,15 @@ func (p *PluginVerifiedAnswer) execute(ctx context.Context, chatManage *types.Ch
 		EstimateRetrievalBudget: func(types.RetrievalRequest) types.VerificationBudgetEstimate {
 			return types.VerificationBudgetEstimate{ModelCalls: 1, InputTokens: estimateVerificationTokens(chatManage.Query), OutputTokens: 0}
 		},
-		Retrieve: func(context.Context, string) (types.EvidenceBundle, error) {
+		Retrieve: func(retrieveCtx context.Context, retrieveQuery string) (types.EvidenceBundle, error) {
+			if len(bundle.Items) > 0 || chatManage.VerifiedRetrieve == nil {
+				return bundle, nil
+			}
+			results, retrieveErr := chatManage.VerifiedRetrieve(retrieveCtx, retrieveQuery)
+			if retrieveErr != nil {
+				return types.EvidenceBundle{}, retrieveErr
+			}
+			bundle = evidenceBundleFromResultsForScope(chatManage, results, scope)
 			return bundle, nil
 		},
 		RetrieveMore: func(retrieveCtx context.Context, request types.RetrievalRequest) (types.EvidenceBundle, error) {
@@ -99,7 +109,8 @@ func (p *PluginVerifiedAnswer) execute(ctx context.Context, chatManage *types.Ch
 				return types.EvidenceBundle{}, retrieveErr
 			}
 			regenerateAfterRetrieval = true
-			return evidenceBundleFromResultsForScope(chatManage, results, request.Scope), nil
+			bundle = evidenceBundleFromResultsForScope(chatManage, results, request.Scope)
+			return bundle, nil
 		},
 		Draft: func(draftCtx context.Context, _ string, draftEvidence types.EvidenceBundle) (types.DraftAnswer, error) {
 			if regenerateAfterRetrieval {
@@ -159,7 +170,7 @@ func (p *PluginVerifiedAnswer) execute(ctx context.Context, chatManage *types.Ch
 			if len(verificationModels) == 0 {
 				return types.ReflectionPlan{Action: types.ReflectionStop, Reason: "pipeline validator has no independent rewrite provider"}, nil
 			}
-			if chatManage.VerifiedRetrieve != nil {
+			if chatManage.VerifiedRetrieve != nil && len(bundle.Items) == 0 {
 				return types.ReflectionPlan{Action: types.ReflectionRetrieveMore, Reason: "validator requested additional scoped evidence"}, nil
 			}
 			rewritten, rewriteErr := rewriteDraftWithChatModel(reflectCtx, verificationModels[0].model, draft, bundle, reports)
@@ -336,6 +347,7 @@ func verificationScope(chatManage *types.ChatManage) types.VerificationScope {
 }
 
 func draftFromResponse(text string, bundle types.EvidenceBundle) types.DraftAnswer {
+	text = unwrapAgentDraftText(text)
 	draft := types.DraftAnswer{ID: "pipeline-draft", Text: text}
 	if len(bundle.Items) > 0 {
 		ids := make([]string, 0, len(bundle.Items))
@@ -345,6 +357,24 @@ func draftFromResponse(text string, bundle types.EvidenceBundle) types.DraftAnsw
 		draft.Claims = []types.Claim{{ID: "answer-claim", Text: text, EvidenceIDs: ids, Core: true}}
 	}
 	return draft
+}
+
+// unwrapAgentDraftText removes the structured envelope emitted by the
+// final_answer tool while preserving ordinary JSON answers unchanged.
+func unwrapAgentDraftText(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if strings.HasPrefix(trimmed, "```") && strings.HasSuffix(trimmed, "```") {
+		trimmed = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "```json"), "```"))
+	}
+	var envelope struct {
+		Draft *struct {
+			Text string `json:"text"`
+		} `json:"draft"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &envelope); err == nil && envelope.Draft != nil && strings.TrimSpace(envelope.Draft.Text) != "" {
+		return strings.TrimSpace(envelope.Draft.Text)
+	}
+	return text
 }
 
 func degradedValidationReport(identity types.ModelIdentity, reason string) types.ValidationReport {
@@ -450,12 +480,14 @@ func validateWithChatModel(ctx context.Context, model modelchat.Chat, identity t
 	if model == nil {
 		return types.ValidationReport{}, fmt.Errorf("validator model is nil")
 	}
+	disableThinking := false
 	response, err := model.Chat(ctx, []modelchat.Message{
 		{Role: "system", Content: "You are an independent answer validator. Evaluate the draft against the supplied evidence. Return exactly one JSON object and no markdown with keys fact_score, logic_score, citation_score, completeness_score (each 0..1), and issues (array). If there are no issues, return \"issues\":[]. Each issue must use an existing draft claim_id (usually \"answer-claim\"), existing evidence_ids from the input, dimension in {fact,logic,citation,completeness}, severity in {info,warning,critical}, and a short message. Do not invent claim or evidence IDs. Do not return chain-of-thought, hidden reasoning, markdown fences, or prose."},
 		{Role: "user", Content: buildValidationPrompt(draft, evidence)},
 	}, &modelchat.ChatOptions{
 		Temperature: 0,
-		MaxTokens:   512,
+		MaxTokens:   verificationValidatorMaxTokens,
+		Thinking:    &disableThinking,
 		Format:      json.RawMessage(`{"type":"object"}`),
 	})
 	if err != nil {

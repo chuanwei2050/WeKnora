@@ -66,6 +66,39 @@ func TestHandleToolResultKeepsFailureNonFatal(t *testing.T) {
 	}
 }
 
+func TestHandleReflectionForwardsVerificationStage(t *testing.T) {
+	streamManager := &recordingStreamManager{}
+	handler := &AgentStreamHandler{
+		ctx:                context.Background(),
+		sessionID:          "session-1",
+		assistantMessageID: "message-1",
+		streamManager:      streamManager,
+	}
+
+	err := handler.handleReflection(context.Background(), event.Event{
+		ID: "verification-1",
+		Data: types.VerificationStageEvent{
+			Stage:     "verification",
+			Status:    "completed",
+			Decision:  types.VerificationPassed,
+			ModelKeys: []string{"27b", "9b"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("handleReflection() error = %v", err)
+	}
+	if len(streamManager.events) != 1 {
+		t.Fatalf("events = %d, want 1", len(streamManager.events))
+	}
+	got := streamManager.events[0]
+	if got.Type != types.ResponseTypeReflection || !got.Done {
+		t.Fatalf("event = %#v, want completed reflection", got)
+	}
+	if got.Data["stage"] != "verification" || got.Data["status"] != "completed" || got.Data["decision"] != string(types.VerificationPassed) {
+		t.Fatalf("event data = %#v", got.Data)
+	}
+}
+
 func TestHandleErrorRemainsFatal(t *testing.T) {
 	streamManager := &recordingStreamManager{}
 	handler := &AgentStreamHandler{

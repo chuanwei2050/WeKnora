@@ -558,7 +558,7 @@ RETURN source, target, relation, collect(evidence) AS evidences`, map[string]int
 			relationValue, _ := record.Get("relation")
 			source, sourceOK := neo4jNode(sourceValue)
 			target, targetOK := neo4jNode(targetValue)
-			relation, relationOK := neo4jRelationship(relationValue)
+			relation, relationOK := neo4jNode(relationValue)
 			if !sourceOK || !targetOK || !relationOK {
 				continue
 			}
@@ -568,7 +568,7 @@ RETURN source, target, relation, collect(evidence) AS evidences`, map[string]int
 			if targetEntity, ok := canonicalEntityFromNode(target); ok {
 				nodes[targetEntity.CanonicalKey] = targetEntity
 			}
-			edge := canonicalEdgeFromRelationship(relation, source, target)
+			edge := canonicalEdgeFromRelationNode(relation, source, target)
 			if edge.ID == "" {
 				continue
 			}
@@ -702,21 +702,33 @@ func canonicalEntityFromNode(node neo4j.Node) (types.CanonicalEntity, bool) {
 }
 
 func canonicalEdgeFromRelationship(relationship neo4j.Relationship, source, target neo4j.Node) types.GraphEdge {
-	identity := stringGraphProperty(relationship.Props, "relation_key")
-	if identity == "" {
-		identity = strings.Join([]string{stringGraphProperty(source.Props, "canonical_key"), relationship.Type, stringGraphProperty(target.Props, "canonical_key")}, "|")
+	return canonicalEdgeFromProperties(relationship.Props, relationship.Type, source, target)
+}
+
+func canonicalEdgeFromRelationNode(relation neo4j.Node, source, target neo4j.Node) types.GraphEdge {
+	return canonicalEdgeFromProperties(relation.Props, "CanonicalRelation", source, target)
+}
+
+func canonicalEdgeFromProperties(props map[string]interface{}, fallbackType string, source, target neo4j.Node) types.GraphEdge {
+	identity := stringGraphProperty(props, "relation_key")
+	relationType := stringGraphProperty(props, "relation_type")
+	if relationType == "" {
+		relationType = fallbackType
 	}
-	direction := types.GraphDirection(stringGraphProperty(relationship.Props, "direction"))
+	if identity == "" {
+		identity = strings.Join([]string{stringGraphProperty(source.Props, "canonical_key"), relationType, stringGraphProperty(target.Props, "canonical_key")}, "|")
+	}
+	direction := types.GraphDirection(stringGraphProperty(props, "direction"))
 	if direction == "" {
 		direction = types.GraphDirectionOutgoing
 	}
 	return types.GraphEdge{
 		ID:           identity,
-		Source:       stringGraphProperty(relationship.Props, "source"),
-		Target:       stringGraphProperty(relationship.Props, "target"),
-		RelationType: stringGraphProperty(relationship.Props, "relation_type"),
+		Source:       stringGraphProperty(props, "source"),
+		Target:       stringGraphProperty(props, "target"),
+		RelationType: relationType,
 		Direction:    direction,
-		Weight:       floatGraphProperty(relationship.Props, "weight"),
+		Weight:       floatGraphProperty(props, "weight"),
 	}
 }
 

@@ -362,6 +362,26 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 
 // handleReflection handles agent reflection events
 func (h *AgentStreamHandler) handleReflection(ctx context.Context, evt event.Event) error {
+	if data, ok := evt.Data.(types.VerificationStageEvent); ok {
+		encoded, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		var metadata map[string]interface{}
+		if err := json.Unmarshal(encoded, &metadata); err != nil {
+			return err
+		}
+		if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+			ID:        evt.ID,
+			Type:      types.ResponseTypeReflection,
+			Done:      data.Status == "completed" || data.Status == "degraded",
+			Timestamp: time.Now(),
+			Data:      metadata,
+		}); err != nil {
+			logger.GetLogger(h.ctx).Error("Append verification stage event to stream failed", "error", err)
+		}
+		return nil
+	}
 	data, ok := evt.Data.(event.AgentReflectionData)
 	if !ok {
 		return nil

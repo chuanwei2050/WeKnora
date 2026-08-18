@@ -226,6 +226,7 @@ type KnowledgeRepository interface {
 // review history within tenant and knowledge scopes.
 type KnowledgeGovernanceRepository interface {
 	CreateVersion(ctx context.Context, version *types.KnowledgeVersion) error
+	DeleteDraftVersion(ctx context.Context, tenantID uint64, id string) error
 	GetVersion(ctx context.Context, tenantID uint64, id string) (*types.KnowledgeVersion, error)
 	ListVersions(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.KnowledgeVersion, error)
 	UpdateVersionStatus(ctx context.Context, tenantID uint64, id string, status types.KnowledgeVersionStatus) error

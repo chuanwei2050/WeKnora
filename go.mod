@@ -39,7 +39,7 @@ require (
 	github.com/parquet-go/parquet-go v0.25.0
 	github.com/pganalyze/pg_query_go/v6 v6.1.0
 	github.com/pgvector/pgvector-go v0.3.0
-	github.com/qdrant/go-client v1.16.1
+	github.com/qdrant/go-client v1.16.2
 	github.com/redis/go-redis/v9 v9.14.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/sashabaranov/go-openai v1.40.5

@@ -144,6 +144,11 @@ models:
     needs_gpu: false
     port: 8004
     served_model_name: sensevoice-small
+    # ONNX 推理依赖原始 SenseVoice 仓库中的 tokenizer sidecar；随模型包一起导入。
+    extra_files:
+      - model_id: iic/SenseVoiceSmall
+        source: modelscope
+        path: chn_jpn_yue_eng_ko_spectok.bpe.model
     allowed_uses: [asr, model]
     forbidden_uses: [object-storage]
 
