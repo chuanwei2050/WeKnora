@@ -242,6 +242,26 @@ func governanceSourceMetadata(metadata map[string]string) (types.KnowledgeSource
 	return result, nil
 }
 
+func (s *knowledgeService) resolveDocumentTagID(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	tagID string,
+) (string, error) {
+	tagID = strings.TrimSpace(tagID)
+	if tagID == "" || tagID == "__untagged__" {
+		tag, err := s.tagService.FindOrCreateTagByName(ctx, kb.ID, types.UntaggedTagName)
+		if err != nil {
+			return "", err
+		}
+		return tag.ID, nil
+	}
+	tag, err := s.tagRepo.GetByID(ctx, kb.TenantID, tagID)
+	if err != nil || tag.KnowledgeBaseID != kb.ID {
+		return "", werrors.NewBadRequestError("目标文件夹不存在或不属于当前知识库")
+	}
+	return tag.ID, nil
+}
+
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagID string, channel string,
@@ -273,6 +293,10 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	// FAQ knowledge bases should not accept file uploads — use the FAQ import API instead
 	if kb.Type == types.KnowledgeBaseTypeFAQ {
 		return nil, werrors.NewBadRequestError("FAQ 知识库不支持文件上传，请使用 FAQ 导入功能")
+	}
+	tagID, err = s.resolveDocumentTagID(ctx, kb, tagID)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
@@ -598,6 +622,10 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
 		return nil, err
 	}
+	tagID, err = s.resolveDocumentTagID(ctx, kb, tagID)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
@@ -793,6 +821,10 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
+		return nil, err
+	}
+	tagID, err = s.resolveDocumentTagID(ctx, kb, tagID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -1000,6 +1032,10 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
 		return nil, err
 	}
+	resolvedTagID, err := s.resolveDocumentTagID(ctx, kb, payload.TagID)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
@@ -1031,7 +1067,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		EmbeddingModelID: kb.EmbeddingModelID,
 		FileName:         fileName,
 		FileType:         types.KnowledgeTypeManual,
-		TagID:            payload.TagID, // 设置分类ID，用于知识分类管理
+		TagID:            resolvedTagID, // 设置分类ID，用于知识分类管理
 	}
 	if err := knowledge.SetManualMetadata(meta); err != nil {
 		logger.Errorf(ctx, "Failed to set manual metadata: %v", err)

@@ -682,10 +682,17 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 		return
 	}
 
-	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
 	if err != nil {
 		c.Error(err)
 		return
+	}
+	if knowledge.CurrentVersionID != "" {
+		kb, kbErr := h.kbService.GetKnowledgeBaseByID(effCtx, knowledge.KnowledgeBaseID)
+		if kbErr != nil || !types.CanManageKnowledgeBase(effCtx, kb) {
+			c.Error(errors.NewForbiddenError("published contribution cannot be deleted"))
+			return
+		}
 	}
 	logger.Infof(ctx, "Deleting knowledge, ID: %s", secutils.SanitizeForLog(id))
 	err = h.kgService.DeleteKnowledge(effCtx, id)

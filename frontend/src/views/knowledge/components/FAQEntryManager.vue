@@ -63,7 +63,7 @@
                       {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatImportTime(currentSharedKb.shared_at) }}
                     </span>
                   </template>
-                  <template v-else-if="effectiveKBPermission">
+                  <template v-else-if="isAgentVisibleKnowledgeBase">
                     <span class="faq-access-meta-sep">·</span>
                     <span class="faq-access-meta-text">{{ $t('knowledgeList.detail.sourceTypeAgent') }}</span>
                   </template>
@@ -1315,22 +1315,25 @@ const uiStore = useUIStore()
 const authStore = useAuthStore()
 const orgStore = useOrganizationStore()
 
+const isSameTenantKnowledgeBase = computed(() => {
+  if (!kbInfo.value) return false
+  return Number(kbInfo.value.tenant_id) === Number(authStore.effectiveTenantId)
+})
+
 // Permission control: check if current user owns this KB or has edit/manage permission
 const isOwner = computed(() => {
   if (!kbInfo.value) return false
-  // Check if the current user's tenant ID matches the KB's tenant ID
-  const userTenantId = authStore.effectiveTenantId
-  return kbInfo.value.tenant_id === userTenantId
+  return kbInfo.value.created_by === authStore.currentUserId
 })
 
 // Can edit: owner, admin, or editor
 const canEdit = computed(() => {
-  return canManageBidReviewKnowledge() && orgStore.canEditKB(props.kbId, isOwner.value)
+  return canManageBidReviewKnowledge() && orgStore.canEditKB(props.kbId, isSameTenantKnowledgeBase.value)
 })
 
 // Can manage (delete, settings, etc.): owner or admin
 const canManage = computed(() => {
-  return canManageBidReviewKnowledge() && orgStore.canManageKB(props.kbId, isOwner.value)
+  return canManageBidReviewKnowledge() && orgStore.canManageKB(props.kbId, isSameTenantKnowledgeBase.value)
 })
 
 // Current KB's shared record (when accessed via organization share)
@@ -1340,6 +1343,9 @@ const currentSharedKb = computed(() =>
 
 // Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
 const effectiveKBPermission = computed(() => orgStore.getKBPermission(props.kbId) || kbInfo.value?.my_permission || '')
+const isAgentVisibleKnowledgeBase = computed(() =>
+  Boolean(effectiveKBPermission.value) && !currentSharedKb.value && !isSameTenantKnowledgeBase.value
+)
 
 // Display role label: owner or org role (admin/editor/viewer)
 const accessRoleLabel = computed(() => {
@@ -3274,6 +3280,7 @@ watch(() => entries.value.map(e => ({
 <style lang="less">
 /* 下拉菜单样式已统一至 @/assets/dropdown-menu.less */
 </style>
+
 <style scoped lang="less">
 .faq-manager {
   display: flex;
@@ -6292,4 +6299,3 @@ watch(() => entries.value.map(e => ({
   line-height: 1.4;
 }
 </style>
-

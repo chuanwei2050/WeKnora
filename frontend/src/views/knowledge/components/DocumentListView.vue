@@ -1,7 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatFileSize, getFileIcon } from '@/utils/files';
+import {
+  canOperateGovernanceRow,
+  getGovernanceRowActions,
+  isGovernanceRowActionDisabled,
+  type GovernanceRowAction,
+} from './knowledge-governance-actions';
 
 interface Tag {
   id: string;
@@ -21,7 +27,12 @@ interface KnowledgeItem {
   updated_at?: string;
   source?: string;
   isMore?: boolean;
+  created_by?: string;
+  current_version_id?: string;
+  pending_version_id?: string;
 }
+
+type DocumentAction = 'edit' | 'reparse' | 'delete' | 'submit' | 'withdraw' | 'approve' | 'reject';
 
 const props = defineProps<{
   items: KnowledgeItem[];
@@ -30,13 +41,19 @@ const props = defineProps<{
   tagList: Tag[];
   loading?: boolean;
   canGenerateSummary?: boolean;
+  governanceEnabled?: boolean;
+  canContribute?: boolean;
+  canReview?: boolean;
+  currentUserId?: string;
+  governanceBusyId?: string;
 }>();
 
 const emit = defineEmits<{
   (e: 'open', item: KnowledgeItem): void;
-  (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean): void;
-  (e: 'toggle-all', checked: boolean): void;
-  (e: 'action', action: 'edit' | 'reparse' | 'move' | 'delete', item: KnowledgeItem): void;
+  (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean, selectableIds: string[]): void;
+  (e: 'toggle-all', checked: boolean, selectableIds: string[]): void;
+  (e: 'action', action: DocumentAction, item: KnowledgeItem): void;
+  (e: 'move-folder', item: KnowledgeItem, tagId: string): void;
 }>();
 
 const { t } = useI18n();
@@ -111,37 +128,46 @@ const statusByRow = computed(() => {
   return map;
 });
 
-const allSelected = computed(() => {
-  return props.items.length > 0 && props.items.every(i => props.selectedIds.has(i.id));
+const showActions = computed(() => props.canEdit || (props.governanceEnabled && (props.canContribute || props.canReview)));
+const governanceContext = () => ({
+  enabled: Boolean(props.governanceEnabled),
+  canContribute: Boolean(props.canContribute),
+  canReview: Boolean(props.canReview),
+  currentUserId: props.currentUserId || '',
 });
-const someSelected = computed(() => {
-  return props.items.some(i => props.selectedIds.has(i.id)) && !allSelected.value;
-});
+const governanceActions = (item: KnowledgeItem) => getGovernanceRowActions(item, governanceContext());
+const hasGovernanceAction = (item: KnowledgeItem, action: GovernanceRowAction) => governanceActions(item).includes(action);
+const canOperateItem = (item: KnowledgeItem) => props.canEdit || canOperateGovernanceRow(item, governanceContext());
+const selectableIds = computed(() => props.items.filter(canOperateItem).map(item => item.id));
+const allSelected = computed(() => (
+  selectableIds.value.length > 0 && selectableIds.value.every(id => props.selectedIds.has(id))
+));
+const someSelected = computed(() => (
+  selectableIds.value.some(id => props.selectedIds.has(id)) && !allSelected.value
+));
 
 const onHeaderToggle = (e: Event) => {
   const checked = (e.target as HTMLInputElement).checked;
-  emit('toggle-all', checked);
+  emit('toggle-all', checked, selectableIds.value);
 };
+const getFolderTargets = (item: KnowledgeItem) => props.tagList
+  .filter(tag => String(tag.id) !== String(item.tag_id ?? ''))
+  .map(tag => ({ content: tag.name, value: String(tag.id) }));
 
 const onRowToggle = (item: KnowledgeItem, e: MouseEvent) => {
+  if (!canOperateItem(item)) return;
   const checked = !props.selectedIds.has(item.id);
-  emit('toggle-row', item.id, checked, e.shiftKey);
+  emit('toggle-row', item.id, checked, e.shiftKey, selectableIds.value);
 };
 
-const moreOpen = ref<string | null>(null);
-const onMoreVisible = (id: string, visible: boolean) => {
-  moreOpen.value = visible ? id : null;
-};
-
-const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: KnowledgeItem) => {
-  moreOpen.value = null;
+const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
   item.isMore = false;
   emit('action', action, item);
 };
 </script>
 
 <template>
-  <div class="doc-list-view" :class="{ 'is-loading': loading }">
+  <div class="doc-list-view" :class="{ 'is-loading': loading }" :style="{ '--doc-list-actions-width': showActions ? (canEdit ? '320px' : '220px') : '0px' }">
     <div class="doc-list-header" role="row">
       <div class="cell cell-check" role="columnheader">
         <label class="checkbox-wrap" @click.stop>
@@ -149,7 +175,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
             type="checkbox"
             :checked="allSelected"
             :indeterminate.prop="someSelected"
-            :disabled="!items.length"
+            :disabled="!selectableIds.length"
             @change="onHeaderToggle"
             :aria-label="t('knowledgeBase.selectAll')"
           />
@@ -161,7 +187,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
       <div class="cell cell-type" role="columnheader">{{ t('knowledgeBase.columnType') }}</div>
       <div class="cell cell-status" role="columnheader">{{ t('knowledgeBase.columnStatus') }}</div>
       <div class="cell cell-time" role="columnheader">{{ t('knowledgeBase.columnUpdatedAt') }}</div>
-      <div class="cell cell-actions" role="columnheader" v-if="canEdit"></div>
+      <div class="cell cell-actions" role="columnheader" v-if="showActions">{{ t('knowledgeBase.columnActions') }}</div>
     </div>
 
     <div class="doc-list-body">
@@ -169,7 +195,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
         v-for="item in items"
         :key="item.id"
         class="doc-list-row"
-        :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }"
+        :class="{ selected: selectedIds.has(item.id) }"
         role="row"
         @click="emit('open', item)"
       >
@@ -178,6 +204,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
             <input
               type="checkbox"
               :checked="selectedIds.has(item.id)"
+              :disabled="!canOperateItem(item)"
               @click="onRowToggle(item, $event as unknown as MouseEvent)"
               :aria-label="item.file_name"
             />
@@ -230,37 +257,49 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
           <span class="row-mono">{{ formatTime(item.updated_at) }}</span>
         </div>
 
-        <div class="cell cell-actions" v-if="canEdit" @click.stop>
-          <t-popup
-            placement="bottom-right"
-            trigger="click"
-            destroy-on-close
-            :on-visible-change="(v: boolean) => onMoreVisible(item.id, v)"
-          >
-            <button class="row-more-btn" :class="{ active: moreOpen === item.id }" type="button" :aria-label="t('knowledgeBase.columnActions')">
-              <t-icon name="more" size="16px" />
+        <div class="cell cell-actions" v-if="showActions" @click.stop>
+          <div class="row-inline-actions">
+            <button v-if="hasGovernanceAction(item, 'submit')" class="row-action-btn primary" type="button" :disabled="governanceBusyId === item.id" @click="handleAction('submit', item)">
+              {{ t('knowledgeBase.governanceSubmit') }}
             </button>
-            <template #content>
-              <div class="row-menu">
-                <div
-                  v-if="item.type === 'manual'"
-                  class="row-menu-item"
-                  @click.stop="handleAction('edit', item)"
-                >
-                  <t-icon name="edit" /> <span>{{ t('knowledgeBase.editDocument') }}</span>
-                </div>
-                <div class="row-menu-item" @click.stop="handleAction('reparse', item)">
-                  <t-icon name="refresh" /> <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
-                </div>
-                <div class="row-menu-item" @click.stop="handleAction('move', item)">
-                  <t-icon name="swap" /> <span>{{ t('knowledgeBase.moveDocument') }}</span>
-                </div>
-                <div class="row-menu-item danger" @click.stop="handleAction('delete', item)">
-                  <t-icon name="delete" /> <span>{{ t('knowledgeBase.deleteDocument') }}</span>
-                </div>
-              </div>
-            </template>
-          </t-popup>
+            <button v-if="hasGovernanceAction(item, 'withdraw')" class="row-action-btn primary" type="button" :disabled="governanceBusyId === item.id" @click="handleAction('withdraw', item)">
+              {{ t('knowledgeBase.governanceWithdraw') }}
+            </button>
+            <button v-if="hasGovernanceAction(item, 'approve')" class="row-action-btn primary" type="button" :disabled="governanceBusyId === item.id" @click="handleAction('approve', item)">
+              {{ t('knowledgeBase.governanceApprove') }}
+            </button>
+            <button v-if="hasGovernanceAction(item, 'reject')" class="row-action-btn danger" type="button" :disabled="governanceBusyId === item.id" @click="handleAction('reject', item)">
+              {{ t('knowledgeBase.governanceReject') }}
+            </button>
+            <button v-if="hasGovernanceAction(item, 'delete')" class="row-action-btn danger" type="button" :disabled="governanceBusyId === item.id || isGovernanceRowActionDisabled(item, 'delete')" @click="handleAction('delete', item)">
+              {{ t('knowledgeBase.governanceDelete') }}
+            </button>
+            <button v-if="canEdit && item.type === 'manual'" class="row-action-btn" type="button" @click="handleAction('edit', item)">
+              {{ t('knowledgeBase.rowEdit') }}
+            </button>
+            <button v-if="canEdit" class="row-action-btn" type="button" @click="handleAction('reparse', item)">
+              {{ t('knowledgeBase.rowRebuild') }}
+            </button>
+            <t-dropdown
+              v-if="canEdit && getFolderTargets(item).length"
+              :options="getFolderTargets(item)"
+              trigger="click"
+              @click="(data: { value: string | number }) => emit('move-folder', item, String(data.value))"
+            >
+              <button class="row-action-btn" type="button">
+                {{ t('knowledgeBase.rowMove') }}
+              </button>
+            </t-dropdown>
+            <button
+              v-if="canEdit && !hasGovernanceAction(item, 'delete')"
+              class="row-action-btn danger"
+              type="button"
+              :disabled="item.parse_status === 'pending_review'"
+              @click="handleAction('delete', item)"
+            >
+              {{ t('knowledgeBase.governanceDelete') }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -289,7 +328,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
     72px                       // type
     minmax(96px, 0.7fr)        // status
     140px                      // updated_at
-    48px;                      // actions
+    var(--doc-list-actions-width); // actions
   align-items: center;
   column-gap: 0;
   padding: 0 12px;
@@ -324,8 +363,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
 
   &:last-child { border-bottom: 0; }
 
-  &:hover:not(.selected),
-  &.menu-open:not(.selected) {
+  &:hover:not(.selected) {
     background: var(--td-bg-color-page, #f7f8fa);
   }
 
@@ -341,10 +379,6 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
       background: color-mix(in srgb, var(--td-brand-color-1) 75%, var(--td-brand-color));
     }
   }
-
-  &:hover .row-more-btn,
-  &.menu-open .row-more-btn,
-  &.selected .row-more-btn { opacity: 1; }
 }
 
 .cell {
@@ -372,7 +406,30 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
 }
 
 .cell-actions {
+  gap: 6px;
   justify-content: flex-end;
+}
+
+.row-inline-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.row-action-btn {
+  border: 0;
+  padding: 3px 5px;
+  background: transparent;
+  color: var(--td-text-color-primary, #232323);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+
+  &:hover:not(:disabled) { color: var(--td-brand-color, #0052d9); }
+  &.primary { color: var(--td-brand-color, #0052d9); }
+  &.danger { color: var(--td-error-color, #d54941); }
+  &:disabled { cursor: not-allowed; opacity: 0.45; }
 }
 
 .checkbox-wrap {
@@ -385,6 +442,11 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
     accent-color: var(--td-brand-color, #0052d9);
     cursor: pointer;
     margin: 0;
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
   }
 }
 
@@ -432,43 +494,4 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
   to { transform: rotate(360deg); }
 }
 
-.row-more-btn {
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  background: transparent;
-  border-radius: 6px;
-  color: var(--td-text-color-secondary, #666);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s ease, background-color 0.12s ease;
-
-  &:hover { background: var(--td-bg-color-component-hover, #ececec); }
-  &.active { opacity: 1; background: var(--td-bg-color-component-active, #e0e0e0); }
-}
-
-.row-menu {
-  min-width: 160px;
-  padding: 4px 0;
-}
-
-.row-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  font-size: 13px;
-  color: var(--td-text-color-primary, #232323);
-  cursor: pointer;
-  transition: background-color 0.12s ease;
-
-  &:hover { background: var(--td-bg-color-component-hover, #f5f5f5); }
-  &.danger { color: var(--td-error-color, #d54941); }
-  &.danger:hover { background: var(--td-error-color-1, #fff1f0); }
-
-  .t-icon { font-size: 14px; }
-}
 </style>

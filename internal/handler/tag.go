@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -217,6 +218,42 @@ type updateTagRequest struct {
 	Name      *string `json:"name"`
 	Color     *string `json:"color"`
 	SortOrder *int    `json:"sort_order"`
+}
+
+type reorderTagsRequest struct {
+	TagIDs []string `json:"tag_ids" binding:"required"`
+}
+
+// ReorderTags atomically saves the complete order of ordinary folders.
+func (h *TagHandler) ReorderTags(c *gin.Context) {
+	ctx := c.Request.Context()
+	kbID := secutils.SanitizeForLog(c.Param("id"))
+
+	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	var req reorderTagsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("文件夹排序参数不合法").WithDetails(err.Error()))
+		return
+	}
+	for index := range req.TagIDs {
+		req.TagIDs[index] = strings.TrimSpace(req.TagIDs[index])
+		if req.TagIDs[index] == "" {
+			c.Error(errors.NewBadRequestError("文件夹ID不能为空"))
+			return
+		}
+	}
+
+	if err := h.tagService.ReorderTags(effCtx, kbID, req.TagIDs); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kb_id": kbID})
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 // UpdateTag godoc

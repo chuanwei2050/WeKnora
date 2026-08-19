@@ -13,11 +13,14 @@ import { knowledgeStore } from "@/stores/knowledge";
 import { useUIStore } from "@/stores/ui";
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
+import { useAuthStore } from '@/stores/auth';
+import { buildKnowledgeUploadMetadata } from '@/utils/knowledge-upload-metadata';
 
 export default function (knowledgeBaseId?: string) {
   const usemenuStore = knowledgeStore();
   const route = useRoute();
   const { t } = useI18n();
+  const authStore = useAuthStore();
   const { cardList, total } = storeToRefs(usemenuStore);
   let moreIndex = ref(-1);
   const details = reactive({
@@ -101,7 +104,7 @@ export default function (knowledgeBaseId?: string) {
       moreIndex.value = -1;
     }
   };
-  const requestMethod = (file: any, uploadInput: any) => {
+  const requestMethod = (file: any, uploadInput: any, governanceEnabled = false) => {
     if (!(file instanceof File) || !uploadInput) {
       MessagePlugin.error(t('error.invalidFileType'));
       return;
@@ -129,7 +132,12 @@ export default function (knowledgeBaseId?: string) {
     const uiStore = useUIStore();
     const tagIdToUpload = uiStore.selectedTagId !== '__untagged__' ? uiStore.selectedTagId : undefined;
     
-    uploadKnowledgeFile(currentKbId, { file, tag_id: tagIdToUpload })
+    const metadata = buildKnowledgeUploadMetadata(
+      file.name,
+      governanceEnabled,
+      authStore.user?.role === 'member' ? 'member_contribution' : 'managed_upload',
+    );
+    uploadKnowledgeFile(currentKbId, { file, tag_id: tagIdToUpload, metadata })
       .then((result: any) => {
         if (result.success) {
           MessagePlugin.info(t('knowledgeBase.uploadSuccess'));

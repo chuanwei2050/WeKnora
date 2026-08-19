@@ -12,8 +12,19 @@ import { useOrganizationStore } from '@/stores/organization';
 import { useAuthStore } from '@/stores/auth';
 import { useSettingsStore } from '@/stores/settings';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
-import KnowledgeGovernancePanel from './components/KnowledgeGovernancePanel.vue';
-import { submitKnowledgeVersionReview } from '@/api/knowledge-governance';
+import {
+  approveKnowledgeVersion,
+  rejectKnowledgeVersion,
+  submitKnowledgeVersionReview,
+  withdrawKnowledgeVersionReview,
+} from '@/api/knowledge-governance';
+import {
+  getGovernanceActionNextStatus,
+  canExecuteGovernanceRowAction,
+  type DocumentBatchAction,
+  type GovernanceReviewAction,
+  type GovernanceRowAction,
+} from './components/knowledge-governance-actions';
 const usemenuStore = useMenuStore();
 const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
@@ -27,6 +38,7 @@ import {
   updateKnowledgeTagBatch,
   createKnowledgeBaseTag,
   updateKnowledgeBaseTag,
+  reorderKnowledgeBaseTags,
   deleteKnowledgeBaseTag,
   uploadKnowledgeFile,
   createKnowledgeFromURL,
@@ -37,6 +49,12 @@ import {
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
+import {
+  UNTAGGED_TAG_NAME,
+  folderMoveTargets,
+  reorderFolders,
+  resolveUploadTarget,
+} from './components/document-folder-organization';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import { getWikiStats } from '@/api/wiki';
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
@@ -45,6 +63,7 @@ import { formatStringDate, kbFileTypeVerification } from '@/utils';
 import { formatFileSize } from '@/utils/files';
 import { getParserEngines, type ParserEngineInfo } from '@/api/system';
 import { canManageBidReviewKnowledge } from '@/utils/bidreview-sso';
+import { buildKnowledgeUploadMetadata } from '@/utils/knowledge-upload-metadata';
 const route = useRoute();
 const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
@@ -60,7 +79,7 @@ const validTabs = ['documents', 'wiki', 'graph'] as const
 type KbTab = typeof validTabs[number]
 const initTab = validTabs.includes(route.query.tab as any) ? (route.query.tab as KbTab) : 'documents'
 const activeKbTab = ref<KbTab>(initTab);
-const governanceVisible = ref(false)
+const governanceBusyId = ref('')
 
 // Wiki 状态用于面包屑上的索引中指示。父组件自行拉取，避免依赖 WikiBrowser 挂载状态
 // （用户切到"文档" tab 时 WikiBrowser 会卸载，这里仍需持续反映后台索引进度）。
@@ -198,22 +217,25 @@ const goToParserSettings = () => {
   }
 }
 
+const isSameTenantKnowledgeBase = computed(() => {
+  if (!kbInfo.value) return false;
+  return Number(kbInfo.value.tenant_id) === Number(authStore.effectiveTenantId);
+});
+
 // Permission control: check if current user owns this KB or has edit/manage permission
 const isOwner = computed(() => {
   if (!kbInfo.value) return false;
-  // Check if the current user's tenant ID matches the KB's tenant ID
-  const userTenantId = authStore.effectiveTenantId;
-  return kbInfo.value.tenant_id === userTenantId;
+  return kbInfo.value.created_by === authStore.currentUserId;
 });
 
 // Can edit: owner, admin, or editor
 const canEdit = computed(() => {
-  return authStore.canManageTenant && canManageBidReviewKnowledge() && orgStore.canEditKB(kbId.value, isOwner.value);
+  return authStore.canManageTenant && canManageBidReviewKnowledge() && orgStore.canEditKB(kbId.value, isSameTenantKnowledgeBase.value);
 });
 
 // Can manage (delete, settings, etc.): owner or admin
 const canManage = computed(() => {
-  return authStore.canManageTenant && canManageBidReviewKnowledge() && orgStore.canManageKB(kbId.value, isOwner.value);
+  return authStore.canManageTenant && canManageBidReviewKnowledge() && orgStore.canManageKB(kbId.value, isSameTenantKnowledgeBase.value);
 });
 
 const canContribute = computed(() => {
@@ -223,7 +245,6 @@ const canContribute = computed(() => {
   return mode === 'members' || (mode === 'allowlist' && (kbInfo.value.contributor_ids || []).includes(authStore.currentUserId));
 });
 const canReview = computed(() => canManage.value || (kbInfo.value?.reviewer_ids || []).includes(authStore.currentUserId));
-const canUseGovernance = computed(() => !isFAQ.value && (canManage.value || canContribute.value || canReview.value));
 const canUploadDocument = computed(() => canEdit.value || canContribute.value);
 
 // Current KB's shared record (when accessed via organization share)
@@ -233,6 +254,9 @@ const currentSharedKb = computed(() =>
 
 // Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
 const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
+const isAgentVisibleKnowledgeBase = computed(() =>
+  Boolean(effectiveKBPermission.value) && !currentSharedKb.value && !isSameTenantKnowledgeBase.value
+);
 
 // Display role label: owner or org role (admin/editor/viewer)
 const accessRoleLabel = computed(() => {
@@ -287,6 +311,7 @@ const moveSelectedTargetId = ref('');
 const moveSelectedTargetName = ref('');
 const moveMode = ref<'reuse_vectors' | 'reparse'>('reuse_vectors');
 const moveSubmitting = ref(false);
+const moveDialogVisible = ref(false);
 let movePollTimer: ReturnType<typeof setInterval> | null = null;
 
 // View mode (grid / list) — persisted per browser
@@ -307,18 +332,16 @@ watch(viewMode, (v) => {
 const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleteDialog = ref(false);
-const batchDeleting = ref(false);
+const batchActionLoading = ref<GovernanceRowAction | null>(null);
+const batchMovingFolder = ref(false);
+const batchDeleting = computed(() => batchActionLoading.value === 'delete');
 
 const selectedTagId = ref<string>('');
 const tagList = ref<any[]>([]);
 const tagLoading = ref(false);
 const tagSearchQuery = ref('');
-const TAG_PAGE_SIZE = 50;
-const tagPage = ref(1);
-const tagHasMore = ref(false);
-const tagLoadingMore = ref(false);
+const TAG_PAGE_SIZE = 1000;
 const tagTotal = ref(0);
-let tagSearchDebounce: ReturnType<typeof setTimeout> | null = null;
 let docSearchDebounce: ReturnType<typeof setTimeout> | null = null;
 const docSearchKeyword = ref('');
 const selectedFileType = ref('');
@@ -358,101 +381,22 @@ const filteredTags = computed(() => {
   if (!query) return tagList.value;
   return tagList.value.filter((tag) => (tag.name || '').toLowerCase().includes(query));
 });
-const documentKnowledgeRoots = computed(() => {
-  const currentRoot = knowledgeList.value.find((item) => item.id === kbId.value && item.type !== 'faq');
-  if (currentRoot) return [currentRoot];
-  if (kbInfo.value && kbInfo.value.type !== 'faq') {
-    return [{ id: kbId.value, name: kbInfo.value.name, type: 'document' }];
-  }
-  return [];
-});
-const currentKnowledgeRootIndex = computed(() => {
-  const index = documentKnowledgeRoots.value.findIndex((item) => item.id === kbId.value);
-  return index >= 0 ? index + 1 : 1;
-});
-type KnowledgeTagTreeNode = {
-  key: string;
-  label: string;
-  children: KnowledgeTagTreeNode[];
-  tag?: any;
-  totalCount: number;
-  depth: number;
-  outline: string;
-};
-const knowledgeRootExpanded = ref(true);
-const expandedTreeTagId = ref<string | null>(null);
-const expandedTreeDirectoryKeys = ref<Record<string, boolean>>({});
-const activeTreeDocumentId = ref<string | null>(null);
-
-const treeRootNumber = (rootId: string) => {
-  const index = documentKnowledgeRoots.value.findIndex((item) => item.id === rootId);
-  return String(index >= 0 ? index + 1 : 1);
-};
-
-const stripOutlineNumber = (value?: string) => (
-  String(value || '').replace(/^\s*\d+(?:\.\d+)*[、.．\s]+/, '').trim()
-);
-
-const tagTreeNodes = computed<KnowledgeTagTreeNode[]>(() => {
-  const roots: KnowledgeTagTreeNode[] = [];
-
-  filteredTags.value.forEach((tag) => {
-    const segments = String(tag.name || '')
-      .split('-')
-      .map((segment) => stripOutlineNumber(segment).trim())
-      .filter(Boolean);
-    const pathSegments = segments.length ? segments : [stripOutlineNumber(tag.name)];
-    let siblings = roots;
-    const keyParts: string[] = [];
-
-    pathSegments.forEach((label, index) => {
-      keyParts.push(label);
-      const key = keyParts.join('\u001f');
-      let node = siblings.find((item) => item.key === key);
-      if (!node) {
-        node = { key, label, children: [], totalCount: 0, depth: index, outline: '' };
-        siblings.push(node);
-      }
-      if (index === pathSegments.length - 1) node.tag = tag;
-      siblings = node.children;
-    });
-  });
-
-  const finalizeNodes = (nodes: KnowledgeTagTreeNode[], parentOutline: string, depth: number): number => (
-    nodes.reduce((total, node, index) => {
-      node.depth = depth;
-      node.outline = `${parentOutline}.${index + 1}`;
-      const childCount = finalizeNodes(node.children, node.outline, depth + 1);
-      node.totalCount = Number(node.tag?.knowledge_count || 0) + childCount;
-      return total + node.totalCount;
-    }, 0)
-  );
-  finalizeNodes(roots, String(currentKnowledgeRootIndex.value), 0);
-  return roots;
-});
-
-const visibleTagTreeNodes = computed(() => {
-  const rows: KnowledgeTagTreeNode[] = [];
-  const searchActive = Boolean(tagSearchQuery.value.trim());
-  const visit = (nodes: KnowledgeTagTreeNode[]) => {
-    nodes.forEach((node) => {
-      rows.push(node);
-      if (node.children.length && (searchActive || expandedTreeDirectoryKeys.value[node.key])) {
-        visit(node.children);
-      }
-    });
-  };
-  visit(tagTreeNodes.value);
-  return rows;
-});
-
-const treeDocumentNumber = (tagOutline: string, documentIndex: number) => (
-  `${tagOutline}.${documentIndex + 1}`
-);
-
-const treeDocumentName = (item: KnowledgeCard) => (
-  stripOutlineNumber(item.display_name || item.file_name || item.title || t('knowledgeBase.untitledDocument'))
-);
+const untaggedTag = computed(() => tagList.value.find(tag => tag.name === UNTAGGED_TAG_NAME));
+const ordinaryTags = computed(() => tagList.value.filter(tag => tag.name !== UNTAGGED_TAG_NAME));
+const filteredOrdinaryTags = computed(() => filteredTags.value.filter(tag => tag.name !== UNTAGGED_TAG_NAME));
+const folderOrderComplete = computed(() => tagList.value.length === tagTotal.value);
+const canReorderFolders = computed(() => canEdit.value && folderOrderComplete.value && !tagSearchQuery.value.trim());
+const draggedTagId = ref('');
+const dragOverTagId = ref('');
+const folderOrderSaving = ref(false);
+const allDocumentCount = computed(() => Number(
+  kbInfo.value?.knowledge_count
+  ?? tagList.value.reduce((sum, tag) => sum + Number(tag.knowledge_count || 0), 0),
+));
+const selectedFolder = computed(() => tagMap.value[selectedTagId.value]);
+const uploadTarget = computed(() => resolveUploadTarget(selectedFolder.value));
+const uploadTargetName = computed(() => uploadTarget.value.name);
+const uploadTargetTagId = computed(() => uploadTarget.value.tagId);
 
 const editingTagInputRefs = new Map<string, TagInputInstance | null>();
 const setEditingTagInputRef = (el: TagInputInstance | null, tagId: string) => {
@@ -541,53 +485,39 @@ const loadTags = async (kbIdValue: string, reset = false) => {
   if (!kbIdValue) {
     tagList.value = [];
     tagTotal.value = 0;
-    tagHasMore.value = false;
-    tagPage.value = 1;
     return;
   }
 
   if (reset) {
-    tagPage.value = 1;
     tagList.value = [];
     tagTotal.value = 0;
-    tagHasMore.value = false;
   }
 
-  const currentPage = tagPage.value || 1;
-  tagLoading.value = currentPage === 1;
-  tagLoadingMore.value = currentPage > 1;
+  tagLoading.value = true;
 
   try {
     const res: any = await listKnowledgeTags(kbIdValue, {
-      page: currentPage,
+      page: 1,
       page_size: TAG_PAGE_SIZE,
-      keyword: tagSearchQuery.value || undefined,
     });
     const pageData = (res?.data || {}) as {
       data?: any[];
       total?: number;
     };
-    const pageTags = (pageData.data || []).map((tag: any) => ({
+    tagList.value = (pageData.data || []).map((tag: any) => ({
       ...tag,
       id: String(tag.id),
     }));
-
-    if (currentPage === 1) {
-      tagList.value = pageTags;
-    } else {
-      tagList.value = [...tagList.value, ...pageTags];
-    }
-
     tagTotal.value = pageData.total || tagList.value.length;
-    tagHasMore.value = tagList.value.length < tagTotal.value;
-    if (tagHasMore.value) {
-      tagPage.value = currentPage + 1;
+    const actualUntagged = tagList.value.find(tag => tag.name === UNTAGGED_TAG_NAME);
+    if (selectedTagId.value === '__untagged__' && actualUntagged) {
+      selectedTagId.value = actualUntagged.id;
+      uiStore.setSelectedTagId(actualUntagged.id);
     }
   } catch (error) {
     console.error('Failed to load tags', error);
   } finally {
     tagLoading.value = false;
-    tagLoadingMore.value = false;
   }
 };
 
@@ -596,7 +526,6 @@ const handleTagFilterChange = (value: string) => {
   // 同步更新 store 中的 selectedTagId，供 menu.vue 上传时使用
   uiStore.setSelectedTagId(value);
   page = 1;
-  loadKnowledgeFiles(kbId.value);
 };
 
 const handleTagRowClick = (tagId: string) => {
@@ -615,64 +544,62 @@ const handleTagRowClick = (tagId: string) => {
   handleTagFilterChange(tagId);
 };
 
-const handleTreeRootSelect = (root: { id: string }) => {
-  if (root.id !== kbId.value) {
-    router.push(`/platform/knowledge-bases/${root.id}`);
+const selectAllDocuments = () => handleTagFilterChange('');
+
+const selectFolder = (tagId: string) => {
+  if (creatingTag.value) cancelCreateTag();
+  if (editingTagId.value) cancelEditTag();
+  handleTagFilterChange(tagId);
+};
+
+const resetFolderDrag = () => {
+  draggedTagId.value = '';
+  dragOverTagId.value = '';
+};
+
+const handleFolderDragStart = (event: DragEvent, tagId: string) => {
+  if (!canReorderFolders.value || folderOrderSaving.value) {
+    event.preventDefault();
     return;
   }
-  knowledgeRootExpanded.value = true;
-  expandedTreeTagId.value = null;
-  expandedTreeDirectoryKeys.value = {};
-  activeTreeDocumentId.value = null;
-  handleTagFilterChange('');
+  draggedTagId.value = tagId;
+  event.dataTransfer?.setData('text/plain', tagId);
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
 };
 
-const toggleTreeRoot = (root: { id: string }) => {
-  if (root.id !== kbId.value) {
-    router.push(`/platform/knowledge-bases/${root.id}`);
+const handleFolderDragOver = (event: DragEvent, tagId: string) => {
+  if (!draggedTagId.value || draggedTagId.value === tagId) return;
+  event.preventDefault();
+  dragOverTagId.value = tagId;
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+};
+
+const handleFolderDrop = async (event: DragEvent, targetTagId: string) => {
+  event.preventDefault();
+  const sourceTagId = draggedTagId.value || event.dataTransfer?.getData('text/plain') || '';
+  if (!canReorderFolders.value || !sourceTagId || sourceTagId === targetTagId || folderOrderSaving.value) {
+    resetFolderDrag();
     return;
   }
-  knowledgeRootExpanded.value = !knowledgeRootExpanded.value;
-};
 
-const toggleTreeDirectory = (key: string) => {
-  expandedTreeDirectoryKeys.value = {
-    ...expandedTreeDirectoryKeys.value,
-    [key]: !expandedTreeDirectoryKeys.value[key],
-  };
-};
-
-const handleTreeTagSelect = (tagId: string) => {
-  if (creatingTag.value) {
-    creatingTag.value = false;
-    newTagName.value = '';
-  }
-  if (editingTagId.value) {
-    editingTagId.value = null;
-    editingTagName.value = '';
-  }
-  expandedTreeTagId.value = tagId;
-  activeTreeDocumentId.value = null;
-  if (selectedTagId.value !== tagId) {
-    handleTagFilterChange(tagId);
-  }
-};
-
-const toggleTreeTag = (tagId: string) => {
-  if (expandedTreeTagId.value === tagId) {
-    expandedTreeTagId.value = null;
+  const previous = [...tagList.value];
+  const reordered = reorderFolders(ordinaryTags.value, sourceTagId, targetTagId);
+  if (reordered.every((tag, index) => tag.id === ordinaryTags.value[index]?.id)) {
+    resetFolderDrag();
     return;
   }
-  expandedTreeTagId.value = tagId;
-  activeTreeDocumentId.value = null;
-  if (selectedTagId.value !== tagId) {
-    handleTagFilterChange(tagId);
+  tagList.value = [...tagList.value.filter(tag => tag.name === UNTAGGED_TAG_NAME), ...reordered];
+  folderOrderSaving.value = true;
+  resetFolderDrag();
+  try {
+    await reorderKnowledgeBaseTags(kbId.value, reordered.map(tag => tag.id));
+    MessagePlugin.success(t('knowledgeBase.folderReorderSuccess'));
+  } catch (error: any) {
+    tagList.value = previous;
+    MessagePlugin.error(error?.message || t('knowledgeBase.folderReorderFailed'));
+  } finally {
+    folderOrderSaving.value = false;
   }
-};
-
-const handleTreeDocumentOpen = (item: KnowledgeCard) => {
-  activeTreeDocumentId.value = item.id;
-  openCardDetails(item);
 };
 
 const startCreateTag = () => {
@@ -709,7 +636,7 @@ const submitCreateTag = async () => {
   }
   creatingTagLoading.value = true;
   try {
-    await createKnowledgeBaseTag(kbId.value, { name });
+    await createKnowledgeBaseTag(kbId.value, { name, sort_order: ordinaryTags.value.length });
     MessagePlugin.success(t('knowledgeBase.tagCreateSuccess'));
     cancelCreateTag();
     await loadTags(kbId.value);
@@ -884,11 +811,6 @@ watch(activeKbTab, (tab) => {
 watch(() => kbId.value, (newKbId, oldKbId) => {
   if (newKbId && newKbId !== oldKbId) {
     tagSearchQuery.value = '';
-    tagPage.value = 1;
-    knowledgeRootExpanded.value = true;
-    expandedTreeTagId.value = null;
-    expandedTreeDirectoryKeys.value = {};
-    activeTreeDocumentId.value = null;
     // 重置标签选择状态，避免在不同知识库间保持标签选择
     uiStore.setSelectedTagId('');
     loadKnowledgeBaseInfo(newKbId);
@@ -900,18 +822,6 @@ watch(selectedTagId, (newVal, oldVal) => {
   if (newVal !== oldVal && kbId.value) {
     loadKnowledgeFiles(kbId.value);
   }
-});
-
-watch(tagSearchQuery, (newVal, oldVal) => {
-  if (newVal === oldVal) return;
-  if (tagSearchDebounce) {
-    clearTimeout(tagSearchDebounce);
-  }
-  tagSearchDebounce = setTimeout(() => {
-    if (kbId.value) {
-      loadTags(kbId.value, true);
-    }
-  }, 300);
 });
 
 // 监听文档搜索关键词变化
@@ -1041,6 +951,9 @@ type KnowledgeCard = {
   metadata?: any;
   error_message?: string;
   tag_id?: string;
+  created_by?: string;
+  current_version_id?: string;
+  pending_version_id?: string;
 };
 const isSummaryStatusPending = (item: KnowledgeCard) => (
   item.parse_status === 'completed' &&
@@ -1111,18 +1024,15 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
 
 const closeDoc = () => {
   isCardDetails.value = false;
-  activeTreeDocumentId.value = null;
 };
 const openCardDetails = (item: KnowledgeCard) => {
   isCardDetails.value = true;
-  activeTreeDocumentId.value = item.id;
   getCardDetails(item);
 };
 
 // Open source document preview from WikiBrowser
 const openSourceDoc = (knowledgeId: string) => {
   isCardDetails.value = true;
-  activeTreeDocumentId.value = knowledgeId;
   getCardDetails({ id: knowledgeId });
 };
 
@@ -1201,6 +1111,15 @@ const handleMoveBack = () => {
   }
 };
 
+const handleMoveDialogBack = () => {
+  if (moveMenuMode.value === 'confirm') {
+    moveMenuMode.value = 'targets';
+    return;
+  }
+  moveDialogVisible.value = false;
+  moveMenuMode.value = 'normal';
+};
+
 const handleMoveConfirm = async () => {
   if (!moveSelectedTargetId.value || moveSubmitting.value) return;
   moveSubmitting.value = true;
@@ -1215,6 +1134,7 @@ const handleMoveConfirm = async () => {
     MessagePlugin.info(t('knowledgeBase.moveStarted'));
     // Close the card menu
     moveMenuMode.value = 'normal';
+    moveDialogVisible.value = false;
     cardList.value.forEach(c => { c.isMore = false; });
 
     if (taskId) {
@@ -1430,24 +1350,18 @@ const handleDocumentUpload = async (event: Event) => {
   let failCount = 0;
   const totalCount = validFiles.length;
 
-  // 获取当前选中的分类ID（如果不是"未分类"则传递）
-  const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
+  const tagIdToUpload = uploadTargetTagId.value;
 
   for (const file of validFiles) {
     try {
-      const metadata = kbInfo.value?.governance?.enabled ? JSON.stringify({
-        layer: 'experience',
-        source_category: canContribute.value && !canEdit.value ? 'member_contribution' : 'managed_upload',
-        version_label: `${file.name}-${new Date().toISOString()}`,
-        authority_level: 'internal',
-      }) : undefined;
+      const metadata = buildKnowledgeUploadMetadata(
+        file.name,
+        Boolean(kbInfo.value?.governance?.enabled),
+        canContribute.value && !canEdit.value ? 'member_contribution' : 'managed_upload',
+      );
       const responseData: any = await uploadKnowledgeFile(kbId.value, { file, tag_id: tagIdToUpload, metadata });
       const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
       if (isSuccess) {
-        const created = responseData?.data || responseData;
-        if (canContribute.value && !canEdit.value && created?.id && created?.pending_version_id) {
-          await submitKnowledgeVersionReview(created.id, created.pending_version_id, '普通用户文件投稿');
-        }
         successCount++;
       } else {
         failCount++;
@@ -1580,7 +1494,7 @@ const handleFolderUpload = async (event: Event) => {
   // 批量上传
   let successCount = 0;
   let failCount = 0;
-  const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
+  const tagIdToUpload = uploadTargetTagId.value;
 
   for (const file of validFiles) {
     const relativePath = (file as any).webkitRelativePath;
@@ -1594,7 +1508,12 @@ const handleFolderUpload = async (event: Event) => {
     }
 
     try {
-      await uploadKnowledgeFile(kbId.value, { file, fileName, tag_id: tagIdToUpload });
+      const metadata = buildKnowledgeUploadMetadata(
+        fileName,
+        Boolean(kbInfo.value?.governance?.enabled),
+        canContribute.value && !canEdit.value ? 'member_contribution' : 'managed_upload',
+      );
+      await uploadKnowledgeFile(kbId.value, { file, fileName, tag_id: tagIdToUpload, metadata });
       successCount++;
     } catch (error: any) {
       failCount++;
@@ -1666,8 +1585,7 @@ const handleURLImportConfirm = async () => {
 
   urlImporting.value = true;
   try {
-    // 获取当前选中的分类ID
-    const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
+    const tagIdToUpload = uploadTargetTagId.value;
     const responseData: any = await createKnowledgeFromURL(kbId.value, { url, tag_id: tagIdToUpload });
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
       detail: { kbId: kbId.value }
@@ -1806,15 +1724,16 @@ const delCardConfirm = () => {
   });
 };
 
-const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {
+const toggleSelectRow = (id: string, checked: boolean, shiftKey = false, selectableIds: string[] = []) => {
   const items = cardList.value || [];
+  const selectable = new Set(selectableIds);
   const idx = items.findIndex((i: KnowledgeCard) => i.id === id);
   if (shiftKey && lastSelectedIndex >= 0 && idx >= 0) {
     const [s, e] = idx < lastSelectedIndex
       ? [idx, lastSelectedIndex]
       : [lastSelectedIndex, idx];
     for (let i = s; i <= e; i++) {
-      if (checked) selectedIds.value.add(items[i].id);
+      if (checked && selectable.has(items[i].id)) selectedIds.value.add(items[i].id);
       else selectedIds.value.delete(items[i].id);
     }
   } else {
@@ -1824,11 +1743,11 @@ const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {
   lastSelectedIndex = idx;
 };
 
-const toggleSelectAll = (checked: boolean) => {
+const toggleSelectAll = (checked: boolean, selectableIds: string[] = []) => {
   if (checked) {
-    for (const item of cardList.value || []) selectedIds.value.add(item.id);
+    for (const id of selectableIds) selectedIds.value.add(id);
   } else {
-    for (const item of cardList.value || []) selectedIds.value.delete(item.id);
+    for (const id of selectableIds) selectedIds.value.delete(id);
   }
 };
 
@@ -1837,20 +1756,80 @@ const clearSelection = () => {
   lastSelectedIndex = -1;
 };
 
+const selectedKnowledgeItems = computed(() => (
+  (cardList.value || []).filter((item: KnowledgeCard) => selectedIds.value.has(item.id))
+));
+
+const batchFolderTargets = computed(() => {
+  if (!canEdit.value || selectedIds.value.size === 0) return [];
+  return folderMoveTargets(tagList.value, selectedTagId.value);
+});
+
+const handleBatchMoveToFolder = async (targetTagId: string) => {
+  if (!canEdit.value || batchMovingFolder.value) return;
+  const target = tagMap.value[targetTagId];
+  const items = selectedKnowledgeItems.value;
+  if (!target || items.length === 0 || targetTagId === selectedTagId.value) return;
+
+  batchMovingFolder.value = true;
+  try {
+    const updates = Object.fromEntries(items.map(item => [item.id, targetTagId]));
+    await updateKnowledgeTagBatch({ updates });
+    items.forEach(item => selectedIds.value.delete(item.id));
+    MessagePlugin.success(t('knowledgeBase.batchMoveFolderSuccess', {
+      count: items.length,
+      name: target.name,
+    }));
+    page = 1;
+    loadKnowledgeFiles(kbId.value);
+    await loadTags(kbId.value, true);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.batchMoveFolderFailed'));
+  } finally {
+    batchMovingFolder.value = false;
+  }
+};
+
+const governanceActionContext = computed(() => ({
+  enabled: Boolean(kbInfo.value?.governance?.enabled),
+  canContribute: canContribute.value,
+  canReview: canReview.value,
+  currentUserId: authStore.currentUserId,
+}));
+
+const getEligibleBatchItems = (action: GovernanceRowAction): KnowledgeCard[] => {
+  if (action === 'delete' && canEdit.value) {
+    return selectedKnowledgeItems.value.filter((item: KnowledgeCard) => (
+      !governanceActionContext.value.enabled || item.parse_status !== 'pending_review'
+    ));
+  }
+  return selectedKnowledgeItems.value.filter((item: KnowledgeCard) => (
+    canExecuteGovernanceRowAction(item, governanceActionContext.value, action)
+  ));
+};
+
+const batchActions = computed<DocumentBatchAction[]>(() => (
+  (['submit', 'withdraw', 'approve', 'reject', 'delete'] satisfies GovernanceRowAction[])
+    .map(action => ({ action, count: getEligibleBatchItems(action).length }))
+    .filter(item => item.count > 0)
+));
+
+const batchDeleteTargetIds = computed(() => getEligibleBatchItems('delete').map(item => item.id));
+
 const openBatchDeleteDialog = () => {
-  if (selectedIds.value.size === 0) return;
+  if (batchDeleteTargetIds.value.length === 0) return;
   batchDeleteDialog.value = true;
 };
 
 const confirmBatchDelete = async () => {
-  if (batchDeleting.value || selectedIds.value.size === 0) return;
-  const ids = Array.from(selectedIds.value);
-  batchDeleting.value = true;
+  if (batchDeleting.value || batchDeleteTargetIds.value.length === 0) return;
+  const ids = [...batchDeleteTargetIds.value];
+  batchActionLoading.value = 'delete';
   try {
     const res: any = await batchDeleteKnowledge(kbId.value, ids);
     if (res?.success) {
       MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: ids.length }));
-      clearSelection();
+      ids.forEach(id => selectedIds.value.delete(id));
       batchDeleteDialog.value = false;
       page = 1;
       loadKnowledgeFiles(kbId.value);
@@ -1861,19 +1840,105 @@ const confirmBatchDelete = async () => {
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('knowledgeBase.batchDeleteFailed'));
   } finally {
-    batchDeleting.value = false;
+    batchActionLoading.value = null;
   }
+};
+
+type DocumentRowAction = 'edit' | 'reparse' | 'delete' | GovernanceReviewAction;
+
+const governanceActionLabelKeys: Record<GovernanceReviewAction, string> = {
+  submit: 'knowledgeBase.governanceSubmit',
+  withdraw: 'knowledgeBase.governanceWithdraw',
+  approve: 'knowledgeBase.governanceApprove',
+  reject: 'knowledgeBase.governanceReject',
+};
+
+const governanceActionSuccessKeys: Record<GovernanceReviewAction, string> = {
+  submit: 'knowledgeBase.governanceSubmitSuccess',
+  withdraw: 'knowledgeBase.governanceWithdrawSuccess',
+  approve: 'knowledgeBase.governanceApproveSuccess',
+  reject: 'knowledgeBase.governanceRejectSuccess',
+};
+
+const executeGovernanceAction = async (action: GovernanceReviewAction, item: KnowledgeCard) => {
+  const versionId = item.pending_version_id;
+  if (!versionId) throw new Error(t('knowledgeBase.governanceVersionMissing'));
+  if (action === 'submit') await submitKnowledgeVersionReview(item.id, versionId);
+  if (action === 'withdraw') await withdrawKnowledgeVersionReview(item.id, versionId);
+  if (action === 'approve') await approveKnowledgeVersion(item.id, versionId);
+  if (action === 'reject') await rejectKnowledgeVersion(item.id, versionId);
+};
+
+const handleGovernanceAction = async (action: GovernanceReviewAction, item: KnowledgeCard) => {
+  governanceBusyId.value = item.id;
+  try {
+    await executeGovernanceAction(action, item);
+    item.parse_status = getGovernanceActionNextStatus(action);
+    MessagePlugin.success(t(governanceActionSuccessKeys[action]));
+    page = 1;
+    loadKnowledgeFiles(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.governanceActionFailed'));
+  } finally {
+    governanceBusyId.value = '';
+  }
+};
+
+const handleBatchGovernanceAction = async (action: GovernanceReviewAction) => {
+  if (batchActionLoading.value) return;
+  const items = getEligibleBatchItems(action);
+  if (items.length === 0) return;
+  batchActionLoading.value = action;
+  try {
+    const succeeded: KnowledgeCard[] = [];
+    let failed = 0;
+    for (const item of items) {
+      try {
+        await executeGovernanceAction(action, item);
+        succeeded.push(item);
+      } catch {
+        failed += 1;
+      }
+    }
+    succeeded.forEach(item => {
+      item.parse_status = getGovernanceActionNextStatus(action);
+      selectedIds.value.delete(item.id);
+    });
+    if (failed === 0) {
+      MessagePlugin.success(t('knowledgeBase.batchGovernanceSuccess', {
+        action: t(governanceActionLabelKeys[action]),
+        count: succeeded.length,
+      }));
+    } else {
+      MessagePlugin.warning(t('knowledgeBase.batchGovernancePartial', { success: succeeded.length, failed }));
+    }
+    page = 1;
+    loadKnowledgeFiles(kbId.value);
+  } finally {
+    batchActionLoading.value = null;
+  }
+};
+
+const handleBatchAction = (action: GovernanceRowAction) => {
+  if (action === 'delete') {
+    openBatchDeleteDialog();
+    return;
+  }
+  void handleBatchGovernanceAction(action);
 };
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'edit' | 'reparse' | 'move' | 'delete',
+  action: DocumentRowAction,
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
+  if (action === 'submit' || action === 'withdraw' || action === 'approve' || action === 'reject') {
+    void handleGovernanceAction(action, item);
+    return;
+  }
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') return handleKnowledgeReparse(idx, item);
-  if (action === 'move') return handleMoveKnowledge(item);
   if (action === 'delete') return delCard(idx, item);
 };
 
@@ -2021,7 +2086,7 @@ async function createNewSession(value: string): Promise<void> {
                       {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatStringDate(new Date(currentSharedKb.shared_at)) }}
                     </span>
                   </template>
-                  <template v-else-if="effectiveKBPermission">
+                  <template v-else-if="isAgentVisibleKnowledgeBase">
                     <span class="kb-access-meta-sep">·</span>
                     <span class="kb-access-meta-text">{{ $t('knowledgeList.detail.sourceTypeAgent') }}</span>
                   </template>
@@ -2042,15 +2107,6 @@ async function createNewSession(value: string): Promise<void> {
                 <t-icon name="setting" size="16px" />
               </button>
             </t-tooltip>
-            <button
-              v-if="canUseGovernance"
-              type="button"
-              class="kb-governance-button"
-              :disabled="!kbId"
-              @click="governanceVisible = true"
-            >
-              版本治理
-            </button>
           </div>
           <p class="document-subtitle">{{ $t('knowledgeEditor.document.subtitle') }}</p>
           <p v-if="unsupportedFileTypes.length" class="parser-hint" @click="goToParserSettings">
@@ -2091,15 +2147,15 @@ async function createNewSession(value: string): Promise<void> {
         <aside class="tag-sidebar knowledge-tree-sidebar">
           <div class="sidebar-header">
             <div class="sidebar-title">
-              <span>{{ $t('menu.knowledgeBase') }}</span>
+              <span>{{ $t('knowledgeBase.folderTitle') }}</span>
             </div>
             <div v-if="canEdit" class="sidebar-actions">
               <t-button
                 size="small"
                 variant="text"
                 class="create-tag-btn"
-                :aria-label="$t('knowledgeBase.tagCreateAction')"
-                :title="$t('knowledgeBase.tagCreateAction')"
+                :aria-label="$t('knowledgeBase.folderCreateAction')"
+                :title="$t('knowledgeBase.folderCreateAction')"
                 @click="startCreateTag"
               >
                 <t-icon name="add" />
@@ -2110,7 +2166,7 @@ async function createNewSession(value: string): Promise<void> {
             <t-input
               v-model.trim="tagSearchQuery"
               size="small"
-              :placeholder="$t('knowledgeBase.tagSearchPlaceholder')"
+              :placeholder="$t('knowledgeBase.folderSearchPlaceholder')"
               clearable
             >
               <template #prefix-icon>
@@ -2118,166 +2174,141 @@ async function createNewSession(value: string): Promise<void> {
               </template>
             </t-input>
           </div>
-          <div class="tag-list knowledge-tree" role="tree" :aria-label="$t('knowledgeBase.documentCategoryTitle')">
-            <div v-for="root in documentKnowledgeRoots" :key="root.id" class="knowledge-tree-root">
-              <div
-                class="knowledge-tree-row knowledge-tree-root-row"
-                :class="{ active: root.id === kbId && !selectedTagId }"
-                role="treeitem"
-                :aria-expanded="root.id === kbId ? knowledgeRootExpanded : false"
-              >
-                <button
-                  type="button"
-                  class="tree-toggle"
-                  :aria-label="root.id === kbId && knowledgeRootExpanded ? $t('common.collapse') : $t('common.expand')"
-                  @click.stop="toggleTreeRoot(root)"
-                >
-                  <t-icon :name="root.id === kbId && knowledgeRootExpanded ? 'chevron-down' : 'chevron-right'" size="14px" />
-                </button>
-                <button type="button" class="tree-label" @click="handleTreeRootSelect(root)">
-                  <span class="tree-number">{{ treeRootNumber(root.id) }}</span>
-                  <span class="tree-name" :title="root.name">{{ stripOutlineNumber(root.name) }}</span>
-                </button>
-              </div>
+          <div class="tag-list knowledge-tree folder-list" role="list" :aria-label="$t('knowledgeBase.documentCategoryTitle')">
+            <button
+              type="button"
+              class="knowledge-tree-row folder-row fixed-folder-row"
+              :class="{ active: !selectedTagId }"
+              role="listitem"
+              @click="selectAllDocuments"
+            >
+              <span class="folder-drag-placeholder" />
+              <span class="folder-icon computer-folder-icon" aria-hidden="true" />
+              <span class="tree-name">{{ $t('knowledgeBase.allDocumentsFolder') }}</span>
+              <span class="tag-count">{{ allDocumentCount }}</span>
+            </button>
 
-              <div v-if="root.id === kbId && knowledgeRootExpanded" class="knowledge-tree-children" role="group">
-                <div v-if="creatingTag" class="knowledge-tree-row knowledge-tree-category-row tree-editing" @click.stop>
-                  <span class="tree-toggle-placeholder" />
-                  <span class="tree-number">{{ currentKnowledgeRootIndex }}.{{ filteredTags.length + 1 }}</span>
-                  <div class="tag-edit-input">
+            <button
+              type="button"
+              class="knowledge-tree-row folder-row fixed-folder-row"
+              :class="{ active: selectedTagId === (untaggedTag?.id || '__untagged__') }"
+              role="listitem"
+              @click="selectFolder(untaggedTag?.id || '__untagged__')"
+            >
+              <span class="folder-drag-placeholder" />
+              <span class="folder-icon computer-folder-icon" aria-hidden="true" />
+              <span class="tree-name">{{ UNTAGGED_TAG_NAME }}</span>
+              <span class="tag-count">{{ Number(untaggedTag?.knowledge_count || 0) }}</span>
+            </button>
+
+            <div class="folder-list-divider" />
+
+            <div v-if="creatingTag" class="knowledge-tree-row folder-row tree-editing" @click.stop>
+              <span class="folder-drag-placeholder" />
+              <span class="folder-icon computer-folder-icon" aria-hidden="true" />
+              <div class="tag-edit-input">
+                <t-input
+                  ref="newTagInputRef"
+                  v-model="newTagName"
+                  size="small"
+                  :maxlength="40"
+                  :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
+                  @keydown.enter.stop.prevent="submitCreateTag"
+                  @keydown.esc.stop.prevent="cancelCreateTag"
+                />
+              </div>
+              <div class="tag-inline-actions">
+                <t-button variant="text" size="small" class="tag-action-btn confirm" :loading="creatingTagLoading" @click.stop="submitCreateTag">
+                  <t-icon name="check" size="16px" />
+                </t-button>
+                <t-button variant="text" size="small" class="tag-action-btn cancel" @click.stop="cancelCreateTag">
+                  <t-icon name="close" size="16px" />
+                </t-button>
+              </div>
+            </div>
+
+            <template v-if="tagLoading && !ordinaryTags.length">
+              <div v-for="n in 6" :key="'folder-skel-'+n" class="knowledge-tree-row folder-row tree-skeleton-row">
+                <span class="folder-drag-placeholder" />
+                <t-skeleton animation="gradient" :row-col="[{ width: '80%', height: '18px' }]" />
+              </div>
+            </template>
+            <template v-else>
+              <div
+                v-for="tag in filteredOrdinaryTags"
+                :key="tag.id"
+                class="knowledge-tree-row folder-row"
+                :class="{
+                  active: selectedTagId === tag.id,
+                  editing: editingTagId === tag.id,
+                  dragging: draggedTagId === tag.id,
+                  'drop-target': dragOverTagId === tag.id,
+                }"
+                role="listitem"
+                :draggable="canReorderFolders && !folderOrderSaving"
+                @dragstart="handleFolderDragStart($event, tag.id)"
+                @dragover="handleFolderDragOver($event, tag.id)"
+                @dragleave="dragOverTagId === tag.id && (dragOverTagId = '')"
+                @drop="handleFolderDrop($event, tag.id)"
+                @dragend="resetFolderDrag"
+              >
+                <span v-if="canEdit" class="folder-drag-handle" :class="{ disabled: !canReorderFolders }" aria-hidden="true">
+                  <t-icon name="move" size="14px" />
+                </span>
+                <span v-else class="folder-drag-placeholder" />
+                <span class="folder-icon computer-folder-icon" aria-hidden="true" />
+                <template v-if="editingTagId === tag.id">
+                  <div class="tag-edit-input" @click.stop>
                     <t-input
-                      ref="newTagInputRef"
-                      v-model="newTagName"
+                      :ref="setEditingTagInputRefByTag(tag.id)"
+                      v-model="editingTagName"
                       size="small"
                       :maxlength="40"
-                      :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
-                      @keydown.enter.stop.prevent="submitCreateTag"
-                      @keydown.esc.stop.prevent="cancelCreateTag"
+                      @keydown.enter.stop.prevent="submitEditTag"
+                      @keydown.esc.stop.prevent="cancelEditTag"
                     />
                   </div>
-                  <div class="tag-inline-actions">
-                    <t-button variant="text" size="small" class="tag-action-btn confirm" :loading="creatingTagLoading" @click.stop="submitCreateTag">
-                      <t-icon name="check" size="16px" />
-                    </t-button>
-                    <t-button variant="text" size="small" class="tag-action-btn cancel" @click.stop="cancelCreateTag">
-                      <t-icon name="close" size="16px" />
-                    </t-button>
-                  </div>
-                </div>
-
-                <template v-if="tagLoading && !filteredTags.length">
-                  <div v-for="n in 7" :key="'tree-skel-tag-'+n" class="knowledge-tree-row knowledge-tree-category-row tree-skeleton-row">
-                    <span class="tree-toggle-placeholder" />
-                    <t-skeleton animation="gradient" :row-col="[{ width: '80%', height: '18px' }]" />
-                  </div>
                 </template>
-                <template v-else-if="visibleTagTreeNodes.length">
-                  <div v-for="node in visibleTagTreeNodes" :key="node.key" class="knowledge-tree-branch">
-                    <div
-                      class="knowledge-tree-row knowledge-tree-category-row"
-                      :class="{ active: node.tag && selectedTagId === node.tag.id, editing: node.tag && editingTagId === node.tag.id }"
-                      :data-tree-depth="node.depth"
-                      :style="{ paddingLeft: `${node.depth * 20 + 2}px` }"
-                      role="treeitem"
-                      :aria-expanded="node.children.length ? Boolean(expandedTreeDirectoryKeys[node.key]) : (node.tag ? expandedTreeTagId === node.tag.id : false)"
-                    >
-                      <button
-                        type="button"
-                        class="tree-toggle"
-                        @click.stop="node.children.length ? toggleTreeDirectory(node.key) : (node.tag && toggleTreeTag(node.tag.id))"
-                      >
-                        <t-icon
-                          :name="(node.children.length ? expandedTreeDirectoryKeys[node.key] : (node.tag && expandedTreeTagId === node.tag.id)) ? 'chevron-down' : 'chevron-right'"
-                          size="14px"
-                        />
-                      </button>
-                      <span class="tree-number">{{ node.outline }}</span>
-                      <template v-if="node.tag && editingTagId === node.tag.id">
-                        <div class="tag-edit-input" @click.stop>
-                          <t-input
-                            :ref="setEditingTagInputRefByTag(node.tag.id)"
-                            v-model="editingTagName"
-                            size="small"
-                            :maxlength="40"
-                            @keydown.enter.stop.prevent="submitEditTag"
-                            @keydown.esc.stop.prevent="cancelEditTag"
-                          />
-                        </div>
-                      </template>
-                      <button
-                        v-else
-                        type="button"
-                        class="tree-label"
-                        @click="node.tag ? handleTreeTagSelect(node.tag.id) : toggleTreeDirectory(node.key)"
-                      >
-                        <span class="tree-name" :title="node.tag?.name || node.label">{{ node.label }}</span>
-                      </button>
-                      <div class="tag-list-right">
-                        <span class="tag-count">{{ node.totalCount }}</span>
-                        <template v-if="node.tag && editingTagId === node.tag.id">
-                          <div class="tag-inline-actions" @click.stop>
-                            <t-button variant="text" size="small" class="tag-action-btn confirm" :loading="editingTagSubmitting" @click.stop="submitEditTag">
-                              <t-icon name="check" size="16px" />
-                            </t-button>
-                            <t-button variant="text" size="small" class="tag-action-btn cancel" @click.stop="cancelEditTag">
-                              <t-icon name="close" size="16px" />
-                            </t-button>
+                <button v-else type="button" class="tree-label" @click="selectFolder(tag.id)">
+                  <span class="tree-name" :title="tag.name">{{ tag.name }}</span>
+                </button>
+                <div class="tag-list-right">
+                  <span class="tag-count">{{ Number(tag.knowledge_count || 0) }}</span>
+                  <template v-if="editingTagId === tag.id">
+                    <div class="tag-inline-actions" @click.stop>
+                      <t-button variant="text" size="small" class="tag-action-btn confirm" :loading="editingTagSubmitting" @click.stop="submitEditTag">
+                        <t-icon name="check" size="16px" />
+                      </t-button>
+                      <t-button variant="text" size="small" class="tag-action-btn cancel" @click.stop="cancelEditTag">
+                        <t-icon name="close" size="16px" />
+                      </t-button>
+                    </div>
+                  </template>
+                  <div v-else-if="canEdit" class="tag-more" @click.stop>
+                    <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
+                      <div class="tag-more-btn"><t-icon name="more" size="14px" /></div>
+                      <template #content>
+                        <div class="tag-menu">
+                          <div class="tag-menu-item" @click="startEditTag(tag)">
+                            <t-icon class="menu-icon" name="edit" />
+                            <span>{{ $t('knowledgeBase.folderRenameAction') }}</span>
                           </div>
-                        </template>
-                        <div v-else-if="canEdit && node.tag" class="tag-more" @click.stop>
-                          <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
-                            <div class="tag-more-btn"><t-icon name="more" size="14px" /></div>
-                            <template #content>
-                              <div class="tag-menu">
-                                <div class="tag-menu-item" @click="startEditTag(node.tag)">
-                                  <t-icon class="menu-icon" name="edit" />
-                                  <span>{{ $t('knowledgeBase.tagEditAction') }}</span>
-                                </div>
-                                <div class="tag-menu-item danger" @click="confirmDeleteTag(node.tag)">
-                                  <t-icon class="menu-icon" name="delete" />
-                                  <span>{{ $t('knowledgeBase.tagDeleteAction') }}</span>
-                                </div>
-                              </div>
-                            </template>
-                          </t-popup>
+                          <div class="tag-menu-item danger" @click="confirmDeleteTag(tag)">
+                            <t-icon class="menu-icon" name="delete" />
+                            <span>{{ $t('knowledgeBase.folderDeleteAction') }}</span>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                    <div v-if="node.tag && expandedTreeTagId === node.tag.id && selectedTagId === node.tag.id" class="knowledge-tree-documents" role="group">
-                      <div
-                        v-if="docListLoading"
-                        class="knowledge-tree-row knowledge-tree-document-row tree-skeleton-row"
-                        :style="{ paddingLeft: `${(node.depth + 1) * 20 + 2}px` }"
-                      >
-                        <span class="tree-toggle-placeholder" />
-                        <t-skeleton animation="gradient" :row-col="[{ width: '76%', height: '16px' }]" />
-                      </div>
-                      <template v-else>
-                        <button
-                          v-for="(item, documentIndex) in cardList"
-                          :key="item.id"
-                          type="button"
-                          class="knowledge-tree-row knowledge-tree-document-row"
-                          :class="{ active: activeTreeDocumentId === item.id }"
-                          :style="{ paddingLeft: `${(node.depth + 1) * 20 + 2}px` }"
-                          role="treeitem"
-                          @click="handleTreeDocumentOpen(item)"
-                        >
-                          <span class="tree-toggle-placeholder" />
-                          <span class="tree-number">{{ treeDocumentNumber(node.outline, documentIndex) }}</span>
-                          <span class="tree-name" :title="treeDocumentName(item)">{{ treeDocumentName(item) }}</span>
-                        </button>
                       </template>
-                    </div>
+                    </t-popup>
                   </div>
-                </template>
-                <div v-else class="tag-empty-state">{{ $t('knowledgeBase.tagEmptyResult') }}</div>
-                <div v-if="tagHasMore" class="tag-load-more">
-                  <t-button variant="text" size="small" :loading="tagLoadingMore" @click.stop="kbId && loadTags(kbId)">
-                    {{ $t('tenant.loadMore') }}
-                  </t-button>
                 </div>
               </div>
+            </template>
+            <div v-if="!tagLoading && tagSearchQuery && !filteredOrdinaryTags.length" class="tag-empty-state">
+              {{ $t('knowledgeBase.tagEmptyResult') }}
+            </div>
+            <div v-if="!folderOrderComplete" class="folder-order-warning">
+              {{ $t('knowledgeBase.folderOrderIncomplete') }}
             </div>
           </div>
         </aside>
@@ -2304,6 +2335,10 @@ async function createNewSession(value: string): Promise<void> {
                 class="doc-type-select"
                 clearable
               />
+              <div v-if="canUploadDocument" class="upload-target" :title="$t('knowledgeBase.uploadTarget', { name: uploadTargetName })">
+                <t-icon name="folder" size="15px" />
+                <span>{{ $t('knowledgeBase.uploadTarget', { name: uploadTargetName }) }}</span>
+              </div>
               <div class="doc-view-toggle" role="group" :aria-label="$t('knowledgeBase.viewModeToggle')">
                 <t-tooltip :content="$t('knowledgeBase.viewModeGrid')" placement="top">
                   <button
@@ -2610,10 +2645,16 @@ async function createNewSession(value: string): Promise<void> {
                   :tag-list="tagList"
                   :can-edit="canEdit"
                   :can-generate-summary="Boolean(kbInfo?.summary_model_id)"
+                  :governance-enabled="Boolean(kbInfo?.governance?.enabled)"
+                  :can-contribute="canContribute"
+                  :can-review="canReview"
+                  :current-user-id="authStore.currentUserId"
+                  :governance-busy-id="governanceBusyId"
                   @open="(item: any) => openCardDetails(item)"
                   @toggle-row="toggleSelectRow"
                   @toggle-all="toggleSelectAll"
                   @action="(action: any, item: any) => handleListAction(action, item)"
+                  @move-folder="(item: any, tagId: string) => handleKnowledgeTagChange(item.id, tagId)"
                 />
               </template>
               <template v-else-if="!docListLoading">
@@ -2623,9 +2664,13 @@ async function createNewSession(value: string): Promise<void> {
               </template>
               <DocumentBatchBar
                 :count="selectedIds.size"
-                :loading="batchDeleting"
+                :actions="batchActions"
+                :loading-action="batchActionLoading"
+                :folder-targets="batchFolderTargets"
+                :moving-folder="batchMovingFolder"
                 @clear="clearSelection"
-                @delete="openBatchDeleteDialog"
+                @action="handleBatchAction"
+                @move-folder="handleBatchMoveToFolder"
               />
             </div>
           </div>
@@ -2667,7 +2712,7 @@ async function createNewSession(value: string): Promise<void> {
                 <span class="circle-title">{{ t('knowledgeBase.batchDeleteConfirmation') }}</span>
               </div>
               <span class="del-circle-txt">
-                {{ t('knowledgeBase.confirmBatchDeleteDocument', { count: selectedIds.size }) }}
+                {{ t('knowledgeBase.confirmBatchDeleteDocument', { count: batchDeleteTargetIds.length }) }}
               </span>
               <div class="circle-btn">
                 <span
@@ -2685,6 +2730,78 @@ async function createNewSession(value: string): Promise<void> {
                   {{ batchDeleting ? '...' : t('knowledgeBase.confirmDelete') }}
                 </span>
               </div>
+            </div>
+          </t-dialog>
+
+          <t-dialog
+            v-model:visible="moveDialogVisible"
+            :header="moveMenuMode === 'confirm' ? t('knowledgeBase.moveConfirmTitle') : t('knowledgeBase.moveToKnowledgeBase')"
+            :cancelBtn="null"
+            :confirmBtn="null"
+            width="520px"
+            @close="moveMenuMode = 'normal'"
+          >
+            <div class="move-dialog-body">
+              <template v-if="moveMenuMode === 'targets'">
+                <div v-if="moveTargetsLoading" class="move-dialog-loading">
+                  <t-loading size="small" />
+                </div>
+                <div v-else-if="moveTargetKbs.length === 0" class="move-dialog-empty">
+                  {{ t('knowledgeBase.moveNoTargets') }}
+                </div>
+                <div v-else class="move-dialog-targets">
+                  <button
+                    v-for="kb in moveTargetKbs"
+                    :key="kb.id"
+                    type="button"
+                    class="move-dialog-target"
+                    @click="handleMoveSelectTarget(kb)"
+                  >
+                    <t-icon name="root-list" size="16px" />
+                    <span class="move-target-name">{{ kb.name }}</span>
+                    <span v-if="kb.knowledge_count !== undefined" class="move-target-count">{{ kb.knowledge_count }}</span>
+                    <t-icon name="chevron-right" size="16px" />
+                  </button>
+                </div>
+              </template>
+              <template v-else-if="moveMenuMode === 'confirm'">
+                <div class="move-dialog-selected">
+                  <t-icon name="arrow-right" size="16px" />
+                  <span>{{ moveSelectedTargetName }}</span>
+                </div>
+                <button
+                  type="button"
+                  class="move-dialog-mode"
+                  :class="{ active: moveMode === 'reuse_vectors' }"
+                  @click="moveMode = 'reuse_vectors'"
+                >
+                  <t-radio :checked="moveMode === 'reuse_vectors'" />
+                  <span>
+                    <strong>{{ t('knowledgeBase.moveModeReuseVectors') }}</strong>
+                    <small>{{ t('knowledgeBase.moveModeReuseVectorsDesc') }}</small>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  class="move-dialog-mode"
+                  :class="{ active: moveMode === 'reparse' }"
+                  @click="moveMode = 'reparse'"
+                >
+                  <t-radio :checked="moveMode === 'reparse'" />
+                  <span>
+                    <strong>{{ t('knowledgeBase.moveModeReparse') }}</strong>
+                    <small>{{ t('knowledgeBase.moveModeReparseDesc') }}</small>
+                  </span>
+                </button>
+                <div class="move-dialog-actions">
+                  <t-button variant="outline" :disabled="moveSubmitting" @click="handleMoveDialogBack">
+                    {{ t('common.cancel') }}
+                  </t-button>
+                  <t-button theme="primary" :loading="moveSubmitting" @click="handleMoveConfirm">
+                    {{ t('knowledgeBase.moveConfirm') }}
+                  </t-button>
+                </div>
+              </template>
             </div>
           </t-dialog>
 
@@ -2768,16 +2885,6 @@ async function createNewSession(value: string): Promise<void> {
     :initial-type="uiStore.kbEditorType"
     @update:visible="(val) => val ? null : uiStore.closeKBEditor()"
     @success="handleKBEditorSuccess"
-  />
-  <KnowledgeGovernancePanel
-    v-if="kbId"
-    :visible="governanceVisible"
-    :knowledge-base-id="kbId"
-    :knowledge-items="cardList"
-    :current-user-id="authStore.currentUserId"
-    :can-manage="canManage"
-    :can-review="canReview"
-    @update:visible="governanceVisible = $event"
   />
 </template>
 <style>
@@ -3208,6 +3315,128 @@ async function createNewSession(value: string): Promise<void> {
     padding-right: 2px;
   }
 
+  .folder-list-divider {
+    height: 1px;
+    margin: 5px 6px;
+    background: var(--td-component-stroke, #e7e7e7);
+  }
+
+  .folder-row {
+    min-height: 36px;
+    gap: 7px;
+    padding: 4px 6px;
+
+    &.dragging {
+      opacity: 0.45;
+    }
+
+    &.drop-target {
+      box-shadow: inset 0 2px 0 var(--td-brand-color, #0052d9);
+    }
+
+    .folder-icon {
+      flex: 0 0 auto;
+    }
+
+    .computer-folder-icon {
+      position: relative;
+      width: 18px;
+      height: 13px;
+      margin-top: 2px;
+      border: 1px solid #4d8ed8;
+      border-radius: 2px 2px 3px 3px;
+      background: linear-gradient(180deg, #8dccff 0%, #4d9bea 100%);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 1px 1px rgba(30, 86, 145, 0.16);
+
+      &::before {
+        position: absolute;
+        top: -5px;
+        left: -1px;
+        width: 8px;
+        height: 5px;
+        border: 1px solid #4d8ed8;
+        border-bottom: 0;
+        border-radius: 3px 3px 0 0;
+        background: #72b8f5;
+        content: "";
+      }
+    }
+
+    &.active .computer-folder-icon {
+      border-color: #2563a9;
+      background: linear-gradient(180deg, #62b5f7 0%, #287dcc 100%);
+
+      &::before {
+        border-color: #2563a9;
+        background: #4a9de0;
+      }
+    }
+
+    .tag-list-right {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+      gap: 3px;
+      margin-left: auto;
+    }
+
+    .tag-count {
+      min-width: 22px;
+      color: var(--td-text-color-secondary, #5e5e5e);
+      font-size: 12px;
+      text-align: right;
+    }
+
+    .tag-more-btn {
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 3px;
+      color: var(--td-text-color-primary, #232323);
+
+      &:hover {
+        background: rgba(0, 0, 0, 0.06);
+      }
+    }
+  }
+
+  .fixed-folder-row {
+    font-weight: 500;
+  }
+
+  .folder-drag-handle,
+  .folder-drag-placeholder {
+    width: 18px;
+    height: 22px;
+    flex: 0 0 18px;
+  }
+
+  .folder-drag-handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--td-text-color-secondary, #5e5e5e);
+    cursor: grab;
+
+    &:active {
+      cursor: grabbing;
+    }
+
+    &.disabled {
+      cursor: not-allowed;
+      opacity: 0.35;
+    }
+  }
+
+  .folder-order-warning {
+    padding: 8px 6px;
+    color: #b45309;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
   .knowledge-tree-root,
   .knowledge-tree-branch,
   .knowledge-tree-children,
@@ -3473,6 +3702,25 @@ async function createNewSession(value: string): Promise<void> {
   .doc-type-select {
     width: 140px;
     flex-shrink: 0;
+  }
+
+  .upload-target {
+    max-width: 190px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    padding: 4px 8px;
+    border-radius: 5px;
+    background: #fff7e6;
+    color: #7c4a03;
+    font-size: 12px;
+
+    span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   }
 
   .doc-view-toggle {
@@ -3791,26 +4039,6 @@ async function createNewSession(value: string): Promise<void> {
 
   :deep(.t-icon) {
     font-size: 18px;
-  }
-}
-
-.kb-governance-button {
-  height: 30px;
-  padding: 0 11px;
-  border: 1px solid var(--td-brand-color);
-  border-radius: 15px;
-  background: transparent;
-  color: var(--td-brand-color);
-  cursor: pointer;
-  font-size: 12px;
-
-  &:hover:not(:disabled) {
-    background: var(--td-brand-color-light);
-  }
-
-  &:disabled {
-    cursor: not-allowed;
-    opacity: 0.4;
   }
 }
 
@@ -4217,6 +4445,115 @@ async function createNewSession(value: string): Promise<void> {
       margin-top: 8px;
     }
   }
+}
+
+.move-dialog-body {
+  min-height: 120px;
+}
+
+.move-dialog-loading,
+.move-dialog-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  color: var(--td-text-color-placeholder);
+  font-size: 13px;
+  text-align: center;
+}
+
+.move-dialog-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.move-dialog-target {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    border-color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+  }
+
+  .move-target-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .move-target-count {
+    color: var(--td-text-color-placeholder);
+    font-size: 12px;
+  }
+}
+
+.move-dialog-selected {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--td-bg-color-container-hover);
+  color: var(--td-text-color-secondary);
+}
+
+.move-dialog-mode {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  background: var(--td-bg-color-container);
+  cursor: pointer;
+  text-align: left;
+
+  &.active {
+    border-color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+  }
+
+  span {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  strong {
+    color: var(--td-text-color-primary);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  small {
+    color: var(--td-text-color-placeholder);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+}
+
+.move-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
 }
 
 .card-draft {

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -132,6 +133,34 @@ func (r *knowledgeTagRepository) ListByKB(
 	}
 
 	return tags, total, nil
+}
+
+// Reorder atomically updates ordinary tag sort orders and keeps the default tag first.
+func (r *knowledgeTagRepository) Reorder(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	orderedIDs []string,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&types.KnowledgeTag{}).
+			Where("tenant_id = ? AND knowledge_base_id = ? AND name = ?", tenantID, kbID, types.UntaggedTagName).
+			Update("sort_order", -1).Error; err != nil {
+			return err
+		}
+		for index, id := range orderedIDs {
+			result := tx.Model(&types.KnowledgeTag{}).
+				Where("tenant_id = ? AND knowledge_base_id = ? AND id = ? AND name <> ?", tenantID, kbID, id, types.UntaggedTagName).
+				Update("sort_order", index)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("tag %s is not reorderable", id)
+			}
+		}
+		return nil
+	})
 }
 
 // Delete deletes a knowledge tag

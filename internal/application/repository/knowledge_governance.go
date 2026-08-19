@@ -123,6 +123,33 @@ func (r *knowledgeGovernanceRepository) TransitionVersionWithReview(
 		if review.VersionID != version.ID {
 			return errors.New("knowledge version review does not match version")
 		}
+		parseStatus := ""
+		switch review.Action {
+		case "submit":
+			parseStatus = types.ParseStatusPendingReview
+		case "withdraw":
+			parseStatus = types.ParseStatusDraft
+		case "reject":
+			parseStatus = types.ParseStatusRejected
+		}
+		updateKnowledgeStatus := func() error {
+			result := tx.Model(&types.Knowledge{}).
+				Where("tenant_id = ? AND id = ?", tenantID, version.KnowledgeID).
+				Update("parse_status", parseStatus)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return errors.New("knowledge not found")
+			}
+			return nil
+		}
+		// A retried submit is idempotent. Besides avoiding an invalid
+		// pending_review -> pending_review transition, this repairs records
+		// created before the knowledge status was updated transactionally.
+		if review.Action == "submit" && version.Status == status {
+			return updateKnowledgeStatus()
+		}
 		if version.Status == types.KnowledgeVersionRejected && status == types.KnowledgeVersionPendingReview {
 			if err := types.TransitionKnowledgeVersion(&version, types.KnowledgeVersionDraft); err != nil {
 				return err
@@ -134,7 +161,13 @@ func (r *knowledgeGovernanceRepository) TransitionVersionWithReview(
 		if err := tx.Model(&types.KnowledgeVersion{}).Where("tenant_id = ? AND id = ?", tenantID, id).Update("status", status).Error; err != nil {
 			return err
 		}
-		return tx.Create(review).Error
+		if err := tx.Create(review).Error; err != nil {
+			return err
+		}
+		if parseStatus == "" {
+			return nil
+		}
+		return updateKnowledgeStatus()
 	})
 }
 

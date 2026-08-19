@@ -131,6 +131,61 @@ func TestTransitionVersionWithReviewRollsBackStatusWhenAuditFails(t *testing.T) 
 	}
 }
 
+func TestTransitionVersionWithReviewUpdatesKnowledgeStatusAndSubmitIsIdempotent(t *testing.T) {
+	db := openKnowledgeGovernanceTestDB(t)
+	repo := NewKnowledgeGovernanceRepository(db, nil)
+	ctx := context.Background()
+	version := newGovernedTestVersion(1, "knowledge-submit", string(types.KnowledgeVersionDraft), nil, nil)
+	if err := repo.CreateVersion(ctx, version); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(
+		"INSERT INTO knowledges (id, tenant_id, parse_status, pending_version_id) VALUES (?, ?, ?, ?)",
+		version.KnowledgeID, 1, types.ParseStatusDraft, version.ID,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	submit := func() error {
+		return repo.TransitionVersionWithReview(ctx, 1, version.ID, types.KnowledgeVersionPendingReview, &types.KnowledgeVersionReview{
+			ID: uuid.NewString(), VersionID: version.ID, ReviewerID: "author", Action: "submit", CreatedAt: time.Now().UTC(),
+		})
+	}
+	if err := submit(); err != nil {
+		t.Fatal(err)
+	}
+
+	var knowledge struct {
+		ParseStatus string `gorm:"column:parse_status"`
+	}
+	if err := db.Table("knowledges").Where("id = ?", version.KnowledgeID).First(&knowledge).Error; err != nil {
+		t.Fatal(err)
+	}
+	if knowledge.ParseStatus != types.ParseStatusPendingReview {
+		t.Fatalf("knowledge parse status = %s, want pending_review", knowledge.ParseStatus)
+	}
+
+	if err := db.Table("knowledges").Where("id = ?", version.KnowledgeID).Update("parse_status", types.ParseStatusDraft).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := submit(); err != nil {
+		t.Fatalf("repeated submit should be idempotent: %v", err)
+	}
+	if err := db.Table("knowledges").Where("id = ?", version.KnowledgeID).First(&knowledge).Error; err != nil {
+		t.Fatal(err)
+	}
+	if knowledge.ParseStatus != types.ParseStatusPendingReview {
+		t.Fatalf("repeated submit did not repair parse status: %s", knowledge.ParseStatus)
+	}
+	reviews, err := repo.ListReviews(ctx, version.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reviews) != 1 {
+		t.Fatalf("repeated submit created %d reviews, want 1", len(reviews))
+	}
+}
+
 func newGovernedTestVersion(tenantID uint64, knowledgeID, status string, effectiveAt, expiresAt *time.Time) *types.KnowledgeVersion {
 	return &types.KnowledgeVersion{
 		ID: uuid.NewString(), TenantID: tenantID, KnowledgeID: knowledgeID,

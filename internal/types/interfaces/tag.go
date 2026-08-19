@@ -15,6 +15,8 @@ type KnowledgeTagService interface {
 	CreateTag(ctx context.Context, kbID string, name string, color string, sortOrder int) (*types.KnowledgeTag, error)
 	// UpdateTag updates tag basic information.
 	UpdateTag(ctx context.Context, id string, name *string, color *string, sortOrder *int) (*types.KnowledgeTag, error)
+	// ReorderTags atomically persists the complete order of non-default tags in a knowledge base.
+	ReorderTags(ctx context.Context, kbID string, orderedIDs []string) error
 	// DeleteTag deletes a tag.
 	// When contentOnly=true, only deletes the content under the tag but keeps the tag itself.
 	// excludeIDs: IDs of chunks to exclude from deletion (only valid when deleting chunks)
@@ -44,6 +46,8 @@ type KnowledgeTagRepository interface {
 		page *types.Pagination,
 		keyword string,
 	) ([]*types.KnowledgeTag, int64, error)
+	// Reorder atomically updates ordinary tag sort orders and keeps the default tag first.
+	Reorder(ctx context.Context, tenantID uint64, kbID string, orderedIDs []string) error
 	Delete(ctx context.Context, tenantID uint64, id string) error
 	// CountReferences returns number of knowledges and chunks that reference the tag.
 	CountReferences(

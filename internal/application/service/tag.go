@@ -204,12 +204,21 @@ func (s *knowledgeTagService) UpdateTag(
 		if newName == "" {
 			return nil, werrors.NewBadRequestError("标签名称不能为空")
 		}
+		if tag.Name == types.UntaggedTagName && newName != types.UntaggedTagName {
+			return nil, werrors.NewBadRequestError("未分类文件夹不能重命名")
+		}
+		if tag.Name != types.UntaggedTagName && newName == types.UntaggedTagName {
+			return nil, werrors.NewBadRequestError("未分类是系统保留名称")
+		}
 		tag.Name = newName
 	}
 	if color != nil {
 		tag.Color = strings.TrimSpace(*color)
 	}
 	if sortOrder != nil {
+		if tag.Name == types.UntaggedTagName && *sortOrder != -1 {
+			return nil, werrors.NewBadRequestError("未分类文件夹不能排序")
+		}
 		tag.SortOrder = *sortOrder
 	}
 	tag.UpdatedAt = time.Now()
@@ -217,6 +226,47 @@ func (s *knowledgeTagService) UpdateTag(
 		return nil, err
 	}
 	return tag, nil
+}
+
+// ReorderTags validates and atomically persists the complete order of ordinary tags.
+func (s *knowledgeTagService) ReorderTags(ctx context.Context, kbID string, orderedIDs []string) error {
+	if kbID == "" {
+		return werrors.NewBadRequestError("知识库ID不能为空")
+	}
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		return err
+	}
+
+	page := &types.Pagination{Page: 1, PageSize: 1000}
+	tags, total, err := s.repo.ListByKB(ctx, kb.TenantID, kbID, page, "")
+	if err != nil {
+		return err
+	}
+	if total != int64(len(tags)) {
+		return werrors.NewBadRequestError("文件夹数量超过可排序上限")
+	}
+
+	expected := make(map[string]struct{}, len(tags))
+	for _, tag := range tags {
+		if tag != nil && tag.Name != types.UntaggedTagName {
+			expected[tag.ID] = struct{}{}
+		}
+	}
+	if len(orderedIDs) != len(expected) {
+		return werrors.NewBadRequestError("文件夹排序集合不完整")
+	}
+	seen := make(map[string]struct{}, len(orderedIDs))
+	for _, id := range orderedIDs {
+		if _, duplicate := seen[id]; duplicate {
+			return werrors.NewBadRequestError("文件夹排序包含重复项")
+		}
+		if _, ok := expected[id]; !ok {
+			return werrors.NewBadRequestError("文件夹排序包含无效项")
+		}
+		seen[id] = struct{}{}
+	}
+	return s.repo.Reorder(ctx, kb.TenantID, kbID, orderedIDs)
 }
 
 // DeleteTag deletes a tag. When force=true, also deletes all chunks under this tag.
@@ -230,6 +280,9 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 	tag, err := s.repo.GetByID(ctx, tenantID, id)
 	if err != nil {
 		return err
+	}
+	if tag.Name == types.UntaggedTagName {
+		return werrors.NewBadRequestError("未分类文件夹不能删除")
 	}
 
 	// Get KB info for embedding model
