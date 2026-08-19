@@ -33,7 +33,7 @@ docker:
   vllm_image: vllm/vllm-openai:latest
   vllm_image_tar: images/vllm-openai.tar
   vllm_min_version_hint: "0.19.0"
-  # 默认按单卡可启动；双卡可将 verifier.device_ids 改为 ["1"] 并提高双方 gpu_memory_utilization
+  # 默认每个 GPU 服务申请一张卡，不绑定具体编号；部署时可按目标服务器显式设置 device_ids。
   gpu_count: 1
   shm_size: 16gb
   service_images:
@@ -58,10 +58,9 @@ models:
     port: 8001
     served_model_name: qwen3-embedding-4b
     max_model_len: 8192
-    # 单卡与 verifier 共享 GPU0；双卡可提高到 0.45+
+    # 单卡默认与 verifier 共享一张 GPU；显存充足时可提高到 0.45+
     gpu_memory_utilization: 0.28
     dtype: auto
-    device_ids: ["0"]
     extra_vllm_args:
       - "--quantization"
       - "compressed-tensors"
@@ -97,10 +96,9 @@ models:
     port: 8003
     served_model_name: qwen3.5-9b
     max_model_len: 32768
-    # 单卡默认与 embedding 同卡；双卡改为 ["1"] 并可提高到 0.55+
+    # 单卡默认与 embedding 同卡；多卡部署可显式设置 device_ids 并提高到 0.55+
     gpu_memory_utilization: 0.45
     dtype: auto
-    device_ids: ["0"]
     extra_vllm_args:
       - "--trust-remote-code"
       - "--reasoning-parser"
@@ -126,7 +124,6 @@ models:
     max_model_len: 32768
     gpu_memory_utilization: 0.90
     dtype: fp8
-    device_ids: ["0"]
     limit_mm_per_prompt: '{"image": 5}'
     extra_vllm_args:
       - "--trust-remote-code"
@@ -167,6 +164,5 @@ models:
     needs_gpu: true
     port: 8005
     served_model_name: cosyvoice2-0.5b
-    device_ids: ["0"]
     allowed_uses: [tts, model]
     forbidden_uses: [object-storage]

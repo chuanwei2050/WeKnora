@@ -356,15 +356,16 @@ class TestPickBaseImage(unittest.TestCase):
 
 
 class TestSingleGpuDefaults(unittest.TestCase):
-    def test_verifier_defaults_to_gpu0(self) -> None:
+    def test_gpu_services_request_one_unpinned_device(self) -> None:
         cfg = deploy.load_config(ROOT / "config.yaml.example", prefer_as_base=True)
         self.assertEqual(cfg.get("docker", {}).get("gpu_count"), 1)
         specs = {s.key: s for s in deploy.parse_models(cfg)}
-        self.assertEqual(specs["verifier"].device_ids, [0])
-        self.assertEqual(specs["embedding"].device_ids, [0])
+        for key in ("embedding", "verifier", "tts"):
+            self.assertIsNone(specs[key].device_ids)
         text = deploy.render_compose(cfg, Path("/mnt/models"), list(specs.values()))
-        self.assertIn('device_ids: ["0"]', text)
-        self.assertNotIn('device_ids: ["1"]', text)
+        self.assertNotIn("device_ids:", text)
+        self.assertEqual(text.count("              count: 1"), 3)
+        self.assertIn("compressed-tensors", text)
 
 
 class TestDownloadCleanup(unittest.TestCase):
