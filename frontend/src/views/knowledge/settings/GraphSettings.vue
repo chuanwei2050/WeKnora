@@ -34,6 +34,67 @@
         </div>
       </div>
 
+      <div v-if="localGraphExtract.enabled" class="setting-row vertical">
+        <div class="setting-info">
+          <label>{{ t('graphSettings.extractionModelLabel') }}</label>
+          <p class="desc">{{ t('graphSettings.extractionModelDescription') }}</p>
+        </div>
+        <div class="setting-control full-width">
+          <ModelSelector
+            model-type="KnowledgeQA"
+            :selected-model-id="localGraphExtract.model_id"
+            :all-models="allModels"
+            @update:selected-model-id="handleExtractionModelChange"
+          />
+          <t-button
+            v-if="localGraphExtract.model_id"
+            class="fallback-model-button"
+            theme="default"
+            variant="text"
+            size="small"
+            @click="handleExtractionModelChange('')"
+          >
+            {{ t('graphSettings.useFallbackModel') }}
+          </t-button>
+        </div>
+      </div>
+
+      <div v-if="localGraphExtract.enabled" class="setting-row vertical">
+        <div class="setting-info">
+          <label>{{ t('graphSettings.ingestionModeLabel') }}</label>
+          <p class="desc">{{ t('graphSettings.ingestionModeDescription') }}</p>
+        </div>
+        <div class="setting-control full-width">
+          <t-select v-model="localGraphExtract.ingestion_mode" @change="handleConfigChange">
+            <t-option value="all" :label="t('graphSettings.ingestionModeAll')" />
+            <t-option value="signal" :label="t('graphSettings.ingestionModeSignal')" />
+          </t-select>
+        </div>
+      </div>
+
+      <div v-if="localGraphExtract.enabled" class="setting-row vertical">
+        <div class="setting-info">
+          <label>{{ t('graphSettings.extractionLimitsLabel') }}</label>
+          <p class="desc">{{ t('graphSettings.extractionLimitsDescription') }}</p>
+        </div>
+        <div class="setting-control full-width">
+          <div class="quality-grid">
+            <label>
+              <span>{{ t('graphSettings.maxEntitiesLabel') }}</span>
+              <t-input-number v-model="localGraphExtract.max_entities" :min="1" :max="100" @change="handleConfigChange" />
+            </label>
+            <label>
+              <span>{{ t('graphSettings.maxRelationsLabel') }}</span>
+              <t-input-number v-model="localGraphExtract.max_relations" :min="1" :max="200" @change="handleConfigChange" />
+            </label>
+            <label>
+              <span>{{ t('graphSettings.minConfidenceLabel') }}</span>
+              <t-input-number v-model="localGraphExtract.min_confidence" :min="0.1" :max="1" :step="0.1" :decimal-places="1" @change="handleConfigChange" />
+            </label>
+          </div>
+        </div>
+      </div>
+
       <!-- 关系类型配置 -->
       <div v-if="localGraphExtract.enabled" class="setting-row vertical">
         <div class="setting-info">
@@ -360,6 +421,8 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { extractTextRelations, fabriText, fabriTag, type Node, type Relation } from '@/api/initialization'
 import { getSystemInfo } from '@/api/system'
+import ModelSelector from '@/components/ModelSelector.vue'
+import type { ModelConfig } from '@/api/model'
 import {
   applySoftwareTestingGraphDefaults,
 } from '@/constants/software-testing-graph-preset'
@@ -368,6 +431,11 @@ const { t } = useI18n()
 
 interface GraphExtractConfig {
   enabled: boolean
+  model_id: string
+  ingestion_mode: 'all' | 'signal'
+  max_entities: number
+  max_relations: number
+  min_confidence: number
   text: string
   tags: string[]
   entity_types: string[]
@@ -380,7 +448,7 @@ interface GraphExtractConfig {
 interface Props {
   graphExtract: GraphExtractConfig
   modelId: string
-  allModels?: any[]
+  allModels?: ModelConfig[]
 }
 
 const props = defineProps<Props>()
@@ -391,13 +459,18 @@ const emit = defineEmits<{
 
 const modelStatus = computed(() => ({
   llm: {
-    available: !!props.modelId
+    available: !!effectiveModelId.value
   }
 }))
 
 // 本地状态
 const localGraphExtract = ref<GraphExtractConfig>({
   ...props.graphExtract,
+  model_id: props.graphExtract.model_id || '',
+  ingestion_mode: props.graphExtract.ingestion_mode || 'all',
+  max_entities: props.graphExtract.max_entities || 12,
+  max_relations: props.graphExtract.max_relations || 15,
+  min_confidence: props.graphExtract.min_confidence || 0.5,
   tags: props.graphExtract.tags || [],
   entity_types: props.graphExtract.entity_types || [],
   strict_schema: !!props.graphExtract.strict_schema,
@@ -405,6 +478,8 @@ const localGraphExtract = ref<GraphExtractConfig>({
   nodes: props.graphExtract.nodes || [],
   relations: props.graphExtract.relations || []
 })
+
+const effectiveModelId = computed(() => localGraphExtract.value.model_id || props.modelId)
 
 // 加载状态
 const tagFabring = ref(false)
@@ -423,6 +498,11 @@ const isGraphDatabaseEnabled = computed(() => {
 watch(() => props.graphExtract, (newVal) => {
   localGraphExtract.value = {
     ...newVal,
+    model_id: newVal.model_id || '',
+    ingestion_mode: newVal.ingestion_mode || 'all',
+    max_entities: newVal.max_entities || 12,
+    max_relations: newVal.max_relations || 15,
+    min_confidence: newVal.min_confidence || 0.5,
     tags: newVal.tags || [],
     entity_types: newVal.entity_types || [],
     strict_schema: !!newVal.strict_schema,
@@ -435,6 +515,11 @@ watch(() => props.graphExtract, (newVal) => {
 // 处理配置变更
 const handleConfigChange = () => {
   emit('update:graphExtract', localGraphExtract.value)
+}
+
+const handleExtractionModelChange = (modelId: string) => {
+  localGraphExtract.value.model_id = modelId
+  handleConfigChange()
 }
 
 // 处理启用/禁用切换
@@ -554,7 +639,7 @@ const handleFabriTag = async () => {
 
 // 生成随机文本
 const handleFabriText = async () => {
-  if (!props.modelId) {
+  if (!effectiveModelId.value) {
     MessagePlugin.warning(t('graphSettings.completeModelConfig'))
     return
   }
@@ -563,7 +648,7 @@ const handleFabriText = async () => {
   try {
     const response = await fabriText({
       tags: localGraphExtract.value.tags,
-      model_id: props.modelId
+      model_id: effectiveModelId.value
     })
     localGraphExtract.value.text = response.text || ''
     handleTextChange()
@@ -578,7 +663,7 @@ const handleFabriText = async () => {
 
 // 提取实体关系
 const handleExtract = async () => {
-  if (!props.modelId) {
+  if (!effectiveModelId.value) {
     MessagePlugin.warning(t('graphSettings.completeModelConfig'))
     return
   }
@@ -593,7 +678,12 @@ const handleExtract = async () => {
     const response = await extractTextRelations({
       text: localGraphExtract.value.text,
       tags: localGraphExtract.value.tags,
-      model_id: props.modelId
+      entity_types: localGraphExtract.value.entity_types,
+      strict_schema: localGraphExtract.value.strict_schema,
+      max_entities: localGraphExtract.value.max_entities,
+      max_relations: localGraphExtract.value.max_relations,
+      min_confidence: localGraphExtract.value.min_confidence,
+      model_id: effectiveModelId.value
     })
     localGraphExtract.value.nodes = response.nodes || []
     localGraphExtract.value.relations = response.relations || []
@@ -757,6 +847,31 @@ onMounted(async () => {
   gap: 12px;
   width: 100%;
   align-items: flex-start;
+}
+
+.quality-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: 16px;
+  width: 100%;
+
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: var(--td-text-color-secondary);
+    font-size: 13px;
+  }
+}
+
+.fallback-model-button {
+  margin-top: 8px;
+}
+
+@media (max-width: 760px) {
+  .quality-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .text-control-group {

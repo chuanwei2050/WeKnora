@@ -205,10 +205,13 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	}
 
 	template := &types.PromptTemplateStructured{
-		Description:  s.template.Description,
-		Tags:         kb.ExtractConfig.Tags,
-		EntityTypes:  kb.ExtractConfig.EntityTypes,
-		StrictSchema: kb.ExtractConfig.StrictSchema,
+		Description:   s.template.Description,
+		Tags:          kb.ExtractConfig.Tags,
+		EntityTypes:   kb.ExtractConfig.EntityTypes,
+		StrictSchema:  kb.ExtractConfig.StrictSchema,
+		MaxEntities:   kb.ExtractConfig.MaxEntities,
+		MaxRelations:  kb.ExtractConfig.MaxRelations,
+		MinConfidence: kb.ExtractConfig.MinConfidence,
 		Examples: []types.GraphData{
 			{
 				Text:     kb.ExtractConfig.Text,
@@ -222,9 +225,16 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	if err != nil {
 		return err
 	}
-	if graph == nil || len(graph.Relation) == 0 {
-		logger.Infof(ctx, "skip graph write for chunk %s: no relations extracted", p.ChunkID)
-		return nil
+	if graph == nil {
+		return fmt.Errorf("graph extractor returned nil graph")
+	}
+	if len(graph.Relation) == 0 {
+		if kb.ExtractConfig != nil && kb.ExtractConfig.RequireTripleReview {
+			logger.Infof(ctx, "skip empty graph extraction for chunk %s: triple review is required", p.ChunkID)
+			return nil
+		}
+		logger.Infof(ctx, "replace prior canonical graph source for chunk %s with empty extraction", p.ChunkID)
+		graph = &types.GraphData{}
 	}
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
@@ -236,7 +246,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	for _, node := range graph.Node {
 		node.Chunks = []string{chunk.ID}
 	}
-	if kb.ExtractConfig != nil && kb.ExtractConfig.RequireTripleReview {
+	if kb.ExtractConfig != nil && kb.ExtractConfig.RequireTripleReview && len(graph.Relation) > 0 {
 		if s.tripleReviewRepo == nil {
 			return fmt.Errorf("triple review required but repository is unavailable")
 		}
@@ -282,14 +292,12 @@ func WriteExtractedGraph(
 		return err
 	}
 	canonicalRecords := canonicalRecordsFromExtractedGraph(chunk, graph, modelID)
-	if len(canonicalRecords) == 0 {
-		return nil
-	}
-	return graphEngine.UpsertCanonicalRecords(
+	return graphEngine.ReplaceCanonicalSourceRecords(
 		ctx,
 		chunk.TenantID,
 		chunk.KnowledgeBaseID,
 		types.GraphNamespaceForVersion(chunk.KnowledgeVersionID, chunk.KnowledgeVersionID != ""),
+		types.GraphSource{KnowledgeID: chunk.KnowledgeID, KnowledgeVersionID: chunk.KnowledgeVersionID, ChunkID: chunk.ID},
 		canonicalRecords,
 	)
 }
@@ -315,7 +323,7 @@ func canonicalRecordsFromExtractedGraph(chunk *types.Chunk, graph *types.GraphDa
 		}
 		typeByName[node.Name] = entityType
 		records = append(records,
-			types.GraphRebuildRecord{Entity: &types.CanonicalEntity{Name: node.Name, EntityType: entityType}, Source: source},
+			types.GraphRebuildRecord{Entity: &types.CanonicalEntity{Name: node.Name, EntityType: entityType, Aliases: append([]string(nil), node.Aliases...)}, Source: source},
 			types.GraphRebuildRecord{Instance: &types.DocumentEntityInstance{Name: node.Name, EntityType: entityType, KnowledgeID: chunk.KnowledgeID, ChunkIDs: []string{chunk.ID}}, Source: source},
 		)
 	}
@@ -336,6 +344,7 @@ func canonicalRecordsFromExtractedGraph(chunk *types.Chunk, graph *types.GraphDa
 			Target:       types.CanonicalEntityKey(chunk.TenantID, chunk.KnowledgeBaseID, targetType, relation.Node2),
 			RelationType: relation.Type,
 			Direction:    types.GraphDirectionOutgoing,
+			Weight:       relation.Confidence,
 		}, Source: source})
 	}
 	return records

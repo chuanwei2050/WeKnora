@@ -250,7 +250,7 @@
                   <GraphSettings
                     v-if="formData"
                     :graph-extract="formData.nodeExtractConfig"
-                    model-id=""
+                    :model-id="formData.modelConfig.llmModelId"
                     :all-models="allModels"
                     @update:graphExtract="handleNodeExtractUpdate"
                   />
@@ -475,6 +475,11 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     },
     nodeExtractConfig: {
       enabled: true,
+      model_id: '',
+      ingestion_mode: 'all',
+      max_entities: 12,
+      max_relations: 15,
+      min_confidence: 0.5,
       text: SOFTWARE_TESTING_GRAPH_PRESET.text,
       tags: [...SOFTWARE_TESTING_GRAPH_PRESET.tags],
       entity_types: [...SOFTWARE_TESTING_GRAPH_PRESET.entity_types],
@@ -578,6 +583,11 @@ const loadKBData = async () => {
       },
       nodeExtractConfig: {
         enabled: kb.extract_config?.enabled || false,
+        model_id: kb.extract_config?.model_id || '',
+        ingestion_mode: kb.extract_config?.ingestion_mode || 'all',
+        max_entities: kb.extract_config?.max_entities || 12,
+        max_relations: kb.extract_config?.max_relations || 15,
+        min_confidence: kb.extract_config?.min_confidence || 0.5,
         text: kb.extract_config?.text || '',
         tags: kb.extract_config?.tags || [],
         entity_types: kb.extract_config?.entity_types || [],
@@ -585,7 +595,8 @@ const loadKBData = async () => {
         require_triple_review: !!kb.extract_config?.require_triple_review,
         nodes: (kb.extract_config?.nodes || []).map((node: any) => ({
           name: node.name,
-          attributes: node.attributes || []
+          attributes: node.attributes || [],
+          aliases: node.aliases || []
         })),
         relations: kb.extract_config?.relations || []
       },
@@ -883,6 +894,11 @@ const buildSubmitData = () => {
   if (formData.value.indexingStrategy?.graphEnabled && formData.value.nodeExtractConfig?.enabled) {
     data.extract_config = {
       enabled: true,
+      model_id: formData.value.nodeExtractConfig.model_id || '',
+      ingestion_mode: formData.value.nodeExtractConfig.ingestion_mode || 'all',
+      max_entities: formData.value.nodeExtractConfig.max_entities || 12,
+      max_relations: formData.value.nodeExtractConfig.max_relations || 15,
+      min_confidence: formData.value.nodeExtractConfig.min_confidence || 0.5,
       text: formData.value.nodeExtractConfig.text,
       tags: formData.value.nodeExtractConfig.tags,
       entity_types: formData.value.nodeExtractConfig.entity_types || [],
@@ -998,6 +1014,11 @@ const doSubmit = async () => {
         },
         nodeExtract: {
           enabled: data.extract_config?.enabled || false,
+          model_id: data.extract_config?.model_id || '',
+          ingestion_mode: data.extract_config?.ingestion_mode || 'all',
+          max_entities: data.extract_config?.max_entities || 12,
+          max_relations: data.extract_config?.max_relations || 15,
+          min_confidence: data.extract_config?.min_confidence || 0.5,
           text: data.extract_config?.text || '',
           tags: data.extract_config?.tags || [],
           entity_types: data.extract_config?.entity_types || [],

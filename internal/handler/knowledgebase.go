@@ -769,27 +769,28 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		*config = types.ExtractConfig{Enabled: false}
 		return nil
 	}
+	if err := validateGraphExtractionPolicy(config); err != nil {
+		return err
+	}
 	// Validate text field
 	if config.Text == "" {
 		return apperrors.NewBadRequestError("text cannot be empty")
 	}
 
-	// Validate tags field
-	if len(config.Tags) == 0 {
-		return apperrors.NewBadRequestError("tags cannot be empty")
-	}
+	// Validate configured tags. An empty list intentionally enables exploratory
+	// relation extraction when strict_schema is disabled.
 	for i, tag := range config.Tags {
 		if tag == "" {
 			return apperrors.NewBadRequestError("tag cannot be empty at index " + strconv.Itoa(i))
 		}
 	}
 
-	// Validate nodes
-	if len(config.Nodes) == 0 {
-		return apperrors.NewBadRequestError("nodes cannot be empty")
-	}
+	// Nodes and relations are optional prompt examples, not schema sources.
 	nodeNames := make(map[string]bool)
 	for i, node := range config.Nodes {
+		if node == nil {
+			return apperrors.NewBadRequestError("node cannot be null at index " + strconv.Itoa(i))
+		}
 		if node.Name == "" {
 			return apperrors.NewBadRequestError("node name cannot be empty at index " + strconv.Itoa(i))
 		}
@@ -800,11 +801,11 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		nodeNames[node.Name] = true
 	}
 
-	if len(config.Relations) == 0 {
-		return apperrors.NewBadRequestError("relations cannot be empty")
-	}
 	// Validate relations
 	for i, relation := range config.Relations {
+		if relation == nil {
+			return apperrors.NewBadRequestError("relation cannot be null at index " + strconv.Itoa(i))
+		}
 		if relation.Node1 == "" {
 			return apperrors.NewBadRequestError("relation node1 cannot be empty at index " + strconv.Itoa(i))
 		}
@@ -823,6 +824,30 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		}
 	}
 
+	return nil
+}
+
+func validateGraphExtractionPolicy(config *types.ExtractConfig) error {
+	if config.IngestionMode == "" {
+		config.IngestionMode = types.GraphIngestionAll
+	} else if config.IngestionMode != types.GraphIngestionAll && config.IngestionMode != types.GraphIngestionSignal {
+		return apperrors.NewBadRequestError("ingestion_mode must be all or signal")
+	}
+	if config.MaxEntities == 0 {
+		config.MaxEntities = types.DefaultGraphMaxEntities
+	} else if config.MaxEntities < 0 || config.MaxEntities > types.MaxGraphEntities {
+		return apperrors.NewBadRequestError("max_entities must be between 1 and " + strconv.Itoa(types.MaxGraphEntities))
+	}
+	if config.MaxRelations == 0 {
+		config.MaxRelations = types.DefaultGraphMaxRelations
+	} else if config.MaxRelations < 0 || config.MaxRelations > types.MaxGraphRelations {
+		return apperrors.NewBadRequestError("max_relations must be between 1 and " + strconv.Itoa(types.MaxGraphRelations))
+	}
+	if config.MinConfidence == 0 {
+		config.MinConfidence = types.DefaultGraphMinConfidence
+	} else if config.MinConfidence < 0 || config.MinConfidence > 1 {
+		return apperrors.NewBadRequestError("min_confidence must be between 0 and 1")
+	}
 	return nil
 }
 

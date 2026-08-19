@@ -19,9 +19,9 @@ TBD - created by archiving change add-graph-triple-review-queue. Update Purpose 
 
 - **THEN** 系统 MUST 创建 `pending` staging，且 MUST NOT 立即写入图库
 
-#### Scenario: 过滤后无关系
+#### Scenario: 开启审核且过滤后无关系
 
-- **WHEN** schema 过滤后无合法关系
+- **WHEN** `require_triple_review` 为 true 且 schema 过滤后无合法关系
 
 - **THEN** 系统 MUST NOT 创建 staging，也 MUST NOT 写图
 
@@ -72,4 +72,3 @@ TBD - created by archiving change add-graph-triple-review-queue. Update Purpose 
 - **WHEN** 管理员执行试抽取
 
 - **THEN** MUST 即时返回，且 MUST NOT 仅因此创建 pending 审核单
-

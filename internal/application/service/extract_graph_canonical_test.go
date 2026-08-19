@@ -9,8 +9,8 @@ import (
 func TestCanonicalRecordsFromExtractedGraphCarriesVersionEvidence(t *testing.T) {
 	chunk := &types.Chunk{TenantID: 7, KnowledgeBaseID: "kb", KnowledgeID: "doc", KnowledgeVersionID: "v2", ID: "chunk"}
 	graph := &types.GraphData{
-		Node: []*types.GraphNode{{Name: "A", EntityType: "tool"}, {Name: "B", EntityType: "service"}},
-		Relation: []*types.GraphRelation{{Node1: "A", Node2: "B", Type: "uses"}},
+		Node:     []*types.GraphNode{{Name: "A", EntityType: "tool", Aliases: []string{"Alpha"}}, {Name: "B", EntityType: "service"}},
+		Relation: []*types.GraphRelation{{Node1: "A", Node2: "B", Type: "uses", Confidence: 0.8}},
 	}
 	records := canonicalRecordsFromExtractedGraph(chunk, graph, "model")
 	if len(records) != 5 {
@@ -26,5 +26,11 @@ func TestCanonicalRecordsFromExtractedGraphCarriesVersionEvidence(t *testing.T) 
 	}
 	if records[4].Edge == nil || records[4].Edge.Source == "" || records[4].Edge.Target == "" {
 		t.Fatalf("edge was not canonicalized: %+v", records[4])
+	}
+	if records[4].Edge.Weight != 0.8 {
+		t.Fatalf("edge confidence was not retained: %+v", records[4].Edge)
+	}
+	if records[0].Entity == nil || len(records[0].Entity.Aliases) != 1 || records[0].Entity.Aliases[0] != "Alpha" {
+		t.Fatalf("entity aliases were not retained: %+v", records[0].Entity)
 	}
 }

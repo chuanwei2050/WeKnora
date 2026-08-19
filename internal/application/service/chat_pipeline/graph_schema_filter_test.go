@@ -121,3 +121,106 @@ func TestParseGraph_FillsEntityType(t *testing.T) {
 		t.Fatalf("expected EntityType=tool, got %#v", graph.Node)
 	}
 }
+
+func TestParseGraph_StructuredItemsCarriesAliasesAndConfidence(t *testing.T) {
+	f := NewFormater()
+	raw := `{"items":[{"entity":"Alpha","entity_type":"tool","aliases":["A"]},{"entity":"Beta","entity_type":"service"},{"entity1":"Alpha","entity2":"Beta","relation":"uses","confidence":0.8}]}`
+	graph, err := f.ParseGraph(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("ParseGraph: %v", err)
+	}
+	if len(graph.Node) != 2 || len(graph.Node[0].Aliases) != 1 || graph.Node[0].Aliases[0] != "A" {
+		t.Fatalf("aliases were not parsed: %#v", graph.Node)
+	}
+	if len(graph.Relation) != 1 || graph.Relation[0].Confidence != 0.8 {
+		t.Fatalf("confidence was not parsed: %#v", graph.Relation)
+	}
+}
+
+func TestParseGraph_DropsUnknownRelationshipEndpoint(t *testing.T) {
+	f := NewFormater()
+	raw := `{"items":[{"entity":"Alpha"},{"entity1":"Alpha","entity2":"Missing","relation":"uses","confidence":0.9}]}`
+	graph, err := f.ParseGraph(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("ParseGraph: %v", err)
+	}
+	if len(graph.Node) != 1 || len(graph.Relation) != 0 {
+		t.Fatalf("unknown endpoint must not be materialized: %#v", graph)
+	}
+}
+
+func TestApplyGraphExtractionPolicy_LimitsAndFilters(t *testing.T) {
+	graph := &types.GraphData{
+		Node: []*types.GraphNode{{Name: "A"}, {Name: "B"}, {Name: "C"}},
+		Relation: []*types.GraphRelation{
+			{Node1: "A", Node2: "B", Type: "uses", Confidence: 0.9},
+			{Node1: "A", Node2: "C", Type: "uses", Confidence: 0.9},
+			{Node1: "A", Node2: "B", Type: "weak", Confidence: 0.2},
+		},
+	}
+	ApplyGraphExtractionPolicy(context.Background(), graph, 2, 1, 0.5)
+	if len(graph.Node) != 2 || len(graph.Relation) != 1 || graph.Relation[0].Node2 != "B" {
+		t.Fatalf("unexpected extraction policy result: %#v", graph)
+	}
+}
+
+func TestApplyGraphSchemaFilter_NormalizesConfiguredCasing(t *testing.T) {
+	graph := &types.GraphData{
+		Node:     []*types.GraphNode{{Name: "A", EntityType: "TOOL"}, {Name: "B", EntityType: "service"}},
+		Relation: []*types.GraphRelation{{Node1: "A", Node2: "B", Type: "USES"}},
+	}
+	result := ApplyGraphSchemaFilter(context.Background(), graph, SchemaFilterOptions{
+		StrictSchema: true,
+		Tags:         []string{"uses"},
+		EntityTypes:  []string{"tool", "service"},
+	})
+	if result.SkipWrite || graph.Relation[0].Type != "uses" || graph.Node[0].EntityType != "tool" {
+		t.Fatalf("schema casing was not normalized: result=%#v graph=%#v", result, graph)
+	}
+}
+
+func TestExtractorFiltersSchemaBeforeApplyingEntityLimit(t *testing.T) {
+	stub := &validationChatStub{content: `{"items":[
+		{"entity":"invalid","entity_type":"unknown"},
+		{"entity":"A","entity_type":"tool"},
+		{"entity":"B","entity_type":"service"},
+		{"entity1":"A","entity2":"B","relation":"uses","confidence":0.9}
+	]}`}
+	extractor := NewExtractor(stub, &types.PromptTemplateStructured{
+		Tags:          []string{"uses"},
+		EntityTypes:   []string{"tool", "service"},
+		StrictSchema:  true,
+		MaxEntities:   2,
+		MaxRelations:  1,
+		MinConfidence: 0.5,
+	})
+	graph, err := extractor.Extract(context.Background(), "A uses B")
+	if err != nil {
+		t.Fatalf("extract graph: %v", err)
+	}
+	if len(graph.Node) != 2 || len(graph.Relation) != 1 {
+		t.Fatalf("valid triple was lost before limits: %#v", graph)
+	}
+}
+
+func TestParseGraphDropsMalformedItems(t *testing.T) {
+	f := NewFormater()
+	raw := `{"items":[
+		{"entity":"   "},
+		{"entity":"A"},
+		{"entity":"B"},
+		{"entity1":"A","entity2":"B","relation":"   ","confidence":0.9},
+		{"entity1":"A","entity2":"B","relation":"uses","confidence":"high"}
+	]}`
+	graph, err := f.ParseGraph(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("ParseGraph: %v", err)
+	}
+	if len(graph.Node) != 2 || len(graph.Relation) != 1 || graph.Relation[0].Confidence != 0 {
+		t.Fatalf("malformed graph items were not normalized safely: %#v", graph)
+	}
+	ApplyGraphExtractionPolicy(context.Background(), graph, 2, 1, 0.5)
+	if len(graph.Relation) != 0 {
+		t.Fatalf("invalid confidence must not pass extraction policy: %#v", graph.Relation)
+	}
+}

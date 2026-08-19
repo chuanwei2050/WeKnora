@@ -60,22 +60,26 @@ func (n *Neo4jRepository) UpsertCanonicalRecords(ctx context.Context, tenantID u
 	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(ctx)
 	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-		for _, record := range records {
-			if record.Entity == nil {
-				continue
-			}
-			if err := upsertCanonicalRecord(ctx, tx, tenantID, knowledgeBaseID, namespace, types.GraphRebuildRecord{Entity: record.Entity}); err != nil {
-				return nil, err
-			}
-		}
-		for _, record := range records {
-			if err := upsertCanonicalRecord(ctx, tx, tenantID, knowledgeBaseID, namespace, record); err != nil {
-				return nil, err
-			}
-		}
-		return nil, nil
+		return nil, upsertCanonicalRecordsInTx(ctx, tx, tenantID, knowledgeBaseID, namespace, records)
 	})
 	return err
+}
+
+func upsertCanonicalRecordsInTx(ctx context.Context, tx neo4j.ManagedTransaction, tenantID uint64, knowledgeBaseID, namespace string, records []types.GraphRebuildRecord) error {
+	for _, record := range records {
+		if record.Entity == nil {
+			continue
+		}
+		if err := upsertCanonicalRecord(ctx, tx, tenantID, knowledgeBaseID, namespace, types.GraphRebuildRecord{Entity: record.Entity}); err != nil {
+			return err
+		}
+	}
+	for _, record := range records {
+		if err := upsertCanonicalRecord(ctx, tx, tenantID, knowledgeBaseID, namespace, record); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func upsertCanonicalRecord(ctx context.Context, tx neo4j.ManagedTransaction, tenantID uint64, knowledgeBaseID, namespace string, record types.GraphRebuildRecord) error {
@@ -149,7 +153,7 @@ MERGE (evidence:GraphEvidence {evidence_key: $evidence_key})
 SET evidence.tenant_id = $tenant_id, evidence.knowledge_base_id = $knowledge_base_id,
     evidence.knowledge_id = $knowledge_id, evidence.chunk_id = $chunk_id,
     evidence.knowledge_version_id = $knowledge_version_id, evidence.extractor_id = $extractor_id,
-    evidence.namespace = $namespace
+    evidence.namespace = $namespace, evidence.weight = $weight
 MERGE (relation)-[:EVIDENCED_BY]->(evidence)`, map[string]interface{}{
 			"relation_key": relationKey, "tenant_id": tenantID, "knowledge_base_id": knowledgeBaseID,
 			"namespace": namespace, "source": edge.Source, "target": edge.Target,
@@ -214,29 +218,61 @@ func (n *Neo4jRepository) RemoveCanonicalSource(ctx context.Context, tenantID ui
 	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(ctx)
 	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-		params := map[string]interface{}{"tenant_id": tenantID, "knowledge_base_id": knowledgeBaseID, "namespace": namespace, "knowledge_id": source.KnowledgeID, "knowledge_version_id": source.KnowledgeVersionID, "chunk_id": source.ChunkID, "extractor_id": source.ExtractorID}
-		queries := []string{
-			`MATCH (e:GraphEvidence {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id, namespace: $namespace, knowledge_id: $knowledge_id, chunk_id: $chunk_id})
+		return nil, removeCanonicalSourceInTx(ctx, tx, tenantID, knowledgeBaseID, namespace, source)
+	})
+	return err
+}
+
+// ReplaceCanonicalSourceRecords atomically removes all graph facts contributed
+// by one chunk and writes the new extraction result.
+func (n *Neo4jRepository) ReplaceCanonicalSourceRecords(ctx context.Context, tenantID uint64, knowledgeBaseID, namespace string, source types.GraphSource, records []types.GraphRebuildRecord) error {
+	if tenantID == 0 || strings.TrimSpace(knowledgeBaseID) == "" || strings.TrimSpace(namespace) == "" {
+		return fmt.Errorf("tenant, knowledge base and namespace are required")
+	}
+	if source.KnowledgeID == "" || source.ChunkID == "" {
+		return fmt.Errorf("knowledge and chunk source are required")
+	}
+	if n.driver == nil {
+		return fmt.Errorf("neo4j driver is unavailable")
+	}
+	if err := n.EnsureCanonicalSchema(ctx); err != nil {
+		return err
+	}
+	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer session.Close(ctx)
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		if err := removeCanonicalSourceInTx(ctx, tx, tenantID, knowledgeBaseID, namespace, source); err != nil {
+			return nil, err
+		}
+		return nil, upsertCanonicalRecordsInTx(ctx, tx, tenantID, knowledgeBaseID, namespace, records)
+	})
+	return err
+}
+
+func removeCanonicalSourceInTx(ctx context.Context, tx neo4j.ManagedTransaction, tenantID uint64, knowledgeBaseID, namespace string, source types.GraphSource) error {
+	params := map[string]interface{}{"tenant_id": tenantID, "knowledge_base_id": knowledgeBaseID, "namespace": namespace, "knowledge_id": source.KnowledgeID, "knowledge_version_id": source.KnowledgeVersionID, "chunk_id": source.ChunkID, "extractor_id": source.ExtractorID}
+	queries := []string{
+		`MATCH (e:GraphEvidence {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id, namespace: $namespace, knowledge_id: $knowledge_id, chunk_id: $chunk_id})
 WHERE ($knowledge_version_id = '' OR coalesce(e.knowledge_version_id, '') = $knowledge_version_id)
   AND ($extractor_id = '' OR e.extractor_id = $extractor_id)
 DETACH DELETE e`,
-			`MATCH (i:DocumentEntityInstance {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id, namespace: $namespace, knowledge_id: $knowledge_id, chunk_id: $chunk_id})
+		`MATCH (i:DocumentEntityInstance {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id, namespace: $namespace, knowledge_id: $knowledge_id, chunk_id: $chunk_id})
 DETACH DELETE i`,
-			`MATCH (r:CanonicalRelation {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id, namespace: $namespace})
+		`MATCH (r:CanonicalRelation {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id, namespace: $namespace})
 WHERE NOT (r)-[:EVIDENCED_BY]->()
 DETACH DELETE r`,
-			`MATCH (e:CanonicalEntity {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id, namespace: $namespace})
+		`MATCH (e:CanonicalEntity {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id, namespace: $namespace})
 WHERE NOT (e)<-[:INSTANCE_OF]-()
+  AND NOT (e)<-[:CONNECTS_FROM]-()
+  AND NOT (e)<-[:CONNECTS_TO]-()
 DETACH DELETE e`,
+	}
+	for _, query := range queries {
+		if _, err := tx.Run(ctx, query, params); err != nil {
+			return fmt.Errorf("remove canonical source: %w", err)
 		}
-		for _, query := range queries {
-			if _, err := tx.Run(ctx, query, params); err != nil {
-				return nil, fmt.Errorf("remove canonical source: %w", err)
-			}
-		}
-		return nil, nil
-	})
-	return err
+	}
+	return nil
 }
 
 func (n *Neo4jRepository) RebuildCanonicalGraph(ctx context.Context, tenantID uint64, knowledgeBaseID, namespace string, records []types.GraphRebuildRecord, switchActive bool) (types.GraphRebuildResult, error) {
@@ -572,12 +608,23 @@ RETURN source, target, relation, collect(evidence) AS evidences`, map[string]int
 			if edge.ID == "" {
 				continue
 			}
+			relationWeight := edge.Weight
+			edge.Weight = 0
 			evidenceValue, _ := record.Get("evidences")
 			for _, item := range neo4jList(evidenceValue) {
 				evidenceNode, ok := neo4jNode(item)
 				if ok {
-					edge.Evidence = appendUniqueGraphEvidence(edge.Evidence, graphEvidenceFromNode(evidenceNode))
+					evidence := graphEvidenceFromNode(evidenceNode)
+					edge.Evidence = appendUniqueGraphEvidence(edge.Evidence, evidence)
+					if evidence.Weight > edge.Weight {
+						edge.Weight = evidence.Weight
+					}
 				}
+			}
+			// Evidence written before per-source weights were introduced still
+			// relies on the relation-level value.
+			if edge.Weight == 0 {
+				edge.Weight = relationWeight
 			}
 			if len(edge.Evidence) > 0 {
 				edges[edge.ID] = mergeCanonicalEdge(edges[edge.ID], edge)

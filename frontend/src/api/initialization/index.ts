@@ -55,6 +55,11 @@ export interface InitializationConfig {
     storageType?: 'cos' | 'minio';
     nodeExtract: {
         enabled: boolean,
+        model_id?: string,
+        ingestion_mode?: 'all' | 'signal',
+        max_entities?: number,
+        max_relations?: number,
+        min_confidence?: number,
         text: string,
         tags: string[],
         entity_types?: string[],
@@ -103,6 +108,11 @@ export interface KBModelConfigRequest {
     }
     nodeExtract: {
         enabled: boolean
+        model_id?: string
+        ingestion_mode?: 'all' | 'signal'
+        max_entities?: number
+        max_relations?: number
+        min_confidence?: number
         text: string
         tags: string[]
         entity_types?: string[]
@@ -476,18 +486,25 @@ export function testMultimodalFunction(testData: {
 export interface TextRelationExtractionRequest {
     text: string;
     tags: string[];
+    entity_types?: string[];
+    strict_schema?: boolean;
+    max_entities?: number;
+    max_relations?: number;
+    min_confidence?: number;
     model_id: string;
 }
 
 export interface Node {
     name: string;
     attributes: string[];
+    aliases?: string[];
 }
 
 export interface Relation {
     node1: string;
     node2: string;
     type: string;
+    confidence?: number;
 }
 
 export interface TextRelationExtractionResponse {

@@ -9,9 +9,9 @@ TBD - created by archiving change harden-graph-ingest-and-retrieval-gates. Updat
 
 当 `ExtractConfig.entity_types` 非空或 `strict_schema` 为 true 时，系统 MUST 在抽取 prompt 中注入实体类型白名单，并 MUST 解析模型输出以填充 `GraphNode.EntityType`。现网仅填充 Name/Attributes、不填充 EntityType 的解析行为 MUST 被修正，否则严格模式不可用。
 
-当 `Tags` 非空时，系统 MUST 丢弃不在白名单中的关系类型，无论 `strict_schema` 取值如何。当 `Tags` 为空且 `strict_schema` 为 false 时，系统 MUST NOT 仅因调用关系过滤而丢弃全部关系。试抽取路径 MUST 与正式路径使用同一过滤语义，且 MUST NOT 在 `Tags` 为空且非严格模式下因无条件调用关系过滤而清空全部关系。
+当 `Tags` 非空时，系统 MUST 丢弃不在白名单中的关系类型，无论 `strict_schema` 取值如何。当 `Tags` 为空且 `strict_schema` 为 false 时，系统 MUST NOT 仅因调用关系过滤而丢弃全部关系。试抽取路径 MUST 与正式路径使用同一过滤语义，且 MUST NOT 在 `Tags` 为空且非严格模式下因无条件调用关系过滤而清空全部关系。系统 MUST 在应用实体和关系数量上限之前执行 schema 过滤，避免无效模型输出挤占合法结果名额。
 
-知识库 `ExtractConfig` MUST 支持 `strict_schema`（默认 false）与 `entity_types`（字符串列表，默认空）。当 `strict_schema` 为 true 且 `entity_types` 非空时，系统 MUST 丢弃 `EntityType` 为空或不在白名单中的节点及其相关关系，且 MUST NOT 通过事后将空类型默认成 `"entity"` 来绕过该过滤。当 `strict_schema` 为 true 且（`Tags` 为空或 `entity_types` 为空）时，系统 MUST NOT 向图数据库写入该次抽取结果（试抽取则 MUST 返回无合法关系的结果）。schema 过滤后若不存在任何合法关系三元组，正式路径 MUST NOT 向图数据库写入该 chunk 的图数据。
+知识库 `ExtractConfig` MUST 支持 `strict_schema`（默认 false）与 `entity_types`（字符串列表，默认空）。当 `strict_schema` 为 true 且 `entity_types` 非空时，系统 MUST 丢弃 `EntityType` 为空或不在白名单中的节点及其相关关系，且 MUST NOT 通过事后将空类型默认成 `"entity"` 来绕过该过滤。当 `strict_schema` 为 true 且（`Tags` 为空或 `entity_types` 为空）时，试抽取 MUST 返回无合法关系的结果。schema 过滤后若不存在任何合法关系三元组，关闭人工审核的正式路径 MUST 以空结果原子替换该 chunk 的既有规范化图来源；开启人工审核时 MUST NOT 创建 staging，也 MUST NOT 改动图库。
 
 #### Scenario: Tags 非空时未知关系被拒绝（不依赖 strict）
 - **WHEN** `Tags` 仅含 `uses`，模型输出关系类型为 `related_to`（无论 `strict_schema` 真假）
@@ -33,17 +33,17 @@ TBD - created by archiving change harden-graph-ingest-and-retrieval-gates. Updat
 - **WHEN** `strict_schema` 为 true，`Tags` 含 `uses`，`entity_types` 含所需类型，模型输出合法三元组
 - **THEN** 该三元组 MUST 可被写入图库（试抽取 MUST 可返回）
 
-#### Scenario: 过滤后无合法三元组不写图
+#### Scenario: 过滤后无合法三元组收敛旧来源
 - **WHEN** 抽取完成且 schema 过滤后关系列表为空
-- **THEN** 正式路径 MUST NOT 将该结果写入图数据库
+- **THEN** 关闭人工审核时 MUST 清除该 chunk 的既有规范化图来源；开启人工审核时 MUST NOT 创建 staging 或改动图库
 
-#### Scenario: 严格模式且白名单不完整不写图
+#### Scenario: 严格模式且白名单不完整不产生新关系
 - **WHEN** `strict_schema` 为 true，且 `Tags` 为空或 `entity_types` 为空
-- **THEN** 正式路径 MUST NOT 向图数据库写入该次抽取结果
+- **THEN** 正式路径 MUST NOT 写入新的关系；关闭人工审核时 MAY 通过空替换清除该 chunk 的旧规范化来源
 
 ### Requirement: 既有入库门禁保持有效
 
-系统 MUST 继续仅在知识库启用图谱索引时对文档 chunk 执行图抽取，且 MUST 仅对通过关系迹象判定的文本类 chunk 入队抽取。本 capability 不要求重建该决策逻辑，但 MUST 以回归测试覆盖以下行为。
+系统 MUST 继续仅在知识库启用图谱索引时对文档 chunk 执行图抽取。知识库 MUST 支持 `all` 与 `signal` 两种入图范围：`all`（默认）对所有非空文本类 chunk 入队以优先保证召回率；`signal` 仅对通过关系迹象判定的文本类 chunk 入队以减少模型调用。系统 MUST 以回归测试覆盖以下行为。
 
 #### Scenario: 知识库未开图
 
@@ -51,11 +51,17 @@ TBD - created by archiving change harden-graph-ingest-and-retrieval-gates. Updat
 
 - **THEN** 文档后处理 MUST NOT 创建图抽取任务
 
-#### Scenario: chunk 无关系迹象
+#### Scenario: signal 模式下 chunk 无关系迹象
 
-- **WHEN** 知识库已开图，但某文本 chunk 未通过关系迹象判定
+- **WHEN** 知识库已开图且入图范围为 `signal`，但某文本 chunk 未通过关系迹象判定
 
 - **THEN** 系统 MUST NOT 为该 chunk 入队图抽取任务
+
+#### Scenario: all 模式覆盖非空文本
+
+- **WHEN** 知识库已开图且入图范围为空或为 `all`，某文本类 chunk 非空
+
+- **THEN** 系统 MUST 为该 chunk 入队图抽取任务
 
 ### Requirement: RAG 搜图自动门禁保持且可观测
 
@@ -85,7 +91,7 @@ TBD - created by archiving change harden-graph-ingest-and-retrieval-gates. Updat
 
 ### Requirement: 图谱抽取规则配置增强（不含搜图开关）
 
-知识库编辑中的图谱设置 MUST 在既有启用/tags/示例实体与关系配置之上，允许管理员配置 `strict_schema` 与 `entity_types`，并 MUST 展示入库抽取规则说明（含「Tags 为关系类型白名单」「entity_types 为实体类型白名单」「搜图由系统自动判断」）。UI MUST 提供加载软件测评预设的操作：profile `relations` → `tags`，`concepts` → `entity_types`；加载预设时 MAY 默认打开 `strict_schema`，且结果可再编辑。UI MUST NOT 提供「问答时是否搜索图库」的开关。示例 `nodes` MUST NOT 被当作实体类型白名单的唯一来源。
+知识库编辑中的图谱设置 MUST 在既有启用/tags/示例实体与关系配置之上，允许管理员配置专用抽取模型、`all | signal` 入图范围、实体/关系数量上限、最低关系置信度、`strict_schema` 与 `entity_types`，并 MUST 展示入库抽取规则说明（含「Tags 为关系类型白名单」「entity_types 为实体类型白名单」「搜图由系统自动判断」）。专用抽取模型为空时 MUST 回退到知识库摘要模型。UI MUST 提供加载软件测评预设的操作：profile `relations` → `tags`，`concepts` → `entity_types`；加载预设时 MAY 默认打开 `strict_schema`，且结果可再编辑。UI MUST NOT 提供「问答时是否搜索图库」的开关。示例 `nodes` MUST NOT 被当作实体类型白名单的唯一来源。
 
 #### Scenario: 配置严格 schema 与 entity_types 并保存
 
@@ -104,4 +110,3 @@ TBD - created by archiving change harden-graph-ingest-and-retrieval-gates. Updat
 - **WHEN** 管理员打开知识库图谱设置页
 
 - **THEN** 页面 MUST NOT 出现控制「检索时是否查询图数据库」的开关控件
-

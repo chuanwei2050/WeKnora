@@ -10,25 +10,30 @@ type ChunkContext struct {
 
 // PromptTemplateStructured represents the prompt template structured
 type PromptTemplateStructured struct {
-	Description  string      `json:"description"`
-	Tags         []string    `json:"tags"`
-	EntityTypes  []string    `json:"entity_types,omitempty"`
-	StrictSchema bool        `json:"strict_schema,omitempty"`
-	Examples     []GraphData `json:"examples"`
+	Description   string      `json:"description"`
+	Tags          []string    `json:"tags"`
+	EntityTypes   []string    `json:"entity_types,omitempty"`
+	StrictSchema  bool        `json:"strict_schema,omitempty"`
+	MaxEntities   int         `json:"max_entities,omitempty"`
+	MaxRelations  int         `json:"max_relations,omitempty"`
+	MinConfidence float64     `json:"min_confidence,omitempty"`
+	Examples      []GraphData `json:"examples"`
 }
 
 type GraphNode struct {
 	Name       string   `json:"name,omitempty"`
 	EntityType string   `json:"entity_type,omitempty"`
+	Aliases    []string `json:"aliases,omitempty"`
 	Chunks     []string `json:"chunks,omitempty"`
 	Attributes []string `json:"attributes,omitempty"`
 }
 
 // GraphRelation represents the relation of the graph
 type GraphRelation struct {
-	Node1 string `json:"node1,omitempty"`
-	Node2 string `json:"node2,omitempty"`
-	Type  string `json:"type,omitempty"`
+	Node1      string  `json:"node1,omitempty"`
+	Node2      string  `json:"node2,omitempty"`
+	Type       string  `json:"type,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"`
 }
 
 type GraphData struct {

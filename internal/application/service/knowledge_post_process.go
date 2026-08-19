@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -20,7 +21,13 @@ func ShouldEnqueueGraphExtract(kb *types.KnowledgeBase, chunkContent string) boo
 	if kb == nil || !kb.IsGraphEnabled() {
 		return false
 	}
-	return types.NeedsEntityRelation(chunkContent)
+	if strings.TrimSpace(chunkContent) == "" {
+		return false
+	}
+	if kb.ExtractConfig.IngestionMode.Normalize() == types.GraphIngestionSignal {
+		return types.NeedsEntityRelation(chunkContent)
+	}
+	return true
 }
 
 // KnowledgePostProcessService acts as an orchestrator for all post-processing tasks
@@ -133,12 +140,12 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 				continue
 			}
 			graphCandidates++
-			err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.SummaryModelID)
+			err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.GraphExtractionModelID())
 			if err != nil {
 				logger.Errorf(ctx, "[KnowledgePostProcess] Failed to create chunk extract task for %s: %v", chunk.ID, err)
 			}
 		}
-		logger.Infof(ctx, "[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d/%d relation-bearing text-like chunks", graphCandidates, len(textChunks))
+		logger.Infof(ctx, "[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d/%d eligible text-like chunks", graphCandidates, len(textChunks))
 	}
 
 	// 6. Spawn Wiki Ingest Task if wiki indexing is enabled in IndexingStrategy

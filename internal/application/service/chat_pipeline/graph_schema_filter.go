@@ -61,20 +61,21 @@ func ApplyGraphSchemaFilter(ctx context.Context, graph *types.GraphData, opts Sc
 	}
 
 	if len(opts.Tags) > 0 {
-		allowed := make(map[string]struct{}, len(opts.Tags))
+		allowed := make(map[string]string, len(opts.Tags))
 		for _, tag := range opts.Tags {
 			tag = strings.TrimSpace(tag)
 			if tag == "" {
 				continue
 			}
-			allowed[tag] = struct{}{}
+			allowed[strings.ToLower(tag)] = tag
 		}
 		kept := make([]*types.GraphRelation, 0, len(graph.Relation))
 		for _, relation := range graph.Relation {
 			if relation == nil {
 				continue
 			}
-			if _, ok := allowed[relation.Type]; ok {
+			if canonical, ok := allowed[strings.ToLower(strings.TrimSpace(relation.Type))]; ok {
+				relation.Type = canonical
 				kept = append(kept, relation)
 				continue
 			}
@@ -84,13 +85,13 @@ func ApplyGraphSchemaFilter(ctx context.Context, graph *types.GraphData, opts Sc
 	}
 
 	if opts.StrictSchema && len(opts.EntityTypes) > 0 {
-		allowedTypes := make(map[string]struct{}, len(opts.EntityTypes))
+		allowedTypes := make(map[string]string, len(opts.EntityTypes))
 		for _, entityType := range opts.EntityTypes {
 			entityType = strings.TrimSpace(entityType)
 			if entityType == "" {
 				continue
 			}
-			allowedTypes[entityType] = struct{}{}
+			allowedTypes[strings.ToLower(entityType)] = entityType
 		}
 		validNodes := make(map[string]struct{})
 		keptNodes := make([]*types.GraphNode, 0, len(graph.Node))
@@ -103,10 +104,12 @@ func ApplyGraphSchemaFilter(ctx context.Context, graph *types.GraphData, opts Sc
 				logger.Infof(ctx, "strict schema drop node %s: empty entity type", node.Name)
 				continue
 			}
-			if _, ok := allowedTypes[entityType]; !ok {
+			canonicalType, ok := allowedTypes[strings.ToLower(entityType)]
+			if !ok {
 				logger.Infof(ctx, "strict schema drop node %s: unknown entity type %s", node.Name, entityType)
 				continue
 			}
+			node.EntityType = canonicalType
 			keptNodes = append(keptNodes, node)
 			validNodes[node.Name] = struct{}{}
 		}

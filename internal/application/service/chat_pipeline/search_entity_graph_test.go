@@ -37,6 +37,10 @@ func (f *graphRepositoryFixture) UpsertCanonicalRecords(context.Context, uint64,
 	return nil
 }
 
+func (f *graphRepositoryFixture) ReplaceCanonicalSourceRecords(context.Context, uint64, string, string, types.GraphSource, []types.GraphRebuildRecord) error {
+	return nil
+}
+
 func (f *graphRepositoryFixture) RemoveCanonicalSource(context.Context, uint64, string, string, types.GraphSource) error {
 	return nil
 }

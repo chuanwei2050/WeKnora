@@ -476,14 +476,52 @@ func (c *ASRConfig) Scan(value interface{}) error {
 
 // ExtractConfig represents the extract configuration for a knowledge base
 type ExtractConfig struct {
-	Enabled             bool             `yaml:"enabled"       json:"enabled"`
-	Text                string           `yaml:"text"          json:"text,omitempty"`
-	Tags                []string         `yaml:"tags"          json:"tags,omitempty"`
-	EntityTypes         []string         `yaml:"entity_types"  json:"entity_types,omitempty"`
-	StrictSchema        bool             `yaml:"strict_schema" json:"strict_schema,omitempty"`
-	RequireTripleReview bool             `yaml:"require_triple_review" json:"require_triple_review,omitempty"`
-	Nodes               []*GraphNode     `yaml:"nodes"         json:"nodes,omitempty"`
-	Relations           []*GraphRelation `yaml:"relations"     json:"relations,omitempty"`
+	Enabled             bool               `yaml:"enabled"       json:"enabled"`
+	ModelID             string             `yaml:"model_id"      json:"model_id,omitempty"`
+	IngestionMode       GraphIngestionMode `yaml:"ingestion_mode" json:"ingestion_mode,omitempty"`
+	MaxEntities         int                `yaml:"max_entities"  json:"max_entities,omitempty"`
+	MaxRelations        int                `yaml:"max_relations" json:"max_relations,omitempty"`
+	MinConfidence       float64            `yaml:"min_confidence" json:"min_confidence,omitempty"`
+	Text                string             `yaml:"text"          json:"text,omitempty"`
+	Tags                []string           `yaml:"tags"          json:"tags,omitempty"`
+	EntityTypes         []string           `yaml:"entity_types"  json:"entity_types,omitempty"`
+	StrictSchema        bool               `yaml:"strict_schema" json:"strict_schema,omitempty"`
+	RequireTripleReview bool               `yaml:"require_triple_review" json:"require_triple_review,omitempty"`
+	Nodes               []*GraphNode       `yaml:"nodes"         json:"nodes,omitempty"`
+	Relations           []*GraphRelation   `yaml:"relations"     json:"relations,omitempty"`
+}
+
+// GraphIngestionMode controls the recall/cost trade-off before LLM extraction.
+type GraphIngestionMode string
+
+const (
+	GraphIngestionAll         GraphIngestionMode = "all"
+	GraphIngestionSignal      GraphIngestionMode = "signal"
+	DefaultGraphMaxEntities                      = 12
+	DefaultGraphMaxRelations                     = 15
+	DefaultGraphMinConfidence                    = 0.5
+	MaxGraphEntities                             = 100
+	MaxGraphRelations                            = 200
+)
+
+// Normalize defaults legacy empty values to the high-recall ingestion mode.
+func (m GraphIngestionMode) Normalize() GraphIngestionMode {
+	if m == GraphIngestionSignal {
+		return GraphIngestionSignal
+	}
+	return GraphIngestionAll
+}
+
+// GraphExtractionModelID returns the dedicated graph model when configured,
+// otherwise it preserves the historical summary-model fallback.
+func (kb *KnowledgeBase) GraphExtractionModelID() string {
+	if kb == nil {
+		return ""
+	}
+	if kb.ExtractConfig != nil && strings.TrimSpace(kb.ExtractConfig.ModelID) != "" {
+		return strings.TrimSpace(kb.ExtractConfig.ModelID)
+	}
+	return kb.SummaryModelID
 }
 
 // Value implements the driver.Valuer interface, used to convert ExtractConfig to database value

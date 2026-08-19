@@ -111,13 +111,7 @@ type KBModelConfigRequest struct {
 	} `json:"multimodal"`
 
 	// 知识图谱配置
-	NodeExtract struct {
-		Enabled   bool                  `json:"enabled"`
-		Text      string                `json:"text"`
-		Tags      []string              `json:"tags"`
-		Nodes     []types.GraphNode     `json:"nodes"`
-		Relations []types.GraphRelation `json:"relations"`
-	} `json:"nodeExtract"`
+	NodeExtract graphExtractConfigRequest `json:"nodeExtract"`
 
 	// 问题生成配置
 	QuestionGeneration struct {
@@ -179,25 +173,59 @@ type InitializationRequest struct {
 		Separators   []string `json:"separators" binding:"required,min=1"`
 	} `json:"documentSplitting" binding:"required"`
 
-	NodeExtract struct {
-		Enabled bool     `json:"enabled"`
-		Text    string   `json:"text"`
-		Tags    []string `json:"tags"`
-		Nodes   []struct {
-			Name       string   `json:"name"`
-			Attributes []string `json:"attributes"`
-		} `json:"nodes"`
-		Relations []struct {
-			Node1 string `json:"node1"`
-			Node2 string `json:"node2"`
-			Type  string `json:"type"`
-		} `json:"relations"`
-	} `json:"nodeExtract"`
+	NodeExtract graphExtractConfigRequest `json:"nodeExtract"`
 
 	QuestionGeneration struct {
 		Enabled       bool `json:"enabled"`
 		QuestionCount int  `json:"questionCount"`
 	} `json:"questionGeneration"`
+}
+
+type graphExtractConfigRequest struct {
+	Enabled             bool                     `json:"enabled"`
+	ModelID             string                   `json:"model_id"`
+	IngestionMode       types.GraphIngestionMode `json:"ingestion_mode"`
+	MaxEntities         int                      `json:"max_entities"`
+	MaxRelations        int                      `json:"max_relations"`
+	MinConfidence       float64                  `json:"min_confidence"`
+	Text                string                   `json:"text"`
+	Tags                []string                 `json:"tags"`
+	EntityTypes         []string                 `json:"entity_types"`
+	StrictSchema        bool                     `json:"strict_schema"`
+	RequireTripleReview bool                     `json:"require_triple_review"`
+	Nodes               []types.GraphNode        `json:"nodes"`
+	Relations           []types.GraphRelation    `json:"relations"`
+}
+
+func (r graphExtractConfigRequest) extractConfig() *types.ExtractConfig {
+	if !r.Enabled {
+		return &types.ExtractConfig{Enabled: false}
+	}
+	nodes := make([]*types.GraphNode, len(r.Nodes))
+	for i := range r.Nodes {
+		node := r.Nodes[i]
+		nodes[i] = &node
+	}
+	relations := make([]*types.GraphRelation, len(r.Relations))
+	for i := range r.Relations {
+		relation := r.Relations[i]
+		relations[i] = &relation
+	}
+	return &types.ExtractConfig{
+		Enabled:             true,
+		ModelID:             r.ModelID,
+		IngestionMode:       r.IngestionMode,
+		MaxEntities:         r.MaxEntities,
+		MaxRelations:        r.MaxRelations,
+		MinConfidence:       r.MinConfidence,
+		Text:                r.Text,
+		Tags:                append([]string(nil), r.Tags...),
+		EntityTypes:         append([]string(nil), r.EntityTypes...),
+		StrictSchema:        r.StrictSchema,
+		RequireTripleReview: r.RequireTripleReview,
+		Nodes:               nodes,
+		Relations:           relations,
+	}
 }
 
 // UpdateKBConfig godoc
@@ -305,27 +333,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 
 	// 更新知识图谱配置
-	if req.NodeExtract.Enabled {
-		// 转换 Nodes 和 Relations 为指针类型
-		nodes := make([]*types.GraphNode, len(req.NodeExtract.Nodes))
-		for i := range req.NodeExtract.Nodes {
-			nodes[i] = &req.NodeExtract.Nodes[i]
-		}
-		relations := make([]*types.GraphRelation, len(req.NodeExtract.Relations))
-		for i := range req.NodeExtract.Relations {
-			relations[i] = &req.NodeExtract.Relations[i]
-		}
-
-		kb.ExtractConfig = &types.ExtractConfig{
-			Enabled:   req.NodeExtract.Enabled,
-			Text:      req.NodeExtract.Text,
-			Tags:      req.NodeExtract.Tags,
-			Nodes:     nodes,
-			Relations: relations,
-		}
-	} else {
-		kb.ExtractConfig = &types.ExtractConfig{Enabled: false}
-	}
+	kb.ExtractConfig = req.NodeExtract.extractConfig()
 	if err := validateExtractConfig(kb.ExtractConfig); err != nil {
 		logger.Error(ctx, "Invalid extract configuration", err)
 		c.Error(err)
@@ -550,15 +558,7 @@ func validateNodeExtractConfig(ctx context.Context, req *InitializationRequest) 
 		logger.Error(ctx, "Node Extractor configuration incomplete")
 		return errors.NewBadRequestError("请正确配置环境变量NEO4J_ENABLE")
 	}
-	if req.NodeExtract.Text == "" || len(req.NodeExtract.Tags) == 0 {
-		logger.Error(ctx, "Node Extractor configuration incomplete")
-		return errors.NewBadRequestError("Node Extractor配置不完整")
-	}
-	if len(req.NodeExtract.Nodes) == 0 || len(req.NodeExtract.Relations) == 0 {
-		logger.Error(ctx, "Node Extractor configuration incomplete")
-		return errors.NewBadRequestError("请先提取实体和关系")
-	}
-	return nil
+	return validateExtractConfig(req.NodeExtract.extractConfig())
 }
 
 type modelDescriptor struct {
@@ -736,26 +736,7 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 	}
 
 	if req.NodeExtract.Enabled {
-		kb.ExtractConfig = &types.ExtractConfig{
-			Text:      req.NodeExtract.Text,
-			Tags:      req.NodeExtract.Tags,
-			Nodes:     make([]*types.GraphNode, 0),
-			Relations: make([]*types.GraphRelation, 0),
-		}
-		for _, rnode := range req.NodeExtract.Nodes {
-			node := &types.GraphNode{
-				Name:       rnode.Name,
-				Attributes: rnode.Attributes,
-			}
-			kb.ExtractConfig.Nodes = append(kb.ExtractConfig.Nodes, node)
-		}
-		for _, relation := range req.NodeExtract.Relations {
-			kb.ExtractConfig.Relations = append(kb.ExtractConfig.Relations, &types.GraphRelation{
-				Node1: relation.Node1,
-				Node2: relation.Node2,
-				Type:  relation.Type,
-			})
-		}
+		kb.ExtractConfig = req.NodeExtract.extractConfig()
 	}
 }
 
@@ -1366,11 +1347,19 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 
 	if kb.ExtractConfig != nil {
 		config["nodeExtract"] = map[string]interface{}{
-			"enabled":   kb.ExtractConfig.Enabled,
-			"text":      kb.ExtractConfig.Text,
-			"tags":      kb.ExtractConfig.Tags,
-			"nodes":     kb.ExtractConfig.Nodes,
-			"relations": kb.ExtractConfig.Relations,
+			"enabled":               kb.ExtractConfig.Enabled,
+			"model_id":              kb.ExtractConfig.ModelID,
+			"ingestion_mode":        kb.ExtractConfig.IngestionMode.Normalize(),
+			"max_entities":          kb.ExtractConfig.MaxEntities,
+			"max_relations":         kb.ExtractConfig.MaxRelations,
+			"min_confidence":        kb.ExtractConfig.MinConfidence,
+			"text":                  kb.ExtractConfig.Text,
+			"tags":                  kb.ExtractConfig.Tags,
+			"entity_types":          kb.ExtractConfig.EntityTypes,
+			"strict_schema":         kb.ExtractConfig.StrictSchema,
+			"require_triple_review": kb.ExtractConfig.RequireTripleReview,
+			"nodes":                 kb.ExtractConfig.Nodes,
+			"relations":             kb.ExtractConfig.Relations,
 		}
 	} else {
 		config["nodeExtract"] = map[string]interface{}{
@@ -2118,9 +2107,14 @@ func (h *InitializationHandler) testMultimodalWithDocReader(
 
 // TextRelationExtractionRequest 文本关系提取请求结构
 type TextRelationExtractionRequest struct {
-	Text    string   `json:"text"     binding:"required"`
-	Tags    []string `json:"tags"     binding:"required"`
-	ModelID string   `json:"model_id" binding:"required"`
+	Text          string   `json:"text"           binding:"required"`
+	Tags          []string `json:"tags"`
+	EntityTypes   []string `json:"entity_types"`
+	StrictSchema  bool     `json:"strict_schema"`
+	MaxEntities   int      `json:"max_entities"`
+	MaxRelations  int      `json:"max_relations"`
+	MinConfidence float64  `json:"min_confidence"`
+	ModelID       string   `json:"model_id"       binding:"required"`
 }
 
 // TextRelationExtractionResponse 文本关系提取响应结构
@@ -2162,11 +2156,20 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 		return
 	}
 
-	// 验证标签
-	if len(req.Tags) == 0 {
-		c.Error(errors.NewBadRequestError("至少需要选择一个关系标签"))
+	policy := &types.ExtractConfig{
+		Enabled:       true,
+		IngestionMode: types.GraphIngestionAll,
+		MaxEntities:   req.MaxEntities,
+		MaxRelations:  req.MaxRelations,
+		MinConfidence: req.MinConfidence,
+	}
+	if err := validateGraphExtractionPolicy(policy); err != nil {
+		c.Error(err)
 		return
 	}
+	req.MaxEntities = policy.MaxEntities
+	req.MaxRelations = policy.MaxRelations
+	req.MinConfidence = policy.MinConfidence
 
 	// 根据模型ID获取chat模型
 	chatModel, err := h.modelService.GetChatModel(ctx, req.ModelID)
@@ -2177,7 +2180,7 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 	}
 
 	// 调用模型服务进行文本关系提取
-	result, err := h.extractRelationsFromText(ctx, req.Text, req.Tags, chatModel)
+	result, err := h.extractRelationsFromText(ctx, req, chatModel)
 	if err != nil {
 		logger.Error(ctx, "文本关系提取失败", err)
 		c.Error(errors.NewInternalServerError("文本关系提取失败: " + err.Error()))
@@ -2193,18 +2196,22 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 // extractRelationsFromText 从文本中提取关系
 func (h *InitializationHandler) extractRelationsFromText(
 	ctx context.Context,
-	text string,
-	tags []string,
+	req TextRelationExtractionRequest,
 	chatModel chat.Chat,
 ) (*TextRelationExtractionResponse, error) {
 	template := &types.PromptTemplateStructured{
-		Description: h.config.ExtractManager.ExtractGraph.Description,
-		Tags:        tags,
-		Examples:    h.config.ExtractManager.ExtractGraph.Examples,
+		Description:   h.config.ExtractManager.ExtractGraph.Description,
+		Tags:          req.Tags,
+		EntityTypes:   req.EntityTypes,
+		StrictSchema:  req.StrictSchema,
+		MaxEntities:   req.MaxEntities,
+		MaxRelations:  req.MaxRelations,
+		MinConfidence: req.MinConfidence,
+		Examples:      h.config.ExtractManager.ExtractGraph.Examples,
 	}
 
 	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, text)
+	graph, err := extractor.Extract(ctx, req.Text)
 	if err != nil {
 		logger.Error(ctx, "文本关系提取失败", err)
 		return nil, err
