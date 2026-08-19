@@ -36,6 +36,12 @@ func TestValidateManagedUsername(t *testing.T) {
 	require.Error(t, validateManagedUsername("-member"))
 }
 
+func TestValidateManagedNickname(t *testing.T) {
+	require.NoError(t, validateManagedNickname("管理员"))
+	require.Error(t, validateManagedNickname(""))
+	require.Error(t, validateManagedNickname(string(make([]rune, 101))))
+}
+
 func TestValidateManagedRoleChange(t *testing.T) {
 	require.NoError(t, validateManagedRoleChange(types.UserRoleMember, types.UserRoleTenantAdmin))
 	require.NoError(t, validateManagedRoleChange(types.UserRoleTenantAdmin, types.UserRoleTenantAdmin))

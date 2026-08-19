@@ -59,3 +59,34 @@ func TestHasUserDocumentActivitySkipsUnavailableActivityTables(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, active)
 }
+
+func TestListUsersByTenantSearchesNicknameAndEmail(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.User{}))
+
+	repo := NewUserRepository(db)
+	user := &types.User{
+		ID:           "member-a",
+		Username:     "tenant_member_a",
+		Nickname:     "展示昵称",
+		Email:        "member-a@example.com",
+		PasswordHash: "hash",
+		TenantID:     10476,
+		IsActive:     true,
+		Role:         types.UserRoleMember,
+	}
+	require.NoError(t, repo.CreateUser(context.Background(), user))
+
+	users, total, err := repo.ListUsersByTenant(context.Background(), 10476, "展示", 0, 20)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, users, 1)
+	require.Equal(t, user.ID, users[0].ID)
+
+	users, total, err = repo.ListUsersByTenant(context.Background(), 10476, "member-a@example.com", 0, 20)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, users, 1)
+	require.Equal(t, user.ID, users[0].ID)
+}

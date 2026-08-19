@@ -2,9 +2,7 @@
   <section class="admin-page">
     <header class="page-header">
       <div>
-        <p class="eyebrow">{{ isPlatformContext ? 'PLATFORM ADMINISTRATION' : 'TENANT ADMINISTRATION' }}</p>
         <h1>用户管理</h1>
-        <p>{{ tenantLabel }} · 创建账号、编辑访问权限和控制账号状态。</p>
       </div>
       <div class="header-actions">
         <t-button v-if="isPlatformContext" variant="outline" @click="router.push('/platform/admin/tenants')">返回租户列表</t-button>
@@ -13,7 +11,7 @@
     </header>
 
     <div class="toolbar">
-      <t-input v-model="keyword" clearable placeholder="搜索用户名" @enter="search" @clear="search" />
+      <t-input v-model="keyword" clearable placeholder="搜索昵称或用户名" @enter="search" @clear="search" />
       <t-button variant="outline" @click="search">查询</t-button>
     </div>
 
@@ -23,20 +21,21 @@
       <div v-else-if="users.length === 0" class="state">暂无用户</div>
       <div v-else class="table-scroll">
         <table>
-          <thead><tr><th>用户</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+          <thead><tr><th>昵称</th><th>用户名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="user in users" :key="user.id">
-              <td><strong>{{ user.username }}</strong></td>
+              <td><strong>{{ user.nickname || user.username }}</strong></td>
+              <td>{{ user.username }}</td>
               <td><t-tag variant="light">{{ roleLabel(user.role) }}</t-tag></td>
               <td><t-tag :theme="user.is_active ? 'success' : 'default'" variant="light">{{ user.is_active ? '已启用' : '已禁用' }}</t-tag></td>
               <td>{{ formatDate(user.created_at) }}</td>
-              <td class="actions">
+              <td><div class="actions">
                 <t-link :disabled="user.role === 'platform_admin'" theme="primary" @click="openEdit(user)">编辑</t-link>
                 <t-link :disabled="user.role === 'platform_admin' || user.id === authStore.currentUserId" :theme="user.is_active ? 'danger' : 'success'" @click="toggleUser(user)">{{ user.is_active ? '禁用' : '启用' }}</t-link>
                 <t-tooltip :content="user.can_delete ? '删除用户' : '管理员、当前用户或已有文档操作记录的用户不能删除'">
                   <t-link :disabled="!user.can_delete" theme="danger" @click="removeUser(user)">删除</t-link>
                 </t-tooltip>
-              </td>
+              </div></td>
             </tr>
           </tbody>
         </table>
@@ -48,11 +47,12 @@
 
     <t-dialog v-model:visible="createVisible" header="新增用户" :confirm-btn="{ content: '创建账号', loading: saving }" @confirm="saveUser">
       <t-form label-align="top">
-        <t-form-item label="用户名" required><t-input v-model="createForm.username" class="form-control" maxlength="100" autocomplete="off" /></t-form-item>
+        <t-form-item label="昵称" required><t-input v-model="createForm.nickname" class="form-control" maxlength="100" placeholder="用于界面展示" autocomplete="off" /></t-form-item>
+        <t-form-item label="用户名" required><t-input v-model="createForm.username" class="form-control" maxlength="100" placeholder="用于登录" autocomplete="off" /></t-form-item>
         <t-form-item label="初始密码" required>
           <div class="field-control">
             <t-input v-model="createForm.password" class="form-control" type="password" maxlength="72" autocomplete="new-password" />
-            <div class="field-hint">8–72 位，须包含英文字母和数字，可使用英文特殊字符，不能包含空白或中文</div>
+            <div class="field-hint">8–72 位，仅支持字母、数字、特殊字符</div>
           </div>
         </t-form-item>
         <t-form-item label="角色" required>
@@ -78,11 +78,12 @@
 
     <t-dialog v-model:visible="editVisible" header="编辑用户" :confirm-btn="{ content: '保存', loading: saving }" @confirm="saveEdit">
       <t-form label-align="top">
-        <t-form-item label="用户名" required><t-input v-model="editForm.username" class="form-control" maxlength="100" autocomplete="off" /></t-form-item>
+        <t-form-item label="昵称" required><t-input v-model="editForm.nickname" class="form-control" maxlength="100" placeholder="用于界面展示" autocomplete="off" /></t-form-item>
+        <t-form-item label="用户名" required><t-input v-model="editForm.username" class="form-control" maxlength="100" placeholder="用于登录" autocomplete="off" /></t-form-item>
         <t-form-item label="重置密码">
           <div class="field-control">
             <t-input v-model="editForm.password" class="form-control" type="password" maxlength="72" placeholder="留空表示不修改密码" autocomplete="new-password" />
-            <div class="field-hint">8–72 位，须包含英文字母和数字，可使用英文特殊字符，不能包含空白或中文</div>
+            <div class="field-hint">8–72 位，仅支持字母、数字、特殊字符</div>
           </div>
         </t-form-item>
         <t-form-item label="角色" required>
@@ -134,8 +135,8 @@ const editVisible = ref(false)
 const editTarget = ref<AdminUser | null>(null)
 const knowledgeBases = ref<AdminKnowledgeBase[]>([])
 const knowledgeBasesLoaded = ref(false)
-const createForm = reactive<{ username: string; password: string; role: TenantUserRole; knowledgeBaseAccessMode: KnowledgeBaseAccessMode; knowledgeBaseIds: string[] }>({ username: '', password: '', role: 'member', knowledgeBaseAccessMode: 'all', knowledgeBaseIds: [] })
-const editForm = reactive<{ username: string; password: string; role: TenantUserRole; knowledgeBaseAccessMode: KnowledgeBaseAccessMode; knowledgeBaseIds: string[] }>({ username: '', password: '', role: 'member', knowledgeBaseAccessMode: 'all', knowledgeBaseIds: [] })
+const createForm = reactive<{ username: string; nickname: string; password: string; role: TenantUserRole; knowledgeBaseAccessMode: KnowledgeBaseAccessMode; knowledgeBaseIds: string[] }>({ username: '', nickname: '', password: '', role: 'member', knowledgeBaseAccessMode: 'all', knowledgeBaseIds: [] })
+const editForm = reactive<{ username: string; nickname: string; password: string; role: TenantUserRole; knowledgeBaseAccessMode: KnowledgeBaseAccessMode; knowledgeBaseIds: string[] }>({ username: '', nickname: '', password: '', role: 'member', knowledgeBaseAccessMode: 'all', knowledgeBaseIds: [] })
 
 const tenantId = computed(() => {
   const queryTenant = Number(route.query.tenant_id)
@@ -172,7 +173,7 @@ async function loadKnowledgeBaseOptions() {
 }
 
 function openCreate() {
-  createForm.username = ''; createForm.password = ''; createForm.role = 'member'; createForm.knowledgeBaseAccessMode = 'all'; createForm.knowledgeBaseIds = []
+  createForm.username = ''; createForm.nickname = ''; createForm.password = ''; createForm.role = 'member'; createForm.knowledgeBaseAccessMode = 'all'; createForm.knowledgeBaseIds = []
   createVisible.value = true
 }
 
@@ -192,7 +193,7 @@ function usernameError(username: string): string | null {
 }
 
 async function saveUser() {
-  if (!tenantId.value || !createForm.username.trim()) { MessagePlugin.warning('请填写完整信息'); return }
+  if (!tenantId.value || !createForm.username.trim() || !createForm.nickname.trim()) { MessagePlugin.warning('请填写完整信息'); return }
   const invalidUsername = usernameError(createForm.username)
   if (invalidUsername) { MessagePlugin.warning(invalidUsername); return }
   const invalidPassword = passwordError(createForm.password)
@@ -200,7 +201,7 @@ async function saveUser() {
   saving.value = true
   try {
     await createTenantUser(tenantId.value, {
-      username: createForm.username.trim(), password: createForm.password, role: createForm.role,
+      username: createForm.username.trim(), nickname: createForm.nickname.trim(), password: createForm.password, role: createForm.role,
       knowledge_base_access_mode: createForm.role === 'member' ? createForm.knowledgeBaseAccessMode : 'all',
       knowledge_base_ids: createForm.role === 'member' && createForm.knowledgeBaseAccessMode === 'selected' ? [...createForm.knowledgeBaseIds] : [],
     })
@@ -215,6 +216,7 @@ async function openEdit(user: AdminUser) {
   if (!tenantId.value || user.role === 'platform_admin') return
   editTarget.value = user
   editForm.username = user.username
+  editForm.nickname = user.nickname || user.username
   editForm.password = ''
   editForm.role = user.role
   editForm.knowledgeBaseAccessMode = user.role === 'member' ? user.knowledge_base_access_mode : 'all'
@@ -224,7 +226,7 @@ async function openEdit(user: AdminUser) {
 }
 
 async function saveEdit() {
-  if (!tenantId.value || !editTarget.value || !editForm.username.trim()) { MessagePlugin.warning('请输入用户名'); return }
+  if (!tenantId.value || !editTarget.value || !editForm.username.trim() || !editForm.nickname.trim()) { MessagePlugin.warning('请输入用户名和昵称'); return }
   const invalidUsername = usernameError(editForm.username)
   if (invalidUsername) { MessagePlugin.warning(invalidUsername); return }
   if (editForm.password) {
@@ -232,11 +234,18 @@ async function saveEdit() {
     if (invalidPassword) { MessagePlugin.warning(invalidPassword); return }
   }
   const input: TenantUserUpdateInput = editForm.knowledgeBaseAccessMode === 'all'
-    ? { username: editForm.username.trim(), password: editForm.password, role: editForm.role, knowledge_base_access_mode: 'all', knowledge_base_ids: [] }
-    : { username: editForm.username.trim(), password: editForm.password, role: editForm.role, knowledge_base_access_mode: 'selected', knowledge_base_ids: [...editForm.knowledgeBaseIds] }
+    ? { username: editForm.username.trim(), nickname: editForm.nickname.trim(), password: editForm.password, role: editForm.role, knowledge_base_access_mode: 'all', knowledge_base_ids: [] }
+    : { username: editForm.username.trim(), nickname: editForm.nickname.trim(), password: editForm.password, role: editForm.role, knowledge_base_access_mode: 'selected', knowledge_base_ids: [...editForm.knowledgeBaseIds] }
   saving.value = true
   try {
-    await updateTenantUser(tenantId.value, editTarget.value.id, input)
+    const updatedUser = await updateTenantUser(tenantId.value, editTarget.value.id, input)
+    if (updatedUser.id === authStore.currentUserId && authStore.user) {
+      authStore.setUser({
+        ...authStore.user,
+        nickname: updatedUser.nickname,
+        username: updatedUser.username,
+      })
+    }
     MessagePlugin.success('用户已更新')
     editVisible.value = false
     await loadUsers()
@@ -280,7 +289,7 @@ onMounted(loadUsers)
 .toolbar { display: flex; gap: 12px; width: min(520px, 100%); margin-bottom: 18px; }
 .table-card { background: #fff; border: 1px solid #e1e6ef; border-radius: 8px; overflow: hidden; }
 .table-scroll { overflow-x: auto; }
-table { width: 100%; min-width: 800px; border-collapse: collapse; th, td { padding: 16px 18px; border-bottom: 1px solid #edf0f5; text-align: left; } th { background: #f8fafd; color: #596780; font-size: 13px; } td { font-size: 14px; } strong { display: block; } }
+table { width: 100%; min-width: 900px; border-collapse: collapse; th, td { padding: 16px 18px; border-bottom: 1px solid #edf0f5; text-align: left; } th { background: #f8fafd; color: #596780; font-size: 13px; } td { font-size: 14px; } strong { display: block; } }
 .actions { display: flex; gap: 16px; white-space: nowrap; }
 .state { padding: 64px; text-align: center; color: #7b879b; }
 .pagination { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; color: #7b879b; }

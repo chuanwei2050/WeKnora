@@ -17,6 +17,7 @@ export interface LoginResponse {
   user?: {
     id: string
     username: string
+    nickname: string
     email: string
     avatar?: string
     tenant_id: number
@@ -84,6 +85,7 @@ export interface RegisterResponse {
 export interface UserInfo {
   id: string
   username: string
+  nickname: string
   email: string
   avatar?: string
   tenant_id: string

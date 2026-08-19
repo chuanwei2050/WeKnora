@@ -37,6 +37,7 @@ const syncOIDCUserContext = async () => {
   authStore.setUser({
     id: user.id || '',
     username: user.username || '',
+    nickname: user.nickname || user.username || '',
     email: user.email || '',
     avatar: user.avatar,
     tenant_id: String(user.tenant_id || tenant.id || ''),

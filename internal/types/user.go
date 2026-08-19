@@ -30,6 +30,7 @@ func IsKnowledgeBaseAccessMode(mode KnowledgeBaseAccessMode) bool {
 
 type CreateTenantUserRequest struct {
 	Username                string                  `json:"username" binding:"required,min=2,max=100"`
+	Nickname                string                  `json:"nickname" binding:"omitempty,max=100"`
 	Password                string                  `json:"password" binding:"required,min=8,max=72"`
 	Role                    UserRole                `json:"role" binding:"required"`
 	KnowledgeBaseAccessMode KnowledgeBaseAccessMode `json:"knowledge_base_access_mode"`
@@ -42,6 +43,7 @@ type ResetTenantUserPasswordRequest struct {
 
 type UpdateTenantUserRequest struct {
 	Username                string                  `json:"username" binding:"required,min=2,max=100"`
+	Nickname                string                  `json:"nickname" binding:"omitempty,max=100"`
 	Password                string                  `json:"password" binding:"omitempty,min=8,max=72"`
 	Role                    UserRole                `json:"role" binding:"required"`
 	KnowledgeBaseAccessMode KnowledgeBaseAccessMode `json:"knowledge_base_access_mode" binding:"required"`
@@ -62,6 +64,8 @@ type User struct {
 	ID string `json:"id"         gorm:"type:varchar(36);primaryKey"`
 	// Username of the user
 	Username string `json:"username"   gorm:"type:varchar(100);uniqueIndex;not null"`
+	// Nickname displayed in the user interface
+	Nickname string `json:"nickname" gorm:"type:varchar(100);not null;default:''"`
 	// Email address of the user
 	Email string `json:"email"      gorm:"type:varchar(255);uniqueIndex;not null"`
 	// Hashed password of the user
@@ -245,6 +249,7 @@ type RegisterResponse struct {
 type UserInfo struct {
 	ID                      string                  `json:"id"`
 	Username                string                  `json:"username"`
+	Nickname                string                  `json:"nickname"`
 	Email                   string                  `json:"email"`
 	Avatar                  string                  `json:"avatar"`
 	TenantID                uint64                  `json:"tenant_id"`
@@ -264,6 +269,7 @@ func (u *User) ToUserInfo() *UserInfo {
 	return &UserInfo{
 		ID:                      u.ID,
 		Username:                u.Username,
+		Nickname:                u.Nickname,
 		Email:                   u.Email,
 		Avatar:                  u.Avatar,
 		TenantID:                u.TenantID,

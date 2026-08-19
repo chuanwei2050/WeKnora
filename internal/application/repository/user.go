@@ -28,6 +28,9 @@ func NewUserRepository(db *gorm.DB) interfaces.UserRepository {
 
 // CreateUser creates a user
 func (r *userRepository) CreateUser(ctx context.Context, user *types.User) error {
+	if strings.TrimSpace(user.Nickname) == "" {
+		user.Nickname = user.Username
+	}
 	if !types.IsKnowledgeBaseAccessMode(user.KnowledgeBaseAccessMode) {
 		user.KnowledgeBaseAccessMode = types.KnowledgeBaseAccessAll
 	}
@@ -158,7 +161,7 @@ func (r *userRepository) ListUsersByTenant(ctx context.Context, tenantID uint64,
 	dbQuery := r.db.WithContext(ctx).Model(&types.User{}).Where("tenant_id = ?", tenantID)
 	if keyword := strings.TrimSpace(query); keyword != "" {
 		pattern := "%" + strings.ToLower(keyword) + "%"
-		dbQuery = dbQuery.Where("LOWER(username) LIKE ? OR LOWER(email) LIKE ?", pattern, pattern)
+		dbQuery = dbQuery.Where("LOWER(nickname) LIKE ? OR LOWER(username) LIKE ? OR LOWER(email) LIKE ?", pattern, pattern, pattern)
 	}
 	var total int64
 	if err := dbQuery.Count(&total).Error; err != nil {

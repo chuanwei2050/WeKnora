@@ -21,6 +21,7 @@ export interface AdminTenant {
 export interface AdminUser {
   id: string
   username: string
+  nickname: string
   email: string
   tenant_id: number
   role: TenantUserRole | 'platform_admin'
@@ -55,6 +56,7 @@ export interface TenantInput {
 
 export interface TenantUserInput {
   username: string
+  nickname: string
   password: string
   role: TenantUserRole
   knowledge_base_access_mode: KnowledgeBaseAccessMode
@@ -63,6 +65,7 @@ export interface TenantUserInput {
 
 interface TenantUserUpdateBase {
   username: string
+  nickname: string
   password: string
   role: TenantUserRole
 }

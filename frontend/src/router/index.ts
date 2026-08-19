@@ -165,6 +165,7 @@ function persistLoginResponse(authStore: ReturnType<typeof useAuthStore>, respon
     authStore.setUser({
       id: response.user.id || '',
       username: response.user.username || '',
+      nickname: response.user.nickname || response.user.username || '',
       email: response.user.email || '',
       avatar: response.user.avatar,
       tenant_id: String(response.tenant.id) || '',

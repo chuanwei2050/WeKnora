@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -622,6 +623,13 @@ func (s *userService) CreateTenantUser(ctx context.Context, actor *types.User, t
 	if err := validateManagedUsername(username); err != nil {
 		return nil, err
 	}
+	nickname := strings.TrimSpace(req.Nickname)
+	if nickname == "" {
+		nickname = username
+	}
+	if err := validateManagedNickname(nickname); err != nil {
+		return nil, err
+	}
 	if existing, err := s.userRepo.GetUserByUsername(ctx, username); err == nil && existing != nil {
 		return nil, werrors.NewConflictError("Username already exists")
 	} else if err != nil && !isUserLookupNotFound(err) {
@@ -647,7 +655,7 @@ func (s *userService) CreateTenantUser(ctx context.Context, actor *types.User, t
 	now := time.Now()
 	userID := uuid.NewString()
 	user := &types.User{
-		ID: userID, Username: username, Email: userID + "@users.weknora.invalid", PasswordHash: string(hash),
+		ID: userID, Username: username, Nickname: nickname, Email: userID + "@users.weknora.invalid", PasswordHash: string(hash),
 		TenantID: tenantID, IsActive: true, Role: req.Role, KnowledgeBaseAccessMode: mode,
 		KnowledgeBaseIDs: ids, CreatedAt: now, UpdatedAt: now,
 	}
@@ -688,6 +696,14 @@ func validateManagedPassword(password string) error {
 func validateManagedUsername(username string) error {
 	if !loginUsernamePattern.MatchString(strings.TrimSpace(username)) {
 		return werrors.NewValidationError("Username must be 2-100 characters and contain only letters, numbers, dots, underscores or hyphens")
+	}
+	return nil
+}
+
+func validateManagedNickname(nickname string) error {
+	length := utf8.RuneCountInString(nickname)
+	if length < 1 || length > 100 {
+		return werrors.NewValidationError("Nickname must be 1 to 100 characters")
 	}
 	return nil
 }
@@ -756,6 +772,13 @@ func (s *userService) UpdateTenantUser(ctx context.Context, actor *types.User, t
 	if err := validateManagedUsername(username); err != nil {
 		return nil, err
 	}
+	nickname := strings.TrimSpace(req.Nickname)
+	if nickname == "" {
+		nickname = username
+	}
+	if err := validateManagedNickname(nickname); err != nil {
+		return nil, err
+	}
 	if err := validateManagedPassword(req.Password); err != nil {
 		return nil, err
 	}
@@ -785,6 +808,7 @@ func (s *userService) UpdateTenantUser(ctx context.Context, actor *types.User, t
 	}
 
 	user.Username = username
+	user.Nickname = nickname
 	user.Role = req.Role
 	user.CanAccessAllTenants = false
 	user.KnowledgeBaseAccessMode = mode

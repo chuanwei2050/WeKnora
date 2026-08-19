@@ -8,8 +8,8 @@
       </div>
       <template v-if="!uiStore.sidebarCollapsed">
         <div class="user-info">
-          <div class="user-name">{{ userName }}</div>
-          <div class="user-email">{{ userEmail }}</div>
+          <div class="user-name">{{ userNickname }}</div>
+          <div class="user-username">{{ username }}</div>
         </div>
         <t-icon :name="menuVisible ? 'chevron-up' : 'chevron-down'" class="dropdown-icon" />
       </template>
@@ -41,10 +41,11 @@
     <t-dialog v-model:visible="profileVisible" header="个人信息" :footer="false" width="420px">
       <div class="profile-card">
         <div class="profile-avatar">{{ userInitial }}</div>
-        <div class="profile-name">{{ userName }}</div>
+        <div class="profile-name">{{ userNickname }}</div>
         <div class="profile-role">{{ roleLabel }}</div>
         <dl class="profile-fields">
-          <div><dt>邮箱</dt><dd>{{ userEmail || '未设置' }}</dd></div>
+          <div><dt>昵称</dt><dd>{{ userNickname }}</dd></div>
+          <div><dt>用户名</dt><dd>{{ username }}</dd></div>
           <div><dt>所属租户</dt><dd>{{ authStore.workspaceMode === 'platform' ? '平台级账号' : authStore.selectedTenantName || authStore.tenant?.name || '未分配' }}</dd></div>
         </dl>
       </div>
@@ -66,7 +67,7 @@ import { useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { changePassword, logout as logoutApi } from '@/api/auth'
+import { changePassword, getCurrentUser, logout as logoutApi } from '@/api/auth'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -82,8 +83,8 @@ const passwordVisible = ref(false)
 const passwordSaving = ref(false)
 const passwordForm = ref({ current: '', next: '', confirm: '' })
 
-const userName = computed(() => authStore.user?.username || t('common.defaultUser'))
-const userEmail = computed(() => authStore.user?.email || '')
+const username = computed(() => authStore.user?.username || t('common.defaultUser'))
+const userNickname = computed(() => authStore.user?.nickname || username.value)
 const userAvatar = computed(() => authStore.user?.avatar || '')
 const roleLabel = computed(() => {
   if (authStore.user?.role === 'platform_admin') return '平台管理员'
@@ -91,10 +92,22 @@ const roleLabel = computed(() => {
   return '普通用户'
 })
 
-// 用户名首字母（用于无头像时显示）
+// 昵称首字符（用于无头像时显示）
 const userInitial = computed(() => {
-  return userName.value.charAt(0).toUpperCase()
+  return userNickname.value.charAt(0).toUpperCase()
 })
+
+const refreshUserIdentity = async () => {
+  if (!authStore.user) return
+  const response = await getCurrentUser()
+  if (!response.success || !response.data?.user) return
+  const currentUser = response.data.user
+  authStore.setUser({
+    ...authStore.user,
+    nickname: currentUser.nickname || currentUser.username,
+    username: currentUser.username,
+  })
+}
 
 // 切换菜单显示
 const toggleMenu = () => {
@@ -131,6 +144,7 @@ const handleClickOutside = (e: MouseEvent) => {
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  void refreshUserIdentity()
 })
 
 const handleSettings = () => {
@@ -266,7 +280,7 @@ onUnmounted(() => {
     text-overflow: ellipsis;
   }
 
-  .user-email {
+  .user-username {
     font-size: 12px;
     color: var(--td-text-color-secondary);
     white-space: nowrap;
