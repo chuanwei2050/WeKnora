@@ -9,10 +9,11 @@ QUANT=onnx / onnx-int8 时优先加载 INT8 ONNX；否则走 Transformers。
 from __future__ import annotations
 
 import os
+import secrets
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "./model"))
@@ -33,6 +34,20 @@ class RerankRequest(BaseModel):
     documents: List[str] = Field(default_factory=list)
     top_n: Optional[int] = None
     return_documents: bool = True
+
+
+def require_api_key(authorization: Optional[str] = Header(None)) -> None:
+    """Validate the shared model API key at the HTTP boundary."""
+    api_key = os.environ.get("MODEL_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="MODEL_API_KEY 未配置")
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not secrets.compare_digest(token, api_key):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 def _prefer_onnx(paths: List[Path]) -> Path:
@@ -172,7 +187,7 @@ def healthz() -> Dict[str, Any]:
     return payload
 
 
-@app.get("/v1/models")
+@app.get("/v1/models", dependencies=[Depends(require_api_key)])
 def list_models() -> Dict[str, Any]:
     return {
         "object": "list",
@@ -186,7 +201,7 @@ def list_models() -> Dict[str, Any]:
     }
 
 
-@app.post("/v1/rerank")
+@app.post("/v1/rerank", dependencies=[Depends(require_api_key)])
 def rerank(req: RerankRequest) -> Dict[str, Any]:
     if not req.query or not req.documents:
         raise HTTPException(status_code=400, detail="query 与 documents 必填")

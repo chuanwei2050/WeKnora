@@ -11,11 +11,12 @@ QUANT=onnx / onnx-int8 时优先 funasr-onnx + model_quant.onnx（体积更小�
 from __future__ import annotations
 
 import os
+import secrets
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "./model"))
@@ -27,6 +28,20 @@ app = FastAPI(title="Airgap ASR", version="1.0.0")
 _asr = None
 _backend = "none"
 _load_error: Optional[str] = None
+
+
+def require_api_key(authorization: Optional[str] = Header(None)) -> None:
+    """Validate the shared model API key at the HTTP boundary."""
+    api_key = os.environ.get("MODEL_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="MODEL_API_KEY 未配置")
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not secrets.compare_digest(token, api_key):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 def _cuda_available() -> bool:
@@ -133,7 +148,7 @@ def healthz() -> Dict[str, Any]:
     return payload
 
 
-@app.get("/v1/models")
+@app.get("/v1/models", dependencies=[Depends(require_api_key)])
 def list_models() -> Dict[str, Any]:
     return {
         "object": "list",
@@ -141,7 +156,10 @@ def list_models() -> Dict[str, Any]:
     }
 
 
-@app.post("/v1/audio/transcriptions")
+@app.post(
+    "/v1/audio/transcriptions",
+    dependencies=[Depends(require_api_key)],
+)
 async def transcriptions(
     file: UploadFile = File(...),
     model: Optional[str] = Form(None),

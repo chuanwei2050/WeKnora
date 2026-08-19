@@ -1009,7 +1009,7 @@ def _gpu_device_block(spec: ModelSpec, default_count: Any) -> List[str]:
 def _compose_health_vllm() -> str:
     return (
         '      test: ["CMD", "python3", "-c", '
-        '"import urllib.request; urllib.request.urlopen(\'http://127.0.0.1:8000/v1/models\')"]'
+        '"import urllib.request; urllib.request.urlopen(\'http://127.0.0.1:8000/health\')"]'
     )
 
 
@@ -1046,6 +1046,8 @@ def render_compose(cfg: Dict[str, Any], data_dir: Path, specs: List[ModelSpec]) 
             args = [
                 "--model",
                 "/models",
+                "--api-key",
+                "${MODEL_API_KEY:?MODEL_API_KEY must be set}",
                 "--served-model-name",
                 spec.served_model_name,
                 "--max-model-len",
@@ -1132,6 +1134,7 @@ def render_compose(cfg: Dict[str, Any], data_dir: Path, specs: List[ModelSpec]) 
                 )
             app_env = [
                 env_lines,
+                "      - MODEL_API_KEY=${MODEL_API_KEY:?MODEL_API_KEY must be set}",
                 "      - MODEL_DIR=/models",
                 "      - PORT=8000",
                 f"      - SERVED_MODEL_NAME={spec.served_model_name}",

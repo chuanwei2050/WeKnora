@@ -74,6 +74,7 @@ python deploy.py prepare --output-dir ./offline-bundle
 
 ```bash
 export AIR_GAPPED_MODE=true
+export MODEL_API_KEY='<统一模型 API Key>'
 
 # 若服务器还没有本工具依赖：
 # pip install --no-index --find-links=./offline-bundle/offline_packages -r requirements.txt
@@ -85,6 +86,10 @@ python deploy.py deploy \
 ```
 
 `deploy` 会自动：解压 → 校验权重 → `docker load` → `docker compose up -d`。
+
+所有 `/v1/*` 模型接口统一要求 `Authorization: Bearer <MODEL_API_KEY>`；
+`/health` 与 `/healthz` 仅供本机容器健康检查，不要求鉴权。密钥只通过环境变量注入，
+不要写入配置文件、镜像或离线归档。
 
 日常启停：
 

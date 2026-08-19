@@ -13,11 +13,12 @@ from __future__ import annotations
 import io
 import importlib
 import os
+import secrets
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -41,6 +42,20 @@ class SpeechRequest(BaseModel):
     voice: str = "default"
     response_format: str = "mp3"
     speed: float = 1.0
+
+
+def require_api_key(authorization: Optional[str] = Header(None)) -> None:
+    """Validate the shared model API key at the HTTP boundary."""
+    api_key = os.environ.get("MODEL_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="MODEL_API_KEY 未配置")
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not secrets.compare_digest(token, api_key):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 def _cuda_available() -> bool:
@@ -213,7 +228,7 @@ def healthz() -> Dict[str, Any]:
     return payload
 
 
-@app.get("/v1/models")
+@app.get("/v1/models", dependencies=[Depends(require_api_key)])
 def list_models() -> Dict[str, Any]:
     return {
         "object": "list",
@@ -221,7 +236,7 @@ def list_models() -> Dict[str, Any]:
     }
 
 
-@app.post("/v1/audio/speech")
+@app.post("/v1/audio/speech", dependencies=[Depends(require_api_key)])
 def speech(req: SpeechRequest) -> Response:
     fmt = (req.response_format or "mp3").lower().strip()
     # opus 暂无编码器时降级 wav，避免平台硬失败

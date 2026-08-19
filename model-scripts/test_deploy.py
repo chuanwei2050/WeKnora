@@ -74,6 +74,10 @@ class TestConfigAndCompose(unittest.TestCase):
         self.assertIn("weknora-rerank:airgap", text)
         self.assertIn("weknora-asr:airgap", text)
         self.assertIn("weknora-tts:airgap", text)
+        self.assertIn("--api-key", text)
+        self.assertIn("MODEL_API_KEY must be set", text)
+        self.assertIn("http://127.0.0.1:8000/health", text)
+        self.assertNotIn("http://127.0.0.1:8000/v1/models", text)
 
     def test_chat_vlm_shared_registry(self) -> None:
         cfg = deploy.load_config(ROOT / "config.yaml", prefer_as_base=True)

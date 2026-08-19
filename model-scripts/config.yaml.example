@@ -1,7 +1,7 @@
 # =============================================================================
 # 内网离线模型部署配置示例（全容器）
 # 用法: cp config.yaml.example config.yaml 后按需修改
-# 密钥仅通过环境变量注入（HF_TOKEN / MODELSCOPE_TOKEN）
+# 密钥仅通过环境变量注入（HF_TOKEN / MODELSCOPE_TOKEN / MODEL_API_KEY）
 #
 # 量化策略: 对比「量化 vs 非量化」——能明显省盘/显存/加速且当前栈可加载时，优先量化。
 #   Embedding  AWQ-INT4  ≈2.7GB（官方 bf16 ≈7.5GB）→ 优先 AWQ

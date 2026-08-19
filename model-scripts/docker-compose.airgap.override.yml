@@ -8,6 +8,8 @@ services:
     ports: ["8001:8000"]
     volumes:
       - "${MODEL_DATA_DIR:-/mnt/models}/models/embedding:/models:ro"
+    environment:
+      - MODEL_API_KEY=${MODEL_API_KEY:?MODEL_API_KEY must be set}
 
   rerank:
     image: weknora-rerank:airgap
@@ -16,6 +18,7 @@ services:
     volumes:
       - "${MODEL_DATA_DIR:-/mnt/models}/models/rerank:/models:ro"
     environment:
+      - MODEL_API_KEY=${MODEL_API_KEY:?MODEL_API_KEY must be set}
       - MODEL_DIR=/models
       - PORT=8000
 
@@ -25,6 +28,8 @@ services:
     ports: ["8003:8000"]
     volumes:
       - "${MODEL_DATA_DIR:-/mnt/models}/models/verifier:/models:ro"
+    environment:
+      - MODEL_API_KEY=${MODEL_API_KEY:?MODEL_API_KEY must be set}
 
   asr:
     image: weknora-asr:airgap
@@ -33,6 +38,7 @@ services:
     volumes:
       - "${MODEL_DATA_DIR:-/mnt/models}/models/asr:/models:ro"
     environment:
+      - MODEL_API_KEY=${MODEL_API_KEY:?MODEL_API_KEY must be set}
       - MODEL_DIR=/models
       - PORT=8000
 
@@ -43,6 +49,7 @@ services:
     volumes:
       - "${MODEL_DATA_DIR:-/mnt/models}/models/tts:/models:ro"
     environment:
+      - MODEL_API_KEY=${MODEL_API_KEY:?MODEL_API_KEY must be set}
       - MODEL_DIR=/models
       - PORT=8000
 
