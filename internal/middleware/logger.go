@@ -25,6 +25,11 @@ type loggerResponseBodyWriter struct {
 	body *bytes.Buffer
 }
 
+type replayRequestBody struct {
+	io.Reader
+	io.Closer
+}
+
 // Write 重写Write方法，同时写入buffer和原始writer
 // 限制buffer大小，避免SSE等流式响应导致内存无限增长
 func (r loggerResponseBodyWriter) Write(b []byte) (int, error) {
@@ -54,6 +59,9 @@ func sanitizeBody(body string) string {
 		{`"authorization"\s*:\s*"[^"]*"`, `"authorization":"***"`},
 		{`"api_key"\s*:\s*"[^"]*"`, `"api_key":"***"`},
 		{`"secret"\s*:\s*"[^"]*"`, `"secret":"***"`},
+		{`"client_secret"\s*:\s*"[^"]*"`, `"client_secret":"***"`},
+		{`"ticket"\s*:\s*"[^"]*"`, `"ticket":"***"`},
+		{`"csrf_token"\s*:\s*"[^"]*"`, `"csrf_token":"***"`},
 		{`"apikey"\s*:\s*"[^"]*"`, `"apikey":"***"`},
 		{`"apisecret"\s*:\s*"[^"]*"`, `"apisecret":"***"`},
 	}
@@ -80,21 +88,18 @@ func readRequestBody(c *gin.Context) string {
 		return "[非文本类型，已跳过]"
 	}
 
-	// 完整读取body内容（不限制大小），因为需要完整重置给后续handler使用
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	// 只读取日志上限，并把已读前缀与剩余流重新拼回，避免日志中间件
+	// 在业务边界限流前把任意大请求整体读入内存。
+	originalBody := c.Request.Body
+	bodyBytes, err := io.ReadAll(io.LimitReader(originalBody, maxBodySize+1))
 	if err != nil {
 		return "[读取请求体失败]"
 	}
+	c.Request.Body = &replayRequestBody{Reader: io.MultiReader(bytes.NewReader(bodyBytes), originalBody), Closer: originalBody}
 
-	// 重置request body，使用完整内容，确保后续handler能读取到完整数据
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
-	// 用于日志的body（限制大小）
-	var logBodyBytes []byte
-	if len(bodyBytes) > maxBodySize {
-		logBodyBytes = bodyBytes[:maxBodySize]
-	} else {
-		logBodyBytes = bodyBytes
+	logBodyBytes := bodyBytes
+	if len(logBodyBytes) > maxBodySize {
+		logBodyBytes = logBodyBytes[:maxBodySize]
 	}
 
 	bodyStr := string(logBodyBytes)

@@ -18,6 +18,8 @@ const (
 	UserIDContextKey ContextKey = "UserID"
 	// AuthenticationMethodContextKey identifies the credential validated at the HTTP boundary.
 	AuthenticationMethodContextKey ContextKey = "AuthenticationMethod"
+	// IntegrationKnowledgeBaseScopeContextKey carries a client-bound KB allowlist.
+	IntegrationKnowledgeBaseScopeContextKey ContextKey = "IntegrationKnowledgeBaseScope"
 	// SessionTenantIDContextKey is the context key for session owner's tenant ID.
 	// When set (e.g. in pipeline with shared agent), session/message lookups use this instead of TenantIDContextKey.
 	SessionTenantIDContextKey ContextKey = "SessionTenantID"

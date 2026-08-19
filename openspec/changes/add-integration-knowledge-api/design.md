@@ -16,8 +16,13 @@ WeKnora 内部已有知识库列表、多知识库搜索和流式聊天能力，
 - V1 不开放内部模型配置、密钥、存储和治理细节。
 - V1 不实现每库配额的 balanced retrieval。
 - 不在本变更实现页面 iframe 或 Widget UI。
+- 不复制现有 `KnowledgeBaseService.SearchKnowledge`、`HybridSearch`、会话/消息仓储、`StreamManager`、停止生成或 RAG pipeline。
 
 ## Decisions
+
+### Integration API 是现有业务能力的版本化适配层
+
+Integration handler 负责稳定 DTO、主体绑定、范围校验、幂等和事件恢复；实际知识库查询复用 `KnowledgeBaseService.SearchKnowledge`/`HybridSearch`，聊天复用现有 session、message、pipeline、`StreamManager`、继续流和停止生成能力。适配层不得复制召回、重排、回答生成或流管理逻辑；新增持久化仅限外部契约缺少的主体绑定、实际范围快照、幂等记录和稳定事件日志。
 
 ### 独立 Integration API DTO
 
@@ -41,6 +46,8 @@ RAG 搜索必须显式提交至少一个 `knowledge_base_id`；缺失、null 或
 - `all-allowed`：不得提交知识库数组；服务端在会话创建时计算并冻结 `allowed_knowledge_base_ids` 授权上限，每轮使用该上限与当前 client allowlist、用户实时权限的交集，不因后续新增授权自动扩大会话范围。
 
 缺失、null、空数组以及模式与字段组合冲突统一返回 `400`。请求包含越权 ID 时整轮返回 `403`。消息记录保存最终实际范围，确保历史回答可追溯。
+
+请求 DTO 在 HTTP 边界解析为 `selected` 与 `all-allowed` 两种互斥内部命令；业务层不得继续携带“mode + 可空数组”的非法状态。外部 ID、`top_k`、cursor 和 `Idempotency-Key` 同样只在 handler 边界完成格式与上限校验。
 
 ### 稳定 SSE 事件与恢复协议
 

@@ -60,6 +60,19 @@ func UserFromContext(ctx context.Context) (*User, bool) {
 	return v, ok && v != nil
 }
 
+func integrationKnowledgeBaseAllowed(ctx context.Context, knowledgeBaseID string) bool {
+	scope, scoped := ctx.Value(IntegrationKnowledgeBaseScopeContextKey).([]string)
+	if !scoped {
+		return true
+	}
+	for _, allowed := range scope {
+		if strings.TrimSpace(allowed) == knowledgeBaseID {
+			return true
+		}
+	}
+	return false
+}
+
 // IsBidReviewKnowledgeAdmin reports whether the current user can manage all KBs in the active tenant.
 func IsBidReviewKnowledgeAdmin(ctx context.Context) bool {
 	user, ok := UserFromContext(ctx)
@@ -105,6 +118,9 @@ func IsKnowledgeBaseVisibleToUser(ctx context.Context, kb *KnowledgeBase) bool {
 	if kb == nil {
 		return false
 	}
+	if !integrationKnowledgeBaseAllowed(ctx, kb.ID) {
+		return false
+	}
 	user, userOK := UserFromContext(ctx)
 	tenantID, tenantOK := TenantIDFromContext(ctx)
 	if !userOK || !tenantOK || user.CanManageTenant() {
@@ -123,6 +139,9 @@ func CanManageKnowledgeBase(ctx context.Context, kb *KnowledgeBase) bool {
 	}
 	tenantID, ok := TenantIDFromContext(ctx)
 	if !ok || tenantID != kb.TenantID {
+		return false
+	}
+	if !integrationKnowledgeBaseAllowed(ctx, kb.ID) {
 		return false
 	}
 	if IsBidReviewKnowledgeAdmin(ctx) {

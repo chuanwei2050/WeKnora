@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS integration_stream_events;
+DROP TABLE IF EXISTS integration_idempotency_records;
+DROP TABLE IF EXISTS integration_chat_bindings;
+DROP TABLE IF EXISTS integration_audits;
+DROP TABLE IF EXISTS integration_sessions;
+DROP TABLE IF EXISTS integration_bootstrap_tickets;
+DROP TABLE IF EXISTS integration_external_identities;
+DROP TABLE IF EXISTS integration_clients;
+DROP TABLE IF EXISTS integration_identity_providers;

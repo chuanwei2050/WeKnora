@@ -3,6 +3,7 @@ import axios, { type AxiosResponse } from "axios";
 import { generateRandomString } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
+import { getEmbeddedCSRFToken, isCookieEmbeddedMode, notifyEmbeddedHost } from './embedded-runtime';
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -28,8 +29,10 @@ function getCurrentLanguage(): string {
 
 instance.interceptors.request.use(
   (config) => {
+    const embedded = isCookieEmbeddedMode();
+    config.withCredentials = embedded;
     // 添加JWT token认证
-    const token = localStorage.getItem('weknora_token');
+    const token = embedded ? null : localStorage.getItem('weknora_token');
     if (token) {
       config.headers["Authorization"] = `Bearer ${token}`;
     }
@@ -38,7 +41,7 @@ instance.interceptors.request.use(
     config.headers["Accept-Language"] = getCurrentLanguage();
     
     // 添加跨租户访问请求头（如果选择了其他租户）
-    const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
+    const selectedTenantId = embedded ? null : localStorage.getItem('weknora_selected_tenant_id');
     const defaultTenantId = localStorage.getItem('weknora_tenant');
     if (selectedTenantId && !config.url?.includes('/api/v1/admin/')) {
       try {
@@ -54,6 +57,10 @@ instance.interceptors.request.use(
     }
     
     config.headers["X-Request-ID"] = `${generateRandomString(12)}`;
+    if (embedded && !['get', 'head', 'options'].includes((config.method || 'get').toLowerCase())) {
+      const csrf = getEmbeddedCSRFToken();
+      if (csrf) config.headers['X-CSRF-Token'] = csrf;
+    }
     return config;
   },
   (error) => {
@@ -104,6 +111,10 @@ instance.interceptors.response.use(
   },
   async (error: any) => {
     const originalRequest = error.config;
+    if (error.response?.status === 401 && isCookieEmbeddedMode()) {
+      notifyEmbeddedHost('unauthorized');
+      return Promise.reject({ status: 401, message: t('error.pleaseRelogin') });
+    }
     
     if (!error.response) {
       return Promise.reject({ message: t('error.networkError') });

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { autoSetup } from '@/api/auth'
+import { getRuntimeMode } from '@/utils/embedded-runtime'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -39,8 +40,14 @@ function workspaceHome(authStore: ReturnType<typeof useAuthStore>) {
 }
 
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  history: createWebHistory(window.location.pathname.startsWith('/knowledge/embed/') ? '/knowledge/embed/' : import.meta.env.BASE_URL),
   routes: [
+    {
+      path: '/embed/widget',
+      name: 'embeddedWidget',
+      component: () => import('../views/embedded/EmbeddedWidget.vue'),
+      meta: { requiresAuth: false, requiresInit: false },
+    },
     {
       path: "/",
       redirect: "/platform",
@@ -195,6 +202,16 @@ let liteDeepLinkRestoreDone = false
 // 路由守卫：检查认证状态和系统初始化状态
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
+
+  if (getRuntimeMode() === 'embedded-page') {
+    const allowed = to.path.startsWith('/platform/knowledge-bases') || to.path === '/platform/knowledge-search'
+    if (!allowed) {
+      next('/platform/knowledge-bases')
+      return
+    }
+    next()
+    return
+  }
 
   // Lite：硬刷新后若落在默认首页，恢复本次会话中最后访问的 /platform 子路径
   if (!liteDeepLinkRestoreDone) {

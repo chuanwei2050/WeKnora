@@ -1155,7 +1155,7 @@ onMounted(async () => {
     messagesList.splice(0);
     
     // 若从智能体列表点击共享智能体进入，URL 带 agent_id 与 source_tenant_id，同步到 store
-    const agentIdFromQuery = props.embeddedAgentId || (route.query.agent_id && String(route.query.agent_id));
+    const agentIdFromQuery = props.agentId || (route.query.agent_id && String(route.query.agent_id));
     const sourceTenantIdFromQuery = route.query.source_tenant_id && String(route.query.source_tenant_id);
     if (agentIdFromQuery && sourceTenantIdFromQuery) {
         useSettingsStoreInstance.selectAgent(agentIdFromQuery, sourceTenantIdFromQuery);
@@ -1163,8 +1163,8 @@ onMounted(async () => {
         useSettingsStoreInstance.selectAgent(agentIdFromQuery, null);
     }
     
-    if (props.embeddedKbIds && props.embeddedKbIds.length > 0) {
-        useSettingsStoreInstance.selectKnowledgeBases(props.embeddedKbIds);
+    if (props.kbIds && props.kbIds.length > 0) {
+        useSettingsStoreInstance.selectKnowledgeBases(props.kbIds);
     }
     
     // 初始化状态：加载历史消息时不应显示loading

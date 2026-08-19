@@ -16,12 +16,17 @@
 - V1 不引入 Module Federation、qiankun、single-spa 或共享前端依赖。
 - WeKnora 不负责修改宿主左侧菜单；只定义宿主入口契约。
 - iframe 不作为租户、用户或资源的安全隔离边界。
+- 不复制知识库列表、详情、治理、上传、搜索或聊天页面，也不新增第二套代理栈。
 
 ## Decisions
 
+### 从现有 BidReview 嵌入能力演进
+
+现有前端已识别 `/knowledge`、裁剪菜单并通过可配置 Vite base 构建，Nginx 也已有同源代理、SSE 禁止缓冲和长超时。实现应抽取通用 embedded runtime、路径配置和消息协议，并让 BidReview 入口成为兼容适配器；知识管理继续渲染现有路由和组件。旧入口暂时保留 `localStorage` Bearer 兼容，新 `embedded-page` 必须使用 Integration Cookie/CSRF，二者不得混用。
+
 ### 宿主拥有 `/knowledge` 外壳
 
-宿主项目自行增加菜单并路由到 `/knowledge`，保留宿主侧边栏和顶部导航；内容区加载 `/knowledge/embed/platform/knowledge-bases?mode=embedded`。WeKnora embedded 模式隐藏自身应用外壳，保留知识库列表、详情、贡献、审批和配置内容。
+宿主项目自行增加菜单并路由到 `/knowledge`，保留宿主侧边栏和顶部导航；内容区加载 `/knowledge/embed/platform/knowledge-bases?mode=embedded-page`。WeKnora embedded-page 模式隐藏自身应用外壳，保留知识库列表、详情、贡献、审批和配置内容。
 
 ### 同域代理使用三个固定前缀
 
@@ -39,6 +44,8 @@ iframe 加载后发送 `ready`，父页面使用精确 `targetOrigin` 发送 boo
 
 宿主到 WeKnora 仅包含 `auth-ready`、`set-theme`、`set-locale`、`open-knowledge-base`；WeKnora 到宿主仅包含 `ready`、`unauthorized`、`route-change`、`document-published`。双方校验 origin、消息类型和负载 schema，不使用 `targetOrigin="*"`。
 
+消息以 `version` 和 `type` 为判别字段，在 `message` 事件边界逐字段解析；未知版本、未知类型、缺字段或多余敏感字段均被忽略，不通过 TypeScript 断言直接信任 `event.data`。
+
 ### standalone 保持默认
 
 未显式传入嵌入模式时继续呈现完整侧边栏、独立登录、租户切换和管理能力。嵌入模式只改变外壳、认证入口和通信，不分叉知识库、治理、RAG 或聊天业务逻辑。
@@ -52,7 +59,7 @@ iframe 加载后发送 `ready`，父页面使用精确 `targetOrigin` 发送 boo
 
 ## Migration Plan
 
-0. 确认三个前置 change 已完成实施及验收；任何依赖未完成时停止本 change，不以任务勾选代替依赖验收。
+0. 确认两个活动前置 change 已完成实施及验收，并对已归档 `2026-08-19-add-knowledge-contribution-review` 执行回归；任何依赖未满足时停止本 change，不以任务勾选代替依赖验收。
 1. 增加页面、API 和精确文件端点 base path 配置以及 `embedded-page` 模式，不改变默认值。
 2. 实现应用外壳切换和最小通信协议，在本地同域代理下验证。
 3. 接入 bootstrap ticket，并覆盖登录、退出、过期和撤销场景。

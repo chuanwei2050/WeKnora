@@ -178,6 +178,18 @@ func TestCanCreateKnowledgeBaseForBidReviewRoles(t *testing.T) {
 	assert.True(t, CanCreateKnowledgeBase(knowledgeContext(7, "native-a", "")))
 }
 
+func TestIntegrationKnowledgeBaseScopeCapsTenantAdmin(t *testing.T) {
+	user := &User{ID: "admin", TenantID: 7, Role: UserRoleTenantAdmin, IsActive: true}
+	ctx := context.WithValue(context.Background(), TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, UserIDContextKey, user.ID)
+	ctx = context.WithValue(ctx, UserContextKey, user)
+	ctx = context.WithValue(ctx, IntegrationKnowledgeBaseScopeContextKey, []string{"allowed"})
+	assert.True(t, CanReadKnowledgeBase(ctx, &KnowledgeBase{ID: "allowed", TenantID: 7}))
+	assert.True(t, CanManageKnowledgeBase(ctx, &KnowledgeBase{ID: "allowed", TenantID: 7}))
+	assert.False(t, CanReadKnowledgeBase(ctx, &KnowledgeBase{ID: "denied", TenantID: 7}))
+	assert.False(t, CanManageKnowledgeBase(ctx, &KnowledgeBase{ID: "denied", TenantID: 7}))
+}
+
 func TestKnowledgeContributionAndReviewPermissions(t *testing.T) {
 	memberCtx := knowledgeContext(7, "member-a", "member")
 	otherMemberCtx := knowledgeContext(7, "member-b", "member")

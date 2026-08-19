@@ -17,8 +17,13 @@ WeKnora 已有独立登录、租户 API Key 和 BidReview 专用 SSO，但缺少
 - V1 不提供隐式跨租户知识库访问。
 - 不让外部项目直接持有租户 API Key，也不在浏览器中保存 client secret 或 service token。
 - 不替换 WeKnora 现有用户、租户和管理员权限模型。
+- 不创建第二套用户仓储、租户解析、角色枚举或知识库授权算法。
 
 ## Decisions
+
+### 统一主体建立在现有认证授权链上
+
+Integration 层只新增 client 约束、外部身份映射和 Cookie/CSRF 凭证解析，解析后复用现有 `User`、`Tenant`、JWT/OIDC、角色和知识库访问控制。BidReview SSO 保留现有入口并改为统一主体的兼容适配器；其浏览器 `localStorage` Bearer 行为不扩散到新模式。这样所有业务处理器只消费同一种主体，避免两套权限结果随时间分叉。
 
 ### Integration client 服务端绑定租户
 
@@ -29,6 +34,8 @@ WeKnora 已有独立登录、租户 API Key 和 BidReview 专用 SSO，但缺少
 宿主后端验证自身登录态后，以 client 凭证提交外部身份 ID 和已配置的外部角色，申请 60 秒有效的一次性随机 ticket。WeKnora 使用服务端角色映射计算用户角色，取映射结果、client 最高角色、scopes 与知识库 allowlist 的交集，绝不接受 `is_admin` 或任意内部权限声明。ticket 同时绑定预期浏览器 origin，该 origin 必须属于 client 白名单。宿主页面等待 iframe `ready`，再用精确 `targetOrigin` 的 `postMessage` 传递 ticket；iframe 通过浏览器侧 `/knowledge/api/integration/v1/auth/exchange` 兑换会话。服务端只保存 ticket 哈希和唯一 `jti`，并原子标记消费状态。
 
 不采用 URL token，因为查询参数容易进入浏览历史、代理日志和 Referer；不直接把 service token 交给浏览器，因为无法可靠保护 client 权限。
+
+认证端点不得在 URL、日志、审计详情或错误正文回显 secret、ticket、service token、Cookie 或 CSRF 原值；审计只保存不可逆指纹和必要标识。exchange 成功后立即清除 iframe 内存中的 ticket，失败也不得持久化 ticket。
 
 ### 嵌入会话使用限定路径 Cookie 与 CSRF
 
@@ -45,6 +52,10 @@ WeKnora 已有独立登录、租户 API Key 和 BidReview 专用 SSO，但缺少
 ### 浏览器来源和 CORS 精确校验
 
 bootstrap 申请的预期 origin 必须在 client 允许来源中，exchange 请求的 `Origin` 必须与 ticket 绑定值一致。浏览器认证端点只对精确匹配来源返回凭证 CORS 响应，并设置 `Vary: Origin`；任何带凭证响应不得使用 `Access-Control-Allow-Origin: *`。同域反向代理仍是 V1 默认路径，但来源校验不能依赖代理或浏览器单方面保证。
+
+现有 standalone Bearer/API Key 路由继续按原行为工作；凭证 CORS 的精确来源策略只应用于 Integration 浏览器认证端点，避免把全局 `AllowOrigins: ["*"]` 直接改成破坏兼容的全站策略。
+
+所有 Integration 响应设置 `Cache-Control: no-store`；嵌入入口设置不泄漏路径信息的 `Referrer-Policy`，并通过 CSP `frame-ancestors` 只允许部署配置声明的宿主来源。同域默认仍为 `'self'`。
 
 ## Risks / Trade-offs
 

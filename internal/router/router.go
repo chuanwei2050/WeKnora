@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
+	integrationauth "github.com/Tencent/WeKnora/internal/integration"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -72,6 +73,8 @@ type RouterParams struct {
 	AcceptanceBenchmarkHandler *handler.AcceptanceBenchmarkHandler
 	ApprovedEndpointHandler    *handler.ApprovedEndpointHandler
 	AdminHandler               *handler.AdminHandler
+	IntegrationHandler         *handler.IntegrationHandler
+	IntegrationService         *integrationauth.Service
 }
 
 // NewRouter 创建新的路由
@@ -80,14 +83,31 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.ContextWithFallback = true
 
 	// CORS 中间件应放在最前面
-	r.Use(cors.New(cors.Config{
+	legacyCORS := cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-Request-ID", "X-Tenant-ID"},
 		ExposeHeaders:    []string{"Content-Length", "Access-Control-Allow-Origin"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
-	}))
+	})
+	integrationCORS := cors.New(cors.Config{
+		AllowOriginWithContextFunc: func(c *gin.Context, origin string) bool {
+			return params.IntegrationService != nil && params.IntegrationService.IsAllowedOrigin(c.Request.Context(), origin)
+		},
+		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-CSRF-Token", "Idempotency-Key", "Last-Event-ID", "X-Request-ID"},
+		ExposeHeaders:    []string{"Content-Length", "Access-Control-Allow-Origin"},
+		AllowCredentials: true,
+		MaxAge:           10 * time.Minute,
+	})
+	r.Use(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/integration/") {
+			integrationCORS(c)
+			return
+		}
+		legacyCORS(c)
+	})
 
 	// 基础中间件（不需要认证）
 	r.Use(middleware.RequestID())
@@ -121,7 +141,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 	RegisterIMRoutes(r, params.IMHandler)
 
 	// 认证中间件
-	r.Use(middleware.Auth(params.TenantService, params.UserService, params.Config))
+	RegisterIntegrationPublicRoutes(r, params.IntegrationHandler)
+
+	// 认证中间件
+	r.Use(middleware.Auth(params.TenantService, params.UserService, params.Config, params.IntegrationService))
 
 	// 文件服务：统一代理本地/MinIO/COS/TOS存储后端（需要认证）
 	serveFiles(r)
@@ -167,9 +190,48 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterAcceptanceBenchmarkRoutes(v1, params.AcceptanceBenchmarkHandler)
 		RegisterApprovedEndpointRoutes(v1, params.ApprovedEndpointHandler)
 		RegisterAdminRoutes(v1, params.AdminHandler)
+		RegisterIntegrationAdminRoutes(v1, params.IntegrationHandler)
 	}
 
 	return r
+}
+
+func RegisterIntegrationPublicRoutes(r *gin.Engine, h *handler.IntegrationHandler) {
+	if h == nil {
+		return
+	}
+	auth := r.Group("/api/integration/v1/auth")
+	auth.POST("/token", h.Token)
+	auth.POST("/bootstrap", h.Bootstrap)
+	auth.POST("/exchange", h.Exchange)
+	auth.POST("/refresh", h.Refresh)
+	auth.POST("/logout", h.Logout)
+	integration := r.Group("/api/integration/v1")
+	integration.Use(h.Authenticate())
+	integration.GET("/knowledge-bases", h.ListKnowledgeBases)
+	integration.POST("/rag/search", h.Search)
+	integration.POST("/chat/sessions", h.CreateChatSession)
+	integration.GET("/chat/sessions/:session_id", h.GetChatSession)
+	integration.GET("/chat/sessions/:session_id/messages", h.ListChatMessages)
+	integration.POST("/chat/sessions/:session_id/messages", h.SendChatMessage)
+	integration.GET("/chat/sessions/:session_id/messages/:message_id", h.GetMessageSnapshot)
+	integration.GET("/chat/sessions/:session_id/messages/:message_id/events", h.GetMessageEvents)
+	integration.POST("/chat/sessions/:session_id/messages/:message_id/cancel", h.CancelMessage)
+}
+
+func RegisterIntegrationAdminRoutes(r *gin.RouterGroup, h *handler.IntegrationHandler) {
+	if h == nil {
+		return
+	}
+	clients := r.Group("/admin/integration-clients")
+	clients.GET("", h.ListClients)
+	clients.POST("", h.CreateClient)
+	clients.POST("/:client_id/rotate-secret", h.RotateClientSecret)
+	clients.POST("/:client_id/revoke-previous-secret", h.RevokePreviousClientSecret)
+	clients.POST("/:client_id/disable", h.DisableClient)
+	providers := r.Group("/admin/integration-identity-providers")
+	providers.GET("", h.ListIdentityProviders)
+	providers.POST("", h.CreateIdentityProvider)
 }
 
 func RegisterAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler) {

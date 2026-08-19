@@ -1,13 +1,13 @@
 <template>
-    <div class="main" ref="dropzone">
-        <Menu></Menu>
+    <div class="main" :class="{ 'is-embedded': isEmbeddedPage }" ref="dropzone">
+        <Menu v-if="!isEmbeddedPage"></Menu>
         <RouterView v-if="isRouterAlive" />
         <div class="upload-mask" v-show="ismask">
             <input type="file" style="display: none" ref="uploadInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.md,.jpg,.jpeg,.png,.csv,.xls,.xlsx" />
             <UploadMask></UploadMask>
         </div>
         <!-- 全局设置模态框，供所有 platform 子路由使用 -->
-        <Settings v-if="route.path !== '/platform/settings'" />
+        <Settings v-if="!isEmbeddedPage && route.path !== '/platform/settings'" />
     </div>
 </template>
 <script setup lang="ts">
@@ -21,12 +21,14 @@ import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { isFileDrag } from '@/utils/file-drag'
+import { getRuntimeMode } from '@/utils/embedded-runtime'
 
 let { requestMethod } = useKnowledgeBase()
 const route = useRoute();
 let ismask = ref(false)
 let uploadInput = ref();
 const { t } = useI18n();
+const isEmbeddedPage = getRuntimeMode() === 'embedded-page'
 
 const isRouterAlive = ref(true)
 const reloadApp = () => {
@@ -188,6 +190,10 @@ onUnmounted(() => {
     min-width: 600px;
     /* 统一整页背景，让左侧菜单与右侧内容区视觉连贯 */
     background: var(--td-bg-color-container);
+}
+
+.main.is-embedded {
+    min-width: 0;
 }
 
 .upload-mask {

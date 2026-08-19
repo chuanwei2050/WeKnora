@@ -1874,6 +1874,9 @@ const handleGovernanceAction = async (action: GovernanceReviewAction, item: Know
   try {
     await executeGovernanceAction(action, item);
     item.parse_status = getGovernanceActionNextStatus(action);
+    if (action === 'approve') {
+      window.dispatchEvent(new CustomEvent('weknora:document-published', { detail: { knowledgeBaseId: kbId.value, documentId: item.id } }));
+    }
     MessagePlugin.success(t(governanceActionSuccessKeys[action]));
     page = 1;
     loadKnowledgeFiles(kbId.value);
@@ -1896,6 +1899,9 @@ const handleBatchGovernanceAction = async (action: GovernanceReviewAction) => {
       try {
         await executeGovernanceAction(action, item);
         succeeded.push(item);
+        if (action === 'approve') {
+          window.dispatchEvent(new CustomEvent('weknora:document-published', { detail: { knowledgeBaseId: kbId.value, documentId: item.id } }));
+        }
       } catch {
         failed += 1;
       }

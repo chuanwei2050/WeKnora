@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/config"
+	integrationauth "github.com/Tencent/WeKnora/internal/integration"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -68,6 +69,7 @@ func Auth(
 	tenantService interfaces.TenantService,
 	userService interfaces.UserService,
 	cfg *config.Config,
+	integrationServices ...*integrationauth.Service,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// ignore OPTIONS request
@@ -80,6 +82,68 @@ func Auth(
 		if isNoAuthAPI(c.Request.URL.Path, c.Request.Method) {
 			c.Next()
 			return
+		}
+
+		if len(integrationServices) > 0 && integrationServices[0] != nil {
+			if cookie, err := c.Cookie(integrationauth.BrowserCookieName); err == nil && cookie != "" {
+				service := integrationServices[0]
+				principal, user, tenant, authErr := service.Authenticate(c.Request.Context(), cookie, "browser")
+				if authErr != nil || user == nil {
+					c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: invalid integration session"})
+					c.Abort()
+					return
+				}
+				if c.GetHeader("X-Tenant-ID") != "" {
+					c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: integration tenant is server-bound"})
+					c.Abort()
+					return
+				}
+				if !allowedIntegrationInternalPath(c.Request.URL.Path) {
+					c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: endpoint is outside integration scope"})
+					c.Abort()
+					return
+				}
+				requiredScope := "knowledge:read"
+				if !isSafeMethod(c.Request.Method) {
+					requiredScope = "knowledge:write"
+				}
+				if c.Request.URL.Path == "/files" {
+					requiredScope = "file:read"
+				}
+				if !principal.HasScope(requiredScope) {
+					c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: integration scope is missing"})
+					c.Abort()
+					return
+				}
+				if c.Request.URL.Path == "/files" && service.AuthorizeFile(c.Request.Context(), principal, strings.TrimSpace(c.Query("file_path"))) != nil {
+					c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: file is outside integration scope"})
+					c.Abort()
+					return
+				}
+				if !isSafeMethod(c.Request.Method) && service.ValidateCSRF(c.Request.Context(), cookie, c.GetHeader("X-CSRF-Token")) != nil {
+					c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: CSRF validation failed"})
+					c.Abort()
+					return
+				}
+				if !isSafeMethod(c.Request.Method) && service.ValidateBrowserOrigin(c.Request.Context(), cookie, c.GetHeader("Origin")) != nil {
+					c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: integration origin is invalid"})
+					c.Abort()
+					return
+				}
+				c.Set("integrationPrincipal", principal)
+				c.Set(types.TenantIDContextKey.String(), principal.TenantID)
+				c.Set(types.TenantInfoContextKey.String(), tenant)
+				c.Set(types.UserContextKey.String(), user)
+				c.Set(types.UserIDContextKey.String(), user.ID)
+				ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, principal.TenantID)
+				ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+				ctx = context.WithValue(ctx, types.UserContextKey, user)
+				ctx = context.WithValue(ctx, types.UserIDContextKey, user.ID)
+				ctx = context.WithValue(ctx, types.IntegrationKnowledgeBaseScopeContextKey, principal.KnowledgeBaseIDs)
+				c.Request = c.Request.WithContext(ctx)
+				c.Next()
+				return
+			}
 		}
 
 		// 尝试JWT Token认证
@@ -150,6 +214,9 @@ func Auth(
 				c.Set(types.UserContextKey.String(), user)
 				c.Set(types.UserIDContextKey.String(), user.ID)
 				c.Set(types.AuthenticationMethodContextKey.String(), types.AuthenticationMethodBearer)
+				if legacyPrincipal := integrationauth.PrincipalFromBidReview(user); legacyPrincipal != nil {
+					c.Set("integrationPrincipal", legacyPrincipal)
+				}
 				c.Request = c.Request.WithContext(
 					context.WithValue(context.WithValue(
 						context.WithValue(
@@ -242,6 +309,22 @@ func Auth(
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing authentication"})
 		c.Abort()
 	}
+}
+
+func isSafeMethod(method string) bool {
+	return method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions
+}
+
+func allowedIntegrationInternalPath(path string) bool {
+	if path == "/files" {
+		return true
+	}
+	for _, prefix := range []string{"/api/v1/knowledge-bases", "/api/v1/knowledge", "/api/v1/chunks", "/api/v1/tags", "/api/v1/faq"} {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // GetTenantIDFromContext helper function to get tenant ID from context

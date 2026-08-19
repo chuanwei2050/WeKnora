@@ -79,14 +79,40 @@ Widget MUST 使用 Integration API 的 `Idempotency-Key` 和稳定 SSE envelope�
 - **THEN** Widget 调用消息 cancel 接口并展示服务端确认的取消终态
 
 ### Requirement: Widget 必须提供有限且安全的主题配置
-Widget MUST 只接受位置、主色、标题、图标和浅色/深色模式等版本化主题字段，并 MUST 验证所有配置值；V1 MUST NOT 接受任意 HTML 或 CSS 注入。
+Widget MUST 只接受初始位置、初始尺寸、主色、标题、图标和浅色/深色模式等版本化主题字段，并 MUST 验证所有配置值；V1 MUST NOT 接受任意 HTML 或 CSS 注入。
 
 #### Scenario: 宿主设置品牌主题
 - **WHEN** 宿主提供合法主色、标题、图标和位置
 - **THEN** 悬浮入口和聊天外壳应用配置，同时保持内容可读和交互可用
 
+### Requirement: Widget 必须可在可视屏幕内移动和缩放
+SDK MUST 支持拖动悬浮入口与聊天面板、缩放聊天面板、最大化、还原和重置布局，MUST 提供 `moveTo`、`resizeTo`、`maximize`、`restore` 和 `resetLayout`；布局 MUST 始终夹取到 `visualViewport` 可见范围，且 MUST 提供键盘等价操作和可访问名称。
+
+#### Scenario: 用户拖动并放大聊天面板
+- **WHEN** 用户使用鼠标或触控拖动标题栏并通过缩放柄放大面板
+- **THEN** 面板更新位置和尺寸、保持在可见屏幕内并发布结构化 `layout-changed` 事件
+
+#### Scenario: 用户最大化后还原
+- **WHEN** 用户最大化面板后执行还原
+- **THEN** 面板先占据当前可视区域，再恢复最大化前经过边界校正的普通位置和尺寸
+
+#### Scenario: 可视区域发生变化
+- **WHEN** 窗口、缩放比例、软键盘或屏幕方向改变导致 `visualViewport` 变化
+- **THEN** Widget 自动纠正位置和尺寸，入口、标题栏和主要操作仍可见
+
+#### Scenario: 同标签页恢复布局
+- **WHEN** 同一实例在当前标签页内销毁后重新初始化
+- **THEN** Widget 从 `sessionStorage` 恢复合法普通布局，宿主调用 `resetLayout` 后恢复配置默认值
+
+### Requirement: Widget 必须复用现有聊天组件
+standalone、Wiki 修复抽屉和 `embedded-widget` MUST 复用现有 `ChatView`、输入框和消息渲染行为；不同运行模式只能通过显式 props、事件和认证适配改变外壳，不得复制聊天业务实现。
+
+#### Scenario: 三种外壳发送相同聊天请求
+- **WHEN** standalone、Wiki 修复抽屉和 Widget 使用等价 agent、知识库及消息输入
+- **THEN** 三者通过同一 `ChatView` 产生一致的请求语义、流式渲染和错误处理
+
 ### Requirement: Widget 必须发布稳定宿主事件
-Widget MUST 提供 `ready`、`open`、`close`、`unauthorized`、`answer-completed` 和 `error` 事件，并 MUST 校验 iframe 消息的 origin、类型和负载结构。
+Widget MUST 提供 `ready`、`open`、`close`、`layout-changed`、`unauthorized`、`answer-completed` 和 `error` 事件，并 MUST 校验 iframe 消息的 origin、类型和负载结构。
 
 #### Scenario: 回答完成通知宿主
 - **WHEN** 服务端发出 `answer.completed` 且 Widget 完成渲染

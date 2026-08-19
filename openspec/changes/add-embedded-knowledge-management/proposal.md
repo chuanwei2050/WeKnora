@@ -10,6 +10,7 @@
 - 定义最小化 `postMessage` 协议、精确 origin 校验、登录失效通知、主题、语言和路由同步。
 - 让 embedded-page 使用 HttpOnly 嵌入会话访问现有知识管理 `/api/v1/*` 与 `/files`，不在 iframe 中保存 Bearer token、refresh token 或租户切换状态。
 - 明确同域 iframe 只提供样式和运行时隔离，认证与资源授权仍由后端执行。
+- 复用现有 `/knowledge` BidReview 嵌入识别、菜单裁剪、可配置 Vite base 和 Nginx SSE 代理作为兼容基础，抽取通用 embedded runtime，不复制知识管理页面。
 
 ## Capabilities
 
@@ -24,5 +25,5 @@
 ## Impact
 
 - 影响前端路由、应用外壳、运行时配置、认证入口、Nginx 示例和宿主集成说明。
-- **实施门禁**：只有 `add-integration-client-authz`、`add-integration-knowledge-api` 和 `add-knowledge-contribution-review` 已完成实施并通过各自验收后，才能开始本 change；仅有 planning artifacts complete 不满足门禁。
+- **实施门禁**：只有 `add-integration-client-authz`、`add-integration-knowledge-api` 已完成实施并通过各自验收，且已归档的 `2026-08-19-add-knowledge-contribution-review` 仍通过回归后，才能开始本 change；仅有 planning artifacts complete 不满足门禁。
 - 不引入微前端运行时，不替换现有 `/platform/*`、`/api/v1/*`、`/files/*` 或独立登录流程。

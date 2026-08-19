@@ -67,6 +67,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/im/wecom"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
+	"github.com/Tencent/WeKnora/internal/integration"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/modelprofile"
@@ -161,6 +162,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewGraphTripleReviewRepository))
 	must(container.Provide(repository.NewKnowledgeGovernanceRepository))
 	must(container.Provide(repository.NewAcceptanceBenchmarkRepository))
+	must(container.Provide(integration.NewService))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -307,6 +309,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(startVoiceTempCleaner))
 	must(container.Provide(handler.NewApprovedEndpointHandler))
 	must(container.Provide(handler.NewAdminHandler))
+	must(container.Provide(handler.NewIntegrationHandler))
 	// IM integration
 	logger.Debugf(ctx, "[Container] Registering IM integration...")
 	must(container.Provide(imPkg.NewService))

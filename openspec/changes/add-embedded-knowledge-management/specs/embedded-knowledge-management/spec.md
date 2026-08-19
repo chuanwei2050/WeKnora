@@ -29,7 +29,7 @@ WeKnora 前端 MUST 分别支持页面路由、API 和文件 base path 配置，
 当运行模式为 `embedded-page` 时，WeKnora MUST 隐藏自身侧边栏、Logo、租户切换和用户菜单，同时 MUST 保留知识库列表、详情、文档贡献、审批和配置内容。
 
 #### Scenario: 管理员打开嵌入知识库页面
-- **WHEN** 已授权管理员加载 `mode=embedded` 的知识库页面
+- **WHEN** 已授权管理员加载 `mode=embedded-page` 的知识库页面
 - **THEN** 页面只显示知识管理内容，不显示 WeKnora 顶层应用外壳
 
 ### Requirement: 嵌入认证必须使用一次性票据
