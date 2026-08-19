@@ -1,10 +1,19 @@
 import { computed, onBeforeUnmount, ref } from 'vue';
-import { issueVoiceWSTicket, synthesizeVoice, transcribeVoice } from '../api/voice';
+import { issueVoiceWSTicket, synthesizeVoice, synthesizeVoiceStream, transcribeVoice } from '../api/voice';
 
 export type VoiceRecorderState = 'idle' | 'requesting' | 'recording' | 'finalizing' | 'error';
 
 function isAbortError(cause: unknown): boolean {
   return typeof cause === 'object' && cause !== null && 'name' in cause && cause.name === 'AbortError';
+}
+
+function isCanceledError(cause: unknown): boolean {
+  return isAbortError(cause) || (
+    typeof cause === 'object' && cause !== null && (
+      ('name' in cause && cause.name === 'CanceledError') ||
+      ('code' in cause && cause.code === 'ERR_CANCELED')
+    )
+  );
 }
 
 export function useVoiceConversation(sessionId: string, asrModelId: () => string) {
@@ -21,6 +30,8 @@ export function useVoiceConversation(sessionId: string, asrModelId: () => string
   let socket: WebSocket | null = null;
   let audio: HTMLAudioElement | null = null;
   let audioURL = '';
+  let ttsReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let mediaSource: MediaSource | null = null;
   let ttsAbortController: AbortController | null = null;
   let asrAbortController: AbortController | null = null;
   let cancelRequested = false;
@@ -133,6 +144,10 @@ export function useVoiceConversation(sessionId: string, asrModelId: () => string
     error.value = '';
     playbackState.value = 'loading';
     try {
+      if (typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported('audio/mpeg')) {
+        await playStreamingTTS(messageId, ttsModelId, options, ttsAbortController.signal);
+        return;
+      }
       const blob = await synthesizeVoice(sessionId, messageId, ttsModelId, options, ttsAbortController.signal);
       audioURL = URL.createObjectURL(blob);
       audio = new Audio(audioURL);
@@ -140,13 +155,38 @@ export function useVoiceConversation(sessionId: string, asrModelId: () => string
       await audio.play();
       playbackState.value = 'playing';
     } catch (cause) {
-      if ((cause as any)?.code === 'ERR_CANCELED' || (cause as any)?.name === 'CanceledError' || (cause as any)?.name === 'AbortError') {
-        playbackState.value = 'idle';
-        return;
-      }
-      playbackState.value = 'idle';
+      const canceled = isCanceledError(cause);
+      stopPlayback();
+      if (canceled) return;
       error.value = cause instanceof Error ? cause.message : 'tts_failed';
     }
+  }
+
+  async function playStreamingTTS(messageId: string, ttsModelId: string, options: { language?: string; voice?: string; speed?: number; format?: string }, signal: AbortSignal) {
+    mediaSource = new MediaSource();
+    audioURL = URL.createObjectURL(mediaSource);
+    audio = new Audio(audioURL);
+    audio.onended = stopPlayback;
+    audio.onplaying = () => { playbackState.value = 'playing'; };
+
+    const streamPromise = synthesizeVoiceStream(sessionId, messageId, ttsModelId, options, signal);
+    const sourceOpenPromise = waitForMediaSourceOpen(mediaSource, signal);
+    const playbackPromise = audio.play();
+    void playbackPromise.catch(() => undefined);
+    const [responseStream] = await Promise.all([streamPromise, sourceOpenPromise]);
+    if (!mediaSource || mediaSource.readyState !== 'open') throw new Error('tts_stream_unavailable');
+
+    const sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+    sourceBuffer.mode = 'sequence';
+    ttsReader = responseStream.getReader();
+    while (true) {
+      const { done, value } = await ttsReader.read();
+      if (done) break;
+      await appendSourceBuffer(sourceBuffer, value, signal);
+    }
+    if (sourceBuffer.updating) await waitForSourceBufferUpdate(sourceBuffer, signal);
+    if (mediaSource.readyState === 'open') mediaSource.endOfStream();
+    await playbackPromise;
   }
 
   function pausePlayback() {
@@ -164,7 +204,17 @@ export function useVoiceConversation(sessionId: string, asrModelId: () => string
   function stopPlayback() {
     ttsAbortController?.abort();
     ttsAbortController = null;
-    audio?.pause();
+    void ttsReader?.cancel();
+    ttsReader = null;
+    if (audio) {
+      audio.onended = null;
+      audio.onplaying = null;
+      audio.pause();
+    }
+    if (mediaSource?.readyState === 'open') {
+      try { mediaSource.endOfStream(); } catch { /* stream is already closing */ }
+    }
+    mediaSource = null;
     audio = null;
     if (audioURL) URL.revokeObjectURL(audioURL);
     audioURL = '';
@@ -225,4 +275,39 @@ export function useVoiceConversation(sessionId: string, asrModelId: () => string
   }
 
   return { state, partialText, finalText, finalVoiceMetadata, error, supported, playbackState, start, stop, cancel, confirmFinalText, cancelFinalText, playAnswerTTS, pausePlayback, resumePlayback, stopPlayback };
+}
+
+function waitForMediaSourceOpen(source: MediaSource, signal: AbortSignal): Promise<void> {
+  if (source.readyState === 'open') return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      source.removeEventListener('sourceopen', onOpen);
+      signal.removeEventListener('abort', onAbort);
+    };
+    const onOpen = () => { cleanup(); resolve(); };
+    const onAbort = () => { cleanup(); reject(new DOMException('Aborted', 'AbortError')); };
+    source.addEventListener('sourceopen', onOpen, { once: true });
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function appendSourceBuffer(sourceBuffer: SourceBuffer, chunk: Uint8Array, signal: AbortSignal): Promise<void> {
+  return waitForSourceBufferUpdate(sourceBuffer, signal, () => sourceBuffer.appendBuffer(chunk));
+}
+
+function waitForSourceBufferUpdate(sourceBuffer: SourceBuffer, signal: AbortSignal, start?: () => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      sourceBuffer.removeEventListener('updateend', onUpdateEnd);
+      sourceBuffer.removeEventListener('error', onError);
+      signal.removeEventListener('abort', onAbort);
+    };
+    const onUpdateEnd = () => { cleanup(); resolve(); };
+    const onError = () => { cleanup(); reject(new Error('tts_buffer_failed')); };
+    const onAbort = () => { cleanup(); reject(new DOMException('Aborted', 'AbortError')); };
+    sourceBuffer.addEventListener('updateend', onUpdateEnd, { once: true });
+    sourceBuffer.addEventListener('error', onError, { once: true });
+    signal.addEventListener('abort', onAbort, { once: true });
+    start?.();
+  });
 }

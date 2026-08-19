@@ -5,6 +5,7 @@ import { mount } from '@vue/test-utils'
 const apiMocks = vi.hoisted(() => ({
   issueVoiceWSTicket: vi.fn(),
   synthesizeVoice: vi.fn(),
+  synthesizeVoiceStream: vi.fn(),
   transcribeVoice: vi.fn(),
 }))
 
@@ -83,7 +84,9 @@ describe('useVoiceConversation', () => {
     vi.clearAllMocks()
     apiMocks.issueVoiceWSTicket.mockReset()
     apiMocks.synthesizeVoice.mockReset()
+    apiMocks.synthesizeVoiceStream.mockReset()
     apiMocks.transcribeVoice.mockReset()
+    Object.defineProperty(globalThis, 'MediaSource', { configurable: true, value: undefined })
     installMediaRecorder()
   })
 
@@ -168,6 +171,134 @@ describe('useVoiceConversation', () => {
     voice.stopPlayback()
     expect(voice.playbackState.value).toBe('idle')
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:voice')
+    wrapper.unmount()
+  })
+
+  it('starts streaming playback and appends each received MP3 chunk in sequence', async () => {
+    const appended: number[][] = []
+    class FakeSourceBuffer extends EventTarget {
+      updating = false
+      mode: AppendMode = 'segments'
+
+      appendBuffer(chunk: BufferSource) {
+        const bytes = chunk instanceof ArrayBuffer
+          ? new Uint8Array(chunk)
+          : new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+        appended.push(Array.from(bytes))
+        this.updating = true
+        queueMicrotask(() => {
+          this.updating = false
+          this.dispatchEvent(new Event('updateend'))
+        })
+      }
+    }
+    class FakeMediaSource extends EventTarget {
+      static isTypeSupported(type: string) {
+        return type === 'audio/mpeg'
+      }
+
+      readyState: ReadyState = 'closed'
+
+      constructor() {
+        super()
+        queueMicrotask(() => {
+          this.readyState = 'open'
+          this.dispatchEvent(new Event('sourceopen'))
+        })
+      }
+
+      addSourceBuffer() {
+        return new FakeSourceBuffer()
+      }
+
+      endOfStream() {
+        this.readyState = 'ended'
+      }
+    }
+    Object.defineProperty(globalThis, 'MediaSource', { configurable: true, value: FakeMediaSource })
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:stream') })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+
+    let playCount = 0
+    class FakeAudio {
+      onended: (() => void) | null = null
+      onplaying: (() => void) | null = null
+
+      async play() {
+        playCount += 1
+        this.onplaying?.()
+      }
+
+      pause() {}
+    }
+    Object.defineProperty(globalThis, 'Audio', { configurable: true, value: FakeAudio })
+    apiMocks.synthesizeVoiceStream.mockResolvedValue(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2]))
+        controller.enqueue(new Uint8Array([3, 4]))
+        controller.close()
+      },
+    }))
+
+    const { voice, wrapper } = mountVoice('session-stream', 'asr-stream')
+    await voice.playAnswerTTS('message-stream', 'tts-stream')
+
+    expect(apiMocks.synthesizeVoiceStream).toHaveBeenCalledTimes(1)
+    expect(apiMocks.synthesizeVoice).not.toHaveBeenCalled()
+    expect(appended).toEqual([[1, 2], [3, 4]])
+    expect(playCount).toBe(1)
+    expect(voice.playbackState.value).toBe('playing')
+    wrapper.unmount()
+  })
+
+  it('cleans up streaming resources when browser playback is rejected', async () => {
+    class FakeSourceBuffer extends EventTarget {
+      updating = false
+      mode: AppendMode = 'segments'
+
+      appendBuffer() {
+        queueMicrotask(() => this.dispatchEvent(new Event('updateend')))
+      }
+    }
+    class FakeMediaSource extends EventTarget {
+      static isTypeSupported() { return true }
+      readyState: ReadyState = 'closed'
+
+      constructor() {
+        super()
+        queueMicrotask(() => {
+          this.readyState = 'open'
+          this.dispatchEvent(new Event('sourceopen'))
+        })
+      }
+
+      addSourceBuffer() { return new FakeSourceBuffer() }
+      endOfStream() { this.readyState = 'ended' }
+    }
+    const revokeObjectURL = vi.fn()
+    Object.defineProperty(globalThis, 'MediaSource', { configurable: true, value: FakeMediaSource })
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:rejected-stream') })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL })
+    class RejectingAudio {
+      onended: (() => void) | null = null
+      onplaying: (() => void) | null = null
+      play() { return Promise.reject(new Error('playback_denied')) }
+      pause() {}
+    }
+    Object.defineProperty(globalThis, 'Audio', { configurable: true, value: RejectingAudio })
+    apiMocks.synthesizeVoiceStream.mockResolvedValue(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1]))
+        controller.close()
+      },
+    }))
+
+    const { voice, wrapper } = mountVoice('session-rejected', 'asr-rejected')
+    await voice.playAnswerTTS('message-rejected', 'tts-rejected')
+
+    expect(voice.playbackState.value).toBe('idle')
+    expect(voice.error.value).toBe('playback_denied')
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:rejected-stream')
     wrapper.unmount()
   })
 })

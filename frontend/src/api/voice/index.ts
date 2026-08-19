@@ -26,4 +26,12 @@ export function synthesizeVoice(sessionId: string, messageId: string, modelId: s
   return post(`/api/v1/sessions/${sessionId}/voice/tts`, { message_id: messageId, model_id: modelId, ...options }, { responseType: 'blob', signal }).then((response: any) => response instanceof Blob ? response : response?.data) as Promise<Blob>;
 }
 
+export function synthesizeVoiceStream(sessionId: string, messageId: string, modelId: string, options: { language?: string; voice?: string; speed?: number; format?: string } = {}, signal?: AbortSignal) {
+  return post<ReadableStream<Uint8Array>>(
+    `/api/v1/sessions/${sessionId}/voice/tts`,
+    { message_id: messageId, model_id: modelId, ...options, format: 'mp3' },
+    { adapter: 'fetch', responseType: 'stream', signal, timeout: 0 },
+  );
+}
+
 export { get };

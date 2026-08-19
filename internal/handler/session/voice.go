@@ -290,18 +290,88 @@ func (h *Handler) SynthesizeVoice(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	options := tts.SynthesizeOptions{Language: request.Language, Voice: request.Voice, Speed: request.Speed, Format: request.Format}
+	format := strings.ToLower(strings.TrimSpace(request.Format))
+	if format == "" {
+		format = "mp3"
+	}
+	options := tts.SynthesizeOptions{Language: request.Language, Voice: request.Voice, Speed: request.Speed, Format: format}
 	if err := options.Validate(); err != nil {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	stream, err := model.Synthesize(ctx, message.Content, options)
-	if err != nil {
-		c.Error(errors.NewInternalServerError(err.Error()))
+	if format != "mp3" {
+		stream, synthesizeErr := model.Synthesize(ctx, message.Content, options)
+		if synthesizeErr != nil {
+			c.Error(errors.NewInternalServerError(synthesizeErr.Error()))
+			return
+		}
+		defer stream.Close()
+		c.DataFromReader(http.StatusOK, -1, ttsContentType(format), stream, nil)
 		return
 	}
-	defer stream.Close()
-	c.DataFromReader(http.StatusOK, -1, ttsContentType(request.Format), stream, nil)
+
+	chunks := splitTTSContent(message.Content, 120)
+	if len(chunks) == 0 {
+		c.Error(errors.NewBadRequestError("message content is empty"))
+		return
+	}
+
+	var stream io.ReadCloser
+	for index, chunk := range chunks {
+		stream, err = model.Synthesize(ctx, chunk, options)
+		if err != nil {
+			if index == 0 {
+				c.Error(errors.NewInternalServerError(err.Error()))
+			}
+			return
+		}
+		if index == 0 {
+			c.Header("Content-Type", ttsContentType(format))
+			c.Header("Cache-Control", "no-store")
+			c.Header("X-Accel-Buffering", "no")
+			c.Status(http.StatusOK)
+		}
+		_, copyErr := io.Copy(c.Writer, stream)
+		closeErr := stream.Close()
+		c.Writer.Flush()
+		if copyErr != nil || closeErr != nil || ctx.Err() != nil {
+			return
+		}
+	}
+}
+
+func splitTTSContent(content string, maxRunes int) []string {
+	content = strings.TrimSpace(content)
+	if content == "" || maxRunes <= 0 {
+		return nil
+	}
+
+	chunks := make([]string, 0, len(content)/maxRunes+1)
+	current := make([]rune, 0, maxRunes)
+	flush := func() {
+		chunk := strings.TrimSpace(string(current))
+		if chunk != "" {
+			chunks = append(chunks, chunk)
+		}
+		current = current[:0]
+	}
+	for _, value := range []rune(content) {
+		current = append(current, value)
+		if isTTSBoundary(value) || len(current) >= maxRunes {
+			flush()
+		}
+	}
+	flush()
+	return chunks
+}
+
+func isTTSBoundary(value rune) bool {
+	switch value {
+	case '。', '！', '？', '；', '.', '!', '?', ';', '\n':
+		return true
+	default:
+		return false
+	}
 }
 
 func ttsContentType(format string) string {
