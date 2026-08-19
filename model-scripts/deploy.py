@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -323,6 +325,18 @@ class ModelSpec:
         return out or [self.key]
 
 
+@dataclass(frozen=True)
+class GatewaySpec:
+    enabled: bool
+    install: bool
+    listen_port: int
+    server_name: str
+    config_path: Path
+    certificate_path: Path
+    certificate_key_path: Path
+    generate_self_signed_certificate: bool
+
+
 def parse_models(cfg: Dict[str, Any]) -> List[ModelSpec]:
     models_cfg = cfg.get("models") or {}
     specs: List[ModelSpec] = []
@@ -380,6 +394,44 @@ def parse_models(cfg: Dict[str, Any]) -> List[ModelSpec]:
             )
         )
     return specs
+
+
+def parse_gateway(cfg: Dict[str, Any]) -> GatewaySpec:
+    """Parse and validate the external HTTPS gateway configuration."""
+    raw = cfg.get("gateway") or {}
+    listen_port = int(raw.get("listen_port") or 8006)
+    if not 1 <= listen_port <= 65535:
+        raise RuntimeError(f"gateway.listen_port 无效: {listen_port}")
+    deploy_cfg = cfg.get("deploy") or {}
+    server_name = str(raw.get("server_name") or deploy_cfg.get("host") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._:-]+", server_name):
+        raise RuntimeError(f"gateway.server_name 无效: {server_name!r}")
+    path_values = {
+        "config_path": str(
+            raw.get("config_path") or "/etc/nginx/conf.d/weknora-model-gateway.conf"
+        ),
+        "certificate_path": str(
+            raw.get("certificate_path") or "/etc/nginx/ssl/weknora-model-gateway.crt"
+        ),
+        "certificate_key_path": str(
+            raw.get("certificate_key_path") or "/etc/nginx/ssl/weknora-model-gateway.key"
+        ),
+    }
+    for name, value in path_values.items():
+        if not value.startswith("/") or any(ch.isspace() or ch in ";{}" for ch in value):
+            raise RuntimeError(f"gateway.{name} 必须是安全的 Linux 绝对路径: {value!r}")
+    return GatewaySpec(
+        enabled=bool(raw.get("enabled", True)),
+        install=bool(raw.get("install", False)),
+        listen_port=listen_port,
+        server_name=server_name,
+        config_path=Path(path_values["config_path"]),
+        certificate_path=Path(path_values["certificate_path"]),
+        certificate_key_path=Path(path_values["certificate_key_path"]),
+        generate_self_signed_certificate=bool(
+            raw.get("generate_self_signed_certificate", True)
+        ),
+    )
 
 
 def validate_specs_for_prepare(specs: List[ModelSpec]) -> None:
@@ -1172,6 +1224,125 @@ def render_compose(cfg: Dict[str, Any], data_dir: Path, specs: List[ModelSpec]) 
     return "\n".join(lines) + "\n"
 
 
+GATEWAY_MODEL_KEYS = ("embedding", "rerank", "verifier", "asr", "tts")
+
+
+def render_gateway_config(cfg: Dict[str, Any], specs: List[ModelSpec]) -> str:
+    """Render the HTTPS reverse proxy without embedding credentials."""
+    gateway = parse_gateway(cfg)
+    template_path = SCRIPT_DIR / "templates" / "weknora-model-gateway.conf.tmpl"
+    if not template_path.is_file():
+        raise RuntimeError(f"缺少网关模板: {template_path}")
+    enabled = {spec.key: spec for spec in specs if spec.enabled}
+    route_blocks = []
+    for key in GATEWAY_MODEL_KEYS:
+        spec = enabled.get(key)
+        if spec is None:
+            continue
+        route_blocks.append(
+            f"    location ^~ /{key}/ {{\n"
+            '        if ($http_authorization = "") { return 401; }\n'
+            f"        proxy_pass http://127.0.0.1:{spec.port}/;\n"
+            "    }\n"
+        )
+    template = template_path.read_text(encoding="utf-8")
+    return (
+        template.replace("{{LISTEN_PORT}}", str(gateway.listen_port))
+        .replace("{{SERVER_NAME}}", gateway.server_name)
+        .replace("{{CERTIFICATE_PATH}}", gateway.certificate_path.as_posix())
+        .replace("{{CERTIFICATE_KEY_PATH}}", gateway.certificate_key_path.as_posix())
+        .replace("{{MODEL_ROUTES}}", "\n".join(route_blocks))
+    )
+
+
+def write_gateway_config(
+    cfg: Dict[str, Any], specs: List[ModelSpec], output_dir: Path
+) -> Optional[Path]:
+    """Write the generated gateway config when the gateway is enabled."""
+    if not parse_gateway(cfg).enabled:
+        return None
+    gateway_dir = ensure_dir(output_dir / "gateway")
+    output = gateway_dir / "weknora-model-gateway.conf"
+    output.write_text(render_gateway_config(cfg, specs), encoding="utf-8")
+    return output
+
+
+def _certificate_san(server_name: str) -> str:
+    """Return an OpenSSL subjectAltName entry for an IP address or DNS name."""
+    try:
+        ipaddress.ip_address(server_name)
+    except ValueError:
+        return f"DNS:{server_name}"
+    return f"IP:{server_name}"
+
+
+def install_gateway(cfg: Dict[str, Any], rendered_config: Path) -> None:
+    """Install the generated config and local certificate into system Nginx."""
+    gateway = parse_gateway(cfg)
+    if not gateway.enabled or not gateway.install:
+        return
+    if os.name != "posix":
+        raise RuntimeError("gateway.install 仅支持 Linux 服务器")
+    for path in (
+        gateway.config_path,
+        gateway.certificate_path,
+        gateway.certificate_key_path,
+    ):
+        if not path.is_absolute():
+            raise RuntimeError(f"安装路径必须是绝对路径: {path}")
+    if shutil.which("nginx") is None:
+        raise RuntimeError("gateway.install=true，但服务器未安装 nginx")
+
+    cert_exists = gateway.certificate_path.is_file()
+    key_exists = gateway.certificate_key_path.is_file()
+    if cert_exists != key_exists:
+        raise RuntimeError("网关证书和私钥必须同时存在或同时不存在")
+    if not cert_exists:
+        if not gateway.generate_self_signed_certificate:
+            raise RuntimeError("网关证书不存在，且已禁用自签名证书生成")
+        if shutil.which("openssl") is None:
+            raise RuntimeError("生成自签名证书需要 openssl")
+        ensure_dir(gateway.certificate_path.parent)
+        ensure_dir(gateway.certificate_key_path.parent)
+        run_cmd(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-nodes",
+                "-days",
+                "825",
+                "-keyout",
+                str(gateway.certificate_key_path),
+                "-out",
+                str(gateway.certificate_path),
+                "-subj",
+                f"/CN={gateway.server_name}",
+                "-addext",
+                f"subjectAltName={_certificate_san(gateway.server_name)}",
+            ]
+        )
+        gateway.certificate_key_path.chmod(0o600)
+
+    ensure_dir(gateway.config_path.parent)
+    previous = gateway.config_path.read_bytes() if gateway.config_path.exists() else None
+    pending = gateway.config_path.with_suffix(gateway.config_path.suffix + ".tmp")
+    shutil.copy2(rendered_config, pending)
+    pending.replace(gateway.config_path)
+    try:
+        run_cmd(["nginx", "-t"])
+    except RuntimeError:
+        if previous is None:
+            gateway.config_path.unlink(missing_ok=True)
+        else:
+            gateway.config_path.write_bytes(previous)
+        raise
+    run_cmd(["systemctl", "reload", "nginx"])
+    print(f"网关已安装: {gateway.config_path}")
+
+
 def render_approved_endpoints(cfg: Dict[str, Any], specs: List[ModelSpec]) -> Dict[str, Any]:
     deploy = cfg.get("deploy") or {}
     host = str(deploy.get("host") or "127.0.0.1")
@@ -1433,6 +1604,7 @@ def cmd_prepare(args: argparse.Namespace) -> int:
 
     yaml.safe_load(compose_text)
     (output_dir / "docker-compose.airgap.override.yml").write_text(compose_text, encoding="utf-8")
+    write_gateway_config(cfg, specs, output_dir)
     registry = render_approved_endpoints(cfg, specs)
     reg_dir = ensure_dir(output_dir / "registry")
     (reg_dir / "approved_endpoints.json").write_text(
@@ -1752,6 +1924,8 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     )
     dump_yaml(reg_dir / "model_registry.yaml", {"models": registry["model_registry"]})
     dump_yaml(data_dir / "config.yaml", cfg)
+    gateway_config = write_gateway_config(cfg, specs, data_dir)
+    write_gateway_config(cfg, specs, extracted)
 
     auto_start = bool((cfg.get("deploy") or {}).get("auto_start", True)) and not args.no_start
     project = str((cfg.get("deploy") or {}).get("compose_project") or "weknora-models")
@@ -1786,6 +1960,9 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     else:
         print("跳过自动启动。一键启动命令:")
         print(f"  docker compose -p {project} -f {compose_path} up -d")
+
+    if gateway_config is not None:
+        install_gateway(cfg, gateway_config)
 
     print(f"\ndeploy 完成。登记文件: {reg_dir}")
     print(f"OpenAI 兼容基址示例: http://{(cfg.get('deploy') or {}).get('host')}:<port>/v1")
@@ -1846,6 +2023,7 @@ def cmd_gen_config(args: argparse.Namespace) -> int:
 
     yaml.safe_load(compose_text)  # 确保可解析
     (out / "docker-compose.airgap.override.yml").write_text(compose_text, encoding="utf-8")
+    write_gateway_config(cfg, specs, out)
     registry = render_approved_endpoints(cfg, specs)
     (out / "approved_endpoints.json").write_text(
         json.dumps(registry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

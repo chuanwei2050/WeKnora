@@ -199,6 +199,41 @@ class TestConfigAndCompose(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             deploy.parse_models(cfg)
 
+    def test_gateway_has_all_enabled_model_routes_without_secrets(self) -> None:
+        cfg = deploy.load_config(ROOT / "config.yaml.example", prefer_as_base=True)
+        cfg["gateway"]["server_name"] = "114.242.58.129"
+        specs = deploy.parse_models(cfg)
+        text = deploy.render_gateway_config(cfg, specs)
+        self.assertIn("listen 8006 ssl", text)
+        self.assertIn("server_name 114.242.58.129", text)
+        for key, port in {
+            "embedding": 8001,
+            "rerank": 8002,
+            "verifier": 8003,
+            "asr": 8004,
+            "tts": 8005,
+        }.items():
+            self.assertIn(f"location ^~ /{key}/", text)
+            self.assertIn(f"proxy_pass http://127.0.0.1:{port}/", text)
+        self.assertNotIn("MODEL_API_KEY", text)
+        self.assertNotIn("Bearer ", text)
+
+    def test_gateway_omits_disabled_model_route(self) -> None:
+        cfg = deploy.load_config(ROOT / "config.yaml.example", prefer_as_base=True)
+        cfg["models"]["verifier"]["enabled"] = False
+        text = deploy.render_gateway_config(cfg, deploy.parse_models(cfg))
+        self.assertNotIn("location ^~ /verifier/", text)
+
+    def test_gateway_rejects_invalid_boundary_values(self) -> None:
+        cfg = deploy.load_config(ROOT / "config.yaml.example", prefer_as_base=True)
+        cfg["gateway"]["listen_port"] = 70000
+        with self.assertRaises(RuntimeError):
+            deploy.parse_gateway(cfg)
+        cfg["gateway"]["listen_port"] = 8006
+        cfg["gateway"]["server_name"] = "bad host/name"
+        with self.assertRaises(RuntimeError):
+            deploy.parse_gateway(cfg)
+
 
 class TestCli(unittest.TestCase):
     def test_config_before_subcommand(self) -> None:
@@ -259,6 +294,9 @@ class TestCli(unittest.TestCase):
             self.assertTrue(compose.exists())
             text = compose.read_text(encoding="utf-8")
             self.assertIn("pooling", text)
+            gateway = out / "gateway" / "weknora-model-gateway.conf"
+            self.assertTrue(gateway.exists())
+            self.assertIn("/verifier/", gateway.read_text(encoding="utf-8"))
             self.assertIn("10.0.0.8", (out / "approved_endpoints.json").read_text(encoding="utf-8"))
 
 

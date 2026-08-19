@@ -29,6 +29,18 @@ deploy:
   auto_start: true
   install_systemd: false
 
+# 统一 HTTPS 网关。prepare/gen-config 始终生成配置；install=true 时 deploy 会安装并重载 Nginx。
+# 公网使用时 server_name 应填写公网 IP 或域名，且由上级网关做端口映射。
+gateway:
+  enabled: true
+  install: false
+  listen_port: 8006
+  server_name: null  # 留空时使用 deploy.host；公网部署建议显式填写公网 IP 或域名
+  config_path: /etc/nginx/conf.d/weknora-model-gateway.conf
+  certificate_path: /etc/nginx/ssl/weknora-model-gateway.crt
+  certificate_key_path: /etc/nginx/ssl/weknora-model-gateway.key
+  generate_self_signed_certificate: true
+
 docker:
   vllm_image: vllm/vllm-openai:latest
   vllm_image_tar: images/vllm-openai.tar

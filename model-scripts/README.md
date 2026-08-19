@@ -87,6 +87,11 @@ python deploy.py deploy \
 
 `deploy` 会自动：解压 → 校验权重 → `docker load` → `docker compose up -d`。
 
+`gateway.enabled: true` 时还会生成
+`<data_dir>/gateway/weknora-model-gateway.conf`。目标服务器已经安装 Nginx 和 OpenSSL、
+且以 root 部署时，可设置 `gateway.install: true` 自动生成自签名证书、安装配置并平滑重载
+Nginx。证书私钥只在目标服务器生成，不进入 Git、镜像或离线包。
+
 所有 `/v1/*` 模型接口统一要求 `Authorization: Bearer <MODEL_API_KEY>`；
 `/health` 与 `/healthz` 仅供本机容器健康检查，不要求鉴权。密钥只通过环境变量注入，
 不要写入配置文件、镜像或离线归档。
@@ -111,6 +116,7 @@ docker compose -p weknora-models -f /mnt/models/docker-compose.airgap.override.y
 | Verifier + Judge | 8003 | **AWQ** | `Qwen3.5-9B`（默认与 Embedding 同 GPU0；双卡可改 `["1"]`） |
 | ASR | 8004 | **ONNX INT8** | 约 0.23GB，优于官方≈0.9GB |
 | TTS | 8005 | fp16 | 暂无可用 CosyVoice2 INT8 制品 |
+| HTTPS 网关 | 8006 | — | 统一暴露五类模型、鉴权、TLS 与限流 |
 
 策略：**能量化且有优势（体积/显存/速度）且栈可加载 → 用量化；否则用官方全精度。**
 
@@ -123,6 +129,38 @@ curl -s http://127.0.0.1:8001/v1/models
 curl -s http://127.0.0.1:8003/v1/models
 curl -s http://127.0.0.1:8002/healthz
 ```
+
+### 外网 HTTPS 网关
+
+在目标服务器的 `config.yaml` 中设置：
+
+```yaml
+gateway:
+  enabled: true
+  install: true
+  listen_port: 8006
+  server_name: 114.242.58.129  # 或正式域名
+  generate_self_signed_certificate: true
+```
+
+部署完成后，若公网地址位于上级路由器，还需由网络管理员配置 DNAT，例如：
+
+```text
+公网 TCP 30001 → 192.168.0.219:8006
+```
+
+同一公网端口按路径访问：
+
+```text
+https://114.242.58.129:30001/embedding/v1
+https://114.242.58.129:30001/rerank/v1
+https://114.242.58.129:30001/verifier/v1
+https://114.242.58.129:30001/asr/v1
+https://114.242.58.129:30001/tts/v1
+```
+
+所有请求继续使用 `Authorization: Bearer <MODEL_API_KEY>`。使用自签名证书时，客户端应
+导入生成的 `.crt` 文件，不要在正式环境关闭 TLS 校验。
 
 ---
 
@@ -137,6 +175,7 @@ model-scripts/
 ├── docker-compose.airgap.override.yml  # 审阅模板；真正运行以 deploy 生成为准
 ├── services/                 # Rerank / ASR / TTS 的 Dockerfile + 服务代码
 ├── templates/                # WeKnora 批准端点 / 模型登记示例
+│   └── weknora-model-gateway.conf.tmpl  # HTTPS 网关模板
 ├── systemd/                  # 遗留兜底（主路径用 compose，一般不用）
 ├── test_deploy.py            # 离线单测
 ├── .cache/                   # Hub/临时缓存（gitignore，落项目盘）
@@ -158,6 +197,8 @@ model-scripts/
 - **下载缓存默认在 `model-scripts/.cache/`**（项目盘），不写 `C:\Users\...`；可用 `bundle.hub_cache_dir` 改路径
 - 默认单卡：Embedding / Verifier 均 → `device_ids: ["0"]`；双卡可将 verifier 改为 `["1"]` 并提高 `gpu_memory_utilization`
 - 默认 ASR/TTS `needs_gpu: false`，避免和 Embedding 抢 GPU；多卡可改 `true` 并设 `device_ids`
+- `gateway.server_name` 留空时使用 `deploy.host`；公网部署应显式填写公网 IP 或域名
+- `gateway.install: true` 需要目标 Linux 服务器已有 `nginx` 与 `openssl`，且部署用户可写系统配置目录
 
 密钥只用环境变量，**不要写进配置或打包介质**：
 
