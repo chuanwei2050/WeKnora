@@ -38,6 +38,122 @@ use_container_backend() {
     grep -qiE '(microsoft|wsl)' /proc/version 2> /dev/null
 }
 
+use_windows_frontend() {
+    use_container_backend && command -v powershell.exe &> /dev/null
+}
+
+windows_path() {
+    local path="$1"
+
+    if command -v wslpath &> /dev/null; then
+        wslpath -w "$path"
+    else
+        cygpath -w "$path"
+    fi
+}
+
+windows_frontend_is_alive() {
+    local frontend_pid="$1"
+    local frontend_pid_file
+    local bridge_env
+
+    frontend_pid_file="$(windows_path "$PROJECT_ROOT/logs/frontend.pid")"
+    bridge_env="${WSLENV:+$WSLENV:}WEKNORA_FRONTEND_PID:WEKNORA_FRONTEND_PID_FILE"
+
+    WSLENV="$bridge_env" \
+    WEKNORA_FRONTEND_PID="$frontend_pid" \
+    WEKNORA_FRONTEND_PID_FILE="$frontend_pid_file" \
+    powershell.exe -NoProfile -NonInteractive -Command '
+        $frontendProcessId = 0
+        if (-not [int]::TryParse($env:WEKNORA_FRONTEND_PID, [ref]$frontendProcessId)) { exit 1 }
+        $frontendProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $frontendProcessId"
+        if ($null -eq $frontendProcess -or $frontendProcess.CommandLine -notmatch "npm\.cmd.* run dev") { exit 1 }
+        $frontendPidFile = Get-Item $env:WEKNORA_FRONTEND_PID_FILE -ErrorAction SilentlyContinue
+        if ($null -eq $frontendPidFile) { exit 1 }
+        if ($frontendProcess.CreationDate.ToUniversalTime() -gt $frontendPidFile.LastWriteTimeUtc.AddSeconds(1)) { exit 1 }
+    ' > /dev/null 2>&1
+}
+
+start_windows_frontend() {
+    local frontend_dir
+    local frontend_log
+    local frontend_error_log
+    local frontend_pid_file
+    local bridge_env
+
+    frontend_dir="$(windows_path "$PROJECT_ROOT/frontend")"
+    frontend_log="$(windows_path "$PROJECT_ROOT/logs/frontend.log")"
+    frontend_error_log="$(windows_path "$PROJECT_ROOT/logs/frontend-error.log")"
+    frontend_pid_file="$(windows_path "$PROJECT_ROOT/logs/frontend.pid")"
+    bridge_env="${WSLENV:+$WSLENV:}WEKNORA_FRONTEND_DIR:WEKNORA_FRONTEND_LOG:WEKNORA_FRONTEND_ERROR_LOG:WEKNORA_FRONTEND_PID_FILE"
+
+    WSLENV="$bridge_env" \
+    WEKNORA_FRONTEND_DIR="$frontend_dir" \
+    WEKNORA_FRONTEND_LOG="$frontend_log" \
+    WEKNORA_FRONTEND_ERROR_LOG="$frontend_error_log" \
+    WEKNORA_FRONTEND_PID_FILE="$frontend_pid_file" \
+    powershell.exe -NoProfile -NonInteractive -Command '
+        $env:VITE_WATCH_USE_POLLING = "true"
+        $npmCommand = (Get-Command npm.cmd -ErrorAction Stop).Source
+        $frontendOptions = @{
+            FilePath = $npmCommand
+            ArgumentList = @("run", "dev", "--", "--strictPort")
+            WorkingDirectory = $env:WEKNORA_FRONTEND_DIR
+            WindowStyle = "Hidden"
+            RedirectStandardOutput = $env:WEKNORA_FRONTEND_LOG
+            RedirectStandardError = $env:WEKNORA_FRONTEND_ERROR_LOG
+            PassThru = $true
+        }
+        $frontendProcess = Start-Process @frontendOptions
+        [IO.File]::WriteAllText($env:WEKNORA_FRONTEND_PID_FILE, $frontendProcess.Id)
+    ' > /dev/null 2>&1 &
+}
+
+stop_windows_frontend() {
+    local pid_file="$1"
+    local frontend_pid
+
+    if [ ! -f "$pid_file" ]; then
+        return 0
+    fi
+
+    frontend_pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if ! [[ "$frontend_pid" =~ ^[0-9]+$ ]] || ! windows_frontend_is_alive "$frontend_pid"; then
+        log_info "前端上次进程已退出，清理旧 PID 文件"
+        rm -f "$pid_file"
+        return 0
+    fi
+
+    log_info "停止上一次的前端进程 (Windows PID: $frontend_pid)..."
+    if ! MSYS_NO_PATHCONV=1 taskkill.exe /PID "$frontend_pid" /T /F > /dev/null 2>&1 \
+        && windows_frontend_is_alive "$frontend_pid"; then
+        log_error "无法停止前端进程 (Windows PID: $frontend_pid)"
+        return 1
+    fi
+    rm -f "$pid_file"
+}
+
+stop_frontend() {
+    local pid_file="$1"
+
+    if use_windows_frontend; then
+        stop_windows_frontend "$pid_file"
+    else
+        stop_previous_process "前端" "$pid_file" "scripts/dev.sh frontend"
+    fi
+}
+
+process_is_alive() {
+    local process_kind="$1"
+    local process_pid="$2"
+
+    if [ "$process_kind" = "windows" ]; then
+        windows_frontend_is_alive "$process_pid"
+    else
+        kill -0 "$process_pid" 2>/dev/null
+    fi
+}
+
 wait_for_log_pattern() {
     local name="$1"
     local pid="$2"
@@ -127,8 +243,9 @@ wait_for_http() {
     local url="$3"
     local log_file="$4"
     local timeout="${5:-60}"
+    local process_kind="${6:-unix}"
 
-    if ! kill -0 "$pid" 2>/dev/null; then
+    if ! process_is_alive "$process_kind" "$pid"; then
         log_error "$name 进程已退出，请查看日志: $log_file"
         return 1
     fi
@@ -139,7 +256,7 @@ wait_for_http() {
     fi
 
     for _ in $(seq 1 "$timeout"); do
-        if ! kill -0 "$pid" 2>/dev/null; then
+        if ! process_is_alive "$process_kind" "$pid"; then
             log_error "$name 进程已退出，请查看日志: $log_file"
             return 1
         fi
@@ -173,7 +290,7 @@ BACKEND_MARKER="scripts/dev.sh app"
 BACKEND_READY_TIMEOUT=60
 if use_container_backend; then
     BACKEND_COMMAND="app-container"
-    BACKEND_MARKER="scripts/dev.sh app-container"
+    BACKEND_MARKER="WeKnora-app-dev"
     BACKEND_READY_TIMEOUT=240
 fi
 
@@ -181,10 +298,15 @@ case "$ACTION" in
     start)
         ;;
     stop)
-        stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "$BACKEND_MARKER"
-        stop_previous_process "前端" "$PROJECT_ROOT/tmp/frontend.pid" "scripts/dev.sh frontend"
+        stop_previous_process "后端" "$PROJECT_ROOT/logs/backend.pid" "$BACKEND_MARKER"
+        frontend_stop_status=0
+        stop_frontend "$PROJECT_ROOT/logs/frontend.pid" || frontend_stop_status=$?
         bash "$PROJECT_ROOT/scripts/dev.sh" stop
-        exit $?
+        services_stop_status=$?
+        if [ "$frontend_stop_status" -ne 0 ]; then
+            exit "$frontend_stop_status"
+        fi
+        exit "$services_stop_status"
         ;;
     *)
         log_error "未知命令: $ACTION"
@@ -196,6 +318,7 @@ esac
 # 每次启动前清空旧日志，避免本次未启动的服务留下上一轮的误导信息。
 : > "$PROJECT_ROOT/logs/backend.log"
 : > "$PROJECT_ROOT/logs/frontend.log"
+: > "$PROJECT_ROOT/logs/frontend-error.log"
 
 # 1. 启动基础设施
 log_info "步骤 1/3: 启动基础设施服务..."
@@ -206,8 +329,11 @@ if [ $? -ne 0 ]; then
 fi
 
 # 仅在依赖启动成功后停止本脚本上次记录的后端和前端，避免依赖失败时破坏可用的本地服务。
-stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "$BACKEND_MARKER"
-stop_previous_process "前端" "$PROJECT_ROOT/tmp/frontend.pid" "scripts/dev.sh frontend"
+stop_previous_process "后端" "$PROJECT_ROOT/logs/backend.pid" "$BACKEND_MARKER"
+if ! stop_frontend "$PROJECT_ROOT/logs/frontend.pid"; then
+    log_error "无法停止上一次的前端进程，已中止启动"
+    exit 1
+fi
 
 # 等待服务就绪
 log_info "等待服务启动完成..."
@@ -218,32 +344,51 @@ echo ""
 log_info "步骤 2/3: 启动后端应用..."
 nohup bash -c 'cd "$1" && exec bash "$1/scripts/dev.sh" "$2"' _ "$PROJECT_ROOT" "$BACKEND_COMMAND" > "$PROJECT_ROOT/logs/backend.log" 2>&1 &
 BACKEND_PID=$!
-echo $BACKEND_PID > "$PROJECT_ROOT/tmp/backend.pid"
+echo $BACKEND_PID > "$PROJECT_ROOT/logs/backend.pid"
 log_success "后端已在后台启动 (PID: $BACKEND_PID)"
 log_info "查看后端日志: tail -f $PROJECT_ROOT/logs/backend.log"
 
 if use_container_backend && ! wait_for_log_pattern "后端" "$BACKEND_PID" "$PROJECT_ROOT/logs/backend.log" "Server is running at" "$BACKEND_READY_TIMEOUT"; then
-    stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "$BACKEND_MARKER"
+    stop_previous_process "后端" "$PROJECT_ROOT/logs/backend.pid" "$BACKEND_MARKER"
     exit 1
 fi
 
 if ! wait_for_http "后端" "$BACKEND_PID" "http://127.0.0.1:8080/health" "$PROJECT_ROOT/logs/backend.log" "$BACKEND_READY_TIMEOUT"; then
-    stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "$BACKEND_MARKER"
+    stop_previous_process "后端" "$PROJECT_ROOT/logs/backend.pid" "$BACKEND_MARKER"
     exit 1
 fi
 
 # 3. 自动启动前端（后端就绪后再启动，避免后端失败时额外占用前端端口）
 echo ""
 log_info "步骤 3/3: 启动前端应用..."
-nohup bash -c 'cd "$1" && exec bash "$1/scripts/dev.sh" frontend' _ "$PROJECT_ROOT" > "$PROJECT_ROOT/logs/frontend.log" 2>&1 &
-FRONTEND_PID=$!
-echo $FRONTEND_PID > "$PROJECT_ROOT/tmp/frontend.pid"
+FRONTEND_PROCESS_KIND="unix"
+if use_windows_frontend; then
+    FRONTEND_PROCESS_KIND="windows"
+    rm -f "$PROJECT_ROOT/logs/frontend.pid"
+    start_windows_frontend
+    for _ in $(seq 1 10); do
+        if [ -s "$PROJECT_ROOT/logs/frontend.pid" ]; then
+            break
+        fi
+        sleep 1
+    done
+    FRONTEND_PID="$(cat "$PROJECT_ROOT/logs/frontend.pid" 2>/dev/null || true)"
+else
+    nohup bash -c 'cd "$1" && exec bash "$1/scripts/dev.sh" frontend' _ "$PROJECT_ROOT" > "$PROJECT_ROOT/logs/frontend.log" 2>&1 &
+    FRONTEND_PID=$!
+fi
+if ! [[ "$FRONTEND_PID" =~ ^[0-9]+$ ]]; then
+    log_error "前端启动失败，未获得有效 PID，请查看日志: $PROJECT_ROOT/logs/frontend-error.log"
+    stop_previous_process "后端" "$PROJECT_ROOT/logs/backend.pid" "$BACKEND_MARKER"
+    exit 1
+fi
+echo $FRONTEND_PID > "$PROJECT_ROOT/logs/frontend.pid"
 log_success "前端已在后台启动 (PID: $FRONTEND_PID)"
 log_info "查看前端日志: tail -f $PROJECT_ROOT/logs/frontend.log"
 
-if ! wait_for_http "前端" "$FRONTEND_PID" "http://127.0.0.1:5173/" "$PROJECT_ROOT/logs/frontend.log"; then
-    stop_previous_process "前端" "$PROJECT_ROOT/tmp/frontend.pid" "scripts/dev.sh frontend"
-    stop_previous_process "后端" "$PROJECT_ROOT/tmp/backend.pid" "$BACKEND_MARKER"
+if ! wait_for_http "前端" "$FRONTEND_PID" "http://127.0.0.1:5173/" "$PROJECT_ROOT/logs/frontend.log" 60 "$FRONTEND_PROCESS_KIND"; then
+    stop_frontend "$PROJECT_ROOT/logs/frontend.pid"
+    stop_previous_process "后端" "$PROJECT_ROOT/logs/backend.pid" "$BACKEND_MARKER"
     exit 1
 fi
 

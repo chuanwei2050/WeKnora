@@ -39,6 +39,9 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    watch: process.env.VITE_WATCH_USE_POLLING === 'true'
+      ? { usePolling: true, interval: 1000 }
+      : undefined,
     // 代理配置，用于开发环境
     proxy: {
       '/api': {
