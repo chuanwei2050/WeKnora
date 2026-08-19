@@ -25,3 +25,20 @@ func TestRoleSpecificDriverMustBeInitialized(t *testing.T) {
 
 	assert.Empty(t, GetDefaultRetrieverDrivers(VectorRetrieverType))
 }
+
+func TestRoleSpecificDriversConstrainTenantOverrides(t *testing.T) {
+	t.Setenv("KEYWORD_RETRIEVE_DRIVER", "elasticsearch_v8")
+	t.Setenv("VECTOR_RETRIEVE_DRIVER", "milvus")
+
+	tenant := &Tenant{RetrieverEngines: RetrieverEngines{Engines: []RetrieverEngineParams{
+		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: MilvusRetrieverEngineType},
+		{RetrieverType: VectorRetrieverType, RetrieverEngineType: ElasticsearchRetrieverEngineType},
+		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: ElasticsearchRetrieverEngineType},
+		{RetrieverType: VectorRetrieverType, RetrieverEngineType: MilvusRetrieverEngineType},
+	}}}
+
+	assert.Equal(t, []RetrieverEngineParams{
+		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: ElasticsearchRetrieverEngineType},
+		{RetrieverType: VectorRetrieverType, RetrieverEngineType: MilvusRetrieverEngineType},
+	}, tenant.GetEffectiveEngines())
+}

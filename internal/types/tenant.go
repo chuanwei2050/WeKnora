@@ -39,7 +39,6 @@ var retrieverEngineMapping = map[string][]RetrieverEngineParams{
 	},
 	"elasticsearch_v8": {
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: ElasticsearchRetrieverEngineType},
-		{RetrieverType: VectorRetrieverType, RetrieverEngineType: ElasticsearchRetrieverEngineType},
 	},
 	"qdrant": {
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: QdrantRetrieverEngineType},
@@ -47,7 +46,6 @@ var retrieverEngineMapping = map[string][]RetrieverEngineParams{
 	},
 	"milvus": {
 		{RetrieverType: VectorRetrieverType, RetrieverEngineType: MilvusRetrieverEngineType},
-		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: MilvusRetrieverEngineType},
 	},
 	"weaviate": {
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: WeaviateRetrieverEngineType},
@@ -210,7 +208,21 @@ type RetrieverEngines struct {
 // GetEffectiveEngines returns the tenant's engines if configured, otherwise returns system defaults
 func (t *Tenant) GetEffectiveEngines() []RetrieverEngineParams {
 	if len(t.RetrieverEngines.Engines) > 0 {
-		return t.RetrieverEngines.Engines
+		result := make([]RetrieverEngineParams, 0, len(t.RetrieverEngines.Engines))
+		for _, engine := range t.RetrieverEngines.Engines {
+			preferredDriver := preferredRetrieverDriver(engine.RetrieverType)
+			if preferredDriver == "" {
+				result = append(result, engine)
+				continue
+			}
+			for _, preferred := range retrieverEngineMapping[preferredDriver] {
+				if preferred == engine {
+					result = append(result, engine)
+					break
+				}
+			}
+		}
+		return result
 	}
 	return GetDefaultRetrieverEngines()
 }

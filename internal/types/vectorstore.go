@@ -483,38 +483,6 @@ type VectorStoreFieldInfo struct {
 func GetVectorStoreTypes() []VectorStoreTypeInfo {
 	return []VectorStoreTypeInfo{
 		{
-			Type:        "elasticsearch",
-			DisplayName: "Elasticsearch",
-			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "addr", Type: "string", Required: true, Description: "URL", Default: "http://localhost:9200"},
-				{Name: "username", Type: "string", Required: false, Description: "Username", Default: "elastic"},
-				{Name: "password", Type: "string", Required: false, Sensitive: true, Description: "Password"},
-			},
-			IndexFields: []VectorStoreFieldInfo{
-				{Name: "index_name", Type: "string", Required: false, Description: "Index Name", Default: "weknora"},
-				{Name: "number_of_shards", Type: "number", Required: false, Description: "Shards", Default: 4},
-				{Name: "number_of_replicas", Type: "number", Required: false, Description: "Replicas", Default: 1},
-			},
-		},
-		// PostgreSQL and SQLite are excluded from the type list because they only support
-		// the app's default DB connection (UseDefaultConnection=true). They appear as
-		// env stores when configured via RETRIEVE_DRIVER but cannot be added as DB stores.
-		{
-			Type:        "qdrant",
-			DisplayName: "Qdrant",
-			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "host", Type: "string", Required: true, Description: "Host", Default: "localhost"},
-				{Name: "port", Type: "number", Required: false, Description: "Port", Default: 6334},
-				{Name: "api_key", Type: "string", Required: false, Sensitive: true, Description: "API Key"},
-				{Name: "use_tls", Type: "boolean", Required: false, Description: "Use TLS", Default: false},
-			},
-			IndexFields: []VectorStoreFieldInfo{
-				{Name: "collection_prefix", Type: "string", Required: false, Description: "Collection Prefix", Default: "weknora_embeddings"},
-				{Name: "shard_number", Type: "number", Required: false, Description: "Shard Number", Default: 1},
-				{Name: "replication_factor", Type: "number", Required: false, Description: "Replication Factor", Default: 1},
-			},
-		},
-		{
 			Type:        "milvus",
 			DisplayName: "Milvus",
 			ConnectionFields: []VectorStoreFieldInfo{
@@ -526,21 +494,6 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 				{Name: "collection_name", Type: "string", Required: false, Description: "Collection Name", Default: "weknora_embeddings"},
 				{Name: "shards_num", Type: "number", Required: false, Description: "Shards (write parallelism)", Default: 1},
 				{Name: "replica_number", Type: "number", Required: false, Description: "In-memory Replicas (read HA)", Default: 1},
-			},
-		},
-		{
-			Type:        "weaviate",
-			DisplayName: "Weaviate",
-			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "host", Type: "string", Required: true, Description: "Host", Default: "weaviate:8080"},
-				{Name: "grpc_address", Type: "string", Required: false, Description: "gRPC Address", Default: "weaviate:50051"},
-				{Name: "scheme", Type: "string", Required: false, Description: "Scheme", Default: "http"},
-				{Name: "api_key", Type: "string", Required: false, Sensitive: true, Description: "API Key"},
-			},
-			IndexFields: []VectorStoreFieldInfo{
-				{Name: "collection_prefix", Type: "string", Required: false, Description: "Collection Prefix", Default: "Weknora_embeddings"},
-				{Name: "desired_shard_count", Type: "number", Required: false, Description: "Shard Count", Default: 1},
-				{Name: "replication_factor", Type: "number", Required: false, Description: "Replication Factor", Default: 1},
 			},
 		},
 	}
