@@ -243,6 +243,20 @@ func (h *KnowledgeGovernanceHandler) transition(c *gin.Context, next types.Knowl
 		c.Error(errors.NewForbiddenError("knowledge governance permission denied"))
 		return
 	}
+	if action == "submit" && types.CanManageKnowledgeBase(c.Request.Context(), kb) {
+		if err := h.repo.PrepareManagedUpload(c.Request.Context(), tenantID, knowledge.ID, version.ID, userID); err != nil {
+			c.Error(errors.NewConflictError(err.Error()))
+			return
+		}
+		if _, err := h.knowledge.ReparseKnowledge(c.Request.Context(), knowledge.ID); err != nil {
+			_ = h.repo.UpdateVersionStatus(c.Request.Context(), tenantID, version.ID, types.KnowledgeVersionPublishFailed)
+			c.Error(errors.NewConflictError("managed upload parsing could not be started: " + err.Error()))
+			return
+		}
+		version, _ = h.repo.GetVersion(c.Request.Context(), tenantID, version.ID)
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": version})
+		return
+	}
 	if action == "submit" && version.Status == types.KnowledgeVersionRejected {
 		version.Status = types.KnowledgeVersionDraft
 	}
@@ -262,6 +276,20 @@ func (h *KnowledgeGovernanceHandler) transition(c *gin.Context, next types.Knowl
 	if err := h.repo.TransitionVersionWithReview(c.Request.Context(), tenantID, version.ID, next, &types.KnowledgeVersionReview{ID: uuid.NewString(), VersionID: version.ID, ReviewerID: userID, Action: action, Comment: comment, CreatedAt: time.Now().UTC()}); err != nil {
 		c.Error(errors.NewConflictError(err.Error()))
 		return
+	}
+	switch action {
+	case "submit":
+		knowledge.ParseStatus = types.ParseStatusPendingReview
+	case "withdraw":
+		knowledge.ParseStatus = types.ParseStatusDraft
+	case "reject":
+		knowledge.ParseStatus = types.ParseStatusRejected
+	}
+	if action != "approve" {
+		if err := h.knowledge.UpdateKnowledge(c.Request.Context(), knowledge); err != nil {
+			c.Error(errors.NewInternalServerError("failed to update knowledge review status"))
+			return
+		}
 	}
 	if action == "approve" {
 		if err := h.repo.UpdateVersionStatus(c.Request.Context(), tenantID, version.ID, types.KnowledgeVersionIndexing); err != nil {

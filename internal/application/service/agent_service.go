@@ -156,7 +156,7 @@ func (s *agentService) CreateAgentEngine(
 	// and appends them to the tool result content (since Chat Completions API does not
 	// reliably support images in tool role messages across providers).
 	if config.VLMModelID != "" {
-		if vlmModel, err := s.modelService.GetVLMModel(ctx, config.VLMModelID); err == nil {
+		if vlmModel, err := s.modelService.GetVLMModel(ctx, ""); err == nil {
 			engine.SetImageDescriber(func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
 				return vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 			})

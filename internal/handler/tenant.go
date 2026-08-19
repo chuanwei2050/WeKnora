@@ -1163,8 +1163,7 @@ func (h *TenantHandler) GetTenantChatHistoryConfig(c *gin.Context) {
 func (h *TenantHandler) updateTenantChatHistoryConfigInternal(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// The frontend sends: enabled, embedding_model_id
-	// knowledge_base_id is managed internally.
+	// Only enabled is user-controlled; model and knowledge_base_id are managed internally.
 	var req types.ChatHistoryConfig
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
@@ -1184,29 +1183,23 @@ func (h *TenantHandler) updateTenantChatHistoryConfigInternal(c *gin.Context) {
 	// Build the new config, preserving the internally-managed knowledge_base_id
 	cfg := &types.ChatHistoryConfig{
 		Enabled:          req.Enabled,
-		EmbeddingModelID: req.EmbeddingModelID,
+		EmbeddingModelID: "",
 		KnowledgeBaseID:  "", // will be set below
 	}
 
-	// Carry over existing KB ID if the embedding model hasn't changed
+	// The platform default embedding model is fixed when the hidden KB is created.
 	if existing != nil && existing.KnowledgeBaseID != "" {
-		if existing.EmbeddingModelID == req.EmbeddingModelID {
-			cfg.KnowledgeBaseID = existing.KnowledgeBaseID
-		} else {
-			// Embedding model changed — the old KB is incompatible.
-			// We'll create a new one below. The old KB remains but is orphaned (can be cleaned up later).
-			logger.Infof(ctx, "Embedding model changed from %s to %s, will create new chat history KB", existing.EmbeddingModelID, req.EmbeddingModelID)
-		}
+		cfg.KnowledgeBaseID = existing.KnowledgeBaseID
+		cfg.EmbeddingModelID = existing.EmbeddingModelID
 	}
 
-	// Auto-create hidden KB if enabled + model set + no KB yet
-	if cfg.Enabled && cfg.EmbeddingModelID != "" && cfg.KnowledgeBaseID == "" {
+	// Auto-create hidden KB if enabled and no KB exists yet.
+	if cfg.Enabled && cfg.KnowledgeBaseID == "" {
 		kb := &types.KnowledgeBase{
-			Name:             "__chat_history__",
-			Type:             types.KnowledgeBaseTypeDocument,
-			IsTemporary:      true,
-			Description:      "Auto-managed knowledge base for chat history message indexing",
-			EmbeddingModelID: cfg.EmbeddingModelID,
+			Name:        "__chat_history__",
+			Type:        types.KnowledgeBaseTypeDocument,
+			IsTemporary: true,
+			Description: "Auto-managed knowledge base for chat history message indexing",
 		}
 		createdKB, err := h.kbService.CreateKnowledgeBase(ctx, kb)
 		if err != nil {
@@ -1215,6 +1208,7 @@ func (h *TenantHandler) updateTenantChatHistoryConfigInternal(c *gin.Context) {
 			return
 		}
 		cfg.KnowledgeBaseID = createdKB.ID
+		cfg.EmbeddingModelID = createdKB.EmbeddingModelID
 		logger.Infof(ctx, "Auto-created chat history KB: id=%s, embedding_model=%s", createdKB.ID, cfg.EmbeddingModelID)
 	}
 
@@ -1286,6 +1280,7 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("rerank_top_k must be between 0 and 200"))
 		return
 	}
+	cfg.RerankModelID = ""
 
 	settings, err := h.getPlatformSettings(ctx)
 	if err != nil {

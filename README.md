@@ -172,14 +172,53 @@ docker compose up -d   # 启动核心服务
 | Profile | 说明 | 启动命令 |
 |---------|------|----------|
 | _(默认)_ | 核心服务 | `docker compose up -d` |
-| `full` | 全部功能 | `docker compose --profile full up -d` |
+| `full` | 大部分可选功能（不含 Weaviate） | `docker compose --profile full up -d` |
 | `neo4j` | 知识图谱 (Neo4j) | `docker compose --profile neo4j up -d` |
 | `minio` | 对象存储 (MinIO) | `docker compose --profile minio up -d` |
+| `jaeger` | OpenTelemetry 链路查看 (Jaeger) | `docker compose --profile jaeger up -d` |
+| `qdrant` | 向量数据库 (Qdrant) | `docker compose --profile qdrant up -d` |
+| `weaviate` | 向量数据库 (Weaviate) | `docker compose --profile weaviate up -d` |
+| `dex` | 本地 OIDC 联调 (Dex) | `docker compose --profile dex up -d` |
 | `langfuse` | 链路追踪 (Langfuse) | `docker compose --profile langfuse up -d` |
 
 组合示例：`docker compose --profile neo4j --profile minio up -d`
 
 停止服务：`docker compose down`
+
+#### 本地 Langfuse 接入
+
+1. 执行 `docker compose --profile langfuse up -d` 启动 Langfuse，首次启动需等待 ClickHouse 完成迁移。
+2. 打开 `http://localhost:3000`，注册 Langfuse 管理员，并创建组织和项目。
+3. 在项目的 `Settings → API Keys` 中生成 Public Key 和 Secret Key。
+4. 将以下配置写入 `.env`，然后执行 `docker compose up -d app` 使配置生效：
+
+```env
+LANGFUSE_HOST=http://langfuse-web:3000
+LANGFUSE_PUBLIC_KEY=pk-lf-xxxxxxxx
+LANGFUSE_SECRET_KEY=sk-lf-xxxxxxxx
+```
+
+> 浏览器通过 `http://localhost:3000` 访问 Langfuse；Docker 中的 WeKnora 应用通过服务名 `http://langfuse-web:3000` 访问。如果后端使用宿主机上的 `go run` 启动，则将 `LANGFUSE_HOST` 改为 `http://localhost:3000`。请勿将真实密码或 API Key 提交到版本库。
+
+发起一次知识问答或 Agent 对话后，可在 Langfuse 的 **Tracing** 页面查看模型调用、ReAct 轮次、工具调用、Token 使用量和异步任务链路。完整配置及故障排查参见 [Langfuse 集成说明](./docs/Langfuse集成.md)。
+
+#### 其他可选能力接入索引
+
+以下能力还需要启动额外服务或提供外部凭证。修改 `.env` 后需重启 `app`；使用外部服务时，还应确认容器网络、TLS 和防火墙允许访问对应地址。
+
+| 能力 | 启动或接入方式 | `.env` 关键配置 | 验证方式 |
+|------|----------------|-----------------|----------|
+| 知识图谱 | 启动 `neo4j` profile | `ENABLE_GRAPH_RAG=true`、`NEO4J_ENABLE=true`、`NEO4J_*` | 打开 `http://localhost:7474`，并按[知识图谱指南](./docs/开启知识图谱功能.md)验证节点 |
+| MinIO 对象存储 | 启动 `minio` profile | `STORAGE_TYPE=minio`、`MINIO_ENDPOINT`、`MINIO_ACCESS_KEY_ID`、`MINIO_SECRET_ACCESS_KEY`、`MINIO_BUCKET_NAME` | 打开 `http://localhost:9001`，上传文档后确认对象写入 |
+| Qdrant 向量库 | 启动 `qdrant` profile | 在 `RETRIEVE_DRIVER` 中加入 `qdrant`，设置 `VECTOR_RETRIEVE_DRIVER=qdrant`；认证场景再填 `QDRANT_API_KEY` | 后端日志出现 `Register qdrant retrieve engine success` |
+| Weaviate 向量库 | 启动 `weaviate` profile | 在 `RETRIEVE_DRIVER` 中加入 `weaviate`，设置 `VECTOR_RETRIEVE_DRIVER=weaviate`；认证场景再填 `WEAVIATE_*` | 后端日志出现 `Register weaviate retrieve engine success` |
+| Jaeger 链路查看 | 启动 `jaeger` profile | Compose 部署已预设 `OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317` | 打开 `http://localhost:16686` 查询 `WeKnora` 服务 |
+| OIDC 单点登录 | 接入现有 OIDC Provider，或启动 `dex` profile 本地联调 | `OIDC_AUTH_ENABLE=true`、`OIDC_AUTH_CLIENT_ID`、`OIDC_AUTH_CLIENT_SECRET`、Discovery/Issuer 地址 | 登录页出现 OIDC 按钮；配置与回调要求见 [OIDC 认证流程](./docs/OIDC认证调用流程.md) |
+| 外部对象存储 | 无需 Compose profile，在云平台创建 Bucket 和访问凭证 | `STORAGE_TYPE=cos` / `tos` / `s3`，并填写对应的 `COS_*` / `TOS_*` / `S3_*` | 上传文档后确认目标 Bucket 中出现对象 |
+| 在线或内网模型 | 在「设置 → 模型设置」配置服务地址、模型名和 API Key；`MODEL_PROFILE` 与 `ONLINE_*` / `OFFLINE_*` 用于首次启动初始化 | 模型名必须与服务端公开的 model ID 一致，内网端点按需加入 `SSRF_WHITELIST` | 在模型设置中执行连接测试并切换在线/离线档位 |
+| 网页搜索 | 在「设置 → 网页搜索」添加 Provider；Tavily、Google、Bing 等凭证保存在租户配置中 | 不依赖全局 `TAVILY_API_KEY`；按界面填写所选 Provider 的 API Key/Engine ID | 在设置页测试连接，再在 Agent 中启用网页搜索 |
+
+> `full` profile 不包含 Weaviate；如需 Weaviate，请显式添加 `--profile weaviate`。标准 Docker Compose 只会把 `docker-compose.yml` 中 `app.environment` 列出的变量传入后端；使用 OIDC、TOS、S3 或 `ONLINE_*` / `OFFLINE_*` 等变量时，应确认它们已注入 `app` 容器。生产环境请使用 Secret 管理，不要提交真实凭证。
 
 ### 🌐 服务地址
 
@@ -188,6 +227,9 @@ docker compose up -d   # 启动核心服务
 | Web UI | `http://localhost` |
 | 后端 API | `http://localhost:8080` |
 | 链路追踪 (Langfuse) | `http://localhost:3000` |
+| Neo4j Browser | `http://localhost:7474` |
+| MinIO Console | `http://localhost:9001` |
+| Jaeger UI | `http://localhost:16686` |
 
 ## 文档知识图谱
 

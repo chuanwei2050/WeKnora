@@ -6,7 +6,7 @@ uvicorn[standard]>=0.27.0
 pydantic>=2.0
 numpy>=1.24
 soundfile>=0.12.1
-onnxruntime-gpu>=1.17.0; platform_system!="Darwin"
+onnxruntime-gpu>=1.22.0; platform_system!="Darwin"
 onnxruntime>=1.17.0; platform_system=="Darwin"
 HyperPyYAML>=1.2.2
 librosa>=0.10.0

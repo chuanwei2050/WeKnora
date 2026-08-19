@@ -20,6 +20,8 @@ type ModelService interface {
 	GetModelByID(ctx context.Context, id string) (*types.Model, error)
 	// ListModels lists all models
 	ListModels(ctx context.Context) ([]*types.Model, error)
+	// GetDefaultModel returns the platform default for the active profile and role.
+	GetDefaultModel(ctx context.Context, modelType types.ModelType, profileRole string) (*types.Model, error)
 	// UpdateModel updates a model
 	UpdateModel(ctx context.Context, model *types.Model) error
 	// DeleteModel deletes a model
@@ -59,5 +61,5 @@ type ModelRepository interface {
 	Delete(ctx context.Context, tenantID uint64, id string) error
 	// ClearDefaultByType clears the default flag for all models of a specific type
 	// optionally excluding a specific model ID.
-	ClearDefaultByType(ctx context.Context, tenantID uint, modelType types.ModelType, excludeID string) error
+	ClearDefaultByType(ctx context.Context, tenantID uint, modelType types.ModelType, profile types.ModelProfile, profileRole, excludeID string) error
 }

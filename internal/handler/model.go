@@ -58,11 +58,13 @@ func hideSensitiveInfo(model *types.Model, hideCredentials bool) *types.Model {
 			InferenceEngine:     model.Parameters.InferenceEngine,
 			Capabilities:        model.Parameters.Capabilities,
 		},
-		IsBuiltin: model.IsBuiltin,
-		IsDefault: model.IsDefault,
-		Status:    model.Status,
-		CreatedAt: model.CreatedAt,
-		UpdatedAt: model.UpdatedAt,
+		IsBuiltin:   model.IsBuiltin,
+		IsDefault:   model.IsDefault,
+		Profile:     model.Profile,
+		ProfileRole: model.ProfileRole,
+		Status:      model.Status,
+		CreatedAt:   model.CreatedAt,
+		UpdatedAt:   model.UpdatedAt,
 	}
 }
 
@@ -91,6 +93,9 @@ type CreateModelRequest struct {
 	Source      types.ModelSource     `json:"source"      binding:"required"`
 	Description string                `json:"description"`
 	Parameters  types.ModelParameters `json:"parameters"  binding:"required"`
+	Profile     types.ModelProfile    `json:"profile"`
+	ProfileRole string                `json:"profile_role"`
+	IsDefault   bool                  `json:"is_default"`
 }
 
 // CreateModel godoc
@@ -138,6 +143,9 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 		Source:      req.Source,
 		Description: secutils.SanitizeForLog(req.Description),
 		Parameters:  req.Parameters,
+		Profile:     req.Profile,
+		ProfileRole: req.ProfileRole,
+		IsDefault:   req.IsDefault,
 	}
 
 	if err := h.service.CreateModel(ctx, model); err != nil {
@@ -268,6 +276,9 @@ type UpdateModelRequest struct {
 	Parameters  types.ModelParameters `json:"parameters"`
 	Source      types.ModelSource     `json:"source"`
 	Type        types.ModelType       `json:"type"`
+	Profile     types.ModelProfile    `json:"profile"`
+	ProfileRole string                `json:"profile_role"`
+	IsDefault   *bool                 `json:"is_default"`
 }
 
 // UpdateModel godoc
@@ -345,6 +356,15 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	}
 	if req.Type != "" {
 		model.Type = req.Type
+	}
+	if req.Profile != "" {
+		model.Profile = req.Profile
+	}
+	if req.ProfileRole != "" {
+		model.ProfileRole = req.ProfileRole
+	}
+	if req.IsDefault != nil && *req.IsDefault {
+		model.IsDefault = true
 	}
 
 	logger.Infof(ctx, "Updating model, ID: %s, Name: %s", id, model.Name)

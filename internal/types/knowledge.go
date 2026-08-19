@@ -34,6 +34,10 @@ const (
 
 // Knowledge parse status constants
 const (
+	// ParseStatusDraft indicates governed knowledge has not been submitted for review
+	ParseStatusDraft = "draft"
+	// ParseStatusPendingReview indicates governed knowledge is waiting for approval
+	ParseStatusPendingReview = "pending_review"
 	// ParseStatusPending indicates the knowledge is waiting to be processed
 	ParseStatusPending = "pending"
 	// ParseStatusProcessing indicates the knowledge is being processed
@@ -42,6 +46,8 @@ const (
 	ParseStatusCompleted = "completed"
 	// ParseStatusFailed indicates the knowledge processing failed
 	ParseStatusFailed = "failed"
+	// ParseStatusRejected indicates the governed knowledge version was rejected
+	ParseStatusRejected = "rejected"
 	// ParseStatusDeleting indicates the knowledge is being deleted (used to prevent async task conflicts)
 	ParseStatusDeleting = "deleting"
 )

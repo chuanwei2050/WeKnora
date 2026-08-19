@@ -769,10 +769,7 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 		return t.fileService
 	}
 
-	provider := ""
-	if kb != nil {
-		provider = kb.GetStorageProvider()
-	}
+	provider := types.InferStorageFromFilePath(knowledge.FilePath)
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if tenant == nil {
 		tenantID := uint64(0)

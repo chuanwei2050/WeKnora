@@ -111,6 +111,19 @@ func (s *modelService) CreateModel(ctx context.Context, model *types.Model) erro
 		return errors.New("only platform administrators can manage models")
 	}
 	model.TenantID = types.PlatformModelTenantID
+	if model.Profile == "" {
+		profile, err := s.activeModelProfile(ctx)
+		if err != nil {
+			return err
+		}
+		model.Profile = profile
+	}
+	if model.ProfileRole == "" {
+		model.ProfileRole = defaultProfileRole(model.Type)
+	}
+	if err := s.ensureDefaultForNewModel(ctx, model); err != nil {
+		return err
+	}
 	logger.Infof(ctx, "Creating model: %s, type: %s, source: %s", model.Name, model.Type, model.Source)
 	normalizeModelParameters(model)
 	existingModel, err := s.findEquivalentModel(ctx, model, "")
@@ -148,7 +161,7 @@ func (s *modelService) CreateModel(ctx context.Context, model *types.Model) erro
 		}
 
 		logger.Infof(ctx, "Remote model created successfully: %s", model.ID)
-		return nil
+		return s.finalizeModelDefault(ctx, model)
 	}
 
 	// Handle local models (e.g., Ollama)
@@ -168,7 +181,10 @@ func (s *modelService) CreateModel(ctx context.Context, model *types.Model) erro
 			}
 			return errors.New("preloaded model is missing; runtime download is disabled")
 		}
-		return s.repo.Create(ctx, model)
+		if err := s.repo.Create(ctx, model); err != nil {
+			return err
+		}
+		return s.finalizeModelDefault(ctx, model)
 	}
 	logger.Info(ctx, "Local model detected, setting status to downloading")
 	model.Status = types.ModelStatusDownloading
@@ -180,6 +196,9 @@ func (s *modelService) CreateModel(ctx context.Context, model *types.Model) erro
 			"model_name": model.Name,
 			"model_type": model.Type,
 		})
+		return err
+	}
+	if err := s.finalizeModelDefault(ctx, model); err != nil {
 		return err
 	}
 
@@ -204,6 +223,32 @@ func (s *modelService) CreateModel(ctx context.Context, model *types.Model) erro
 
 	logger.Infof(ctx, "Model creation initiated successfully: %s", model.ID)
 	return nil
+}
+
+func (s *modelService) ensureDefaultForNewModel(ctx context.Context, model *types.Model) error {
+	if model.IsDefault {
+		return nil
+	}
+	models, err := s.repo.List(ctx, types.PlatformModelTenantID, model.Type, "")
+	if err != nil {
+		return fmt.Errorf("check platform default model: %w", err)
+	}
+	for _, candidate := range models {
+		if candidate != nil && candidate.Profile == model.Profile && candidate.ProfileRole == model.ProfileRole && candidate.IsDefault {
+			return nil
+		}
+	}
+	model.IsDefault = true
+	return nil
+}
+
+func (s *modelService) finalizeModelDefault(ctx context.Context, model *types.Model) error {
+	if model == nil || !model.IsDefault {
+		return nil
+	}
+	return s.repo.ClearDefaultByType(
+		ctx, uint(types.PlatformModelTenantID), model.Type, model.Profile, model.ProfileRole, model.ID,
+	)
 }
 
 func airGappedMode() bool {
@@ -417,6 +462,10 @@ func (s *modelService) GetModelByID(ctx context.Context, id string) (*types.Mode
 		logger.Error(ctx, "Model not found")
 		return nil, ErrModelNotFound
 	}
+	model, err = s.resolveActiveProfileModel(ctx, model)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.validateApprovedModelEndpoint(ctx, model); err != nil {
 		return nil, err
 	}
@@ -442,6 +491,87 @@ func (s *modelService) GetModelByID(ctx context.Context, id string) (*types.Mode
 	return nil, errors.New("abnormal model status")
 }
 
+func (s *modelService) activeModelProfile(ctx context.Context) (types.ModelProfile, error) {
+	if s.tenantService == nil {
+		return types.ModelProfileOnline, nil
+	}
+	settings, err := s.tenantService.GetPlatformSettings(ctx)
+	if err != nil {
+		return "", fmt.Errorf("load active model profile: %w", err)
+	}
+	if profile, ok := types.ParseModelProfile(string(settings.ModelProfile)); ok {
+		return profile, nil
+	}
+	return types.ModelProfileOnline, nil
+}
+
+func (s *modelService) resolveActiveProfileModel(ctx context.Context, model *types.Model) (*types.Model, error) {
+	if model == nil || model.Profile == "" || model.ProfileRole == "" {
+		return model, nil
+	}
+	active, err := s.activeModelProfile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if model.Profile == active {
+		return model, nil
+	}
+	models, err := s.repo.List(ctx, types.PlatformModelTenantID, "", "")
+	if err != nil {
+		return nil, fmt.Errorf("list active profile models: %w", err)
+	}
+	return selectActiveProfileModel(models, active, model)
+}
+
+func selectActiveProfileModel(
+	models []*types.Model, active types.ModelProfile, model *types.Model,
+) (*types.Model, error) {
+	selected := selectActiveProfileRoleModel(models, active, model.ProfileRole)
+	if selected == nil && model.ProfileRole == "verifier_1" {
+		selected = selectActiveProfileRoleModel(models, active, "chat")
+	}
+	if selected == nil {
+		return nil, fmt.Errorf("active model profile %q has no model for role %q", active, model.ProfileRole)
+	}
+	return selected, nil
+}
+
+func selectActiveProfileRoleModel(models []*types.Model, profile types.ModelProfile, role string) *types.Model {
+	var selected *types.Model
+	for _, candidate := range models {
+		if candidate == nil || candidate.Status != types.ModelStatusActive || candidate.Profile != profile || candidate.ProfileRole != role {
+			continue
+		}
+		if selected == nil || (!selected.IsDefault && candidate.IsDefault) || selected.IsDefault == candidate.IsDefault && candidate.ID < selected.ID {
+			selected = candidate
+		}
+	}
+	return selected
+}
+
+func defaultProfileRole(modelType types.ModelType) string {
+	switch modelType {
+	case types.ModelTypeKnowledgeQA:
+		return "chat"
+	case types.ModelTypeVerifier:
+		return "verifier_2"
+	case types.ModelTypeJudge:
+		return "evaluation_judge"
+	case types.ModelTypeEmbedding:
+		return "embedding"
+	case types.ModelTypeRerank:
+		return "rerank"
+	case types.ModelTypeVLM, types.ModelTypeVLLM:
+		return "vlm"
+	case types.ModelTypeASR:
+		return "asr"
+	case types.ModelTypeTTS:
+		return "tts"
+	default:
+		return ""
+	}
+}
+
 // ListModels returns all models belonging to the tenant
 func (s *modelService) ListModels(ctx context.Context) ([]*types.Model, error) {
 	logger.Info(ctx, "Start listing models")
@@ -460,6 +590,42 @@ func (s *modelService) ListModels(ctx context.Context) ([]*types.Model, error) {
 
 	logger.Infof(ctx, "Retrieved %d models successfully", len(models))
 	return models, nil
+}
+
+func (s *modelService) GetDefaultModel(
+	ctx context.Context, modelType types.ModelType, profileRole string,
+) (*types.Model, error) {
+	profile, err := s.activeModelProfile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if profileRole == "" {
+		profileRole = defaultProfileRole(modelType)
+	}
+	models, err := s.repo.List(ctx, types.PlatformModelTenantID, modelType, "")
+	if err != nil {
+		return nil, err
+	}
+	selected := selectDefaultModel(models, profile, modelType, profileRole)
+	if selected == nil {
+		return nil, fmt.Errorf("active model profile %q has no active default for role %q: %w", profile, profileRole, ErrModelNotFound)
+	}
+	return selected, nil
+}
+
+func selectDefaultModel(
+	models []*types.Model, profile types.ModelProfile, modelType types.ModelType, profileRole string,
+) *types.Model {
+	var selected *types.Model
+	for _, candidate := range models {
+		if candidate == nil || candidate.Type != modelType || candidate.Status != types.ModelStatusActive || candidate.Profile != profile || candidate.ProfileRole != profileRole {
+			continue
+		}
+		if selected == nil || (!selected.IsDefault && candidate.IsDefault) || selected.IsDefault == candidate.IsDefault && candidate.ID < selected.ID {
+			selected = candidate
+		}
+	}
+	return selected
 }
 
 // UpdateModel updates an existing model in the repository
@@ -508,7 +674,9 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 	if existingModel != nil && model.Status == "" {
 		model.Status = existingModel.Status
 	}
-
+	if model.IsDefault && model.Status != types.ModelStatusActive {
+		return errors.New("only active models can be set as platform default")
+	}
 	// Update model in repository
 	err = s.repo.Update(ctx, model)
 	if err != nil {
@@ -517,6 +685,9 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 			"model_name": model.Name,
 		})
 		return err
+	}
+	if err := s.finalizeModelDefault(ctx, model); err != nil {
+		return fmt.Errorf("set platform default model: %w", err)
 	}
 
 	logger.Infof(ctx, "Model updated successfully: %s", model.ID)
@@ -544,10 +715,18 @@ func sameModelRegistration(left, right *types.Model) bool {
 	}
 	return strings.TrimSpace(left.Name) == strings.TrimSpace(right.Name) &&
 		left.Type == right.Type &&
+		compatibleProfileIdentity(left, right) &&
 		left.Source == right.Source &&
 		sameModelProvider(left.Parameters.Provider, right.Parameters.Provider) &&
 		strings.TrimRight(strings.TrimSpace(left.Parameters.BaseURL), "/") ==
 			strings.TrimRight(strings.TrimSpace(right.Parameters.BaseURL), "/")
+}
+
+func compatibleProfileIdentity(left, right *types.Model) bool {
+	if left.Profile == "" || right.Profile == "" {
+		return true
+	}
+	return left.Profile == right.Profile && left.ProfileRole == right.ProfileRole
 }
 
 func sameModelProvider(left, right string) bool {
@@ -598,6 +777,13 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 // GetEmbeddingModel retrieves and initializes an embedding model instance
 // Takes a model ID and returns an Embedder interface implementation
 func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (embedding.Embedder, error) {
+	if modelId == "" {
+		model, err := s.GetDefaultModel(ctx, types.ModelTypeEmbedding, "embedding")
+		if err != nil {
+			return nil, err
+		}
+		modelId = model.ID
+	}
 	// Get the model details
 	model, err := s.GetModelByID(ctx, modelId)
 	if err != nil {
@@ -656,6 +842,10 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 		logger.Error(ctx, "Model not found for specified tenant")
 		return nil, ErrModelNotFound
 	}
+	model, err = s.resolveActiveProfileModel(ctx, model)
+	if err != nil {
+		return nil, err
+	}
 
 	if model.Status != types.ModelStatusActive {
 		logger.Errorf(ctx, "Model is not active, status: %s", model.Status)
@@ -691,6 +881,13 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 // GetRerankModel retrieves and initializes a reranking model instance
 // Takes a model ID and returns a Reranker interface implementation
 func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rerank.Reranker, error) {
+	if modelId == "" {
+		model, err := s.GetDefaultModel(ctx, types.ModelTypeRerank, "rerank")
+		if err != nil {
+			return nil, err
+		}
+		modelId = model.ID
+	}
 	// Get the model details
 	model, err := s.GetModelByID(ctx, modelId)
 	if err != nil {
@@ -728,10 +925,12 @@ func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rera
 // GetChatModel retrieves and initializes a chat model instance
 // Takes a model ID and returns a Chat interface implementation
 func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.Chat, error) {
-	// Check if model ID is empty
 	if modelId == "" {
-		logger.Error(ctx, "Model ID is empty")
-		return nil, errors.New("model ID cannot be empty")
+		model, err := s.GetDefaultModel(ctx, types.ModelTypeKnowledgeQA, "chat")
+		if err != nil {
+			return nil, err
+		}
+		modelId = model.ID
 	}
 
 	tenantID := types.MustTenantIDFromContext(ctx)
@@ -749,6 +948,10 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 	if model == nil {
 		logger.Error(ctx, "Chat model not found")
 		return nil, ErrModelNotFound
+	}
+	model, err = s.resolveActiveProfileModel(ctx, model)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.validateApprovedModelEndpoint(ctx, model); err != nil {
 		return nil, err
@@ -778,7 +981,14 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 // GetVLMModel retrieves and initializes a vision language model instance.
 func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM, error) {
 	if modelId == "" {
-		return nil, errors.New("model ID cannot be empty")
+		model, err := s.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm")
+		if err != nil {
+			model, err = s.GetDefaultModel(ctx, types.ModelTypeVLM, "vlm")
+		}
+		if err != nil {
+			return nil, err
+		}
+		modelId = model.ID
 	}
 
 	tenantID := types.MustTenantIDFromContext(ctx)
@@ -794,6 +1004,10 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 
 	if model == nil {
 		return nil, ErrModelNotFound
+	}
+	model, err = s.resolveActiveProfileModel(ctx, model)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.validateApprovedModelEndpoint(ctx, model); err != nil {
 		return nil, err
@@ -826,7 +1040,11 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 // GetASRModel retrieves and initializes an automatic speech recognition model instance.
 func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR, error) {
 	if modelId == "" {
-		return nil, errors.New("model ID cannot be empty")
+		model, err := s.GetDefaultModel(ctx, types.ModelTypeASR, "asr")
+		if err != nil {
+			return nil, err
+		}
+		modelId = model.ID
 	}
 
 	tenantID := types.MustTenantIDFromContext(ctx)
@@ -842,6 +1060,10 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 
 	if model == nil {
 		return nil, ErrModelNotFound
+	}
+	model, err = s.resolveActiveProfileModel(ctx, model)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.validateApprovedModelEndpoint(ctx, model); err != nil {
 		return nil, err
@@ -869,7 +1091,11 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 // GetTTSModel retrieves an OpenAI-compatible text-to-speech model.
 func (s *modelService) GetTTSModel(ctx context.Context, modelId string) (tts.TTS, error) {
 	if modelId == "" {
-		return nil, errors.New("model ID cannot be empty")
+		model, err := s.GetDefaultModel(ctx, types.ModelTypeTTS, "tts")
+		if err != nil {
+			return nil, err
+		}
+		modelId = model.ID
 	}
 	tenantID := types.MustTenantIDFromContext(ctx)
 	model, err := s.repo.GetByID(ctx, tenantID, modelId)
@@ -878,6 +1104,10 @@ func (s *modelService) GetTTSModel(ctx context.Context, modelId string) (tts.TTS
 	}
 	if model == nil {
 		return nil, ErrModelNotFound
+	}
+	model, err = s.resolveActiveProfileModel(ctx, model)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.validateApprovedModelEndpoint(ctx, model); err != nil {
 		return nil, err

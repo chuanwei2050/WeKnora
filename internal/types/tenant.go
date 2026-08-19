@@ -179,6 +179,8 @@ type PlatformSettings struct {
 	Credentials         *CredentialsConfig   `json:"credentials" gorm:"type:jsonb"`
 	StorageEngineConfig *StorageEngineConfig `json:"storage_engine_config" gorm:"type:jsonb"`
 	RetrievalConfig     *RetrievalConfig     `json:"retrieval_config" gorm:"type:jsonb"`
+	ModelSeedVersion    int                  `json:"model_seed_version" gorm:"default:0"`
+	ModelProfile        ModelProfile         `json:"model_profile" gorm:"type:varchar(16)"`
 	CreatedAt           time.Time            `json:"created_at"`
 	UpdatedAt           time.Time            `json:"updated_at"`
 }
@@ -496,8 +498,8 @@ func (c *ParserEngineConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// StorageEngineConfig holds tenant-level storage engine parameters for Local, MinIO, COS, TOS, S3, and OSS.
-// Knowledge bases select which provider to use; parameters are read from here.
+// StorageEngineConfig holds platform-level storage engine parameters for Local, MinIO, COS, TOS, S3, and OSS.
+// All knowledge bases use DefaultProvider and the corresponding parameters from this config.
 type StorageEngineConfig struct {
 	DefaultProvider string             `json:"default_provider"` // "local", "minio", "cos", "tos", "s3", "oss"
 	Local           *LocalEngineConfig `json:"local,omitempty"`

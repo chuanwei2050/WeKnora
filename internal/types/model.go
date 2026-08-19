@@ -3,6 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -12,6 +13,24 @@ import (
 
 // ModelType represents the type of AI model
 type ModelType string
+
+type ModelProfile string
+
+const (
+	ModelProfileOnline  ModelProfile = "online"
+	ModelProfileOffline ModelProfile = "offline"
+)
+
+func ParseModelProfile(value string) (ModelProfile, bool) {
+	switch ModelProfile(strings.ToLower(strings.TrimSpace(value))) {
+	case ModelProfileOnline:
+		return ModelProfileOnline, true
+	case ModelProfileOffline:
+		return ModelProfileOffline, true
+	default:
+		return "", false
+	}
+}
 
 const (
 	ModelTypeEmbedding   ModelType = "Embedding"   // Embedding model
@@ -117,6 +136,9 @@ type Model struct {
 	IsDefault bool `yaml:"is_default"  json:"is_default"`
 	// Whether the model is a builtin model (visible to all tenants)
 	IsBuiltin bool `yaml:"is_builtin"  json:"is_builtin"  gorm:"default:false"`
+	// Profile and logical role select the runtime endpoint without changing persisted model references.
+	Profile     ModelProfile `yaml:"profile"      json:"profile"      gorm:"type:varchar(16);index"`
+	ProfileRole string       `yaml:"profile_role" json:"profile_role" gorm:"type:varchar(32);index"`
 	// Model status, default: active, possible: downloading, download_failed
 	Status ModelStatus `yaml:"status"      json:"status"`
 	// Creation time of the model

@@ -9,10 +9,6 @@
         <!-- 头部 -->
         <div class="agent-selector-header">
           <span>{{ $t('agent.selectAgent') }}</span>
-          <router-link to="/platform/agents" class="agent-selector-add" @click="$emit('close')">
-            <span class="add-icon">+</span>
-            <span class="add-text">{{ $t('agent.manageAgents') }}</span>
-          </router-link>
         </div>
         
         <!-- 内容区域 -->
@@ -45,7 +41,7 @@
                 </div>
                 <span class="agent-option-name">{{ agent.name }}</span>
                 <div class="agent-option-actions">
-                  <t-tooltip :content="$t('agent.selector.goToSettings')" placement="top">
+                  <t-tooltip v-if="canManageAgents" :content="$t('agent.selector.goToSettings')" placement="top">
                     <div class="settings-btn" @click.stop="goToSettings(agent)">
                       <TIcon name="setting" size="14px" />
                     </div>
@@ -127,7 +123,7 @@
                 <AgentAvatar :name="agent.name" size="small" />
                 <span class="agent-option-name">{{ agent.name }}</span>
                 <div class="agent-option-actions">
-                  <t-tooltip :content="$t('agent.selector.goToSettings')" placement="top">
+                  <t-tooltip v-if="canManageAgents" :content="$t('agent.selector.goToSettings')" placement="top">
                     <div class="settings-btn" @click.stop="goToSettings(agent)">
                       <TIcon name="setting" size="14px" />
                     </div>
@@ -279,12 +275,15 @@ import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID }
 import AgentAvatar from '@/components/AgentAvatar.vue';
 import { useOrganizationStore } from '@/stores/organization';
 import { useSettingsStore } from '@/stores/settings';
+import { useAuthStore } from '@/stores/auth';
 import type { SharedAgentInfo } from '@/api/organization';
 
 const { t } = useI18n();
 const router = useRouter();
 const orgStore = useOrganizationStore();
 const settingsStore = useSettingsStore();
+const authStore = useAuthStore();
+const canManageAgents = computed(() => authStore.user?.role === 'platform_admin' && authStore.workspaceMode === 'platform');
 
 const props = defineProps<{
   visible: boolean;

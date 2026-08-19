@@ -47,33 +47,19 @@ func (s *sessionService) resolveKnowledgeBases(
 	return kbIDs, knowledgeIDs
 }
 
-// resolveChatModelID resolves the effective chat model ID for a QA request.
-// Priority:
-//  1. Request's SummaryModelID (explicit override, validated)
-//  2. Custom agent's ModelID
-//  3. KB / session / system default (via selectChatModelID)
+// resolveChatModelID resolves the platform-managed default chat model.
+// Request, agent and knowledge-base model IDs are compatibility fields only.
 func (s *sessionService) resolveChatModelID(
 	ctx context.Context,
-	req *types.QARequest,
-	knowledgeBaseIDs []string,
-	knowledgeIDs []string,
+	_ *types.QARequest,
+	_ []string,
+	_ []string,
 ) (string, error) {
-	summaryModelID := req.SummaryModelID
-	customAgent := req.CustomAgent
-	session := req.Session
-
-	if summaryModelID != "" {
-		if model, err := s.modelService.GetModelByID(ctx, summaryModelID); err == nil && model != nil {
-			logger.Infof(ctx, "Using request's summary model override: %s", summaryModelID)
-			return summaryModelID, nil
-		}
-		logger.Warnf(ctx, "Request provided invalid summary model ID %s, falling back", summaryModelID)
+	model, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeKnowledgeQA, "chat")
+	if err != nil {
+		return "", err
 	}
-	if customAgent != nil && customAgent.Config.ModelID != "" {
-		logger.Infof(ctx, "Using custom agent's model_id: %s", customAgent.Config.ModelID)
-		return customAgent.Config.ModelID, nil
-	}
-	return s.selectChatModelID(ctx, session, knowledgeBaseIDs, knowledgeIDs)
+	return model.ID, nil
 }
 
 // resolveRetrievalTenantID determines the tenant ID to use for retrieval scope.
@@ -155,9 +141,6 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 		cm.RerankTopK = customAgent.Config.RerankTopK
 	}
 	cm.RerankThreshold = customAgent.Config.RerankThreshold
-	if customAgent.Config.RerankModelID != "" {
-		cm.RerankModelID = customAgent.Config.RerankModelID
-	}
 
 	// Override rewrite settings
 	cm.EnableRewrite = customAgent.Config.EnableRewrite
@@ -202,6 +185,23 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	if cm.FAQPriorityEnabled {
 		logger.Infof(ctx, "FAQ priority enabled: threshold=%.2f, boost=%.2f",
 			cm.FAQDirectAnswerThreshold, cm.FAQScoreBoost)
+	}
+}
+
+func (s *sessionService) applyPlatformVerificationDefaults(
+	ctx context.Context, config *types.VerifiedAnswerConfig,
+) {
+	if config == nil || !config.Enabled {
+		return
+	}
+	if model, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeVerifier, "verifier_1"); err == nil {
+		config.FactValidatorModelID = model.ID
+	}
+	if model, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeVerifier, "verifier_2"); err == nil {
+		config.CitationValidatorModelID = model.ID
+	}
+	if model, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeJudge, "evaluation_judge"); err == nil {
+		config.LogicValidatorModelID = model.ID
 	}
 }
 

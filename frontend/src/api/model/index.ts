@@ -1,5 +1,7 @@
 import { get, post, put, del } from '../../utils/request';
+import { filterModelsByProfile } from '../../utils/model-profile'
 import i18n from '@/i18n'
+import { getModelProfile, type ModelProfile } from '@/api/system'
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -47,6 +49,8 @@ export interface ModelConfig {
   };
   is_default?: boolean;
   is_builtin?: boolean;
+  profile?: 'online' | 'offline' | '';
+  profile_role?: string;
   status?: string;
   created_at?: string;
   updated_at?: string;
@@ -95,12 +99,16 @@ export function createModel(data: ModelConfig): Promise<ModelConfig> {
 }
 
 // 获取模型列表
-export function listModels(type?: string): Promise<ModelConfig[]> {
-  return new Promise((resolve, reject) => {
+export function listModels(type?: string, profile?: ModelProfile): Promise<ModelConfig[]> {
+  return new Promise((resolve) => {
     const url = `/api/v1/models`;
-    get(url)
-      .then((response: any) => {
+    Promise.all([
+      get(url),
+      profile ? Promise.resolve(profile) : getModelProfile().then(response => response.data.profile)
+    ])
+      .then(([response, activeProfile]: [any, ModelProfile]) => {
         if (response.success && response.data) {
+          response.data = filterModelsByProfile(response.data, activeProfile)
           if (type) {
             response.data = response.data.filter((item: ModelConfig) => item.type === type);
           }

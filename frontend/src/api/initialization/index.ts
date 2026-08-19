@@ -101,8 +101,6 @@ export interface KBModelConfigRequest {
     multimodal: {
         enabled: boolean
     }
-    /** 存储引擎选择："local" | "minio" | "cos"，影响文档上传与文档内图片存储 */
-    storageProvider?: string
     nodeExtract: {
         enabled: boolean
         text: string
@@ -347,6 +345,28 @@ export function checkASRModel(modelConfig: {
             })
             .catch((error: any) => {
                 console.error('Failed to check ASR model:', error);
+                reject(error);
+            });
+    });
+}
+
+// 检查 TTS 模型连接（通过 /v1/audio/speech 端点测试）
+export function checkTTSModel(modelConfig: {
+    modelName: string;
+    baseUrl: string;
+    apiKey?: string;
+    provider?: string;
+} & BaseModelTestPayload): Promise<{
+    available: boolean;
+    message?: string;
+}> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/tts/check', modelConfig)
+            .then((response: any) => {
+                resolve(response.data || {});
+            })
+            .catch((error: any) => {
+                console.error('Failed to check TTS model:', error);
                 reject(error);
             });
     });

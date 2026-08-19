@@ -64,6 +64,44 @@ func (r *knowledgeGovernanceRepository) UpdateVersionStatus(ctx context.Context,
 	})
 }
 
+func (r *knowledgeGovernanceRepository) PrepareManagedUpload(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID, versionID, reviewerID string,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var version types.KnowledgeVersion
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("tenant_id = ? AND id = ? AND knowledge_id = ?", tenantID, versionID, knowledgeID).
+			First(&version).Error; err != nil {
+			return err
+		}
+		for _, next := range []types.KnowledgeVersionStatus{
+			types.KnowledgeVersionPendingReview,
+			types.KnowledgeVersionApproved,
+			types.KnowledgeVersionIndexing,
+		} {
+			if err := types.TransitionKnowledgeVersion(&version, next); err != nil {
+				return err
+			}
+		}
+		if err := tx.Model(&types.KnowledgeVersion{}).
+			Where("tenant_id = ? AND id = ?", tenantID, versionID).
+			Update("status", types.KnowledgeVersionIndexing).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&types.KnowledgeVersionReview{
+			ID: uuid.NewString(), VersionID: versionID, ReviewerID: reviewerID,
+			Action: "auto_approve", Comment: "管理员上传自动批准", CreatedAt: time.Now().UTC(),
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&types.Knowledge{}).
+			Where("tenant_id = ? AND id = ?", tenantID, knowledgeID).
+			Update("parse_status", types.ParseStatusPending).Error
+	})
+}
+
 func (r *knowledgeGovernanceRepository) TransitionVersionWithReview(
 	ctx context.Context,
 	tenantID uint64,

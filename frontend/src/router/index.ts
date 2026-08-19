@@ -109,7 +109,7 @@ const router = createRouter({
           path: "agents",
           name: "agentList",
           component: () => import("../views/agent/AgentList.vue"),
-          meta: { requiresInit: true, requiresAuth: true, allowedRoles: ['tenant_admin', 'member'] }
+          meta: { requiresInit: true, requiresAuth: true, allowedRoles: ['platform_admin'] }
         },
         {
           path: "creatChat",
@@ -247,7 +247,7 @@ router.beforeEach(async (to, from, next) => {
 
   const actualRole = authStore.user?.role || 'member'
   const effectiveRole = actualRole === 'platform_admin' && authStore.workspaceMode === 'tenant' ? 'tenant_admin' : actualRole
-  if (actualRole === 'platform_admin' && authStore.workspaceMode === 'platform' && to.name !== 'tenantAdmin' && to.name !== 'userAdmin' && to.name !== 'settings') {
+  if (actualRole === 'platform_admin' && authStore.workspaceMode === 'platform' && to.name !== 'tenantAdmin' && to.name !== 'userAdmin' && to.name !== 'settings' && to.name !== 'agentList') {
     next('/platform/admin/tenants')
     return
   }

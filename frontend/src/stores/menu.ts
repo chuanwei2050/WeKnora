@@ -70,8 +70,9 @@ export const useMenuStore = defineStore('menuStore', () => {
       : authStore.user?.role || 'member'
     return menuArr.filter(item => {
       if (authStore.isLiteMode && liteHiddenPaths.has(item.path)) return false
-      if (role === 'platform_admin') return item.path === 'admin/tenants'
+      if (role === 'platform_admin') return item.path === 'admin/tenants' || item.path === 'agents'
       if (item.path === 'admin/tenants' || item.path === 'organizations') return false
+      if (item.path === 'agents') return false
       if (item.path === 'admin/users') return role === 'tenant_admin'
       return item.path !== 'logout'
     })

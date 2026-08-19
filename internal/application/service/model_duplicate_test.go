@@ -41,7 +41,7 @@ func (r *duplicateModelRepository) List(
 func (r *duplicateModelRepository) Update(_ context.Context, _ *types.Model) error     { return nil }
 func (r *duplicateModelRepository) Delete(_ context.Context, _ uint64, _ string) error { return nil }
 func (r *duplicateModelRepository) ClearDefaultByType(
-	_ context.Context, _ uint, _ types.ModelType, _ string,
+	_ context.Context, _ uint, _ types.ModelType, _ types.ModelProfile, _, _ string,
 ) error {
 	return nil
 }

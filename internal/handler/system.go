@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"regexp"
 	"strings"
@@ -175,6 +176,93 @@ func (h *SystemHandler) GetModelProfileStatus(c *gin.Context) {
 		"msg":  "success",
 		"data": modelprofile.Build(views),
 	})
+}
+
+type updateModelProfileRequest struct {
+	Profile string `json:"profile" binding:"required"`
+}
+
+func (h *SystemHandler) GetModelProfile(c *gin.Context) {
+	settings, err := h.tenantSvc.GetPlatformSettings(c.Request.Context())
+	if err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	profile, ok := types.ParseModelProfile(string(settings.ModelProfile))
+	if !ok {
+		profile = types.ModelProfileOnline
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"profile": profile}})
+}
+
+func (h *SystemHandler) UpdateModelProfile(c *gin.Context) {
+	if !requirePlatformAdminForSystem(c) {
+		return
+	}
+	var req updateModelProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	target, ok := types.ParseModelProfile(req.Profile)
+	if !ok {
+		c.Error(errors.NewBadRequestError("profile must be online or offline"))
+		return
+	}
+	ctx := c.Request.Context()
+	models, err := h.modelSvc.ListModels(ctx)
+	if err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	settings, err := h.tenantSvc.GetPlatformSettings(ctx)
+	if err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	current, ok := types.ParseModelProfile(string(settings.ModelProfile))
+	if !ok {
+		current = types.ModelProfileOnline
+	}
+	if err := validateProfileSwitch(models, current, target); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	settings.ModelProfile = target
+	if _, err := h.tenantSvc.UpdatePlatformSettings(ctx, settings); err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"profile": target}})
+}
+
+func validateProfileSwitch(models []*types.Model, current, target types.ModelProfile) error {
+	targetEmbedding := selectProfileEmbedding(models, target)
+	if targetEmbedding == nil {
+		return fmt.Errorf("profile %q has no embedding model", target)
+	}
+	currentEmbedding := selectProfileEmbedding(models, current)
+	if currentEmbedding != nil {
+		from := currentEmbedding.Parameters.EmbeddingParameters.Dimension
+		to := targetEmbedding.Parameters.EmbeddingParameters.Dimension
+		if from > 0 && to > 0 && from != to {
+			return fmt.Errorf("embedding dimension differs across profiles: %d != %d", from, to)
+		}
+	}
+	return nil
+}
+
+func selectProfileEmbedding(models []*types.Model, profile types.ModelProfile) *types.Model {
+	var selected *types.Model
+	for _, model := range models {
+		if model == nil || model.Profile != profile || model.ProfileRole != "embedding" || model.Status != types.ModelStatusActive {
+			continue
+		}
+		if selected == nil || (!selected.IsDefault && model.IsDefault) || selected.IsDefault == model.IsDefault && model.ID < selected.ID {
+			selected = model
+		}
+	}
+	return selected
 }
 
 func (h *SystemHandler) getDocReaderConnInfo() (addr, transport string) {

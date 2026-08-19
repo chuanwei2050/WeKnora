@@ -36,8 +36,11 @@ func openKnowledgeGovernanceTestDB(t *testing.T) *gorm.DB {
 		`CREATE TABLE knowledges (
 			id TEXT PRIMARY KEY,
 			tenant_id INTEGER NOT NULL,
+			parse_status TEXT NOT NULL DEFAULT 'draft',
 			current_version_id TEXT,
-			pending_version_id TEXT
+			pending_version_id TEXT,
+			updated_at DATETIME,
+			deleted_at DATETIME
 		)`,
 		`CREATE TABLE knowledge_version_reviews (
 			id TEXT PRIMARY KEY,
@@ -54,6 +57,49 @@ func openKnowledgeGovernanceTestDB(t *testing.T) *gorm.DB {
 		}
 	}
 	return db
+}
+
+func TestPrepareManagedUploadAutoApprovesAndMarksKnowledgePending(t *testing.T) {
+	db := openKnowledgeGovernanceTestDB(t)
+	repo := NewKnowledgeGovernanceRepository(db, nil)
+	ctx := context.Background()
+	version := newGovernedTestVersion(1, "knowledge-managed", string(types.KnowledgeVersionDraft), nil, nil)
+	if err := repo.CreateVersion(ctx, version); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(
+		"INSERT INTO knowledges (id, tenant_id, parse_status, pending_version_id) VALUES (?, ?, ?, ?)",
+		"knowledge-managed", 1, types.ParseStatusDraft, version.ID,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.PrepareManagedUpload(ctx, 1, "knowledge-managed", version.ID, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.GetVersion(ctx, 1, version.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != types.KnowledgeVersionIndexing {
+		t.Fatalf("managed version status = %s, want indexing", stored.Status)
+	}
+	var knowledge struct {
+		ParseStatus string `gorm:"column:parse_status"`
+	}
+	if err := db.Table("knowledges").Where("id = ?", "knowledge-managed").First(&knowledge).Error; err != nil {
+		t.Fatal(err)
+	}
+	if knowledge.ParseStatus != types.ParseStatusPending {
+		t.Fatalf("managed knowledge parse status = %s, want pending", knowledge.ParseStatus)
+	}
+	reviews, err := repo.ListReviews(ctx, version.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reviews) != 1 || reviews[0].Action != "auto_approve" || reviews[0].ReviewerID != "admin" {
+		t.Fatalf("managed upload audit = %+v", reviews)
+	}
 }
 
 func TestTransitionVersionWithReviewRollsBackStatusWhenAuditFails(t *testing.T) {

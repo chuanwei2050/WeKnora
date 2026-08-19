@@ -77,14 +77,20 @@ interface StatusInfo {
   spin?: boolean;
 }
 const computeStatus = (item: KnowledgeItem): StatusInfo => {
+  if (item.parse_status === 'draft') {
+    return { label: t('knowledgeBase.statusDraft'), theme: 'warning' };
+  }
+  if (item.parse_status === 'pending_review') {
+    return { label: t('knowledgeBase.statusPendingReview'), theme: 'warning' };
+  }
   if (item.parse_status === 'pending' || item.parse_status === 'processing') {
     return { label: t('knowledgeBase.statusProcessing'), theme: 'primary', icon: 'loading', spin: true };
   }
+  if (item.parse_status === 'rejected') {
+    return { label: t('knowledgeBase.statusRejected'), theme: 'danger', icon: 'close-circle' };
+  }
   if (item.parse_status === 'failed') {
     return { label: t('knowledgeBase.statusFailed'), theme: 'danger', icon: 'close-circle' };
-  }
-  if (item.parse_status === 'draft') {
-    return { label: t('knowledgeBase.statusDraft'), theme: 'warning' };
   }
   if (
     item.parse_status === 'completed' &&

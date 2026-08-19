@@ -351,7 +351,7 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID string) (v
 
 	// New-style: resolve model through ModelService
 	if vlmCfg.ModelID != "" {
-		return s.modelService.GetVLMModel(ctx, vlmCfg.ModelID)
+		return s.modelService.GetVLMModel(ctx, "")
 	}
 
 	// Legacy: create VLM from inline config
@@ -367,13 +367,8 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 	}
 
 	provider := types.ParseProviderScheme(payload.ImageURL)
-	if provider == "" {
-		kb, kbErr := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
-		if kbErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] GetKnowledgeBaseByIDOnly failed: kb=%s err=%v", payload.KnowledgeBaseID, kbErr)
-		} else if kb != nil {
-			provider = strings.ToLower(strings.TrimSpace(kb.GetStorageProvider()))
-		}
+	if provider == "" && tenant.StorageEngineConfig != nil {
+		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
 	}
 
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))

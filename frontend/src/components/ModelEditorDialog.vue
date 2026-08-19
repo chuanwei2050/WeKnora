@@ -19,41 +19,6 @@
           <!-- 表单内容区域 -->
           <div class="modal-body">
             <t-form ref="formRef" :data="formData" :rules="rules" layout="vertical">
-        <!-- 模型来源 -->
-        <div class="form-item">
-          <label class="form-label required">{{ $t('model.editor.sourceLabel') }}</label>
-          <t-radio-group v-model="formData.source">
-            <t-radio
-              value="local"
-              :disabled="ollamaServiceStatus === false || modelType === 'rerank' || modelType === 'tts'"
-            >
-              {{ $t('model.editor.sourceLocal') }}
-            </t-radio>
-            <t-radio value="remote">{{ $t('model.editor.sourceRemote') }}</t-radio>
-          </t-radio-group>
-
-          <!-- ReRank模型不支持Ollama的提示信息 -->
-          <div v-if="modelType === 'rerank'" class="ollama-unavailable-tip rerank-tip">
-            <t-icon name="info-circle-filled" class="tip-icon info" />
-            <span class="tip-text">{{ $t('model.editor.ollamaNotSupportRerank') }}</span>
-          </div>
-
-          <!-- Ollama不可用时的提示信息 -->
-          <div v-else-if="ollamaServiceStatus === false" class="ollama-unavailable-tip">
-            <t-icon name="error-circle-filled" class="tip-icon" />
-            <span class="tip-text">{{ $t('model.editor.ollamaUnavailable') }}</span>
-            <t-button
-              variant="text"
-              size="small"
-              theme="primary"
-              @click="goToOllamaSettings"
-              class="tip-link"
-            >
-              {{ $t('model.editor.goToOllamaSettings') }}
-            </t-button>
-          </div>
-        </div>
-
         <!-- Ollama 本地模型选择器 -->
         <div v-if="formData.source === 'local'" class="form-item">
           <label class="form-label required">{{ $t('model.modelName') }}</label>
@@ -339,24 +304,6 @@
           <p class="form-desc">调用方未指定音色时使用该值。</p>
         </div>
 
-        <!-- 部署策略：位置由服务端根据端点解析，不能由普通用户伪造 -->
-        <div class="form-item deployment-policy-form">
-          <label class="form-label">部署策略</label>
-          <div class="deployment-policy-grid">
-            <t-select v-model="formData.protocol" placeholder="协议">
-              <t-option value="ollama" label="Ollama" />
-              <t-option value="openai-compatible" label="OpenAI-compatible" />
-              <t-option value="native" label="Native" />
-            </t-select>
-            <t-select v-model="formData.artifactPolicy" placeholder="权重策略">
-              <t-option value="preloaded-only" label="仅使用已预加载权重" />
-              <t-option value="allow-download" label="允许下载权重" />
-            </t-select>
-            <t-input v-model="formData.inferenceEngine" placeholder="推理引擎（可选）" />
-          </div>
-          <p class="form-desc">运行位置与连接权限由服务端根据端点和批准清单计算。</p>
-        </div>
-
       </t-form>
           </div>
 
@@ -378,7 +325,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, onUnmounted, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, listOllamaModels, downloadOllamaModel, getDownloadProgress, checkOllamaStatus, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
+import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, checkTTSModel, listOllamaModels, downloadOllamaModel, getDownloadProgress, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
 import { getWeKnoraCloudStatus } from '@/api/model'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
@@ -402,10 +349,6 @@ interface ModelFormData {
   supportsVision?: boolean
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
   customHeaders?: CustomHeaderItem[]
-  protocol?: 'ollama' | 'openai-compatible' | 'native'
-  location?: 'public' | 'private-network' | 'same-host' | 'unknown'
-  artifactPolicy?: 'preloaded-only' | 'allow-download'
-  inferenceEngine?: string
   defaultVoice?: string
 }
 
@@ -601,6 +544,15 @@ const dimensionChecked = ref(false)
 const dimensionSuccess = ref(false)
 const dimensionMessage = ref('')
 
+const DEFAULT_TTS_VOICE = 'default'
+
+const getInitialDefaultVoice = (voice?: string) => {
+  if (props.modelType === 'tts' && !voice?.trim()) {
+    return DEFAULT_TTS_VOICE
+  }
+  return voice || ''
+}
+
 // Ollama 模型状态
 const ollamaModelList = ref<OllamaModelInfo[]>([])
 const loadingOllamaModels = ref(false)
@@ -609,10 +561,6 @@ const downloading = ref(false)
 const downloadProgress = ref(0)
 const currentDownloadModel = ref('')
 let downloadInterval: any = null
-
-// Ollama 服务状态
-const ollamaServiceStatus = ref<boolean | null>(null)
-const checkingOllamaStatus = ref(false)
 
 // WeKnoraCloud 凭证状态
 const wkcCredentialState = ref<'loading' | 'unconfigured' | 'configured' | 'expired'>('loading')
@@ -645,20 +593,17 @@ const goToWeKnoraCloudSettings = async () => {
 const formData = ref<ModelFormData>({
   id: '',
   name: '',
-  source: 'local',
+  source: 'remote',
   provider: 'openai',
   modelName: '',
   baseUrl: '',
   apiKey: '',
   dimension: undefined,
-  interfaceType: 'ollama',
+  interfaceType: 'openai',
   isDefault: false,
   supportsVision: false,
   customHeaders: [],
-  protocol: 'ollama',
-  artifactPolicy: 'allow-download',
-  inferenceEngine: '',
-  defaultVoice: ''
+  defaultVoice: getInitialDefaultVoice()
 })
 
 const rules = computed(() => ({
@@ -741,49 +686,11 @@ const getBaseUrlPlaceholder = () => {
   return t('model.editor.baseUrlPlaceholder')
 }
 
-// 检查Ollama服务状态
-const checkOllamaServiceStatus = async () => {
-  console.log('开始检查Ollama服务状态...')
-  checkingOllamaStatus.value = true
-  try {
-    const result = await checkOllamaStatus()
-    ollamaServiceStatus.value = result.available
-    console.log('Ollama服务状态检查完成:', result.available)
-  } catch (error) {
-    console.error('检查Ollama服务状态失败:', error)
-    ollamaServiceStatus.value = false
-  } finally {
-    checkingOllamaStatus.value = false
-  }
-}
-
-// 打开Ollama设置窗口
-const goToOllamaSettings = async () => {
-  console.log('点击跳转到Ollama设置按钮')
-  // 关闭当前弹窗
-  emit('update:visible', false)
-  
-  // 先关闭设置弹窗（如果已打开）
-  if (uiStore.showSettingsModal) {
-    uiStore.closeSettings()
-    // 等待 DOM 更新
-    await nextTick()
-  }
-  
-  // 打开设置窗口并直接跳转到Ollama设置
-  console.log('调用uiStore.openSettings')
-  uiStore.openSettings('ollama')
-  console.log('uiStore.openSettings调用完成')
-}
-
 // 监听 visible 变化，初始化表单
 watch(() => props.visible, (val) => {
   if (val) {
     // 锁定背景滚动
     document.body.style.overflow = 'hidden'
-
-    // 检查Ollama服务状态
-    checkOllamaServiceStatus()
 
     // 从 API 加载 Model Provider 列表
     loadProviders()
@@ -791,6 +698,7 @@ watch(() => props.visible, (val) => {
     if (props.modelData) {
       formData.value = {
         ...props.modelData,
+        defaultVoice: getInitialDefaultVoice(props.modelData.defaultVoice),
         customHeaders: Array.isArray(props.modelData.customHeaders)
           ? props.modelData.customHeaders.map(h => ({ key: h.key, value: h.value }))
           : []
@@ -819,7 +727,7 @@ const resetForm = () => {
   formData.value = {
     id: generateId(),
     name: '', // 保留字段但不使用，保存时用 modelName
-    source: 'local',
+    source: 'remote',
     provider: 'generic',
     modelName: '',
     baseUrl: '',
@@ -829,10 +737,7 @@ const resetForm = () => {
     isDefault: false,
     supportsVision: false,
     customHeaders: [],
-    protocol: 'ollama',
-    artifactPolicy: 'allow-download',
-    inferenceEngine: '',
-    defaultVoice: ''
+    defaultVoice: getInitialDefaultVoice()
   }
   modelChecked.value = false
   modelAvailable.value = false
@@ -1102,11 +1007,12 @@ const checkRemoteAPI = async () => {
         break
 
       case 'tts':
-        result = await checkRemoteModel({
+        result = await checkTTSModel({
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider || '',
+          extraConfig: { voice: formData.value.defaultVoice || DEFAULT_TTS_VOICE },
           ...headerPayload,
         })
         break
@@ -1287,7 +1193,6 @@ onUnmounted(() => {
 
 // 监听来源变化，清理所有状态
 watch(() => formData.value.source, () => {
-  formData.value.protocol = formData.value.source === 'local' ? 'ollama' : 'openai-compatible'
   // 重置校验状态
   modelChecked.value = false
   modelAvailable.value = false
@@ -1506,34 +1411,6 @@ const handleOverlayMouseUp = () => {
 
 // 厂商选择器样式 — 移至非 scoped 块，因为 t-select popup 渲染到 body 下
 // .provider-option 样式见文件末尾
-
-// 单选按钮组
-:deep(.t-radio-group) {
-  display: flex;
-  gap: 24px;
-
-  .t-radio {
-    margin-right: 0;
-    font-size: 13px;
-
-    &:hover {
-      .t-radio__label {
-        color: var(--td-brand-color);
-      }
-    }
-  }
-
-  .t-radio__label {
-    font-size: 13px;
-    color: var(--td-text-color-primary);
-    transition: color 0.15s ease;
-  }
-
-  .t-radio__input:checked + .t-radio__label {
-    color: var(--td-brand-color);
-    font-weight: 500;
-  }
-}
 
 // 复选框
 :deep(.t-checkbox) {
@@ -1924,39 +1801,6 @@ const handleOverlayMouseUp = () => {
     }
   }
 
-  :deep(.tip-link) {
-    color: var(--td-brand-color);
-    font-size: 13px;
-    font-weight: 500;
-    padding: 4px 6px 4px 10px !important;
-    min-height: auto !important;
-    height: auto !important;
-    line-height: 1.4 !important;
-    text-decoration: none;
-    white-space: nowrap;
-    display: inline-flex !important;
-    align-items: center !important;
-    gap: 1px;
-    border-radius: 4px;
-    transition: all 0.2s ease;
-
-    &:hover {
-      background: rgba(23, 74, 124, 0.08) !important;
-      color: var(--td-brand-color-active) !important;
-    }
-
-    &:active {
-      background: rgba(23, 74, 124, 0.12) !important;
-    }
-
-    .t-icon {
-      font-size: 14px !important;
-      margin: 0 !important;
-      line-height: 1 !important;
-      display: inline-flex !important;
-      align-items: center !important;
-    }
-  }
 }
 </style>
 

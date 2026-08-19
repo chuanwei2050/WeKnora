@@ -83,11 +83,19 @@ func (r *modelRepository) ClearDefaultByType(
 	ctx context.Context,
 	tenantID uint,
 	modelType types.ModelType,
+	profile types.ModelProfile,
+	profileRole string,
 	excludeID string,
 ) error {
 	query := r.db.WithContext(ctx).Model(&types.Model{}).Where(
 		"tenant_id = ? AND type = ? AND is_default = ?", types.PlatformModelTenantID, modelType, true,
 	)
+	if profile != "" {
+		query = query.Where("profile = ?", profile)
+	}
+	if profileRole != "" {
+		query = query.Where("profile_role = ?", profileRole)
+	}
 
 	// If excludeID is provided, exclude that model from the update
 	if excludeID != "" {

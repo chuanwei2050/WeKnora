@@ -16,24 +16,24 @@ import (
 
 // CustomAgentHandler defines the HTTP handler for custom agent operations
 type CustomAgentHandler struct {
-	service     interfaces.CustomAgentService
+	service      interfaces.CustomAgentService
 	disabledRepo interfaces.TenantDisabledSharedAgentRepository
 }
 
 // NewCustomAgentHandler creates a new custom agent handler instance
 func NewCustomAgentHandler(service interfaces.CustomAgentService, disabledRepo interfaces.TenantDisabledSharedAgentRepository) *CustomAgentHandler {
 	return &CustomAgentHandler{
-		service:     service,
+		service:      service,
 		disabledRepo: disabledRepo,
 	}
 }
 
 // CreateAgentRequest defines the request body for creating an agent
 type CreateAgentRequest struct {
-	Name        string                   `json:"name" binding:"required"`
-	Description string                   `json:"description"`
-	Avatar      string                   `json:"avatar"`
-	Config      types.CustomAgentConfig  `json:"config"`
+	Name        string                  `json:"name" binding:"required"`
+	Description string                  `json:"description"`
+	Avatar      string                  `json:"avatar"`
+	Config      types.CustomAgentConfig `json:"config"`
 }
 
 // UpdateAgentRequest defines the request body for updating an agent
@@ -46,7 +46,7 @@ type UpdateAgentRequest struct {
 
 // CreateAgent godoc
 // @Summary      创建智能体
-// @Description  创建新的自定义智能体
+// @Description  平台管理员创建新的全局自定义智能体
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
@@ -58,6 +58,10 @@ type UpdateAgentRequest struct {
 // @Router       /agents [post]
 func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage agents"))
+		return
+	}
 
 	logger.Info(ctx, "Start creating custom agent")
 
@@ -84,11 +88,14 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 	createdAgent, err := h.service.CreateAgent(ctx, agent)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		if err == service.ErrAgentNameRequired {
+		switch err {
+		case service.ErrPlatformAdminRequired:
+			c.Error(errors.NewForbiddenError(err.Error()))
+		case service.ErrAgentNameRequired, service.ErrPlatformAgentSelectedKB:
 			c.Error(errors.NewBadRequestError(err.Error()))
-			return
+		default:
+			c.Error(errors.NewInternalServerError(err.Error()))
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -145,7 +152,7 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 
 // ListAgents godoc
 // @Summary      获取智能体列表
-// @Description  获取当前租户的所有智能体（包括内置智能体）
+// @Description  获取平台统一配置的所有智能体（包括内置智能体）
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
@@ -157,7 +164,7 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// Get all agents for this tenant
+	// Get all platform-managed agents shared by every tenant.
 	agents, err := h.service.ListAgents(ctx)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -165,7 +172,7 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 		return
 	}
 
-	// Per-tenant "disabled by me" for own agents (only affects this tenant's conversation dropdown)
+	// Per-tenant "disabled by me" preferences for the platform agent list.
 	tenantIDVal, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
 		logger.Error(ctx, "Tenant ID not found in context")
@@ -196,7 +203,7 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 
 // UpdateAgent godoc
 // @Summary      更新智能体
-// @Description  更新智能体的名称、描述和配置
+// @Description  平台管理员更新全局智能体的名称、描述和配置
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
@@ -210,6 +217,10 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 // @Router       /agents/{id} [put]
 func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage agents"))
+		return
+	}
 
 	logger.Info(ctx, "Start updating custom agent")
 
@@ -248,11 +259,13 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 			"agent_id": id,
 		})
 		switch err {
+		case service.ErrPlatformAdminRequired:
+			c.Error(errors.NewForbiddenError(err.Error()))
 		case service.ErrAgentNotFound:
 			c.Error(errors.NewNotFoundError("Agent not found"))
 		case service.ErrCannotModifyBuiltin:
 			c.Error(errors.NewForbiddenError("Cannot modify built-in agent"))
-		case service.ErrAgentNameRequired:
+		case service.ErrAgentNameRequired, service.ErrPlatformAgentSelectedKB:
 			c.Error(errors.NewBadRequestError(err.Error()))
 		default:
 			c.Error(errors.NewInternalServerError(err.Error()))
@@ -283,6 +296,10 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 // @Router       /agents/{id} [delete]
 func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage agents"))
+		return
+	}
 
 	logger.Info(ctx, "Start deleting custom agent")
 
@@ -335,6 +352,10 @@ func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 // @Router       /agents/{id}/copy [post]
 func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage agents"))
+		return
+	}
 
 	logger.Info(ctx, "Start copying custom agent")
 

@@ -26,31 +26,6 @@
         </div>
       </div>
 
-      <!-- 记忆功能开关 -->
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('settings.enableMemory') }}</label>
-          <p class="desc">{{ $t('settings.enableMemoryDesc') }}</p>
-        </div>
-        <div class="setting-control">
-          <t-switch
-            v-model="isMemoryEnabled"
-            :disabled="!isNeo4jAvailable"
-            @change="handleMemoryChange"
-          />
-        </div>
-      </div>
-      <t-alert
-        v-if="!isNeo4jAvailable"
-        theme="warning"
-        style="margin-top: -8px; margin-bottom: 16px;"
-      >
-        <template #message>
-          <div>{{ $t('settings.memoryRequiresNeo4j') }}</div>
-          <div>{{ $t('settings.memoryHowToEnable') }}</div>
-        </template>
-      </t-alert>
-
       <!-- 自动下载更新开关 (Lite edition only) -->
       <div class="setting-row" v-if="authStore.isLiteMode">
         <div class="setting-info">
@@ -68,12 +43,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, computed } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
-import { getSystemInfo } from '@/api/system'
 import { useTheme, type ThemeMode } from '@/composables/useTheme'
 
 const { t } = useI18n()
@@ -83,19 +57,6 @@ const { currentTheme, setTheme } = useTheme()
 
 // 本地状态
 const localTheme = ref<ThemeMode>(currentTheme.value)
-
-// 系统信息
-const systemInfo = ref<any>(null)
-
-const isNeo4jAvailable = computed(() => {
-  return systemInfo.value?.graph_database_engine && systemInfo.value.graph_database_engine !== '未启用'
-})
-
-// 记忆功能状态
-const isMemoryEnabled = computed({
-  get: () => settingsStore.isMemoryEnabled,
-  set: (val) => settingsStore.toggleMemory(val)
-})
 
 // 自动检查更新状态
 const isAutoCheckUpdateEnabled = computed({
@@ -111,31 +72,6 @@ const isAutoCheckUpdateEnabled = computed({
     }
   }
 })
-
-// 初始化加载
-onMounted(async () => {
-  // 加载系统信息以检查 Neo4j 可用性
-  try {
-    const response = await getSystemInfo()
-    systemInfo.value = response.data
-    if (!isNeo4jAvailable.value && settingsStore.isMemoryEnabled) {
-      settingsStore.toggleMemory(false)
-    }
-  } catch (error) {
-    console.error('Failed to load system info:', error)
-  }
-})
-
-// 处理记忆功能变化
-const handleMemoryChange = (val: boolean) => {
-  if (val && !isNeo4jAvailable.value) {
-    MessagePlugin.warning(t('settings.memoryRequiresNeo4j'))
-    settingsStore.toggleMemory(false)
-    return
-  }
-  settingsStore.toggleMemory(val)
-  MessagePlugin.success(t('common.success'))
-}
 
 // 处理主题变化
 const handleThemeChange = (val: ThemeMode) => {

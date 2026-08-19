@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
@@ -78,6 +79,12 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb *types.KnowledgeBase,
 ) (*types.KnowledgeBase, error) {
 	kb.EnsureDefaults()
+	// Storage is platform-managed; ignore legacy clients that still submit KB-level overrides.
+	kb.StorageProviderConfig = nil
+	kb.StorageConfig = types.StorageConfig{}
+	if err := s.applyPlatformModelDefaults(ctx, kb); err != nil {
+		return nil, err
+	}
 	if err := kb.Governance.Validate(); err != nil {
 		return nil, err
 	}
@@ -107,6 +114,39 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base created successfully, ID: %s, name: %s", kb.ID, kb.Name)
 	return kb, nil
+}
+
+func (s *knowledgeBaseService) applyPlatformModelDefaults(ctx context.Context, kb *types.KnowledgeBase) error {
+	chatModel, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeKnowledgeQA, "chat")
+	if err != nil {
+		return fmt.Errorf("resolve platform chat model: %w", err)
+	}
+	kb.SummaryModelID = chatModel.ID
+	if kb.WikiConfig != nil {
+		kb.WikiConfig.SynthesisModelID = chatModel.ID
+	}
+	if kb.IsVectorEnabled() {
+		embeddingModel, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeEmbedding, "embedding")
+		if err != nil {
+			return fmt.Errorf("resolve platform embedding model: %w", err)
+		}
+		kb.EmbeddingModelID = embeddingModel.ID
+	}
+	if kb.VLMConfig.Enabled {
+		vlmModel, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm")
+		if err != nil {
+			return fmt.Errorf("resolve platform vision model: %w", err)
+		}
+		kb.VLMConfig.ModelID = vlmModel.ID
+	}
+	if kb.ASRConfig.Enabled {
+		asrModel, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeASR, "asr")
+		if err != nil {
+			return fmt.Errorf("resolve platform ASR model: %w", err)
+		}
+		kb.ASRConfig.ModelID = asrModel.ID
+	}
+	return nil
 }
 
 // GetKnowledgeBaseByID retrieves a knowledge base by its ID
@@ -694,8 +734,6 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			EmbeddingModelID:      sourceKB.EmbeddingModelID,
 			SummaryModelID:        sourceKB.SummaryModelID,
 			VLMConfig:             sourceKB.VLMConfig,
-			StorageProviderConfig: sourceKB.StorageProviderConfig,
-			StorageConfig:         sourceKB.StorageConfig,
 			FAQConfig:             faqConfig,
 			CreatedBy:             sourceKB.CreatedBy,
 		}

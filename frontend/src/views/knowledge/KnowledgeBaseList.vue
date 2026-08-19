@@ -1,13 +1,5 @@
 <template>
   <div class="kb-list-container">
-    <ListSpaceSidebar
-      v-if="!authStore.isLiteMode"
-      v-model="spaceSelection"
-      :count-all="allKnowledgeBases"
-      :count-mine="kbs.length"
-      :count-shared="sharedKbs.length"
-      :count-by-org="effectiveSharedCountByOrg"
-    />
     <div class="kb-list-content">
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
@@ -629,7 +621,6 @@ import { useOrganizationStore } from '@/stores/organization'
 import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type OrganizationSharedKnowledgeBaseItem, type SourceFromAgentInfo } from '@/api/organization'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
-import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import { useI18n } from 'vue-i18n'
 
 const router = useRouter()
@@ -684,9 +675,6 @@ const sharingKbName = ref('')
 
 // Shared knowledge bases
 const sharedKbs = computed<SharedKnowledgeBase[]>(() => orgStore.sharedKnowledgeBases || [])
-
-// All knowledge bases (mine + shared to me)
-const allKnowledgeBases = computed(() => kbs.value.length + sharedKbs.value.length)
 
 // 当前选中的是空间 ID（非全部、非我的）
 const spaceSelectionOrgId = computed(() => {

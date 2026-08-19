@@ -451,9 +451,30 @@ start_app_container() {
     fi
 
     stop_app_container
-    local hot_reload="${WEKNORA_APP_HOT_RELOAD:-true}"
+    local hot_reload
+    local ssrf_whitelist
+    if [ -n "${WEKNORA_APP_HOT_RELOAD+x}" ]; then
+        hot_reload="$WEKNORA_APP_HOT_RELOAD"
+    else
+        hot_reload="$(
+            env_bom=$'\xef\xbb\xbf'
+            set -a
+            source <(sed -e "1s/^${env_bom}//" -e 's/\r$//' .env)
+            printf '%s' "${WEKNORA_APP_HOT_RELOAD:-true}"
+        )"
+    fi
+    if [ -n "${SSRF_WHITELIST+x}" ]; then
+        ssrf_whitelist="$SSRF_WHITELIST"
+    else
+        ssrf_whitelist="$(
+            env_bom=$'\xef\xbb\xbf'
+            set -a
+            source <(sed -e "1s/^${env_bom}//" -e 's/\r$//' .env)
+            printf '%s' "${SSRF_WHITELIST:-}"
+        )"
+    fi
     if [ "$hot_reload" = "true" ]; then
-        log_info "使用 $DEV_APP_IMAGE（Air 轮询监听，支持 Windows 文件变更）"
+        log_info "使用 $DEV_APP_IMAGE（单线程轮询监听，支持 Windows 文件变更）"
     else
         log_info "使用 $DEV_APP_IMAGE（稳定模式，跳过 Air 文件监听）"
     fi
@@ -462,12 +483,13 @@ start_app_container() {
         --network "$network_name" \
         --add-host "host.docker.internal:host-gateway" \
         -e "WEKNORA_APP_HOT_RELOAD=$hot_reload" \
-        -e "SSRF_WHITELIST=${SSRF_WHITELIST:-}" \
+        -e "SSRF_WHITELIST=$ssrf_whitelist" \
         -p 8080:8080 \
         -v "${host_project_root}:/workspace" \
         -v weknora-go-mod-dev:/go/pkg/mod \
         -v weknora-go-build-dev:/root/.cache/go-build \
         -v weknora-go-bin-dev:/go/bin \
+        -v weknora-duckdb-extensions:/root/.duckdb/extensions \
         -w /workspace \
         "$DEV_APP_IMAGE" \
         bash /workspace/scripts/app-container-entrypoint.sh

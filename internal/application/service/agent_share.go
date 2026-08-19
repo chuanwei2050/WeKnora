@@ -398,7 +398,7 @@ func (s *agentShareService) CountByOrganizations(ctx context.Context, orgIDs []s
 	return s.shareRepo.CountByOrganizations(ctx, orgIDs)
 }
 
-// SetSharedAgentDisabledByMe adds or removes (tenantID, agentID, sourceTenantID) from tenant_disabled_shared_agents.
+// SetSharedAgentDisabledByMe stores platform-wide agent status or a tenant-scoped shared-agent preference.
 func (s *agentShareService) SetSharedAgentDisabledByMe(ctx context.Context, tenantID uint64, agentID string, sourceTenantID uint64, disabled bool) error {
 	if disabled {
 		return s.disabledRepo.Add(ctx, tenantID, agentID, sourceTenantID)

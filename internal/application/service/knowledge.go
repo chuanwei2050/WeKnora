@@ -179,18 +179,20 @@ func (s *knowledgeService) isKnowledgeDeleting(ctx context.Context, tenantID uin
 	return knowledge.ParseStatus == types.ParseStatusDeleting
 }
 
-// checkStorageEngineConfigured verifies that the knowledge base has a storage engine configured
-// (either at the KB level or via the tenant default). Returns an error if no storage engine is found.
-func checkStorageEngineConfigured(ctx context.Context, kb *types.KnowledgeBase) error {
-	provider := kb.GetStorageProvider()
-	if provider == "" {
-		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		if tenant != nil && tenant.StorageEngineConfig != nil {
-			provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-		}
+// platformStorageProvider returns the storage provider managed by platform settings.
+func platformStorageProvider(ctx context.Context) string {
+	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenant == nil || tenant.StorageEngineConfig == nil {
+		return ""
 	}
+	return strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+}
+
+// checkStorageEngineConfigured verifies that the platform has a storage engine configured.
+func checkStorageEngineConfigured(ctx context.Context, _ *types.KnowledgeBase) error {
+	provider := platformStorageProvider(ctx)
 	if provider == "" {
-		return werrors.NewBadRequestError("请先为知识库选择存储引擎，再上传内容。请前往知识库设置页面进行配置。")
+		return werrors.NewBadRequestError("请先在平台管理设置中配置存储引擎，再上传内容。")
 	}
 	return nil
 }
@@ -292,21 +294,17 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	if !IsImageType(getFileType(fileName)) {
 		logger.Info(ctx, "Non-image file with multimodal enabled, skipping COS/VLM validation")
 	} else {
-		// 解析有效 provider：优先 KB 级别（新字段 > 旧字段），其次租户默认
-		provider := kb.GetStorageProvider()
 		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-			provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-		}
+		provider := platformStorageProvider(ctx)
 
-		// 根据 provider 校验租户级存储引擎配置
+		// 根据平台选择的 provider 校验存储引擎配置
 		switch provider {
 		case "cos":
 			if tenant == nil || tenant.StorageEngineConfig == nil || tenant.StorageEngineConfig.COS == nil ||
 				tenant.StorageEngineConfig.COS.SecretID == "" || tenant.StorageEngineConfig.COS.SecretKey == "" ||
 				tenant.StorageEngineConfig.COS.Region == "" || tenant.StorageEngineConfig.COS.BucketName == "" {
 				logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
-				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
+				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息，请前往平台管理设置中补全")
 			}
 		case "minio":
 			ok := false
@@ -322,7 +320,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 			}
 			if !ok {
 				logger.Error(ctx, "MinIO configuration incomplete for image multimodal processing")
-				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
+				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息，请前往平台管理设置中补全")
 			}
 		}
 
@@ -409,6 +407,11 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 
 	// Create knowledge record
 	logger.Info(ctx, "Creating knowledge record")
+	parseStatus := types.ParseStatusPending
+	isManagedGovernanceUpload := kb.Governance.Enabled && types.CanManageKnowledgeBase(ctx, kb)
+	if kb.Governance.Enabled {
+		parseStatus = types.ParseStatusDraft
+	}
 	knowledge := &types.Knowledge{
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
@@ -421,7 +424,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		FileType:         getFileType(safeFilename),
 		FileSize:         file.Size,
 		FileHash:         hash,
-		ParseStatus:      "pending",
+		ParseStatus:      parseStatus,
 		EnableStatus:     "disabled",
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
@@ -434,7 +437,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
 	}
-	// Save the file to storage (use KB-level storage engine if configured)
+	// Save the file using the platform-managed storage engine.
 	logger.Infof(ctx, "Saving file, knowledge ID: %s", knowledge.ID)
 	fileService := s.resolveFileService(ctx, kb)
 	filePath, err := fileService.SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
@@ -482,9 +485,17 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 			_ = s.repo.DeleteKnowledge(ctx, tenantID, knowledge.ID)
 			return nil, err
 		}
-		// Governed uploads stay as immutable drafts. Parsing, indexing and graph
-		// extraction start only after an authorized reviewer approves the version.
-		return knowledge, nil
+		if !isManagedGovernanceUpload {
+			// Contributor uploads stay as immutable drafts until an authorized reviewer approves them.
+			return knowledge, nil
+		}
+		if err := s.governanceRepo.PrepareManagedUpload(ctx, tenantID, knowledge.ID, version.ID, createdBy); err != nil {
+			_ = s.governanceRepo.DeleteDraftVersion(ctx, tenantID, version.ID)
+			_ = fileService.DeleteFile(ctx, filePath)
+			_ = s.repo.DeleteKnowledge(ctx, tenantID, knowledge.ID)
+			return nil, err
+		}
+		knowledge.ParseStatus = types.ParseStatusPending
 	}
 
 	// Enqueue document processing task to Asynq
@@ -2567,9 +2578,14 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	if kb.SummaryModelID == "" {
 		logger.Warn(ctx, "Knowledge base summary model ID is empty, skipping summary generation")
 		if knowledge.SummaryStatus == types.SummaryStatusPending || knowledge.SummaryStatus == types.SummaryStatusProcessing {
-			knowledge.SummaryStatus = types.SummaryStatusNone
-			knowledge.UpdatedAt = time.Now()
-			if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+			latest, getErr := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
+			if getErr != nil {
+				logger.Warnf(ctx, "Failed to reload knowledge before resetting summary status: %v", getErr)
+				return nil
+			}
+			latest.SummaryStatus = types.SummaryStatusNone
+			latest.UpdatedAt = time.Now()
+			if err := s.repo.UpdateKnowledge(ctx, latest); err != nil {
 				logger.Warnf(ctx, "Failed to reset summary status to none: %v", err)
 			}
 		}
@@ -2585,9 +2601,14 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 
 	// Helper function to mark summary as failed
 	markSummaryFailed := func() {
-		knowledge.SummaryStatus = types.SummaryStatusFailed
-		knowledge.UpdatedAt = time.Now()
-		if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+		latest, getErr := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
+		if getErr != nil {
+			logger.Warnf(ctx, "Failed to reload knowledge before marking summary as failed: %v", getErr)
+			return
+		}
+		latest.SummaryStatus = types.SummaryStatusFailed
+		latest.UpdatedAt = time.Now()
+		if err := s.repo.UpdateKnowledge(ctx, latest); err != nil {
 			logger.Warnf(ctx, "Failed to update summary status to failed: %v", err)
 		}
 	}
@@ -2611,9 +2632,14 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	if len(textChunks) == 0 {
 		logger.Infof(ctx, "No text chunks found for knowledge: %s", payload.KnowledgeID)
 		// Mark as completed since there's nothing to summarize
-		knowledge.SummaryStatus = types.SummaryStatusCompleted
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		latest, getErr := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
+		if getErr != nil {
+			logger.Warnf(ctx, "Failed to reload knowledge before completing empty summary: %v", getErr)
+			return nil
+		}
+		latest.SummaryStatus = types.SummaryStatusCompleted
+		latest.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, latest)
 		return nil
 	}
 
@@ -2648,13 +2674,19 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	}
 
 	// Update knowledge description
-	knowledge.Description = summary
-	knowledge.SummaryStatus = types.SummaryStatusCompleted
-	knowledge.UpdatedAt = time.Now()
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	latest, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to reload knowledge before updating description: %v", err)
+		return fmt.Errorf("failed to reload knowledge: %w", err)
+	}
+	latest.Description = summary
+	latest.SummaryStatus = types.SummaryStatusCompleted
+	latest.UpdatedAt = time.Now()
+	if err := s.repo.UpdateKnowledge(ctx, latest); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge description: %v", err)
 		return fmt.Errorf("failed to update knowledge: %w", err)
 	}
+	knowledge = latest
 
 	// Create summary chunk and index it — only when RAG indexing is enabled.
 	// Wiki-only KBs don't need summary chunks in the vector index.
@@ -3081,7 +3113,7 @@ func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.
 		return io.NopCloser(strings.NewReader(content)), filename, nil
 	}
 
-	// Resolve KB-level file service with FilePath fallback protection
+	// Resolve the platform file service with FilePath fallback protection.
 	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
 	file, err := s.resolveFileServiceForPath(ctx, kb, knowledge.FilePath).GetFile(ctx, knowledge.FilePath)
 	if err != nil {
@@ -7756,48 +7788,13 @@ func (s *knowledgeService) getVLMConfig(ctx context.Context, kb *types.Knowledge
 }
 
 func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.KnowledgeBase) *types.DocParserStorageConfig {
-	provider := kb.GetStorageProvider()
-	if provider == "" {
-		provider = "local"
-	}
-
-	// Backward compatibility: if legacy cos_config has full params for the chosen provider, use them.
-	sc := &kb.StorageConfig
-	hasKBFull := false
-	switch provider {
-	case "cos":
-		hasKBFull = sc.SecretID != "" && sc.BucketName != ""
-	case "minio":
-		hasKBFull = sc.BucketName != ""
-	case "local":
-		hasKBFull = false
-	}
-
-	if hasKBFull {
-		logger.Infof(ctx, "[storage] buildStorageConfig use legacy kb config: kb=%s provider=%s bucket=%s path_prefix=%s",
-			kb.ID, provider, sc.BucketName, sc.PathPrefix)
-		return &types.DocParserStorageConfig{
-			Provider:        strings.ToUpper(provider),
-			Region:          sc.Region,
-			BucketName:      sc.BucketName,
-			AccessKeyID:     sc.SecretID,
-			SecretAccessKey: sc.SecretKey,
-			AppID:           sc.AppID,
-			PathPrefix:      sc.PathPrefix,
-		}
-	}
-
-	// Merge from tenant's StorageEngineConfig.
+	provider := platformStorageProvider(ctx)
 	var out types.DocParserStorageConfig
 	out.Provider = strings.ToUpper(provider)
 
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if tenant != nil && tenant.StorageEngineConfig != nil {
 		sec := tenant.StorageEngineConfig
-		if sec.DefaultProvider != "" && provider == "" {
-			provider = strings.ToLower(strings.TrimSpace(sec.DefaultProvider))
-			out.Provider = strings.ToUpper(provider)
-		}
 		switch provider {
 		case "local":
 			if sec.Local != nil {
@@ -7829,26 +7826,22 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 		}
 	}
 
-	logger.Infof(ctx, "[storage] buildStorageConfig use merged tenant/global config: kb=%s provider=%s bucket=%s path_prefix=%s endpoint=%s",
+	logger.Infof(ctx, "[storage] buildStorageConfig use platform config: kb=%s provider=%s bucket=%s path_prefix=%s endpoint=%s",
 		kb.ID, strings.ToLower(out.Provider), out.BucketName, out.PathPrefix, out.Endpoint)
 	return &out
 }
 
 // resolveFileService returns the FileService for the given knowledge base,
-// based on the KB's StorageProviderConfig (or legacy StorageConfig.Provider) and the tenant's StorageEngineConfig.
-// Falls back to the global fileSvc when no tenant-level storage config is found.
+// based on the platform-managed StorageEngineConfig.
+// Falls back to the global fileSvc when no platform storage config is found.
 func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.KnowledgeBase) interfaces.FileService {
 	if kb == nil {
 		logger.Infof(ctx, "[storage] resolveFileService fallback default: kb=nil")
 		return s.fileSvc
 	}
 
-	provider := kb.GetStorageProvider()
-
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-	}
+	provider := platformStorageProvider(ctx)
 
 	if provider == "" || tenant == nil || tenant.StorageEngineConfig == nil {
 		logger.Infof(ctx, "[storage] resolveFileService fallback default: kb=%s provider=%q tenant_cfg=%v",
@@ -7882,13 +7875,7 @@ func (s *knowledgeService) resolveFileServiceForPath(ctx context.Context, kb *ty
 		return svc
 	}
 
-	configured := kb.GetStorageProvider()
-	if configured == "" {
-		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		if tenant != nil && tenant.StorageEngineConfig != nil {
-			configured = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-		}
-	}
+	configured := platformStorageProvider(ctx)
 	if configured == "" {
 		configured = strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
 	}
@@ -8331,7 +8318,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "[ASR] Starting audio transcription for knowledge %s, audio size=%d bytes",
 			knowledge.ID, len(convertResult.AudioData))
 
-		asrModel, err := s.modelService.GetASRModel(ctx, kb.ASRConfig.ModelID)
+		asrModel, err := s.modelService.GetASRModel(ctx, "")
 		if err != nil {
 			logger.Errorf(ctx, "[ASR] Failed to get ASR model: %v", err)
 			knowledge.ParseStatus = "failed"

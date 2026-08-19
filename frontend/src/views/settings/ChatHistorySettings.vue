@@ -20,24 +20,6 @@
         </div>
       </div>
 
-      <!-- Embedding 模型选择 -->
-      <div v-if="localEnabled" class="setting-row">
-        <div class="setting-info">
-          <label>{{ t('chatHistorySettings.embeddingModelLabel') }}</label>
-          <p class="desc">{{ t('chatHistorySettings.embeddingModelDescription') }}</p>
-          <p v-if="modelLocked" class="desc warning-text">
-            {{ t('chatHistorySettings.embeddingModelLocked') }}
-          </p>
-        </div>
-        <div class="setting-control" style="min-width: 280px;">
-          <ModelSelector
-            model-type="Embedding"
-            :selected-model-id="localEmbeddingModelId"
-            :disabled="modelLocked"
-            @update:selected-model-id="handleModelChange"
-          />
-        </div>
-      </div>
     </div>
 
     <!-- 统计信息 -->
@@ -61,7 +43,6 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
-import ModelSelector from '@/components/ModelSelector.vue'
 import {
   getTenantChatHistoryConfig,
   updateTenantChatHistoryConfig,

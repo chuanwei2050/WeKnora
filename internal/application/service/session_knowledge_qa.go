@@ -65,8 +65,12 @@ func (s *sessionService) KnowledgeQA(
 			chatModelSupportsVision = chatModelInfo.Parameters.SupportsVision
 		}
 	}
-	if req.CustomAgent != nil {
-		vlmModelID = req.CustomAgent.Config.VLMModelID
+	if model, defaultErr := s.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm"); defaultErr == nil {
+		vlmModelID = model.ID
+	}
+	var rerankModelID string
+	if model, defaultErr := s.modelService.GetDefaultModel(ctx, types.ModelTypeRerank, "rerank"); defaultErr == nil {
+		rerankModelID = model.ID
 	}
 
 	// Resolve retrieval tenant scope using shared helper
@@ -107,6 +111,7 @@ func (s *sessionService) KnowledgeQA(
 			RerankTopK:              s.cfg.Conversation.RerankTopK,
 			RerankThreshold:         s.cfg.Conversation.RerankThreshold,
 			ChatModelID:             chatModelID,
+			RerankModelID:           rerankModelID,
 			SummaryConfig:           summaryConfig,
 			FallbackStrategy:        fallbackStrategy,
 			FallbackResponse:        s.cfg.Conversation.FallbackResponse,
@@ -145,6 +150,7 @@ func (s *sessionService) KnowledgeQA(
 	// Apply custom agent overrides (system prompt, temperature, retrieval params,
 	// rewrite, fallback, FAQ strategy, history turns)
 	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
+	s.applyPlatformVerificationDefaults(ctx, &chatManage.VerifiedAnswer)
 
 	// Determine pipeline based on knowledge bases availability and web search setting
 	hasKB := len(knowledgeBaseIDs) > 0 || len(knowledgeIDs) > 0
@@ -670,26 +676,9 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		},
 	}
 
-	// Get default models
-	models, err := s.modelService.ListModels(ctx)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get models: %v", err)
-		return nil, err
-	}
-
-	// Use rerank model from RetrievalConfig if set, otherwise auto-select the first available
-	if rc != nil && rc.RerankModelID != "" {
-		chatManage.RerankModelID = rc.RerankModelID
-	} else {
-		for _, model := range models {
-			if model == nil {
-				continue
-			}
-			if model.Type == types.ModelTypeRerank {
-				chatManage.RerankModelID = model.ID
-				break
-			}
-		}
+	// Retrieval always uses the platform-managed default rerank model.
+	if model, defaultErr := s.modelService.GetDefaultModel(ctx, types.ModelTypeRerank, "rerank"); defaultErr == nil {
+		chatManage.RerankModelID = model.ID
 	}
 
 	// Use specific event list, only including retrieval-related events, not LLM summarization

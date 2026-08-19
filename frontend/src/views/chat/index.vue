@@ -50,7 +50,7 @@
                         <usermsg :content="session.content" :mentioned_items="session.mentioned_items" :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"></usermsg>
                     </div>
                     <div v-if="session.role == 'assistant'">
-                        <botmsg :content="session.content" :session="session" :voice-config="voiceConfig" :user-query="getUserQuery(id)" @scroll-bottom="scrollToBottom"
+                        <botmsg :content="session.content" :session="session" :session-id="session_id" :voice-config="voiceConfig" :user-query="getUserQuery(id)" @scroll-bottom="scrollToBottom"
                             :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"></botmsg>
                     </div>
                 </div>

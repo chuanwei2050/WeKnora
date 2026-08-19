@@ -12,7 +12,7 @@ conversation:
   embedding_top_k: 30
   vector_threshold: 0.2
   rerank_threshold: 0.3
-  rerank_top_k: 30
+  rerank_top_k: 5
   fallback_strategy: "model"
   fallback_response: "Sorry, I am unable to answer this question."
   fallback_prompt_id: "default_fallback_prompt"  # from prompt_templates/fallback.yaml (mode: "model")

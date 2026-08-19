@@ -55,7 +55,7 @@ func (h *Handler) TranscribeVoiceBatch(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("audio file is too large"))
 		return
 	}
-	model, err := h.modelService.GetASRModel(ctx, modelID)
+	model, err := h.modelService.GetASRModel(ctx, "")
 	if err != nil {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
@@ -216,7 +216,7 @@ func (h *Handler) VoiceWebSocket(c *gin.Context) {
 				_ = conn.WriteJSON(gin.H{"type": "error", "message": "unsupported audio mime type"})
 				continue
 			}
-			resolved, resolveErr := h.modelService.GetASRModel(c.Request.Context(), message.ModelID)
+			resolved, resolveErr := h.modelService.GetASRModel(c.Request.Context(), "")
 			if resolveErr != nil {
 				_ = conn.WriteJSON(gin.H{"type": "error", "message": resolveErr.Error()})
 				continue
@@ -285,7 +285,7 @@ func (h *Handler) SynthesizeVoice(c *gin.Context) {
 		c.Error(errors.NewNotFoundError("completed assistant message not found"))
 		return
 	}
-	model, err := h.modelService.GetTTSModel(ctx, request.ModelID)
+	model, err := h.modelService.GetTTSModel(ctx, "")
 	if err != nil {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return

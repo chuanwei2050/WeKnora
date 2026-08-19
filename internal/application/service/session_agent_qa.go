@@ -73,10 +73,11 @@ func (s *sessionService) AgentQA(
 		return err
 	}
 
-	// Set VLM model ID for tool result image analysis (runtime-only field)
-	if req.CustomAgent != nil && req.CustomAgent.Config.VLMModelID != "" {
-		agentConfig.VLMModelID = req.CustomAgent.Config.VLMModelID
+	// Resolve platform-managed runtime models.
+	if model, defaultErr := s.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm"); defaultErr == nil {
+		agentConfig.VLMModelID = model.ID
 	}
+	s.applyPlatformVerificationDefaults(ctx, &agentConfig.VerifiedAnswer)
 
 	// Resolve model ID using shared helper (AgentQA requires a model, so error if not found)
 	effectiveModelID, err := s.resolveChatModelID(ctx, req, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs)
@@ -105,13 +106,7 @@ func (s *sessionService) AgentQA(
 	}
 
 	if hasKnowledgeSearchTool {
-		rerankModelID := req.CustomAgent.Config.RerankModelID
-		if rerankModelID == "" {
-			logger.Warnf(ctx, "No rerank model configured for custom agent %s, but knowledge_search tool is enabled", req.CustomAgent.ID)
-			return errors.New("rerank model (rerank_model_id) is not configured in custom agent settings")
-		}
-
-		rerankModel, err = s.modelService.GetRerankModel(ctx, rerankModelID)
+		rerankModel, err = s.modelService.GetRerankModel(ctx, "")
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get rerank model: %v", err)
 			return fmt.Errorf("failed to get rerank model: %w", err)

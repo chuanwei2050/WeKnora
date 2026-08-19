@@ -147,7 +147,7 @@ type AgentShareService interface {
 	ListSharedAgentsInOrganization(ctx context.Context, orgID string, userID string, currentTenantID uint64) ([]*types.OrganizationSharedAgentItem, error)
 	// ListSharedAgentsInOrganizations returns per-org agent list (batch, for sidebar count merge).
 	ListSharedAgentsInOrganizations(ctx context.Context, orgIDs []string, userID string, currentTenantID uint64) (map[string][]*types.OrganizationSharedAgentItem, error)
-	// SetSharedAgentDisabledByMe sets whether the current tenant has "disabled" this shared agent for their conversation dropdown (per-user preference).
+	// SetSharedAgentDisabledByMe stores platform-wide agent status or a tenant-scoped shared-agent preference.
 	SetSharedAgentDisabledByMe(ctx context.Context, tenantID uint64, agentID string, sourceTenantID uint64, disabled bool) error
 	// GetSharedAgentForUser returns the shared agent by agentID if the user has access (source tenant is resolved from share); used to resolve KB scope for @ mention.
 	GetSharedAgentForUser(ctx context.Context, userID string, currentTenantID uint64, agentID string) (*types.CustomAgent, error)
@@ -182,7 +182,7 @@ type AgentShareRepository interface {
 // TenantDisabledSharedAgentRepository stores per-tenant "disabled" agents (hidden from conversation dropdown; own and shared)
 type TenantDisabledSharedAgentRepository interface {
 	ListByTenantID(ctx context.Context, tenantID uint64) ([]*types.TenantDisabledSharedAgent, error)
-	// ListDisabledOwnAgentIDs returns agent IDs that this tenant has disabled for their own agents (source_tenant_id = tenant_id)
+	// ListDisabledOwnAgentIDs returns tenant-owned IDs plus globally disabled platform agent IDs.
 	ListDisabledOwnAgentIDs(ctx context.Context, tenantID uint64) ([]string, error)
 	Add(ctx context.Context, tenantID uint64, agentID string, sourceTenantID uint64) error
 	Remove(ctx context.Context, tenantID uint64, agentID string, sourceTenantID uint64) error

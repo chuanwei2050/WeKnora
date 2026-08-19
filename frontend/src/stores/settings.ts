@@ -112,6 +112,7 @@ function loadInitialSettings(): Settings {
       modelConfig: { ...defaultSettings.modelConfig, ...(stored.modelConfig || {}) },
       ollamaConfig: { ...defaultSettings.ollamaConfig, ...(stored.ollamaConfig || {}) },
       conversationModels: { ...defaultSettings.conversationModels, ...(stored.conversationModels || {}) },
+      enableMemory: false,
       selectedKnowledgeBases: Array.isArray(stored.selectedKnowledgeBases) ? stored.selectedKnowledgeBases : [],
       selectedFiles: Array.isArray(stored.selectedFiles) ? stored.selectedFiles : [],
       selectedFileKbMap: stored.selectedFileKbMap || {},

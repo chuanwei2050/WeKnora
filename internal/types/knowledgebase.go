@@ -91,7 +91,7 @@ type KnowledgeBase struct {
 	VLMConfig VLMConfig `yaml:"vlm_config"              json:"vlm_config"              gorm:"type:json"`
 	// ASR config (Automatic Speech Recognition)
 	ASRConfig ASRConfig `yaml:"asr_config"              json:"asr_config"              gorm:"type:json"`
-	// Storage provider config (new): only stores provider selection; credentials from tenant StorageEngineConfig
+	// Deprecated: legacy knowledge-base storage selection. Runtime storage follows platform settings.
 	StorageProviderConfig *StorageProviderConfig `yaml:"storage_provider_config" json:"storage_provider_config"  gorm:"column:storage_provider_config;type:jsonb"`
 	// Deprecated: legacy COS config column. Kept for backward compatibility with old data.
 	StorageConfig StorageConfig `yaml:"-" json:"storage_config" gorm:"column:cos_config;type:json"`
@@ -206,8 +206,8 @@ func (c ChunkingConfig) ResolveParserEngine(fileType string) string {
 	return ""
 }
 
-// StorageProviderConfig stores the KB-level storage provider selection.
-// Credentials are managed at the tenant level (StorageEngineConfig).
+// StorageProviderConfig is the legacy KB-level storage provider selection.
+// Runtime storage is managed by the platform StorageEngineConfig.
 type StorageProviderConfig struct {
 	Provider string `yaml:"provider" json:"provider"` // "local", "minio", "cos", "tos", "s3", "oss"
 }
@@ -228,7 +228,7 @@ func (c *StorageProviderConfig) Scan(value interface{}) error {
 }
 
 // Deprecated: StorageConfig is the legacy COS configuration stored in the cos_config column.
-// New code should use StorageProviderConfig. Kept for backward compatibility with old data.
+// Kept for backward compatibility with old data.
 type StorageConfig struct {
 	SecretID   string `yaml:"secret_id"   json:"secret_id"`
 	SecretKey  string `yaml:"secret_key"  json:"secret_key"`
@@ -278,8 +278,8 @@ func (kb *KnowledgeBase) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// GetStorageProvider returns the effective storage provider for this KB.
-// Priority: StorageProviderConfig (new) > StorageConfig.Provider (legacy cos_config).
+// GetStorageProvider returns the legacy storage provider persisted on this KB.
+// Runtime storage resolution must use the platform StorageEngineConfig instead.
 func (kb *KnowledgeBase) GetStorageProvider() string {
 	if kb == nil {
 		return ""

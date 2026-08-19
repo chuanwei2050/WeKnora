@@ -164,7 +164,7 @@ export const BUILTIN_AGENT_NORMAL_ID = BUILTIN_QUICK_ANSWER_ID;
 export const BUILTIN_AGENT_AGENT_ID = BUILTIN_SMART_REASONING_ID;
 
 // 获取智能体列表（包括内置智能体）
-// disabled_own_agent_ids: 当前租户在对话下拉中停用的「我的」智能体 ID，仅影响本租户
+// disabled_own_agent_ids: 当前租户自有停用项与平台全局停用智能体 ID 的合并结果
 export function listAgents() {
   return get<{ data: CustomAgent[]; disabled_own_agent_ids?: string[] }>('/api/v1/agents');
 }

@@ -16,11 +16,42 @@ import (
 
 // Custom agent related errors
 var (
-	ErrAgentNotFound       = errors.New("agent not found")
-	ErrCannotModifyBuiltin = errors.New("cannot modify built-in agent basic info")
-	ErrCannotDeleteBuiltin = errors.New("cannot delete built-in agent")
-	ErrAgentNameRequired   = errors.New("agent name is required")
+	ErrAgentNotFound           = errors.New("agent not found")
+	ErrCannotModifyBuiltin     = errors.New("cannot modify built-in agent basic info")
+	ErrCannotDeleteBuiltin     = errors.New("cannot delete built-in agent")
+	ErrAgentNameRequired       = errors.New("agent name is required")
+	ErrPlatformAdminRequired   = errors.New("only platform administrators can manage agents")
+	ErrPlatformAgentSelectedKB = errors.New("platform agents cannot select tenant-specific knowledge bases")
 )
+
+func requirePlatformAgentAdmin(ctx context.Context) error {
+	user, ok := ctx.Value(types.UserContextKey).(*types.User)
+	if !ok || !user.IsPlatformAdmin() {
+		return ErrPlatformAdminRequired
+	}
+	return nil
+}
+
+func validatePlatformAgentConfig(config types.CustomAgentConfig) error {
+	if config.KBSelectionMode == "selected" || len(config.KnowledgeBases) > 0 {
+		return ErrPlatformAgentSelectedKB
+	}
+	return nil
+}
+
+func clearPlatformManagedModelIDs(config *types.CustomAgentConfig) {
+	if config == nil {
+		return
+	}
+	config.ModelID = ""
+	config.RerankModelID = ""
+	config.VLMModelID = ""
+	config.ASRModelID = ""
+	config.TTSModelID = ""
+	config.VerifiedAnswer.FactValidatorModelID = ""
+	config.VerifiedAnswer.LogicValidatorModelID = ""
+	config.VerifiedAnswer.CitationValidatorModelID = ""
+}
 
 // customAgentService implements the CustomAgentService interface
 type customAgentService struct {
@@ -47,6 +78,9 @@ func NewCustomAgentService(
 
 // CreateAgent creates a new custom agent
 func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.CustomAgent) (*types.CustomAgent, error) {
+	if err := requirePlatformAgentAdmin(ctx); err != nil {
+		return nil, err
+	}
 	// Validate required fields
 	if strings.TrimSpace(agent.Name) == "" {
 		return nil, ErrAgentNameRequired
@@ -57,12 +91,7 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 		agent.ID = uuid.New().String()
 	}
 
-	// Get tenant ID from context
-	tenantID, ok := types.TenantIDFromContext(ctx)
-	if !ok {
-		return nil, ErrInvalidTenantID
-	}
-	agent.TenantID = tenantID
+	agent.TenantID = types.PlatformAgentTenantID
 
 	// Set timestamps
 	agent.CreatedAt = time.Now()
@@ -78,6 +107,10 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 
 	// Set defaults
 	agent.EnsureDefaults()
+	clearPlatformManagedModelIDs(&agent.Config)
+	if err := validatePlatformAgentConfig(agent.Config); err != nil {
+		return nil, err
+	}
 	if err := agent.Config.Validate(); err != nil {
 		return nil, err
 	}
@@ -104,11 +137,7 @@ func (s *customAgentService) GetAgentByID(ctx context.Context, id string) (*type
 		return nil, errors.New("agent ID cannot be empty")
 	}
 
-	// Get tenant ID from context
-	tenantID, ok := types.TenantIDFromContext(ctx)
-	if !ok {
-		return nil, ErrInvalidTenantID
-	}
+	tenantID := types.PlatformAgentTenantID
 
 	// Check if it's a built-in agent using the registry
 	if types.IsBuiltinAgentID(id) {
@@ -155,12 +184,9 @@ func (s *customAgentService) GetAgentByIDAndTenant(ctx context.Context, id strin
 	return agent, nil
 }
 
-// ListAgents lists all agents for the current tenant (including built-in agents)
+// ListAgents lists the platform-managed agents shared by every tenant.
 func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAgent, error) {
-	tenantID, ok := types.TenantIDFromContext(ctx)
-	if !ok {
-		return nil, ErrInvalidTenantID
-	}
+	tenantID := types.PlatformAgentTenantID
 
 	// Get all agents from database (including built-in agents with customized config)
 	allAgents, err := s.repo.ListAgentsByTenantID(ctx, tenantID)
@@ -213,16 +239,15 @@ func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAge
 
 // UpdateAgent updates an agent's information
 func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.CustomAgent) (*types.CustomAgent, error) {
+	if err := requirePlatformAgentAdmin(ctx); err != nil {
+		return nil, err
+	}
 	if agent.ID == "" {
 		logger.Error(ctx, "Agent ID is empty")
 		return nil, errors.New("agent ID cannot be empty")
 	}
 
-	// Get tenant ID from context
-	tenantID, ok := types.TenantIDFromContext(ctx)
-	if !ok {
-		return nil, ErrInvalidTenantID
-	}
+	tenantID := types.PlatformAgentTenantID
 
 	// Handle built-in agents specially using registry
 	if types.IsBuiltinAgentID(agent.ID) {
@@ -257,6 +282,10 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 
 	// Ensure defaults
 	existingAgent.EnsureDefaults()
+	clearPlatformManagedModelIDs(&existingAgent.Config)
+	if err := validatePlatformAgentConfig(existingAgent.Config); err != nil {
+		return nil, err
+	}
 	if err := existingAgent.Config.Validate(); err != nil {
 		return nil, err
 	}
@@ -293,6 +322,10 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 		existingAgent.Config = agent.Config
 		existingAgent.UpdatedAt = time.Now()
 		existingAgent.EnsureDefaults()
+		clearPlatformManagedModelIDs(&existingAgent.Config)
+		if err := validatePlatformAgentConfig(existingAgent.Config); err != nil {
+			return nil, err
+		}
 
 		logger.Infof(ctx, "Updating built-in agent config, ID: %s", agent.ID)
 
@@ -320,6 +353,10 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 		UpdatedAt:   time.Now(),
 	}
 	newAgent.EnsureDefaults()
+	clearPlatformManagedModelIDs(&newAgent.Config)
+	if err := validatePlatformAgentConfig(newAgent.Config); err != nil {
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Creating built-in agent config record, ID: %s, tenant ID: %d", agent.ID, tenantID)
 
@@ -337,6 +374,9 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 
 // DeleteAgent deletes an agent
 func (s *customAgentService) DeleteAgent(ctx context.Context, id string) error {
+	if err := requirePlatformAgentAdmin(ctx); err != nil {
+		return err
+	}
 	if id == "" {
 		logger.Error(ctx, "Agent ID is empty")
 		return errors.New("agent ID cannot be empty")
@@ -347,11 +387,7 @@ func (s *customAgentService) DeleteAgent(ctx context.Context, id string) error {
 		return ErrCannotDeleteBuiltin
 	}
 
-	// Get tenant ID from context
-	tenantID, ok := types.TenantIDFromContext(ctx)
-	if !ok {
-		return ErrInvalidTenantID
-	}
+	tenantID := types.PlatformAgentTenantID
 
 	// Get existing agent to verify ownership
 	existingAgent, err := s.repo.GetAgentByID(ctx, id, tenantID)
@@ -382,16 +418,15 @@ func (s *customAgentService) DeleteAgent(ctx context.Context, id string) error {
 
 // CopyAgent creates a copy of an existing agent
 func (s *customAgentService) CopyAgent(ctx context.Context, id string) (*types.CustomAgent, error) {
+	if err := requirePlatformAgentAdmin(ctx); err != nil {
+		return nil, err
+	}
 	if id == "" {
 		logger.Error(ctx, "Agent ID is empty")
 		return nil, errors.New("agent ID cannot be empty")
 	}
 
-	// Get tenant ID from context
-	tenantID, ok := types.TenantIDFromContext(ctx)
-	if !ok {
-		return nil, ErrInvalidTenantID
-	}
+	tenantID := types.PlatformAgentTenantID
 
 	// Get the source agent
 	sourceAgent, err := s.GetAgentByID(ctx, id)
@@ -414,6 +449,10 @@ func (s *customAgentService) CopyAgent(ctx context.Context, id string) (*types.C
 
 	// Ensure defaults
 	newAgent.EnsureDefaults()
+	clearPlatformManagedModelIDs(&newAgent.Config)
+	if err := validatePlatformAgentConfig(newAgent.Config); err != nil {
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Copying agent, source ID: %s, new ID: %s", id, newAgent.ID)
 

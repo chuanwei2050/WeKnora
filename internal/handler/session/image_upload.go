@@ -66,7 +66,7 @@ func (h *Handler) analyzeImageAttachments(ctx context.Context, images []ImageAtt
 		return
 	}
 
-	vlmModel, err := h.modelService.GetVLMModel(ctx, vlmModelID)
+	vlmModel, err := h.modelService.GetVLMModel(ctx, "")
 	if err != nil {
 		logger.Warnf(ctx, "No VLM model available for image analysis, skipping: %v", err)
 		return

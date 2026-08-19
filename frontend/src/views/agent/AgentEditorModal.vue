@@ -290,71 +290,6 @@
                   </div>
                 </div>
 
-                <!-- 模型配置 -->
-                <div v-show="currentSection === 'model'" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agent.editor.modelConfig') }}</h2>
-                    <p class="section-description">{{ $t('agent.editor.modelConfigDesc') }}</p>
-                  </div>
-                  
-                  <div class="settings-group">
-                    <!-- 模型选择 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.model') }} <span class="required">*</span></label>
-                        <p class="desc">{{ $t('agentEditor.desc.model') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <ModelSelector
-                          model-type="KnowledgeQA"
-                          :selected-model-id="formData.config.model_id"
-                          :all-models="allModels"
-                          @update:selected-model-id="(val: string) => formData.config.model_id = val"
-                          @add-model="handleAddModel('llm')"
-                          :placeholder="$t('agent.editor.modelPlaceholder')"
-                        />
-                      </div>
-                    </div>
-
-                    <!-- 温度 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.temperature') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.temperature') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <div class="slider-wrapper">
-                          <t-slider v-model="formData.config.temperature" :min="0" :max="1" :step="0.1" />
-                          <span class="slider-value">{{ formData.config.temperature }}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- 最大生成Token数（仅普通模式） -->
-                    <div v-if="!isAgentMode" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.maxCompletionTokens') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.maxTokens') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-input-number v-model="formData.config.max_completion_tokens" :min="100" :max="100000" :step="100" theme="column" />
-                      </div>
-                    </div>
-
-                    <!-- 思考模式 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.thinking') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.thinking') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="thinkingEnabled" />
-                      </div>
-                    </div>
-
-                  </div>
-                </div>
-
                 <!-- 复杂度路由与验证式回答 -->
                 <div v-show="currentSection === 'reasoning'" class="section">
                   <div class="section-header">
@@ -430,18 +365,6 @@
                         <div class="setting-info"><label>最大反思轮数</label><p class="desc">硬上限为 2，默认 1。</p></div>
                         <div class="setting-control"><t-input-number v-model="formData.config.verified_answer.max_reflections" :min="0" :max="2" theme="column" /></div>
                       </div>
-                      <div class="setting-row">
-                        <div class="setting-info"><label>事实验证模型</label></div>
-                        <div class="setting-control"><ModelSelector model-type="KnowledgeQA" :selected-model-id="formData.config.verified_answer.fact_validator_model_id" :all-models="allModels" @update:selected-model-id="(val: string) => formData.config.verified_answer.fact_validator_model_id = val" /></div>
-                      </div>
-                      <div class="setting-row">
-                        <div class="setting-info"><label>引用验证模型</label></div>
-                        <div class="setting-control"><ModelSelector model-type="KnowledgeQA" :selected-model-id="formData.config.verified_answer.citation_validator_model_id" :all-models="allModels" @update:selected-model-id="(val: string) => formData.config.verified_answer.citation_validator_model_id = val" /></div>
-                      </div>
-                      <div class="setting-row">
-                        <div class="setting-info"><label>逻辑验证模型</label></div>
-                        <div class="setting-control"><ModelSelector model-type="KnowledgeQA" :selected-model-id="formData.config.verified_answer.logic_validator_model_id" :all-models="allModels" @update:selected-model-id="(val: string) => formData.config.verified_answer.logic_validator_model_id = val" /></div>
-                      </div>
                     </template>
                   </div>
                 </div>
@@ -462,24 +385,6 @@
                       </div>
                       <div class="setting-control">
                         <t-switch v-model="formData.config.image_upload_enabled" />
-                      </div>
-                    </div>
-
-                    <!-- VLM模型（图片上传启用时） -->
-                    <div v-if="formData.config.image_upload_enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.imageUpload.vlmModel') }} <span class="required">*</span></label>
-                        <p class="desc">{{ $t('agentEditor.imageUpload.vlmModelDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <ModelSelector
-                          model-type="VLLM"
-                          :selected-model-id="formData.config.vlm_model_id"
-                          :all-models="allModels"
-                          @update:selected-model-id="(val: string) => formData.config.vlm_model_id = val"
-                          @add-model="handleAddModel('vllm')"
-                          :placeholder="$t('agentEditor.imageUpload.vlmModelPlaceholder')"
-                        />
                       </div>
                     </div>
 
@@ -527,47 +432,12 @@
                       </div>
                     </div>
 
-                    <!-- ASR模型（音频上传启用时） -->
-                    <div v-if="formData.config.audio_upload_enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.audioUpload.asrModel') }}</label>
-                        <p class="desc">{{ $t('agentEditor.audioUpload.asrModelDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <ModelSelector
-                          model-type="ASR"
-                          :selected-model-id="formData.config.asr_model_id"
-                          :all-models="allModels"
-                          @update:selected-model-id="(val: string) => formData.config.asr_model_id = val"
-                          @add-model="handleAddModel('asr')"
-                          :placeholder="$t('agentEditor.audioUpload.asrModelPlaceholder')"
-                        />
-                      </div>
-                    </div>
-
                     <div class="setting-row">
                       <div class="setting-info">
                         <label>语音输入</label>
                         <p class="desc">允许用户主动录音，并将确认后的转写作为普通会话消息发送。</p>
                       </div>
                       <div class="setting-control"><t-switch v-model="formData.config.voice_input_enabled" /></div>
-                    </div>
-
-                    <div v-if="formData.config.voice_input_enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>实时语音识别模型 <span class="required">*</span></label>
-                        <p class="desc">浏览器或模型不支持流式识别时自动使用结束后转写。</p>
-                      </div>
-                      <div class="setting-control">
-                        <ModelSelector
-                          model-type="ASR"
-                          :selected-model-id="formData.config.asr_model_id"
-                          :all-models="allModels"
-                          @update:selected-model-id="(val: string) => formData.config.asr_model_id = val"
-                          @add-model="handleAddModel('asr')"
-                          placeholder="请选择 ASR 模型"
-                        />
-                      </div>
                     </div>
 
                     <div class="setting-row">
@@ -579,22 +449,6 @@
                     </div>
 
                     <template v-if="formData.config.voice_output_enabled">
-                      <div class="setting-row">
-                        <div class="setting-info">
-                          <label>TTS 模型 <span class="required">*</span></label>
-                          <p class="desc">请选择声明音频输出能力的 TTS 模型。</p>
-                        </div>
-                        <div class="setting-control">
-                          <ModelSelector
-                            model-type="TTS"
-                            :selected-model-id="formData.config.tts_model_id"
-                            :all-models="allModels"
-                            @update:selected-model-id="(val: string) => formData.config.tts_model_id = val"
-                            @add-model="handleAddModel('tts')"
-                            placeholder="请选择 TTS 模型"
-                          />
-                        </div>
-                      </div>
                       <div class="setting-row">
                         <div class="setting-info"><label>语言 / 音色</label><p class="desc">留空时使用模型默认值。</p></div>
                         <div class="setting-control" style="gap: 8px;">
@@ -1042,14 +896,13 @@
                       <div class="setting-control">
                         <t-radio-group v-model="kbSelectionMode">
                           <t-radio-button value="all">{{ $t('agent.editor.allKnowledgeBases') }}</t-radio-button>
-                          <t-radio-button value="selected">{{ $t('agent.editor.selectedKnowledgeBases') }}</t-radio-button>
                           <t-radio-button value="none">{{ $t('agent.editor.noKnowledgeBase') }}</t-radio-button>
                         </t-radio-group>
                       </div>
                     </div>
 
                     <!-- 选择指定知识库（仅在选择"指定知识库"时显示） -->
-                    <div v-if="kbSelectionMode === 'selected'" class="setting-row">
+                    <div v-if="kbSelectionMode === 'selected' && authStore.workspaceMode !== 'platform'" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.selectKnowledgeBases') }}</label>
                         <p class="desc">{{ $t('agent.editor.selectKnowledgeBasesDesc') }}</p>
@@ -1139,24 +992,6 @@
                       </div>
                       <div class="setting-control">
                         <t-switch v-model="formData.config.retrieve_kb_only_when_mentioned" />
-                      </div>
-                    </div>
-
-                    <!-- ReRank 模型（当配置了知识库时显示） -->
-                    <div v-if="needsRerankModel" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.rerankModel') }} <span class="required">*</span></label>
-                        <p class="desc">{{ $t('agent.editor.rerankModelDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <ModelSelector
-                          model-type="Rerank"
-                          :selected-model-id="formData.config.rerank_model_id"
-                          :all-models="allModels"
-                          @update:selected-model-id="(val: string) => formData.config.rerank_model_id = val"
-                          @add-model="handleAddModel('rerank')"
-                          :placeholder="$t('agent.editor.rerankModelPlaceholder')"
-                        />
                       </div>
                     </div>
 
@@ -1488,11 +1323,6 @@
                   </div>
                 </div>
 
-                <!-- 共享管理（仅编辑模式且非内置智能体） -->
-                <div v-if="props.mode === 'edit' && props.agent?.id && !props.agent?.is_builtin" v-show="currentSection === 'share'" class="section">
-                  <AgentShareSettings :agent-id="props.agent.id" :agent="props.agent" />
-                </div>
-
                 <!-- IM集成（仅编辑模式） -->
                 <div v-if="props.mode === 'edit' && props.agent?.id" v-show="currentSection === 'im'" class="section">
                   <div class="section-header">
@@ -1548,8 +1378,6 @@ import { useAuthStore } from '@/stores/auth';
 import { useOrganizationStore } from '@/stores/organization';
 import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
-import ModelSelector from '@/components/ModelSelector.vue';
-import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import IMChannelPanel from '@/components/IMChannelPanel.vue';
 import {
   evaluateToolRequirement,
@@ -1942,7 +1770,6 @@ const fallbackPromptTextareaRef = ref<any>(null);
 const navItems = computed(() => {
   const items: { key: string; icon: string; label: string }[] = [
     { key: 'basic', icon: 'info-circle', label: t('agent.editor.basicInfo') },
-    { key: 'model', icon: 'control-platform', label: t('agent.editor.modelConfig') },
     { key: 'reasoning', icon: 'control-platform', label: '复杂度与验证' },
   ];
   // 知识库配置（放在工具上面）
@@ -1966,10 +1793,6 @@ const navItems = computed(() => {
   // 多轮对话（仅普通模式显示，Agent模式内部自动控制）
   if (!isAgentMode.value) {
     items.push({ key: 'conversation', icon: 'chat', label: t('agent.editor.conversationSettings') });
-  }
-  // 共享管理（仅编辑模式且非内置智能体，Lite 模式下隐藏）
-  if (props.mode === 'edit' && props.agent?.id && !props.agent?.is_builtin && !authStore.isLiteMode) {
-    items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') });
   }
   // IM集成（仅编辑模式，创建时Agent还没有ID）
   if (props.mode === 'edit' && props.agent?.id) {
@@ -3743,12 +3566,6 @@ const handleSave = async () => {
     }
   }
 
-  if (!formData.value.config.model_id) {
-    MessagePlugin.error(t('agent.editor.modelRequired'));
-    currentSection.value = 'model';
-    return;
-  }
-
   const routing = formData.value.config.complexity_routing;
   if (routing?.enabled && (routing.confidence_threshold < 0 || routing.confidence_threshold > 1)) {
     MessagePlugin.error('复杂度路由置信度阈值必须在 0 到 1 之间');
@@ -3776,24 +3593,19 @@ const handleSave = async () => {
     return;
   }
 
-  // 校验 VLM 模型（当图片上传启用时必填）
-  if (formData.value.config.image_upload_enabled && !formData.value.config.vlm_model_id) {
-    MessagePlugin.error(t('agentEditor.imageUpload.vlmModelRequired'));
-    currentSection.value = 'multimodal';
-    return;
-  }
-
-  // 校验 ReRank 模型（当需要时必填）
-  if (needsRerankModel.value && !formData.value.config.rerank_model_id) {
-    MessagePlugin.error(t('agent.editor.rerankModelRequired'));
-    currentSection.value = 'knowledge';
-    return;
-  }
-
   // 过滤空推荐问题
   if (formData.value.config.suggested_prompts) {
     formData.value.config.suggested_prompts = formData.value.config.suggested_prompts.filter((p: string) => p.trim() !== '');
   }
+
+  formData.value.config.model_id = '';
+  formData.value.config.rerank_model_id = '';
+  formData.value.config.vlm_model_id = '';
+  formData.value.config.asr_model_id = '';
+  formData.value.config.tts_model_id = '';
+  formData.value.config.verified_answer.fact_validator_model_id = '';
+  formData.value.config.verified_answer.logic_validator_model_id = '';
+  formData.value.config.verified_answer.citation_validator_model_id = '';
 
   saving.value = true;
   try {

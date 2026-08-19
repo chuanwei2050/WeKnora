@@ -230,6 +230,8 @@ type KnowledgeGovernanceRepository interface {
 	GetVersion(ctx context.Context, tenantID uint64, id string) (*types.KnowledgeVersion, error)
 	ListVersions(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.KnowledgeVersion, error)
 	UpdateVersionStatus(ctx context.Context, tenantID uint64, id string, status types.KnowledgeVersionStatus) error
+	// PrepareManagedUpload atomically auto-approves an administrator upload and marks it ready for parsing.
+	PrepareManagedUpload(ctx context.Context, tenantID uint64, knowledgeID, versionID, reviewerID string) error
 	// TransitionVersionWithReview atomically changes a version status and records its audit entry.
 	TransitionVersionWithReview(ctx context.Context, tenantID uint64, id string, status types.KnowledgeVersionStatus, review *types.KnowledgeVersionReview) error
 	// ActivateVersion atomically switches the current version after its index is ready.

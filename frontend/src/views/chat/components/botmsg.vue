@@ -74,10 +74,15 @@
                     size="small"
                     variant="outline"
                     shape="round"
-                    :aria-label="voicePlaybackState === 'playing' ? '暂停朗读' : '朗读回答'"
+                    class="voice-playback-button"
+                    :class="`is-${voicePlaybackState}`"
+                    :aria-label="voicePlaybackLabel"
+                    :aria-pressed="voicePlaybackState === 'playing'"
+                    :aria-busy="voicePlaybackState === 'loading'"
+                    :disabled="voicePlaybackState === 'loading'"
                     @click.stop="toggleAnswerPlayback"
                 >
-                    {{ voicePlaybackState === 'playing' ? '暂停朗读' : voicePlaybackState === 'paused' ? '继续朗读' : '朗读' }}
+                    {{ voicePlaybackState === 'idle' ? '朗读' : voicePlaybackLabel }}
                 </t-button>
                 <span v-if="voicePlaybackState === 'loading'" class="voice-playback-status" role="status" aria-live="polite">正在加载语音</span>
                 <span v-else-if="voicePlaybackError" class="voice-playback-status" role="status" aria-live="polite">朗读失败，请点击“朗读”重试</span>
@@ -153,6 +158,10 @@ const props = defineProps({
         type: Object,
         required: false
     },
+    sessionId: {
+        type: String,
+        required: true
+    },
     userQuery: {
         type: String,
         required: false,
@@ -176,13 +185,19 @@ const graphPathsOpen = ref(false);
 const graphPaths = computed(() => (Array.isArray(props.session?.graph_paths) ? props.session.graph_paths : []));
 
 const voiceConversation = useVoiceConversation(
-    String(props.session?.session_id || ''),
+    props.sessionId,
     () => String(props.voiceConfig?.asr_model_id || '')
 );
 const voiceOutputEnabled = computed(() => Boolean(props.voiceConfig?.voice_output_enabled));
 const ttsModelId = computed(() => String(props.voiceConfig?.tts_model_id || ''));
 const voicePlaybackState = computed(() => voiceConversation.playbackState.value);
 const voicePlaybackError = computed(() => voiceConversation.error.value);
+const voicePlaybackLabel = computed(() => {
+    if (voicePlaybackState.value === 'loading') return '正在加载语音';
+    if (voicePlaybackState.value === 'playing') return '暂停朗读';
+    if (voicePlaybackState.value === 'paused') return '继续朗读';
+    return '朗读回答';
+});
 const autoPlaybackAttempted = ref(Boolean(props.session?.is_completed));
 
 const toggleAnswerPlayback = async () => {
@@ -373,6 +388,27 @@ onBeforeUnmount(() => {
 <style lang="less" scoped>
 @import '../../../components/css/markdown.less';
 @import '../../../components/css/chat-message-shared.less';
+
+.answer-toolbar :deep(.voice-playback-button) {
+    &.is-loading,
+    &.is-playing {
+        color: var(--td-brand-color);
+        background: var(--td-brand-color-light);
+        border-color: var(--td-brand-color);
+        box-shadow: 0 0 0 3px var(--td-brand-color-light);
+        opacity: 1;
+    }
+
+    &.is-loading {
+        cursor: progress;
+    }
+
+    &.is-paused {
+        color: var(--td-warning-color, #d29c13);
+        background: var(--td-warning-color-light, #fef3e6);
+        border-color: var(--td-warning-color, #d29c13);
+    }
+}
 
 .bot_msg {
     &.is-embedded {

@@ -48,7 +48,7 @@ def require_api_key(authorization: Optional[str] = Header(None)) -> None:
     """Validate the shared model API key at the HTTP boundary."""
     api_key = os.environ.get("MODEL_API_KEY", "")
     if not api_key:
-        raise HTTPException(status_code=503, detail="MODEL_API_KEY 未配置")
+        return
     scheme, _, token = (authorization or "").partition(" ")
     if scheme.lower() != "bearer" or not secrets.compare_digest(token, api_key):
         raise HTTPException(
@@ -65,6 +65,11 @@ def _cuda_available() -> bool:
         return torch.cuda.is_available()
     except Exception:  # noqa: BLE001
         return False
+
+
+def _fp16_enabled() -> bool:
+    """Return whether the configured runtime can safely use FP16 inference."""
+    return QUANT.lower() in {"fp16", "float16"} and _cuda_available()
 
 
 def _block_runtime_model_downloads() -> None:
@@ -99,7 +104,7 @@ def _load() -> None:
         try:
             mod = __import__(import_path, fromlist=[cls_name])
             cls = getattr(mod, cls_name)
-            _tts = cls(str(MODEL_DIR))
+            _tts = cls(str(MODEL_DIR), fp16=_fp16_enabled())
             _load_error = None
             return
         except Exception as exc:  # noqa: BLE001
@@ -222,6 +227,7 @@ def healthz() -> Dict[str, Any]:
         "ready": ready,
         "quant": QUANT,
         "cuda": _cuda_available(),
+        "fp16": _fp16_enabled(),
     }
     if _load_error:
         payload["error"] = _load_error

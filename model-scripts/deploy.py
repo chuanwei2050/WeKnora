@@ -1020,8 +1020,13 @@ def prepare_container_images(
             )
         else:
             vllm_image = str(docker_cfg.get("vllm_image") or "vllm/vllm-openai:latest")
+            preferred_base = (
+                "pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime"
+                if key == "tts"
+                else "pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime"
+            )
             base = pick_local_base_image(
-                "pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime",
+                preferred_base,
                 [vllm_image] if key in {"asr", "tts"} else [],
             )
         docker_build_and_save(

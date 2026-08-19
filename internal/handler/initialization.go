@@ -22,6 +22,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/models/tts"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -88,7 +89,7 @@ func NewInitializationHandler(
 
 // KBModelConfigRequest 知识库模型配置请求（简化版，只传模型ID）
 type KBModelConfigRequest struct {
-	LLMModelID       string           `json:"llmModelId"       binding:"required"`
+	LLMModelID       string           `json:"llmModelId"`
 	EmbeddingModelID string           `json:"embeddingModelId"` // optional when RAG indexing is disabled
 	VLMConfig        *types.VLMConfig `json:"vlm_config"`
 	ASRConfig        *types.ASRConfig `json:"asr_config"`
@@ -104,13 +105,10 @@ type KBModelConfigRequest struct {
 		ChildChunkSize    int                      `json:"childChunkSize,omitempty"`
 	} `json:"documentSplitting"`
 
-	// 多模态配置（仅模型相关；存储引擎在 storageProvider 中配置）
+	// 多模态配置（仅模型相关；存储引擎沿用平台设置）
 	Multimodal struct {
 		Enabled bool `json:"enabled"`
 	} `json:"multimodal"`
-
-	// 存储引擎选择（"local" | "minio" | "cos"），影响文档上传与文档内图片存储，参数从全局设置读取
-	StorageProvider string `json:"storageProvider"`
 
 	// 知识图谱配置
 	NodeExtract struct {
@@ -235,55 +233,33 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		return
 	}
 
-	// 检查Embedding模型是否可以修改
-	if kb.EmbeddingModelID != "" && req.EmbeddingModelID != "" && kb.EmbeddingModelID != req.EmbeddingModelID {
-		// 检查是否已有文件
-		knowledgeList, err := h.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx,
-			kbIdStr, &types.Pagination{
-				Page:     1,
-				PageSize: 1,
-			}, "", "", "")
-		if err == nil && knowledgeList != nil && knowledgeList.Total > 0 {
-			logger.Error(ctx, "Cannot change embedding model when files exist")
-			c.Error(errors.NewBadRequestError("知识库中已有文件，无法修改Embedding模型"))
-			return
-		}
-	}
-
-	// 从数据库获取模型详情并验证
-	llmModel, err := h.modelService.GetModelByID(ctx, req.LLMModelID)
-	if err != nil || llmModel == nil {
-		logger.Error(ctx, "LLM model not found")
-		c.Error(errors.NewBadRequestError("LLM模型不存在"))
+	// 模型由平台模型管理统一决定。Embedding 一旦写入知识库即固定，
+	// 避免平台切换到不同维度后使既有向量索引失效。
+	llmModel, err := h.modelService.GetDefaultModel(ctx, types.ModelTypeKnowledgeQA, "chat")
+	if err != nil {
+		c.Error(errors.NewBadRequestError("平台默认对话模型未配置"))
 		return
 	}
-
-	// Embedding模型仅在需要时验证（RAG检索启用时）
-	if req.EmbeddingModelID != "" {
-		embeddingModel, err := h.modelService.GetModelByID(ctx, req.EmbeddingModelID)
-		if err != nil || embeddingModel == nil {
-			logger.Error(ctx, "Embedding model not found")
-			c.Error(errors.NewBadRequestError("Embedding模型不存在"))
+	kb.SummaryModelID = llmModel.ID
+	if kb.IsVectorEnabled() && kb.EmbeddingModelID == "" {
+		embeddingModel, err := h.modelService.GetDefaultModel(ctx, types.ModelTypeEmbedding, "embedding")
+		if err != nil {
+			c.Error(errors.NewBadRequestError("平台默认Embedding模型未配置"))
 			return
 		}
-	}
-
-	// 更新知识库的模型ID
-	kb.SummaryModelID = req.LLMModelID
-	if req.EmbeddingModelID != "" {
-		kb.EmbeddingModelID = req.EmbeddingModelID
+		kb.EmbeddingModelID = embeddingModel.ID
 	}
 
 	// 处理多模态模型配置
 	kb.VLMConfig = types.VLMConfig{}
-	if req.VLMConfig != nil && req.Multimodal.Enabled && req.VLMConfig.ModelID != "" {
-		vllmModel, err := h.modelService.GetModelByID(ctx, req.VLMConfig.ModelID)
-		if err != nil || vllmModel == nil {
-			logger.Warn(ctx, "VLM model not found")
-		} else {
-			kb.VLMConfig.Enabled = req.VLMConfig.Enabled
-			kb.VLMConfig.ModelID = req.VLMConfig.ModelID
+	if req.Multimodal.Enabled {
+		vllmModel, err := h.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm")
+		if err != nil {
+			c.Error(errors.NewBadRequestError("平台默认视觉模型未配置"))
+			return
 		}
+		kb.VLMConfig.Enabled = true
+		kb.VLMConfig.ModelID = vllmModel.ID
 	}
 	if !kb.VLMConfig.Enabled {
 		kb.VLMConfig.ModelID = ""
@@ -291,15 +267,15 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 
 	// 处理ASR语音识别配置
 	kb.ASRConfig = types.ASRConfig{}
-	if req.ASRConfig != nil && req.ASRConfig.Enabled && req.ASRConfig.ModelID != "" {
-		asrModel, err := h.modelService.GetModelByID(ctx, req.ASRConfig.ModelID)
-		if err != nil || asrModel == nil {
-			logger.Warn(ctx, "ASR model not found")
-		} else {
-			kb.ASRConfig.Enabled = true
-			kb.ASRConfig.ModelID = req.ASRConfig.ModelID
-			kb.ASRConfig.Language = req.ASRConfig.Language
+	if req.ASRConfig != nil && req.ASRConfig.Enabled {
+		asrModel, err := h.modelService.GetDefaultModel(ctx, types.ModelTypeASR, "asr")
+		if err != nil {
+			c.Error(errors.NewBadRequestError("平台默认ASR模型未配置"))
+			return
 		}
+		kb.ASRConfig.Enabled = true
+		kb.ASRConfig.ModelID = asrModel.ID
+		kb.ASRConfig.Language = req.ASRConfig.Language
 	}
 
 	// 更新文档分块配置
@@ -327,24 +303,6 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	} else {
 		kb.VLMConfig.ModelID = ""
 	}
-
-	// 存储引擎：仅写入 provider 到新字段，参数从租户全局 StorageEngineConfig 读取
-	provider := strings.ToLower(strings.TrimSpace(req.StorageProvider))
-	if provider == "" {
-		provider = "local"
-	}
-	oldProvider := kb.GetStorageProvider()
-	if oldProvider == "" {
-		oldProvider = "local"
-	}
-	if oldProvider != provider {
-		knowledgeList, err := h.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx,
-			kbIdStr, &types.Pagination{Page: 1, PageSize: 1}, "", "", "")
-		if err == nil && knowledgeList != nil && knowledgeList.Total > 0 {
-			logger.Warn(ctx, "Storage engine changed with existing files, old files may become inaccessible")
-		}
-	}
-	kb.SetStorageProvider(provider)
 
 	// 更新知识图谱配置
 	if req.NodeExtract.Enabled {
@@ -773,38 +731,8 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 			Enabled: req.Multimodal.Enabled,
 			ModelID: vlmModelID,
 		}
-		switch req.Multimodal.StorageType {
-		case "cos":
-			if req.Multimodal.COS != nil {
-				kb.SetStorageProvider("cos")
-				// Legacy: also write to cos_config for backward compat with old code paths
-				kb.StorageConfig = types.StorageConfig{
-					Provider:   req.Multimodal.StorageType,
-					BucketName: req.Multimodal.COS.BucketName,
-					AppID:      req.Multimodal.COS.AppID,
-					PathPrefix: req.Multimodal.COS.PathPrefix,
-					SecretID:   req.Multimodal.COS.SecretID,
-					SecretKey:  req.Multimodal.COS.SecretKey,
-					Region:     req.Multimodal.COS.Region,
-				}
-			}
-		case "minio":
-			if req.Multimodal.Minio != nil {
-				kb.SetStorageProvider("minio")
-				// Legacy: also write to cos_config for backward compat with old code paths
-				kb.StorageConfig = types.StorageConfig{
-					Provider:   req.Multimodal.StorageType,
-					BucketName: req.Multimodal.Minio.BucketName,
-					PathPrefix: req.Multimodal.Minio.PathPrefix,
-					SecretID:   os.Getenv("MINIO_ACCESS_KEY_ID"),
-					SecretKey:  os.Getenv("MINIO_SECRET_ACCESS_KEY"),
-				}
-			}
-		}
 	} else {
 		kb.VLMConfig = types.VLMConfig{}
-		kb.SetStorageProvider("")
-		kb.StorageConfig = types.StorageConfig{}
 	}
 
 	if req.NodeExtract.Enabled {
@@ -1406,11 +1334,8 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 		}
 	}
 
-	// 判断多模态是否启用：有VLM模型ID或有存储配置（兼容新旧字段）
-	storageProvider := kb.GetStorageProvider()
-	hasMultimodal := (kb.VLMConfig.IsEnabled() ||
-		kb.StorageConfig.SecretID != "" || kb.StorageConfig.BucketName != "" ||
-		(storageProvider != "" && storageProvider != "local"))
+	// 存储由平台统一管理，不再作为知识库多模态开关的判断条件。
+	hasMultimodal := kb.VLMConfig.IsEnabled()
 	if config["multimodal"] == nil {
 		config["multimodal"] = map[string]interface{}{
 			"enabled": hasMultimodal,
@@ -1437,33 +1362,6 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 			"separators":   kb.ChunkingConfig.Separators,
 		}
 
-		// 添加多模态的存储配置信息（优先读新字段，兼容旧 cos_config）
-		effectiveProvider := kb.GetStorageProvider()
-		if kb.StorageConfig.SecretID != "" || (effectiveProvider != "" && effectiveProvider != "local") {
-			if config["multimodal"] == nil {
-				config["multimodal"] = map[string]interface{}{
-					"enabled": true,
-				}
-			}
-			multimodal := config["multimodal"].(map[string]interface{})
-			multimodal["storageType"] = effectiveProvider
-			switch effectiveProvider {
-			case "cos":
-				multimodal["cos"] = map[string]interface{}{
-					"secretId":   kb.StorageConfig.SecretID,
-					"secretKey":  kb.StorageConfig.SecretKey,
-					"region":     kb.StorageConfig.Region,
-					"bucketName": kb.StorageConfig.BucketName,
-					"appId":      kb.StorageConfig.AppID,
-					"pathPrefix": kb.StorageConfig.PathPrefix,
-				}
-			case "minio":
-				multimodal["minio"] = map[string]interface{}{
-					"bucketName": kb.StorageConfig.BucketName,
-					"pathPrefix": kb.StorageConfig.PathPrefix,
-				}
-			}
-		}
 	}
 
 	if kb.ExtractConfig != nil {
@@ -1485,7 +1383,7 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 
 // ModelTestRequest 统一的"测试连接"请求体。
 //
-// 四种模型（chat/embedding/rerank/asr）的测试接口共享同一份结构，以便：
+// 五种模型（chat/embedding/rerank/asr/tts）的测试接口共享同一份结构，以便：
 //   - 前端只需维护一份表单 → 后端映射。
 //   - 后端可以直接把请求转成 *types.Model，再调用各包的 ConfigFromModel，
 //     与生产路径（service.modelService.GetXxxModel）走完全相同的装配流程，
@@ -1511,7 +1409,7 @@ type ModelTestRequest struct {
 type RemoteModelCheckRequest = ModelTestRequest
 
 // buildTestModel 把测试连接请求转成一个临时的 *types.Model（不落库），
-// 供 ConfigFromModel 使用。source 为空时按 defaultSource 兜底（chat/rerank/asr
+// 供 ConfigFromModel 使用。source 为空时按 defaultSource 兜底（chat/rerank/asr/tts
 // 默认 remote，embedding 会根据前端传入的 source 决定）。
 func (h *InitializationHandler) buildTestModel(
 	req *ModelTestRequest, modelType types.ModelType, defaultSource types.ModelSource,
@@ -1915,6 +1813,60 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 
 	logger.Infof(ctx, "ASR model check completed, available: %v, message: %s", available, message)
 
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"available": available,
+			"message":   message,
+		},
+	})
+}
+
+// CheckTTSModel 检查 OpenAI-compatible TTS 模型的语音合成端点。
+func (h *InitializationHandler) CheckTTSModel(c *gin.Context) {
+	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
+
+	var req ModelTestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	if req.ModelName == "" || req.BaseURL == "" {
+		c.Error(errors.NewBadRequestError("模型名称和Base URL不能为空"))
+		return
+	}
+	if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+		return
+	}
+
+	model := h.buildTestModel(&req, types.ModelTypeTTS, types.ModelSourceRemote)
+	ttsInstance, err := tts.NewOpenAITTS(tts.Config{
+		BaseURL:       model.Parameters.BaseURL,
+		APIKey:        model.Parameters.APIKey,
+		ModelName:     model.Name,
+		Voice:         strings.TrimSpace(model.Parameters.ExtraConfig["voice"]),
+		CustomHeaders: model.Parameters.CustomHeaders,
+	})
+	if err == nil {
+		var audio io.ReadCloser
+		audio, err = ttsInstance.Synthesize(ctx, "test", tts.SynthesizeOptions{Format: "wav"})
+		if audio != nil {
+			defer audio.Close()
+			if err == nil {
+				_, err = io.CopyN(io.Discard, audio, 1)
+			}
+		}
+	}
+
+	available := err == nil
+	message := "TTS连接成功"
+	if err != nil {
+		message = fmt.Sprintf("TTS测试失败: %v", err)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{

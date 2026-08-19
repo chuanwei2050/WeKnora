@@ -2502,20 +2502,23 @@ async function createNewSession(value: string): Promise<void> {
                           </template>
                         </t-popup>
                       </div>
+                      <div v-if="item.parse_status === 'draft'" class="card-draft">
+                        <t-tag size="small" theme="warning" variant="light-outline">{{ t('knowledgeBase.statusDraft') }}</t-tag>
+                        <span class="card-draft-tip">{{ t('knowledgeBase.draftTip') }}</span>
+                      </div>
+                      <div v-else-if="item.parse_status === 'pending_review'" class="card-draft">
+                        <t-tag size="small" theme="warning" variant="light-outline">{{ t('knowledgeBase.statusPendingReview') }}</t-tag>
+                      </div>
                       <div
-                        v-if="item.parse_status === 'processing' || item.parse_status === 'pending'"
+                        v-else-if="item.parse_status === 'processing' || item.parse_status === 'pending'"
                         class="card-analyze"
                       >
                         <t-icon name="loading" class="card-analyze-loading"></t-icon>
                         <span class="card-analyze-txt">{{ t('knowledgeBase.parsingInProgress') }}</span>
                       </div>
-                      <div v-else-if="item.parse_status === 'failed'" class="card-analyze failure">
+                      <div v-else-if="item.parse_status === 'failed' || item.parse_status === 'rejected'" class="card-analyze failure">
                         <t-icon name="close-circle" class="card-analyze-loading failure"></t-icon>
-                        <span class="card-analyze-txt failure">{{ t('knowledgeBase.parsingFailed') }}</span>
-                      </div>
-                      <div v-else-if="item.parse_status === 'draft'" class="card-draft">
-                        <t-tag size="small" theme="warning" variant="light-outline">{{ t('knowledgeBase.draft') }}</t-tag>
-                        <span class="card-draft-tip">{{ t('knowledgeBase.draftTip') }}</span>
+                        <span class="card-analyze-txt failure">{{ item.parse_status === 'rejected' ? t('knowledgeBase.statusRejected') : t('knowledgeBase.parsingFailed') }}</span>
                       </div>
                       <div 
                         v-else-if="shouldShowSummaryGeneration(item)"
@@ -2562,15 +2565,18 @@ async function createNewSession(value: string): Promise<void> {
                   >
                     <template v-if="hoveredCardItem">
                       <div class="card-popover-title">{{ hoveredCardItem.file_name }}</div>
-                      <div v-if="hoveredCardItem.parse_status === 'processing' || hoveredCardItem.parse_status === 'pending'" class="card-popover-status parsing">
+                      <div v-if="hoveredCardItem.parse_status === 'draft'" class="card-popover-status draft">
+                        {{ t('knowledgeBase.statusDraft') }}
+                      </div>
+                      <div v-else-if="hoveredCardItem.parse_status === 'pending_review'" class="card-popover-status draft">
+                        {{ t('knowledgeBase.statusPendingReview') }}
+                      </div>
+                      <div v-else-if="hoveredCardItem.parse_status === 'processing' || hoveredCardItem.parse_status === 'pending'" class="card-popover-status parsing">
                         <t-icon name="loading" size="14px" /> {{ t('knowledgeBase.parsingInProgress') }}
                       </div>
-                      <div v-else-if="hoveredCardItem.parse_status === 'failed'" class="card-popover-status failure">
-                        <t-icon name="close-circle" size="14px" /> {{ t('knowledgeBase.parsingFailed') }}
+                      <div v-else-if="hoveredCardItem.parse_status === 'failed' || hoveredCardItem.parse_status === 'rejected'" class="card-popover-status failure">
+                        <t-icon name="close-circle" size="14px" /> {{ hoveredCardItem.parse_status === 'rejected' ? t('knowledgeBase.statusRejected') : t('knowledgeBase.parsingFailed') }}
                         <span v-if="(hoveredCardItem as any).error_message" class="card-popover-error-msg">{{ (hoveredCardItem as any).error_message }}</span>
-                      </div>
-                      <div v-else-if="hoveredCardItem.parse_status === 'draft'" class="card-popover-status draft">
-                        {{ t('knowledgeBase.draft') }}
                       </div>
                       <template v-else>
                         <div v-if="hoveredCardItem.description" class="card-popover-desc">{{ hoveredCardItem.description }}</div>

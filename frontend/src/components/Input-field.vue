@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { onBeforeRouteUpdate } from 'vue-router';
 import { MessagePlugin } from "tdesign-vue-next";
 import { useSettingsStore } from '@/stores/settings';
+import { useAuthStore } from '@/stores/auth';
 import { useUIStore } from '@/stores/ui';
 import { useMenuStore } from '@/stores/menu';
 import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge } from '@/api/knowledge-base';
@@ -30,6 +31,8 @@ import {
 const route = useRoute();
 const router = useRouter();
 const settingsStore = useSettingsStore();
+const authStore = useAuthStore();
+const canManageAgents = computed(() => authStore.user?.role === 'platform_admin' && authStore.workspaceMode === 'platform');
 const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
 const menuStore = useMenuStore();
@@ -91,7 +94,7 @@ const agentModeDropdownStyle = ref<Record<string, string>>({});
 
 // 智能体相关状态（完整列表供选中态解析；对话下拉用 enabledAgents）
 const agents = ref<CustomAgent[]>([]);
-/** 当前租户在对话下拉中停用的「我的」智能体 ID（仅影响本租户） */
+/** 当前租户自有停用项与平台全局停用智能体 ID 的合并结果 */
 const disabledOwnAgentIds = ref<string[]>([]);
 const selectedAgentId = computed({
   get: () => settingsStore.selectedAgentId || BUILTIN_QUICK_ANSWER_ID,
@@ -399,6 +402,12 @@ const voiceInputAvailable = computed(() => Boolean(
 const voiceTranscript = computed(() => voiceConversation.finalText.value);
 const voicePartialTranscript = computed(() => voiceConversation.partialText.value);
 const voiceState = computed(() => voiceConversation.state.value);
+const voiceInputLabel = computed(() => {
+  if (voiceState.value === 'recording') return '停止录音';
+  if (voiceState.value === 'requesting') return '正在启动语音输入';
+  if (voiceState.value === 'finalizing') return '正在识别语音';
+  return '开始语音输入';
+});
 
 const toggleVoiceRecording = async () => {
   if (props.isReplying) return;
@@ -707,12 +716,15 @@ const loadAgents = async () => {
     const res = agentsRes as { data?: CustomAgent[]; disabled_own_agent_ids?: string[] }
     agents.value = res.data || []
     disabledOwnAgentIds.value = res.disabled_own_agent_ids || []
+    if (disabledOwnAgentIds.value.includes(selectedAgentId.value)) {
+      settingsStore.selectAgent(BUILTIN_QUICK_ANSWER_ID)
+    }
   } catch (error) {
     console.error('Failed to load agents:', error)
   }
 }
 
-// 对话下拉中展示的「我的」智能体（排除当前租户已停用的）
+// 对话下拉中展示的智能体（排除租户自有停用项与平台全局停用项）
 const enabledAgents = computed(() =>
   agents.value.filter(a => !disabledOwnAgentIds.value.includes(a.id))
 );
@@ -760,16 +772,17 @@ const loadChatModels = async () => {
 };
 
 const ensureModelSelection = () => {
-  if (selectedModelId.value) {
+  if (selectedModelId.value && availableModels.value.some(model => model.id === selectedModelId.value)) {
     return;
   }
-  if (conversationConfig.value?.summary_model_id) {
+  if (
+    conversationConfig.value?.summary_model_id &&
+    availableModels.value.some(model => model.id === conversationConfig.value?.summary_model_id)
+  ) {
     selectedModelId.value = conversationConfig.value.summary_model_id;
     return;
   }
-  if (availableModels.value.length > 0) {
-    selectedModelId.value = availableModels.value[0].id || '';
-  }
+  selectedModelId.value = pickPreferredModelId(availableModels.value);
 };
 
 const handleGoToConversationModels = () => {
@@ -1911,32 +1924,19 @@ const getBuiltinAgentNotReadyReasons = (agent: CustomAgent, isAgentMode: boolean
 }
 
 // 获取自定义智能体不就绪的原因（非 Agent 模式，快速回答）
-const getCustomAgentNotReadyReasons = (agent: CustomAgent): string[] => {
-  const reasons: string[] = []
-  const config = agent.config || {}
-  
-  // 检查对话模型（Summary Model）
-  if (!config.model_id || config.model_id.trim() === '') {
-    reasons.push(t('input.customAgentMissingSummaryModel'))
-  }
-  // 检查重排模型（Rerank Model）- 仅当允许使用 knowledge_search 工具时需要
-  const hasKnowledgeSearchTool = config.allowed_tools && config.allowed_tools.includes('knowledge_search')
-  if (hasKnowledgeSearchTool) {
-    if (!config.rerank_model_id || config.rerank_model_id.trim() === '') {
-      reasons.push(t('input.customAgentMissingRerankModel'))
-    }
-  }
-  
-  return reasons
+const getCustomAgentNotReadyReasons = (_agent: CustomAgent): string[] => {
+  return []
 }
 
 // 显示智能体未就绪的消息（统一处理内置和自定义智能体）
 const showAgentNotReadyMessage = (agent: CustomAgent, reasons: string[]) => {
   const reasonsText = reasons.join('、')
-  
-  const messageContent = h('div', { style: 'display: flex; flex-direction: column; gap: 8px; max-width: 320px;' }, [
-    h('span', { style: 'color: var(--td-text-color-primary); line-height: 1.5;' }, t('input.agentNotReadyDetail', { agentName: agent.name, reasons: reasonsText })),
-    h('a', {
+
+  const messageChildren = [
+    h('span', { style: 'color: var(--td-text-color-primary); line-height: 1.5;' }, t('input.agentNotReadyDetail', { agentName: agent.name, reasons: reasonsText }))
+  ]
+  if (canManageAgents.value) {
+    messageChildren.push(h('a', {
       href: '#',
       onClick: (e: Event) => {
         e.preventDefault();
@@ -1949,8 +1949,9 @@ const showAgentNotReadyMessage = (agent: CustomAgent, reasons: string[]) => {
       onMouseleave: (e: Event) => {
         (e.target as HTMLElement).style.textDecoration = 'none';
       }
-    }, t('input.goToAgentEditor'))
-  ]);
+    }, t('input.goToAgentEditor')))
+  }
+  const messageContent = h('div', { style: 'display: flex; flex-direction: column; gap: 8px; max-width: 320px;' }, messageChildren);
   
   MessagePlugin.warning({
     content: () => messageContent,
@@ -2174,11 +2175,11 @@ defineExpose({
         />
 
         <!-- WebSearch 开关按钮 -->
-        <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+        <t-tooltip v-if="isWebSearchConfigured" placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
           <template #content>
             <div v-if="isWebSearchDisabledByAgent" class="tooltip-with-link">
               <span>{{ $t('input.webSearchDisabledByAgent') }}</span>
-              <a href="#" @click.prevent="handleGoToAgentSettings('websearch')">{{ $t('input.goToAgentSettings') }}</a>
+              <a v-if="canManageAgents" href="#" @click.prevent="handleGoToAgentSettings('websearch')">{{ $t('input.goToAgentSettings') }}</a>
             </div>
             <span v-else-if="isWebSearchConfigured">{{ isWebSearchEnabled ? $t('input.webSearch.toggleOff') : $t('input.webSearch.toggleOn') }}</span>
             <div v-else class="tooltip-with-link">
@@ -2217,7 +2218,7 @@ defineExpose({
           <template #content>
             <div v-if="!isImageUploadEnabledByAgent" class="tooltip-with-link">
               <span>{{ $t('input.imageUploadDisabledByAgent') }}</span>
-              <a href="#" @click.prevent="handleGoToAgentSettings('model')">{{ $t('input.goToAgentSettings') }}</a>
+              <a v-if="canManageAgents" href="#" @click.prevent="handleGoToAgentSettings('model')">{{ $t('input.goToAgentSettings') }}</a>
             </div>
             <span v-else>{{ $t('chat.imageUploadTooltip') }}</span>
           </template>
@@ -2261,7 +2262,7 @@ defineExpose({
           <template #content>
             <div v-if="isKnowledgeBaseDisabledByAgent" class="tooltip-with-link">
               <span>{{ $t('input.kbDisabledByAgent') }}</span>
-              <a href="#" @click.prevent="handleGoToAgentSettings('knowledge')">{{ $t('input.goToAgentSettings') }}</a>
+              <a v-if="canManageAgents" href="#" @click.prevent="handleGoToAgentSettings('knowledge')">{{ $t('input.goToAgentSettings') }}</a>
             </div>
             <span v-else>{{ allSelectedItems.length > 0 ? $t('input.knowledgeBaseWithCount', { count: allSelectedItems.length }) : $t('input.knowledgeBase') }}</span>
           </template>
@@ -2283,80 +2284,24 @@ defineExpose({
           </div>
         </t-tooltip>
 
-        <!-- 模型显示 -->
-        <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''" :disabled="!isModelLockedByAgent">
-          <div class="model-display" :class="{ 'agent-controlled': isModelLockedByAgent }">
-            <div
-              ref="modelButtonRef"
-              class="model-selector-trigger"
-              @click.stop="toggleModelSelector"
-            >
-              <span class="model-selector-name">
-                {{ selectedModelDisplayName }}
-              </span>
-              <svg 
-                width="12" 
-                height="12" 
-                viewBox="0 0 12 12" 
-                fill="currentColor"
-                class="model-dropdown-arrow"
-                :class="{ 'rotate': showModelSelector }"
-              >
-                <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z"/>
-              </svg>
-            </div>
-          </div>
-        </t-tooltip>
       </div>
-
-      <Teleport to="body">
-        <div v-if="showModelSelector" class="model-selector-overlay" @click="closeModelSelector">
-            <div class="model-selector-dropdown" :style="modelDropdownStyle" @click.stop>
-            <div class="model-selector-header">
-              <span>{{ $t('conversationSettings.models.chatGroupLabel') }}</span>
-              <button class="model-selector-add" type="button" @click="handleModelChange('__add_model__')">
-                <span class="add-icon">+</span>
-                  <span class="add-text">{{ $t('input.addModel') }}</span>
-              </button>
-            </div>
-            <div class="model-selector-content">
-              <div
-                v-for="model in availableModels"
-                :key="model.id"
-                class="model-option"
-                :class="{ selected: model.id === selectedModelId }"
-                @click="handleModelChange(model.id || '')"
-              >
-                <div class="model-option-main">
-                  <span class="model-option-name">{{ model.name }}</span>
-                  <span v-if="model.source === 'remote'" class="model-badge-remote">{{ $t('input.remote') }}</span>
-                  <span v-else-if="model.parameters?.parameter_size" class="model-badge-local">
-                    {{ model.parameters.parameter_size }}
-                  </span>
-                </div>
-                <div v-if="model.description" class="model-option-desc">
-                  {{ model.description }}
-                </div>
-              </div>
-              <div v-if="availableModels.length === 0" class="model-option empty">
-                {{ $t('input.noModel') }}
-              </div>
-            </div>
-          </div>
-        </div>
-      </Teleport>
 
       <!-- 右侧控制按钮组 -->
       <div class="control-right">
         <!-- 语音输入按钮；转写结果需显式确认后才会作为消息发送 -->
-        <t-tooltip v-if="voiceInputAvailable" :content="voiceState === 'recording' ? '停止录音' : '开始语音输入'" placement="top">
+        <t-tooltip v-if="voiceInputAvailable" :content="voiceInputLabel" placement="top">
           <div
             class="control-btn voice-btn"
-            :class="{ active: voiceState === 'recording', disabled: isReplying }"
+            :class="{
+              recording: voiceState === 'recording',
+              processing: voiceState === 'requesting' || voiceState === 'finalizing',
+              disabled: isReplying
+            }"
             role="button"
             tabindex="0"
-            :aria-label="voiceState === 'recording' ? '停止录音' : '开始语音输入'"
+            :aria-label="voiceInputLabel"
             :aria-pressed="voiceState === 'recording'"
+            :aria-busy="voiceState === 'requesting' || voiceState === 'finalizing'"
             @click.stop="toggleVoiceRecording"
             @keydown.enter.prevent="toggleVoiceRecording"
             @keydown.space.prevent="toggleVoiceRecording"
@@ -3025,10 +2970,31 @@ const getImgSrc = (url: string) => {
   padding: 0;
   border: 1px solid var(--td-component-border, #e7e7e7);
 
-  &.active {
+  &.recording {
+    color: var(--td-error-color, #d54941);
+    background: var(--td-error-color-light, #fdecee);
+    border-color: var(--td-error-color, #d54941);
+    box-shadow: 0 0 0 3px var(--td-error-color-light, #fdecee);
+    animation: voice-state-pulse 1.4s ease-in-out infinite;
+  }
+
+  &.processing {
     color: var(--td-brand-color);
-    background: rgba(16, 185, 129, 0.1);
+    background: var(--td-brand-color-light);
     border-color: var(--td-brand-color);
+    cursor: progress;
+  }
+}
+
+@keyframes voice-state-pulse {
+  50% {
+    box-shadow: 0 0 0 5px var(--td-error-color-light, #fdecee);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-btn.recording {
+    animation: none;
   }
 }
 

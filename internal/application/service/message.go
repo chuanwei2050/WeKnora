@@ -22,12 +22,12 @@ var regThinkIndex = regexp.MustCompile(`(?s)<think>.*?</think>`)
 // It reads the chat history knowledge base configuration from the tenant's ChatHistoryConfig,
 // which is managed via the settings UI.
 type messageService struct {
-	messageRepo   interfaces.MessageRepository      // Repository for message storage operations
-	sessionRepo   interfaces.SessionRepository      // Repository for session validation
-	tenantService interfaces.TenantService          // Service for tenant operations (read ChatHistoryConfig)
-	kbService     interfaces.KnowledgeBaseService   // Service for knowledge base operations (search chat history KB)
-	knowService   interfaces.KnowledgeService       // Service for knowledge operations (index/delete passages)
-	modelService  interfaces.ModelService            // Service for model operations (rerank model)
+	messageRepo   interfaces.MessageRepository    // Repository for message storage operations
+	sessionRepo   interfaces.SessionRepository    // Repository for session validation
+	tenantService interfaces.TenantService        // Service for tenant operations (read ChatHistoryConfig)
+	kbService     interfaces.KnowledgeBaseService // Service for knowledge base operations (search chat history KB)
+	knowService   interfaces.KnowledgeService     // Service for knowledge operations (index/delete passages)
+	modelService  interfaces.ModelService         // Service for model operations (rerank model)
 }
 
 // NewMessageService creates a new message service instance with the required repositories
@@ -614,13 +614,13 @@ func (s *messageService) vectorSearchViaKB(ctx context.Context, params *types.Me
 // rerankResults applies rerank model to search results if configured.
 // Returns reranked + filtered results, or original results if rerank is unavailable.
 func (s *messageService) rerankResults(ctx context.Context, rc *types.RetrievalConfig, query string, results []*types.SearchResult) []*types.SearchResult {
-	if rc == nil || rc.RerankModelID == "" || len(results) == 0 {
+	if rc == nil || len(results) == 0 {
 		return results
 	}
 
-	reranker, err := s.modelService.GetRerankModel(ctx, rc.RerankModelID)
+	reranker, err := s.modelService.GetRerankModel(ctx, "")
 	if err != nil {
-		logger.Warnf(ctx, "Failed to get rerank model %s, skipping rerank: %v", rc.RerankModelID, err)
+		logger.Warnf(ctx, "Failed to get platform default rerank model, skipping rerank: %v", err)
 		return results
 	}
 

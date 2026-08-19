@@ -69,6 +69,7 @@ import (
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
+	"github.com/Tencent/WeKnora/internal/modelprofile"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
@@ -177,6 +178,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewKnowledgeTagService))
 	must(container.Provide(embedding.NewBatchEmbedder))
 	must(container.Provide(service.NewModelService))
+	must(container.Invoke(bootstrapProfileModels))
 	must(container.Provide(service.NewDatasetService))
 	must(container.Provide(service.NewEvaluationService))
 	must(container.Provide(service.NewUserService))
@@ -328,6 +330,14 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 func ensureDefaultAdmin(userService interfaces.UserService) error {
 	return userService.EnsureDefaultAdmin(context.Background())
+}
+
+func bootstrapProfileModels(
+	repo interfaces.ModelRepository,
+	tenantRepo interfaces.TenantRepository,
+	approvedEndpoints interfaces.ApprovedEndpointRepository,
+) error {
+	return modelprofile.Bootstrap(context.Background(), repo, tenantRepo, approvedEndpoints)
 }
 
 // must is a helper function for error handling

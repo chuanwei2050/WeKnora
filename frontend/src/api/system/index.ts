@@ -133,6 +133,16 @@ export function getModelProfileStatus(): Promise<{ data: ModelProfileStatus }> {
   return get('/api/v1/system/model-profile-status')
 }
 
+export type ModelProfile = 'online' | 'offline'
+
+export function getModelProfile(): Promise<{ data: { profile: ModelProfile } }> {
+  return get('/api/v1/system/model-profile')
+}
+
+export function updateModelProfile(profile: ModelProfile): Promise<{ data: { profile: ModelProfile } }> {
+  return put('/api/v1/system/model-profile', { profile })
+}
+
 export function getAgentConfig(): Promise<{ data: AgentConfig }> {
   return get('/api/v1/tenants/kv/agent-config')
 }

@@ -44,6 +44,9 @@ const (
 // AgentTypeCustom means the user wants full control and we won't
 // auto-fill anything based on the preset.
 const (
+	// PlatformAgentTenantID is the shared scope for platform-managed agents.
+	PlatformAgentTenantID = PlatformScopeTenantID
+
 	// AgentTypeRAGQA prefers vector/keyword chunk retrieval on document KBs.
 	AgentTypeRAGQA = "rag-qa"
 	// AgentTypeWikiQA prefers wiki-page navigation on wiki-enabled KBs.
@@ -212,15 +215,15 @@ type CustomAgentConfig struct {
 	// Optional question complexity routing. The zero value keeps this feature disabled.
 	ComplexityRouting ComplexityRoutingConfig `yaml:"complexity_routing" json:"complexity_routing"`
 	// Verification is opt-in; reflection_enabled is retained as a compatibility alias.
-	VerifiedAnswer     VerifiedAnswerConfig `yaml:"verified_answer" json:"verified_answer"`
-	ReflectionEnabled  bool                 `yaml:"reflection_enabled" json:"reflection_enabled"`
+	VerifiedAnswer    VerifiedAnswerConfig `yaml:"verified_answer" json:"verified_answer"`
+	ReflectionEnabled bool                 `yaml:"reflection_enabled" json:"reflection_enabled"`
 	// Voice input/output (UI default: enabled for new agents and builtin quick/smart agents)
-	VoiceInputEnabled  bool                 `yaml:"voice_input_enabled" json:"voice_input_enabled"`
-	VoiceOutputEnabled bool                 `yaml:"voice_output_enabled" json:"voice_output_enabled"`
-	TTSModelID         string               `yaml:"tts_model_id" json:"tts_model_id"`
-	VoiceLanguage      string               `yaml:"voice_language" json:"voice_language"`
-	VoiceName          string               `yaml:"voice_name" json:"voice_name"`
-	VoiceAutoPlay      bool                 `yaml:"voice_auto_play" json:"voice_auto_play"`
+	VoiceInputEnabled  bool   `yaml:"voice_input_enabled" json:"voice_input_enabled"`
+	VoiceOutputEnabled bool   `yaml:"voice_output_enabled" json:"voice_output_enabled"`
+	TTSModelID         string `yaml:"tts_model_id" json:"tts_model_id"`
+	VoiceLanguage      string `yaml:"voice_language" json:"voice_language"`
+	VoiceName          string `yaml:"voice_name" json:"voice_name"`
+	VoiceAutoPlay      bool   `yaml:"voice_auto_play" json:"voice_auto_play"`
 	// Whether to enable query expansion
 	EnableQueryExpansion bool `yaml:"enable_query_expansion" json:"enable_query_expansion"`
 	// Whether to enable query rewrite for multi-turn conversations

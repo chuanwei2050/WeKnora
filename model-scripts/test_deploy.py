@@ -74,6 +74,7 @@ class TestConfigAndCompose(unittest.TestCase):
         self.assertIn("weknora-rerank:airgap", text)
         self.assertIn("weknora-asr:airgap", text)
         self.assertIn("weknora-tts:airgap", text)
+        self.assertIn('device_ids: ["0"]', text)
         self.assertIn("--api-key", text)
         self.assertIn("MODEL_API_KEY must be set", text)
         self.assertIn("http://127.0.0.1:8000/health", text)
@@ -128,6 +129,7 @@ class TestConfigAndCompose(unittest.TestCase):
         self.assertIn("--quantization", text)
         self.assertIn("awq", text)
         self.assertIn("QUANT=onnx-int8", text)
+        self.assertIn("QUANT=fp16", text)
 
     def test_asr_runtime_sidecar_is_configured(self) -> None:
         cfg = deploy.load_config(ROOT / "config.yaml.example", prefer_as_base=True)
