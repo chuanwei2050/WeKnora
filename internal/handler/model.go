@@ -350,6 +350,10 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	logger.Infof(ctx, "Updating model, ID: %s, Name: %s", id, model.Name)
 	if err := h.service.UpdateModel(ctx, model); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
+		if err == service.ErrModelAlreadyExists {
+			c.Error(errors.NewConflictError(err.Error()))
+			return
+		}
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}

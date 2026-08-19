@@ -42,19 +42,6 @@
                       <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                       <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                     </svg>
-                    <!-- 云服务自定义图标 -->
-                    <svg
-                      v-else-if="item.key === 'weknoracloud'"
-                      width="18"
-                      height="18"
-                      viewBox="0 0 18 18"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      class="nav-icon"
-                    >
-                      <rect x="1.5" y="1.5" width="15" height="15" rx="3.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
-                      <path d="M4.5 5.5L6.5 12.5L9 7.5L11.5 12.5L13.5 5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                    </svg>
                     <t-icon v-else :name="item.icon" class="nav-icon" />
                     <span class="nav-label">{{ item.label }}</span>
                     <t-icon 
@@ -95,11 +82,6 @@
                 <!-- Ollama 设置 -->
                 <div v-if="currentSection === 'ollama'" class="section">
                   <OllamaSettings />
-                </div>
-
-                <!-- 云服务 -->
-                <div v-if="currentSection === 'weknoracloud'" class="section">
-                  <WeKnoraCloudSettings />
                 </div>
 
                 <!-- 模型配置 -->
@@ -193,7 +175,6 @@ import ChatHistorySettings from './ChatHistorySettings.vue'
 import VectorStoreSettings from './VectorStoreSettings.vue'
 import ParserEngineSettings from './ParserEngineSettings.vue'
 import StorageEngineSettings from './StorageEngineSettings.vue'
-import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
 import { isBidReviewEmbeddedMode } from '@/utils/bidreview-sso'
 import FeedbackReview from './FeedbackReview.vue'
 import GraphTripleReview from './GraphTripleReview.vue'
@@ -220,8 +201,6 @@ type SettingsNavItem = {
 const navItems = computed<SettingsNavItem[]>(() => {
   const items: SettingsNavItem[] = [
     { key: 'general', icon: 'setting', label: t('general.title') },
-    { key: 'ollama', icon: 'server', label: 'Ollama' },
-    { key: 'weknoracloud', icon: '', label: t('settings.weknoraCloud.title') },
     { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
     { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig')  },
     { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
@@ -240,11 +219,11 @@ const navItems = computed<SettingsNavItem[]>(() => {
     ? 'tenant_admin'
     : authStore.user?.role || 'member'
   if (role === 'platform_admin') {
-    const platformSections = new Set(['general', 'ollama', 'weknoracloud', 'models', 'websearch', 'vectorstore', 'parser', 'storage', 'mcp', 'system', 'api'])
+    const platformSections = new Set(['general', 'ollama', 'models', 'websearch', 'vectorstore', 'parser', 'storage', 'mcp', 'system'])
     return items.filter(item => platformSections.has(item.key))
   }
   if (role === 'tenant_admin') {
-    const tenantAdminSections = new Set(['general', 'tenant', 'feedback', 'graph-triples', 'acceptance'])
+    const tenantAdminSections = new Set(['general', 'tenant', 'api', 'feedback', 'graph-triples', 'acceptance'])
     return items.filter(item => tenantAdminSections.has(item.key))
   }
   // Chat history indexing depends on tenant-owned hidden knowledge bases and
@@ -308,8 +287,13 @@ const handleClose = () => {
 // 监听初始导航设置
 watch(() => uiStore.settingsInitialSection, (section) => {
   if (section && visible.value) {
-    currentSection.value = section
     const navItem = (navItems.value as any[]).find((item) => item.key === section)
+    if (!navItem) {
+      currentSection.value = navItems.value[0]?.key || 'general'
+      currentSubSection.value = ''
+      return
+    }
+    currentSection.value = section
     if (navItem && navItem.children && navItem.children.length > 0) {
       if (!expandedMenus.value.includes(section)) {
         expandedMenus.value.push(section)

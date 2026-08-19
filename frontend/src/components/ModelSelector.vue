@@ -72,10 +72,15 @@ const placeholderText = computed(() => {
   return props.placeholder || t('model.selectModelPlaceholder')
 })
 
+const filterModelsByType = (items: ModelConfig[]) => items.filter(model =>
+  model.type === props.modelType ||
+  (props.modelType === 'VLLM' && model.type === 'KnowledgeQA' && model.parameters.supports_vision)
+)
+
 // 监听 allModels 变化，自动过滤当前类型的模型
 watch(() => props.allModels, (newModels) => {
   if (newModels && Array.isArray(newModels)) {
-    models.value = newModels.filter(m => m.type === props.modelType)
+    models.value = filterModelsByType(newModels)
   }
 }, { immediate: true })
 
@@ -96,7 +101,7 @@ const loadModels = async () => {
     const result = await listModels()
     // 前端按类型筛选模型
     if (result && Array.isArray(result)) {
-      models.value = result.filter(m => m.type === props.modelType)
+      models.value = filterModelsByType(result)
     } else {
       models.value = []
     }

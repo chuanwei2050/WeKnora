@@ -23,6 +23,29 @@ services:
     restart: unless-stopped
     stop_grace_period: 1m
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.17
+    container_name: WeKnora-elasticsearch-dev
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.autoconfiguration.enabled=false
+      - xpack.license.self_generated.type=basic
+      - ES_JAVA_OPTS=${ELASTICSEARCH_JAVA_OPTS:--Xms1g -Xmx1g}
+    ports:
+      - "127.0.0.1:${ELASTICSEARCH_PORT:-9200}:9200"
+    volumes:
+      - elasticsearch-data-dev:/usr/share/elasticsearch/data
+    networks:
+      - WeKnora-network-dev
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+
   redis:
     image: redis:7.0-alpine
     container_name: WeKnora-redis-dev
@@ -98,9 +121,6 @@ services:
     networks:
       - WeKnora-network-dev
     restart: unless-stopped
-    profiles:
-      - milvus
-      - full
 
   neo4j:
     image: neo4j:latest
@@ -420,6 +440,7 @@ networks:
 
 volumes:
   postgres-data-dev:
+  elasticsearch-data-dev:
   redis_data_dev:
   minio_data_dev:
   neo4j-data-dev:

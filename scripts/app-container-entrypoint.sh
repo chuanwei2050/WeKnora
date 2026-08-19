@@ -24,6 +24,7 @@ export MILVUS_ADDRESS=milvus:19530
 export OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
 export NEO4J_URI=bolt://neo4j:7687
 export QDRANT_HOST=qdrant
+export ELASTICSEARCH_ADDR=http://elasticsearch:9200
 
 if [ "${WEKNORA_APP_HOT_RELOAD:-true}" != "true" ]; then
     echo '[INFO] 使用稳定模式启动后端，跳过 Air 文件监听。'

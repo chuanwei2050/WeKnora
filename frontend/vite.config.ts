@@ -50,6 +50,11 @@ export default defineConfig({
         target: process.env.VITE_DEV_API_TARGET || 'http://localhost:8080',
         changeOrigin: true,
         secure: false,
+      },
+      '/swagger': {
+        target: process.env.VITE_DEV_API_TARGET || 'http://localhost:8080',
+        changeOrigin: true,
+        secure: false,
       }
     }
   }

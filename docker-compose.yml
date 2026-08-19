@@ -92,6 +92,8 @@ services:
       - LANGFUSE_SAMPLE_RATE=${LANGFUSE_SAMPLE_RATE:-}
       - LANGFUSE_DEBUG=${LANGFUSE_DEBUG:-}
       - RETRIEVE_DRIVER=${RETRIEVE_DRIVER:-}
+      - KEYWORD_RETRIEVE_DRIVER=${KEYWORD_RETRIEVE_DRIVER:-}
+      - VECTOR_RETRIEVE_DRIVER=${VECTOR_RETRIEVE_DRIVER:-}
       - ELASTICSEARCH_ADDR=${ELASTICSEARCH_ADDR:-}
       - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-}
       - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
@@ -153,6 +155,10 @@ services:
       redis:
         condition: service_started
       postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      milvus:
         condition: service_healthy
       docreader:
         condition: service_healthy
@@ -225,6 +231,30 @@ services:
     restart: unless-stopped
     # 添加停机时的优雅退出时间
     stop_grace_period: 1m
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.17
+    container_name: WeKnora-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - xpack.security.autoconfiguration.enabled=false
+      - xpack.license.self_generated.type=basic
+      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD must be set}
+      - ES_JAVA_OPTS=${ELASTICSEARCH_JAVA_OPTS:--Xms1g -Xmx1g}
+    ports:
+      - "127.0.0.1:${ELASTICSEARCH_PORT:-9200}:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - WeKnora-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -u 'elastic:$${ELASTIC_PASSWORD}' 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
 
   redis:
     image: redis:7.0-alpine
@@ -359,8 +389,6 @@ services:
     networks:
       - WeKnora-network
     restart: unless-stopped
-    profiles:
-      - milvus
 
   weaviate:
     image: semitechnologies/weaviate:1.28.4
@@ -624,6 +652,7 @@ networks:
 
 volumes:
   postgres-data:
+  elasticsearch-data:
   redis-data:
   data-files:
   docreader-tmp:

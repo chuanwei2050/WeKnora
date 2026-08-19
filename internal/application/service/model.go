@@ -29,6 +29,9 @@ import (
 // ErrModelNotFound is returned when a model cannot be found in the repository
 var ErrModelNotFound = errors.New("model not found")
 
+// ErrModelAlreadyExists is returned when an equivalent model registration already exists.
+var ErrModelAlreadyExists = errors.New("相同名称、类型、来源、厂商和地址的模型已存在")
+
 // modelService implements the model service interface
 type modelService struct {
 	repo              interfaces.ModelRepository
@@ -110,6 +113,15 @@ func (s *modelService) CreateModel(ctx context.Context, model *types.Model) erro
 	model.TenantID = types.PlatformModelTenantID
 	logger.Infof(ctx, "Creating model: %s, type: %s, source: %s", model.Name, model.Type, model.Source)
 	normalizeModelParameters(model)
+	existingModel, err := s.findEquivalentModel(ctx, model, "")
+	if err != nil {
+		return err
+	}
+	if existingModel != nil {
+		logger.Infof(ctx, "Reusing equivalent model registration: %s", existingModel.ID)
+		*model = *existingModel
+		return nil
+	}
 	if err := s.validateApprovedModelEndpoint(ctx, model); err != nil {
 		return err
 	}
@@ -162,7 +174,7 @@ func (s *modelService) CreateModel(ctx context.Context, model *types.Model) erro
 	model.Status = types.ModelStatusDownloading
 
 	logger.Info(ctx, "Saving local model to repository")
-	err := s.repo.Create(ctx, model)
+	err = s.repo.Create(ctx, model)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_name": model.Name,
@@ -477,6 +489,13 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 		return errors.New("builtin models cannot be updated")
 	}
 	normalizeModelParameters(model)
+	duplicateModel, err := s.findEquivalentModel(ctx, model, model.ID)
+	if err != nil {
+		return err
+	}
+	if duplicateModel != nil {
+		return ErrModelAlreadyExists
+	}
 	if err := s.validateApprovedModelEndpoint(ctx, model); err != nil {
 		return err
 	}
@@ -502,6 +521,39 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 
 	logger.Infof(ctx, "Model updated successfully: %s", model.ID)
 	return nil
+}
+
+func (s *modelService) findEquivalentModel(
+	ctx context.Context, candidate *types.Model, excludeID string,
+) (*types.Model, error) {
+	models, err := s.repo.List(ctx, types.PlatformModelTenantID, candidate.Type, candidate.Source)
+	if err != nil {
+		return nil, fmt.Errorf("check duplicate model: %w", err)
+	}
+	for _, existing := range models {
+		if existing.ID != excludeID && sameModelRegistration(existing, candidate) {
+			return existing, nil
+		}
+	}
+	return nil, nil
+}
+
+func sameModelRegistration(left, right *types.Model) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	return strings.TrimSpace(left.Name) == strings.TrimSpace(right.Name) &&
+		left.Type == right.Type &&
+		left.Source == right.Source &&
+		sameModelProvider(left.Parameters.Provider, right.Parameters.Provider) &&
+		strings.TrimRight(strings.TrimSpace(left.Parameters.BaseURL), "/") ==
+			strings.TrimRight(strings.TrimSpace(right.Parameters.BaseURL), "/")
+}
+
+func sameModelProvider(left, right string) bool {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	return left == "" || right == "" || strings.EqualFold(left, right)
 }
 
 // DeleteModel removes a model from the repository

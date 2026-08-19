@@ -247,6 +247,7 @@ start_services() {
         echo ""
         log_info "服务访问地址:"
         echo "  - PostgreSQL:    localhost:5432"
+        echo "  - Elasticsearch: localhost:9200"
         echo "  - Redis:         localhost:6379"
         echo "  - DocReader:     localhost:50051"
         
@@ -361,6 +362,7 @@ start_app() {
     export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
     export NEO4J_URI=bolt://localhost:7687
     export QDRANT_HOST=localhost
+    export ELASTICSEARCH_ADDR=http://localhost:9200
     
     # 确保必要的环境变量已设置
     if [ -z "$DB_DRIVER" ]; then

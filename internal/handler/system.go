@@ -356,21 +356,7 @@ func (h *SystemHandler) fetchRemoteEngines(ctx context.Context, reader interface
 
 // getKeywordIndexEngine returns the keyword index engine name
 func (h *SystemHandler) getKeywordIndexEngine() string {
-	retrieveDriver := os.Getenv("RETRIEVE_DRIVER")
-	if retrieveDriver == "" {
-		return "未配置"
-	}
-
-	drivers := strings.Split(retrieveDriver, ",")
-	// Filter out engines that support keyword retrieval
-	keywordEngines := []string{}
-	for _, driver := range drivers {
-		driver = strings.TrimSpace(driver)
-		if h.supportsRetrieverType(driver, types.KeywordsRetrieverType) {
-			keywordEngines = append(keywordEngines, driver)
-		}
-	}
-
+	keywordEngines := types.GetDefaultRetrieverDrivers(types.KeywordsRetrieverType)
 	if len(keywordEngines) == 0 {
 		return "未配置"
 	}
@@ -379,27 +365,20 @@ func (h *SystemHandler) getKeywordIndexEngine() string {
 
 // getVectorStoreEngine returns the vector store engine name
 func (h *SystemHandler) getVectorStoreEngine() string {
+	if vectorDriver := strings.TrimSpace(os.Getenv("VECTOR_RETRIEVE_DRIVER")); vectorDriver != "" {
+		vectorEngines := types.GetDefaultRetrieverDrivers(types.VectorRetrieverType)
+		if len(vectorEngines) == 0 {
+			return "未配置"
+		}
+		return strings.Join(vectorEngines, ", ")
+	}
+
 	// First check config.yaml
 	if h.cfg != nil && h.cfg.VectorDatabase != nil && h.cfg.VectorDatabase.Driver != "" {
 		return h.cfg.VectorDatabase.Driver
 	}
 
-	// Fallback to RETRIEVE_DRIVER for vector support
-	retrieveDriver := os.Getenv("RETRIEVE_DRIVER")
-	if retrieveDriver == "" {
-		return "未配置"
-	}
-
-	drivers := strings.Split(retrieveDriver, ",")
-	// Filter out engines that support vector retrieval
-	vectorEngines := []string{}
-	for _, driver := range drivers {
-		driver = strings.TrimSpace(driver)
-		if h.supportsRetrieverType(driver, types.VectorRetrieverType) {
-			vectorEngines = append(vectorEngines, driver)
-		}
-	}
-
+	vectorEngines := types.GetDefaultRetrieverDrivers(types.VectorRetrieverType)
 	if len(vectorEngines) == 0 {
 		return "未配置"
 	}
@@ -412,27 +391,6 @@ func (h *SystemHandler) getGraphDatabaseEngine() string {
 		return "Not Enabled"
 	}
 	return "Neo4j"
-}
-
-// supportsRetrieverType checks if a driver supports a specific retriever type
-// by looking up the retrieverEngineMapping from types package
-func (h *SystemHandler) supportsRetrieverType(driver string, retrieverType types.RetrieverType) bool {
-	// Get the mapping of all supported drivers and their capabilities
-	mapping := types.GetRetrieverEngineMapping()
-
-	// Check if the driver exists in the mapping
-	engines, exists := mapping[driver]
-	if !exists {
-		return false
-	}
-
-	// Check if any of the engine configurations support the requested retriever type
-	for _, engine := range engines {
-		if engine.RetrieverType == retrieverType {
-			return true
-		}
-	}
-	return false
 }
 
 // getMinioConfig resolves MinIO connection parameters from tenant config (if mode=remote) or env vars (mode=docker/default).

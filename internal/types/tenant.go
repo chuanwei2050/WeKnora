@@ -65,6 +65,37 @@ func GetRetrieverEngineMapping() map[string][]RetrieverEngineParams {
 	return retrieverEngineMapping
 }
 
+// GetDefaultRetrieverDrivers returns the configured drivers for one retrieval role.
+// A role-specific driver must also be present in RETRIEVE_DRIVER so its engine is initialized.
+func GetDefaultRetrieverDrivers(retrieverType RetrieverType) []string {
+	preferredDriver := preferredRetrieverDriver(retrieverType)
+	drivers := []string{}
+	for _, driver := range strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",") {
+		driver = strings.TrimSpace(driver)
+		if preferredDriver != "" && driver != preferredDriver {
+			continue
+		}
+		for _, params := range retrieverEngineMapping[driver] {
+			if params.RetrieverType == retrieverType {
+				drivers = append(drivers, driver)
+				break
+			}
+		}
+	}
+	return drivers
+}
+
+func preferredRetrieverDriver(retrieverType RetrieverType) string {
+	switch retrieverType {
+	case KeywordsRetrieverType:
+		return strings.TrimSpace(os.Getenv("KEYWORD_RETRIEVE_DRIVER"))
+	case VectorRetrieverType:
+		return strings.TrimSpace(os.Getenv("VECTOR_RETRIEVE_DRIVER"))
+	default:
+		return ""
+	}
+}
+
 // GetDefaultRetrieverEngines returns the default retriever engines based on RETRIEVE_DRIVER env
 func GetDefaultRetrieverEngines() []RetrieverEngineParams {
 	result := []RetrieverEngineParams{}
@@ -74,6 +105,9 @@ func GetDefaultRetrieverEngines() []RetrieverEngineParams {
 		driver = strings.TrimSpace(driver)
 		if params, ok := retrieverEngineMapping[driver]; ok {
 			for _, p := range params {
+				if preferredDriver := preferredRetrieverDriver(p.RetrieverType); preferredDriver != "" && driver != preferredDriver {
+					continue
+				}
 				key := string(p.RetrieverType) + ":" + string(p.RetrieverEngineType)
 				if !seen[key] {
 					seen[key] = true

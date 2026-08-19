@@ -248,8 +248,8 @@
           </div>
           <div class="model-actions">
             <t-dropdown 
-              :options="getModelOptions('vllm', model)" 
-              @click="(data: any) => handleMenuAction(data, 'vllm', model)"
+              :options="getModelOptions(model.originType === 'KnowledgeQA' ? 'chat' : 'vllm', model)"
+              @click="(data: any) => handleMenuAction(data, model.originType === 'KnowledgeQA' ? 'chat' : 'vllm', model)"
               placement="bottom-right"
               attach="body"
             >
@@ -422,7 +422,7 @@ const rerankModels = computed(() =>
 
 const vllmModels = computed(() =>
   allModels.value
-    .filter(m => m.type === 'VLLM')
+    .filter(m => m.type === 'VLLM' || (m.type === 'KnowledgeQA' && m.parameters.supports_vision))
     .map(convertToLegacyFormat)
 )
 
@@ -450,6 +450,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     provider: model.parameters.provider || '', // 添加 provider 字段
     dimension: model.parameters.embedding_parameters?.dimension,
     isBuiltin: model.is_builtin || false,
+    originType: model.type,
     supportsVision: model.parameters.supports_vision || false,
     protocol: model.parameters.protocol,
     location: model.parameters.location,
