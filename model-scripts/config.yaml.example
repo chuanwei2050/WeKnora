@@ -63,6 +63,8 @@ models:
     dtype: auto
     device_ids: ["0"]
     extra_vllm_args:
+      - "--quantization"
+      - "compressed-tensors"
       - "--trust-remote-code"
     allowed_uses: [embedding, model]
     forbidden_uses: [object-storage, data-connector, search]
@@ -162,8 +164,9 @@ models:
     download_id: iic/CosyVoice2-0.5B
     download_id_hf: FunAudioLLM/CosyVoice2-0.5B
     engine: container
-    needs_gpu: false
+    needs_gpu: true
     port: 8005
     served_model_name: cosyvoice2-0.5b
+    device_ids: ["0"]
     allowed_uses: [tts, model]
     forbidden_uses: [object-storage]

@@ -33,7 +33,7 @@ RUN set -eux; \
 COPY vendor/CosyVoice /opt/CosyVoice
 RUN pip install --upgrade pip setuptools wheel \
  && if [ -f /opt/CosyVoice/requirements.txt ]; then \
-      grep -viE '^(torch|torchaudio|torchvision)([=<>! ]|$)' /opt/CosyVoice/requirements.txt > /tmp/cosy-req.txt \
+      grep -viE '^(torch|torchaudio|torchvision|deepspeed)([=<>! ]|$)' /opt/CosyVoice/requirements.txt > /tmp/cosy-req.txt \
       && pip install -r /tmp/cosy-req.txt; \
     fi
 

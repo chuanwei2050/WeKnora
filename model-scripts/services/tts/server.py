@@ -11,6 +11,7 @@ WeKnora 默认 response_format=mp3，本服务支持 mp3|wav|pcm|opus(降级为 
 from __future__ import annotations
 
 import io
+import importlib
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -63,6 +64,8 @@ def _block_runtime_model_downloads() -> None:
         raise RuntimeError("AIR_GAPPED_MODE=true 禁止 TTS 运行时下载模型或文本前端资源")
 
     modelscope.snapshot_download = blocked_snapshot_download
+    snapshot_module = importlib.import_module("modelscope.hub.snapshot_download")
+    snapshot_module.snapshot_download = blocked_snapshot_download
 
 
 def _load() -> None:
@@ -95,15 +98,30 @@ def _load() -> None:
 
 def _synthesize(text: str, voice: str) -> Tuple[np.ndarray, int]:
     _load()
-    available_spks = list(_tts.list_available_spks()) if hasattr(_tts, "list_available_spks") else []
-    selected_voice = voice if voice in available_spks else None
-    if selected_voice is None and voice == "default" and available_spks:
-        selected_voice = available_spks[0]
+    spk2info = getattr(getattr(_tts, "frontend", None), "spk2info", {})
+    valid_spks = [
+        name
+        for name, info in spk2info.items()
+        if isinstance(info, dict) and info.get("embedding") is not None
+    ] if isinstance(spk2info, dict) else []
+    selected_voice = voice if voice in valid_spks else None
+    if selected_voice is None and voice == "default" and valid_spks:
+        selected_voice = valid_spks[0]
+    text_frontend = os.environ.get("AIR_GAPPED_MODE", "").lower() not in {
+        "1",
+        "true",
+        "yes",
+    }
 
     if selected_voice and hasattr(_tts, "inference_sft"):
-        gen = _tts.inference_sft(text, selected_voice)
+        gen = _tts.inference_sft(text, selected_voice, text_frontend=text_frontend)
     elif hasattr(_tts, "inference_zero_shot") and PROMPT_WAV.is_file() and PROMPT_TEXT:
-        gen = _tts.inference_zero_shot(text, PROMPT_TEXT, str(PROMPT_WAV))
+        gen = _tts.inference_zero_shot(
+            text,
+            PROMPT_TEXT,
+            str(PROMPT_WAV),
+            text_frontend=text_frontend,
+        )
     else:
         raise RuntimeError(
             "TTS 没有可用预置音色，且 zero-shot prompt 未配置或文件不存在: "
