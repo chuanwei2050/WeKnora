@@ -2,9 +2,7 @@
   <section class="admin-page">
     <header class="page-header">
       <div>
-        <p class="eyebrow">PLATFORM ADMINISTRATION</p>
         <h1>租户管理</h1>
-        <p>创建租户、调整资源信息，并控制租户启用状态。</p>
       </div>
       <t-button theme="primary" @click="openCreate">新增租户</t-button>
     </header>
@@ -20,22 +18,23 @@
       <div v-else class="table-scroll">
         <table>
           <thead>
-            <tr><th>租户</th><th>存储用量</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+            <tr><th>租户名称</th><th>用户名</th><th>存储配额</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
           </thead>
           <tbody>
             <tr v-for="tenant in tenants" :key="tenant.id">
-              <td><strong>{{ tenant.name }}</strong><small>#{{ tenant.id }} · {{ tenant.description || '暂无说明' }}</small></td>
+              <td><strong>{{ tenant.name }}</strong></td>
+              <td>{{ tenant.admin_username || '—' }}</td>
               <td>{{ formatBytes(tenant.storage_used) }} / {{ formatBytes(tenant.storage_quota) }}</td>
               <td><t-tag :theme="tenant.status === 'active' ? 'success' : 'warning'" variant="light">{{ tenant.status === 'active' ? '已启用' : '已停用' }}</t-tag></td>
               <td>{{ formatDate(tenant.created_at) }}</td>
-              <td class="actions">
+              <td><div class="actions">
                 <t-link theme="primary" @click="manageUsers(tenant)">用户</t-link>
                 <t-link theme="primary" @click="openEdit(tenant)">编辑</t-link>
                 <t-link :disabled="isHomeTenant(tenant)" :theme="tenant.status === 'active' ? 'warning' : 'success'" @click="toggleStatus(tenant)">{{ tenant.status === 'active' ? '停用' : '启用' }}</t-link>
                 <t-tooltip :content="tenant.can_delete ? '删除未使用租户' : '租户已投入使用，请改为停用'">
                   <t-link :disabled="!tenant.can_delete" theme="danger" @click="removeTenant(tenant)">删除</t-link>
                 </t-tooltip>
-              </td>
+              </div></td>
             </tr>
           </tbody>
         </table>
@@ -63,7 +62,7 @@
         <t-form-item :label="editingId ? '重置登录密码' : '登录密码'">
           <div class="field-control">
             <t-input v-model="form.adminPassword" type="password" :placeholder="editingId ? '留空表示不修改密码' : ''" maxlength="72" autocomplete="new-password" />
-            <div class="field-hint">8–72 位，须包含英文字母和数字，可使用英文特殊字符，不能包含空白或中文{{ editingId ? '；留空表示不修改密码' : '' }}</div>
+            <div class="field-hint">8–72 位，仅支持字母、数字、特殊字符</div>
           </div>
         </t-form-item>
       </t-form>
@@ -193,7 +192,7 @@ onMounted(loadTenants)
 .toolbar { display: flex; gap: 12px; width: min(520px, 100%); margin-bottom: 18px; }
 .table-card { background: #fff; border: 1px solid #e1e6ef; border-radius: 8px; overflow: hidden; }
 .table-scroll { overflow-x: auto; }
-table { width: 100%; min-width: 980px; border-collapse: collapse; th, td { padding: 16px 18px; border-bottom: 1px solid #edf0f5; text-align: left; } th { background: #f8fafd; color: #596780; font-size: 13px; } td { font-size: 14px; } strong, small { display: block; } small { margin-top: 5px; color: #8a95a8; max-width: 280px; } }
+table { width: 100%; min-width: 1120px; border-collapse: collapse; th, td { padding: 16px 18px; border-bottom: 1px solid #edf0f5; text-align: left; } th { background: #f8fafd; color: #596780; font-size: 13px; } td { font-size: 14px; } strong, small { display: block; } small { margin-top: 5px; color: #8a95a8; max-width: 280px; } }
 .credential-note { color: #65728a; line-height: 1.7; }
 .field-control { width: 100%; min-width: 0; }
 .field-hint { margin-top: 6px; color: #7b879b; font-size: 12px; line-height: 1.5; }
