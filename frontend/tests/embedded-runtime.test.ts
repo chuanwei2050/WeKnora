@@ -6,6 +6,7 @@ describe('embedded runtime', () => {
     expect(getRuntimeMode({ pathname: '/', search: '' } as Location)).toBe('standalone')
     expect(getRuntimeMode({ pathname: '/', search: '?mode=embedded-page' } as Location)).toBe('embedded-page')
     expect(getRuntimeMode({ pathname: '/embed/widget', search: '' } as Location)).toBe('embedded-widget')
+    expect(getRuntimeMode({ pathname: '/knowledge/embed/platform/knowledge-bases', search: '' } as Location)).toBe('embedded-page')
   })
 
   it('parses only versioned known messages', () => {

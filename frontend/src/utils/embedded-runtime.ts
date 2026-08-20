@@ -7,6 +7,7 @@ export function getRuntimeMode(location: Pick<Location, 'pathname' | 'search'> =
   const requested = new URLSearchParams(location.search).get('mode') as RuntimeMode | null
   if (requested && ALLOWED_MODES.has(requested)) return requested
   if (location.pathname.includes('/embed/widget')) return 'embedded-widget'
+  if (location.pathname.startsWith('/knowledge/embed/')) return 'embedded-page'
   return 'standalone'
 }
 
