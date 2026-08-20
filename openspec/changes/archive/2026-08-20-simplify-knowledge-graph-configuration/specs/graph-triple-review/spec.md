@@ -8,6 +8,18 @@
 - **WHEN** 候选为 pending 且配置、chunk 和知识版本仍有效
 - **THEN** approve 成功后图库 MUST 含该候选关系且状态 MUST 为 written
 
+#### Scenario: 通过后入图
+- **WHEN** 审核人对仍匹配当前配置、chunk 和知识版本的 `pending` 候选执行 approve 且写图成功
+- **THEN** 图库 MUST 含该候选关系，且状态 MUST 为 `written`
+
+#### Scenario: 写图失败可重试
+- **WHEN** approve 时写图失败
+- **THEN** 状态 MUST 仍为 `pending`，且允许再次 approve
+
+#### Scenario: 驳回
+- **WHEN** 审核人驳回 `pending`
+- **THEN** 状态 MUST 为 `rejected`，且 MUST NOT 写图
+
 #### Scenario: 关闭审核使旧候选失效
 - **WHEN** 管理员关闭三元组人工审核
 - **THEN** 该知识库现有 pending 候选 MUST 变为 superseded

@@ -8,6 +8,10 @@
 - **WHEN** 知识库 `IndexingStrategy.GraphEnabled` 为 false
 - **THEN** 文档后处理 MUST NOT 创建图抽取任务
 
+#### Scenario: signal 模式下 chunk 无关系迹象
+- **WHEN** 知识库已开图且高级兼容入图范围为 `signal`，但某文本 chunk 未通过关系迹象判定
+- **THEN** 系统 MUST NOT 为该 chunk 入队图抽取任务
+
 #### Scenario: all 模式覆盖非空文本
 - **WHEN** 知识库已开图且某文本类 chunk 非空
 - **THEN** 默认配置 MUST 为该 chunk 入队图抽取任务
@@ -19,6 +23,14 @@
 #### Scenario: 配置自定义 Schema 并保存
 - **WHEN** 管理员编辑实体类型和关系类型并保存
 - **THEN** 后续入库抽取 MUST 按保存后的严格 Schema 执行过滤
+
+#### Scenario: 配置严格 schema 与 entity_types 并保存
+- **WHEN** 管理员在自定义 Schema 模式编辑关系类型和实体类型并保存知识库
+- **THEN** 后续入库抽取 MUST 按保存后的严格 Schema 执行过滤
+
+#### Scenario: 加载软件测评预设
+- **WHEN** 管理员选择使用模板并加载软件测评模板
+- **THEN** 关系类型与实体类型 MUST 被填充为模板默认集合，且可再编辑
 
 #### Scenario: 通用抽取
 - **WHEN** 管理员选择通用抽取

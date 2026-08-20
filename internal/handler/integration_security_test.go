@@ -81,3 +81,15 @@ func TestIntegrationRequestBodyLimit(t *testing.T) {
 	_, err := io.ReadAll(context.Request.Body)
 	require.Error(t, err)
 }
+
+func TestIntegrationBrowserCookieIsLimitedToKnowledgePath(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+
+	setIntegrationBrowserCookie(context, "session", 60)
+
+	cookie := recorder.Result().Cookies()[0]
+	require.Equal(t, integrationBrowserCookiePath, cookie.Path)
+	require.True(t, cookie.HttpOnly)
+	require.True(t, cookie.Secure)
+}

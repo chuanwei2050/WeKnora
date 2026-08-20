@@ -35,6 +35,8 @@ type IntegrationHandler struct {
 	generations sync.Map
 }
 
+const integrationBrowserCookiePath = "/knowledge/"
+
 func NewIntegrationHandler(service *integrationauth.Service, kbs interfaces.KnowledgeBaseService, sessions interfaces.SessionService, messages interfaces.MessageService, streams interfaces.StreamManager, files interfaces.FileService, models interfaces.ModelService, documents interfaces.DocumentReader, imageResolver *docparser.ImageResolver) *IntegrationHandler {
 	return &IntegrationHandler{
 		service: service, kbs: kbs, sessions: sessions, messages: messages, models: models, streams: streams,
@@ -233,7 +235,7 @@ func (h *IntegrationHandler) Exchange(c *gin.Context) {
 	c.Header("Vary", "Origin")
 	c.Header("Referrer-Policy", "strict-origin")
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(integrationauth.BrowserCookieName, token, int(integrationauth.SessionMaxTTL.Seconds()), "/", "", true, true)
+	setIntegrationBrowserCookie(c, token, int(integrationauth.SessionMaxTTL.Seconds()))
 	integrationData(c, http.StatusOK, gin.H{"csrf_token": csrf, "user": user, "knowledge_base_ids": principal.KnowledgeBaseIDs})
 }
 
@@ -275,8 +277,12 @@ func (h *IntegrationHandler) Logout(c *gin.Context) {
 		_ = h.service.Logout(c.Request.Context(), token)
 	}
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(integrationauth.BrowserCookieName, "", -1, "/", "", true, true)
+	setIntegrationBrowserCookie(c, "", -1)
 	integrationData(c, http.StatusOK, gin.H{"logged_out": true})
+}
+
+func setIntegrationBrowserCookie(c *gin.Context, value string, maxAge int) {
+	c.SetCookie(integrationauth.BrowserCookieName, value, maxAge, integrationBrowserCookiePath, "", true, true)
 }
 
 func (h *IntegrationHandler) Authenticate() gin.HandlerFunc {
