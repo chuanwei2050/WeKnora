@@ -1,4 +1,5 @@
 import { get, post } from '../../utils/request';
+import { getRuntimeMode } from '../../utils/embedded-runtime';
 
 export interface VoiceTicket {
   ticket: string;
@@ -23,15 +24,21 @@ export function transcribeVoice(sessionId: string, modelId: string, audio: Blob,
 }
 
 export function synthesizeVoice(sessionId: string, messageId: string, modelId: string, options: { language?: string; voice?: string; speed?: number; format?: string } = {}, signal?: AbortSignal) {
-  return post(`/api/v1/sessions/${sessionId}/voice/tts`, { message_id: messageId, model_id: modelId, ...options }, { responseType: 'blob', signal }).then((response: any) => response instanceof Blob ? response : response?.data) as Promise<Blob>;
+  return post(ttsPath(sessionId), { message_id: messageId, model_id: modelId, ...options }, { responseType: 'blob', signal }).then((response: any) => response instanceof Blob ? response : response?.data) as Promise<Blob>;
 }
 
 export function synthesizeVoiceStream(sessionId: string, messageId: string, modelId: string, options: { language?: string; voice?: string; speed?: number; format?: string } = {}, signal?: AbortSignal) {
   return post<ReadableStream<Uint8Array>>(
-    `/api/v1/sessions/${sessionId}/voice/tts`,
+    ttsPath(sessionId),
     { message_id: messageId, model_id: modelId, ...options, format: 'mp3' },
     { adapter: 'fetch', responseType: 'stream', signal, timeout: 0 },
   );
+}
+
+function ttsPath(sessionId: string): string {
+  return getRuntimeMode() === 'embedded-widget'
+    ? `/api/integration/v1/chat/sessions/${sessionId}/voice/tts`
+    : `/api/v1/sessions/${sessionId}/voice/tts`;
 }
 
 export { get };

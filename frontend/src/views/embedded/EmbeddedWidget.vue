@@ -65,7 +65,13 @@ async function createConversationFromDrawer() {
 
 function beginRename(conversation: IntegrationChatSession) {
   editingConversationId.value = conversation.id
-  editingTitle.value = conversation.title || '新对话'
+  editingTitle.value = conversation.title || fallbackConversationTitle(conversation)
+}
+
+function fallbackConversationTitle(conversation: IntegrationChatSession) {
+  const createdAt = new Date(conversation.created_at)
+  if (Number.isNaN(createdAt.getTime())) return '新对话'
+  return `新对话 · ${createdAt.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`
 }
 
 async function saveRename(conversation: IntegrationChatSession) {
@@ -87,9 +93,18 @@ function cancelRename() {
 
 async function deleteConversation(conversation: IntegrationChatSession) {
   try {
+    const deletingActiveConversation = conversation.id === sessionId.value
     await deleteIntegrationChatSession(conversation.id)
-    if (conversation.id === sessionId.value) await createChatSession()
     await refreshConversations()
+    if (deletingActiveConversation) {
+      const nextConversation = compatibleConversations.value[0]
+      if (nextConversation) {
+        sessionId.value = nextConversation.id
+        if (preserveSession) sessionStorage.setItem(sessionStorageKey, nextConversation.id)
+      } else {
+        await createChatSession()
+      }
+    }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '删除会话失败'
   }
@@ -226,9 +241,9 @@ onBeforeUnmount(() => {
           <button type="button" aria-label="关闭对话列表" @click="conversationsOpen = false">×</button>
         </span>
       </div>
-      <div v-for="(conversation, index) in compatibleConversations" :key="conversation.id" class="embedded-widget__conversation" :data-session-id="conversation.id" :class="{ active: conversation.id === sessionId }" @click="switchConversation(conversation)">
+      <div v-for="conversation in compatibleConversations" :key="conversation.id" class="embedded-widget__conversation" :data-session-id="conversation.id" :class="{ active: conversation.id === sessionId }" @click="switchConversation(conversation)">
         <input v-if="editingConversationId === conversation.id" v-model="editingTitle" maxlength="100" aria-label="对话标题" @click.stop @keydown.enter.prevent.stop="saveRename(conversation)" @keydown.esc.prevent.stop="cancelRename" />
-        <span v-else :title="conversation.title || `新对话 ${compatibleConversations.length - index}`">{{ conversation.title || `新对话 ${compatibleConversations.length - index}` }}</span>
+        <span v-else :title="conversation.title || fallbackConversationTitle(conversation)">{{ conversation.title || fallbackConversationTitle(conversation) }}</span>
         <time>{{ new Date(conversation.updated_at || conversation.created_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}</time>
         <span class="embedded-widget__conversation-actions">
           <template v-if="editingConversationId === conversation.id">
@@ -237,7 +252,7 @@ onBeforeUnmount(() => {
           </template>
           <template v-else>
             <button type="button" aria-label="重命名对话" title="重命名" @click.stop="beginRename(conversation)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16-.8 4.8L8 20l11-11-4-4L4 16Zm9.5-9.5 4 4" /></svg></button>
-            <t-popconfirm content="确认删除此对话？" placement="left" :confirm-btn="{ content: '删除', theme: 'danger' }" :cancel-btn="{ content: '取消' }" @confirm="deleteConversation(conversation)">
+            <t-popconfirm content="确认删除此对话？" placement="right" :confirm-btn="{ content: '删除', theme: 'danger' }" :cancel-btn="{ content: '取消' }" @confirm="deleteConversation(conversation)">
               <button type="button" aria-label="删除对话" title="删除" @click.stop><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" /></svg></button>
             </t-popconfirm>
           </template>

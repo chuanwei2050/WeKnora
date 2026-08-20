@@ -27,6 +27,7 @@ type IntegrationHandler struct {
 	kbs         interfaces.KnowledgeBaseService
 	sessions    interfaces.SessionService
 	messages    interfaces.MessageService
+	models      interfaces.ModelService
 	streams     interfaces.StreamManager
 	attachments *session.AttachmentProcessor
 	limiter     *integrationRateLimiter
@@ -36,7 +37,7 @@ type IntegrationHandler struct {
 
 func NewIntegrationHandler(service *integrationauth.Service, kbs interfaces.KnowledgeBaseService, sessions interfaces.SessionService, messages interfaces.MessageService, streams interfaces.StreamManager, files interfaces.FileService, models interfaces.ModelService, documents interfaces.DocumentReader, imageResolver *docparser.ImageResolver) *IntegrationHandler {
 	return &IntegrationHandler{
-		service: service, kbs: kbs, sessions: sessions, messages: messages, streams: streams,
+		service: service, kbs: kbs, sessions: sessions, messages: messages, models: models, streams: streams,
 		attachments: session.NewAttachmentProcessor(files, documents, imageResolver, models),
 		limiter:     newIntegrationRateLimiter(), limits: loadIntegrationLimits(),
 	}
@@ -626,6 +627,28 @@ func (h *IntegrationHandler) ListChatMessages(c *gin.Context) {
 	integrationData(c, http.StatusOK, messages)
 }
 
+func (h *IntegrationHandler) SynthesizeVoice(c *gin.Context) {
+	if !h.requireScope(c, "chat:read") {
+		return
+	}
+	binding, err := h.service.GetChatBinding(c.Request.Context(), integrationPrincipal(c), c.Param("session_id"))
+	if err != nil {
+		integrationError(c, http.StatusForbidden, "session_denied", "session access denied")
+		return
+	}
+	var request session.VoiceSynthesisRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		integrationError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	message, err := h.messages.GetMessage(c.Request.Context(), binding.SessionID, request.MessageID)
+	if err != nil || message == nil || message.Role != "assistant" || !message.IsCompleted {
+		integrationError(c, http.StatusNotFound, "message_not_found", "completed assistant message not found")
+		return
+	}
+	session.SynthesizeVoiceMessage(c, h.models, message, request)
+}
+
 func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	if !h.enforceRate(c, "api.chat.message.create", 60) {
 		return
@@ -743,7 +766,7 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	_, _ = h.service.AppendStreamEvent(c.Request.Context(), binding.SessionID, assistantMessage.ID, "message.created", gin.H{"user_message_id": userMessage.ID, "selected_knowledge_base_ids": selected})
 	eventBus := event.NewEventBus()
 	var answer strings.Builder
-	var references any = []any{}
+	var references types.References = types.References{}
 	generationDone := make(chan error, 1)
 	var generationDoneOnce sync.Once
 	eventBus.On(event.EventAgentFinalAnswer, func(ctx context.Context, evt event.Event) error {
@@ -766,7 +789,9 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	})
 	eventBus.On(event.EventAgentReferences, func(ctx context.Context, evt event.Event) error {
 		if data, ok := evt.Data.(event.AgentReferencesData); ok {
-			references = data.References
+			if values, ok := data.References.([]*types.SearchResult); ok {
+				references = types.References(values)
+			}
 		}
 		return nil
 	})
@@ -799,6 +824,7 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	}
 	assistantMessage.Content = answer.String()
 	assistantMessage.IsCompleted = true
+	assistantMessage.KnowledgeReferences = references
 	if err = h.messages.UpdateMessage(c.Request.Context(), assistantMessage); err != nil {
 		_, _ = h.service.AppendStreamEvent(c.Request.Context(), binding.SessionID, assistantMessage.ID, "error", gin.H{"code": "message_persist_failed", "retryable": true, "status": "failed"})
 		h.writeStoredEvents(c, binding, assistantMessage.ID, "")

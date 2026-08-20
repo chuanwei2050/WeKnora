@@ -220,6 +220,7 @@ func RegisterIntegrationPublicRoutes(r *gin.Engine, h *handler.IntegrationHandle
 	integration.GET("/chat/sessions/:session_id/messages/:message_id", h.GetMessageSnapshot)
 	integration.GET("/chat/sessions/:session_id/messages/:message_id/events", h.GetMessageEvents)
 	integration.POST("/chat/sessions/:session_id/messages/:message_id/cancel", h.CancelMessage)
+	integration.POST("/chat/sessions/:session_id/voice/tts", h.SynthesizeVoice)
 }
 
 func RegisterIntegrationAdminRoutes(r *gin.RouterGroup, h *handler.IntegrationHandler) {

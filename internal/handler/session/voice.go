@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/tts"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
@@ -68,7 +69,7 @@ func (h *Handler) TranscribeVoiceBatch(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"text": result.Text, "segments": result.Segments})
 }
 
-type voiceSynthesisRequest struct {
+type VoiceSynthesisRequest struct {
 	MessageID string  `json:"message_id" binding:"required"`
 	ModelID   string  `json:"model_id" binding:"required"`
 	Language  string  `json:"language,omitempty"`
@@ -271,7 +272,7 @@ func supportedVoiceMIME(value string) bool {
 func (h *Handler) SynthesizeVoice(c *gin.Context) {
 	ctx := c.Request.Context()
 	sessionID := strings.TrimSpace(c.Param("session_id"))
-	var request voiceSynthesisRequest
+	var request VoiceSynthesisRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
@@ -285,7 +286,14 @@ func (h *Handler) SynthesizeVoice(c *gin.Context) {
 		c.Error(errors.NewNotFoundError("completed assistant message not found"))
 		return
 	}
-	model, err := h.modelService.GetTTSModel(ctx, "")
+	SynthesizeVoiceMessage(c, h.modelService, message, request)
+}
+
+// SynthesizeVoiceMessage streams synthesized audio for a message that the
+// caller has already authorized.
+func SynthesizeVoiceMessage(c *gin.Context, modelService interfaces.ModelService, message *types.Message, request VoiceSynthesisRequest) {
+	ctx := c.Request.Context()
+	model, err := modelService.GetTTSModel(ctx, request.ModelID)
 	if err != nil {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
