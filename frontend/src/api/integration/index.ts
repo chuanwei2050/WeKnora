@@ -65,3 +65,17 @@ export async function getIntegrationChatSession(sessionId: string): Promise<{ id
   const payload = await response.json() as { data: { id: string } }
   return payload.data
 }
+
+export interface IntegrationChatSession {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export async function listIntegrationChatSessions(): Promise<IntegrationChatSession[]> {
+  const response = await fetch(`${getApiBaseUrl()}/api/integration/v1/chat/sessions`, { credentials: 'include' })
+  if (!response.ok) throw new Error(`chat session list failed: ${response.status}`)
+  const payload = await response.json() as { data: IntegrationChatSession[] }
+  return payload.data
+}

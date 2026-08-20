@@ -24,6 +24,8 @@ export function getEmbeddedCSRFToken(): string {
 
 export type EmbeddedInboundMessage =
   | { version: 1; type: 'auth-ready'; ticket: string }
+  | { version: 1; type: 'new-conversation' }
+  | { version: 1; type: 'toggle-conversations' }
   | { version: 1; type: 'set-theme'; theme: 'light' | 'dark' }
   | { version: 1; type: 'set-locale'; locale: string }
   | { version: 1; type: 'open-knowledge-base'; knowledgeBaseId: string }
@@ -36,6 +38,8 @@ export function parseEmbeddedMessage(value: unknown): EmbeddedInboundMessage | n
   if (message.type === 'auth-ready' && typeof message.ticket === 'string' && message.ticket.length > 0 && message.ticket.length <= 512) {
     return { version: 1, type: 'auth-ready', ticket: message.ticket }
   }
+  if (message.type === 'new-conversation') return { version: 1, type: 'new-conversation' }
+  if (message.type === 'toggle-conversations') return { version: 1, type: 'toggle-conversations' }
   if (message.type === 'set-theme' && (message.theme === 'light' || message.theme === 'dark')) {
     return { version: 1, type: 'set-theme', theme: message.theme }
   }

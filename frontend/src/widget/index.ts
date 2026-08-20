@@ -12,6 +12,7 @@ import { parseFrameMessage, parseStoredLayout, parseWidgetConfig } from './valid
 const instances = new Map<string, WidgetInstance>()
 const MIN_SIZE: WidgetSize = { width: 320, height: 420 }
 const DEFAULT_SIZE: WidgetSize = { width: 400, height: 620 }
+const LAUNCHER_SIZE = 58
 const EDGE_GAP = 16
 
 function viewportRect() {
@@ -88,39 +89,67 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
     applyStyles(icon, { width: '28px', height: '28px', objectFit: 'contain', pointerEvents: 'none' })
     launcher.append(icon)
   } else {
-    launcher.textContent = '问'
+    launcher.textContent = 'AI'
   }
   applyStyles(launcher, {
-    position: 'fixed', right: '24px', bottom: '24px', width: '56px', height: '56px', borderRadius: '50%',
-    border: '0', color: '#fff', background: config.theme?.primaryColor || '#0052d9', cursor: 'grab',
-    pointerEvents: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,.22)', fontSize: '18px',
+    position: 'fixed', right: '24px', bottom: '24px', width: '58px', height: '58px', borderRadius: '18px',
+    border: `1px solid ${config.theme?.primaryColor || '#0b5f8a'}`, color: config.theme?.primaryColor || '#0b5f8a', background: '#fff', cursor: 'grab',
+    pointerEvents: 'auto', boxShadow: '0 12px 32px rgba(15,45,61,.22)', fontSize: '14px', fontWeight: '700',
   })
 
   const panel = document.createElement('section')
   panel.setAttribute('role', 'dialog')
   panel.setAttribute('aria-label', config.theme?.title || '知识库聊天')
   applyStyles(panel, {
-    position: 'fixed', display: 'none', overflow: 'hidden', borderRadius: '12px', background: config.theme?.colorMode === 'dark' ? '#1f1f1f' : '#fff',
-    boxShadow: '0 16px 48px rgba(0,0,0,.28)', pointerEvents: 'auto',
+    position: 'fixed', display: 'none', overflow: 'hidden', borderRadius: '18px', background: config.theme?.colorMode === 'dark' ? '#1f1f1f' : '#fff',
+    border: '1px solid rgba(28,53,68,.14)', boxShadow: '0 24px 72px rgba(15,45,61,.25)', pointerEvents: 'auto',
   })
 
   const titlebar = document.createElement('header')
   titlebar.tabIndex = 0
   titlebar.setAttribute('aria-label', '拖动聊天窗口；方向键移动')
-  titlebar.textContent = config.theme?.title || '知识库助手'
-  applyStyles(titlebar, { height: '44px', padding: '0 88px 0 16px', display: 'flex', alignItems: 'center', cursor: 'move', userSelect: 'none', background: config.theme?.primaryColor || '#0052d9', color: '#fff' })
+  applyStyles(titlebar, { height: '58px', padding: '0 168px 0 16px', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'move', userSelect: 'none', background: '#fff', color: '#172b36', borderBottom: '1px solid #e4eaee', boxSizing: 'border-box' })
+  if (config.theme?.iconUrl) {
+    const titleIcon = document.createElement('img')
+    titleIcon.src = new URL(config.theme.iconUrl, window.location.href).href
+    titleIcon.alt = ''
+    applyStyles(titleIcon, { width: '26px', height: '26px', padding: '6px', borderRadius: '10px', background: '#e7f3f8', objectFit: 'contain' })
+    titlebar.append(titleIcon)
+  }
+  const titleCopy = document.createElement('span')
+  const title = document.createElement('strong')
+  title.textContent = config.theme?.title || '知识库助手'
+  const subtitle = document.createElement('small')
+  subtitle.textContent = '基于授权知识库回答'
+  applyStyles(titleCopy, { display: 'grid', minWidth: '0', lineHeight: '1.2' })
+  applyStyles(title, { overflow: 'hidden', fontSize: '14px', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })
+  applyStyles(subtitle, { marginTop: '4px', color: '#6b7c86', fontSize: '11px', fontWeight: '400' })
+  titleCopy.append(title, subtitle)
+  titlebar.append(titleCopy)
+
+  const newConversationButton = document.createElement('button')
+  newConversationButton.type = 'button'
+  newConversationButton.setAttribute('aria-label', '新建会话')
+  newConversationButton.textContent = '+'
+  applyStyles(newConversationButton, { position: 'absolute', top: '14px', right: '84px', width: '30px', height: '30px', border: '0', borderRadius: '8px', color: '#405560', background: '#f1f5f7', pointerEvents: 'auto', cursor: 'pointer', fontSize: '20px', lineHeight: '28px' })
+
+  const conversationsButton = document.createElement('button')
+  conversationsButton.type = 'button'
+  conversationsButton.setAttribute('aria-label', '切换对话')
+  conversationsButton.textContent = '☰'
+  applyStyles(conversationsButton, { position: 'absolute', top: '14px', right: '120px', width: '30px', height: '30px', border: '0', borderRadius: '8px', color: '#405560', background: '#f1f5f7', pointerEvents: 'auto', cursor: 'pointer', fontSize: '16px' })
 
   const maximizeButton = document.createElement('button')
   maximizeButton.type = 'button'
   maximizeButton.setAttribute('aria-label', '最大化聊天窗口')
   maximizeButton.textContent = '□'
-  applyStyles(maximizeButton, { position: 'absolute', top: '8px', right: '48px', width: '28px', height: '28px', pointerEvents: 'auto' })
+  applyStyles(maximizeButton, { position: 'absolute', top: '14px', right: '48px', width: '30px', height: '30px', border: '0', borderRadius: '8px', color: '#405560', background: '#f1f5f7', pointerEvents: 'auto', cursor: 'pointer' })
 
   const closeButton = document.createElement('button')
   closeButton.type = 'button'
   closeButton.setAttribute('aria-label', '关闭聊天窗口')
   closeButton.textContent = '×'
-  applyStyles(closeButton, { position: 'absolute', top: '8px', right: '12px', width: '28px', height: '28px', pointerEvents: 'auto' })
+  applyStyles(closeButton, { position: 'absolute', top: '14px', right: '12px', width: '30px', height: '30px', border: '0', borderRadius: '8px', color: '#405560', background: '#f1f5f7', pointerEvents: 'auto', cursor: 'pointer', fontSize: '18px' })
 
   const iframe = document.createElement('iframe')
   iframe.title = config.theme?.title || '知识库聊天内容'
@@ -130,7 +159,7 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   iframe.src = iframeURL.href
   iframe.referrerPolicy = 'strict-origin'
   iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-downloads')
-  applyStyles(iframe, { width: '100%', height: 'calc(100% - 44px)', border: '0', display: 'block' })
+  applyStyles(iframe, { width: '100%', height: 'calc(100% - 58px)', border: '0', display: 'block' })
 
   const resizeHandle = document.createElement('div')
   resizeHandle.tabIndex = 0
@@ -138,7 +167,7 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   resizeHandle.setAttribute('aria-label', '调整聊天窗口大小；方向键缩放')
   applyStyles(resizeHandle, { position: 'absolute', right: '0', bottom: '0', width: '24px', height: '24px', cursor: 'nwse-resize' })
 
-  panel.append(titlebar, maximizeButton, closeButton, iframe, resizeHandle)
+  panel.append(titlebar, conversationsButton, newConversationButton, maximizeButton, closeButton, iframe, resizeHandle)
   shadow.append(launcher, panel)
   document.body.append(host)
 
@@ -152,7 +181,7 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
     const normal = layout.mode === 'normal' ? clampNormal(layout) : layout.restore
     if (layout.mode === 'normal') {
       layout = normal
-      applyStyles(panel, { left: `${normal.position.x}px`, top: `${normal.position.y}px`, width: `${normal.size.width}px`, height: `${normal.size.height}px`, borderRadius: '12px' })
+      applyStyles(panel, { left: `${normal.position.x}px`, top: `${normal.position.y}px`, width: `${normal.size.width}px`, height: `${normal.size.height}px`, borderRadius: '18px' })
       maximizeButton.textContent = '□'
       maximizeButton.setAttribute('aria-label', '最大化聊天窗口')
       sessionStorage.setItem(storageKey, JSON.stringify(normal))
@@ -206,10 +235,10 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   let launcherMoved = false
   const clampLauncher = () => {
     const viewport = viewportRect()
-    const gapX = Math.min(EDGE_GAP, Math.max(0, (viewport.width - 56) / 2))
-    const gapY = Math.min(EDGE_GAP, Math.max(0, (viewport.height - 56) / 2))
-    const maxX = Math.max(viewport.x + gapX, viewport.x + viewport.width - 56 - gapX)
-    const maxY = Math.max(viewport.y + gapY, viewport.y + viewport.height - 56 - gapY)
+    const gapX = Math.min(EDGE_GAP, Math.max(0, (viewport.width - LAUNCHER_SIZE) / 2))
+    const gapY = Math.min(EDGE_GAP, Math.max(0, (viewport.height - LAUNCHER_SIZE) / 2))
+    const maxX = Math.max(viewport.x + gapX, viewport.x + viewport.width - LAUNCHER_SIZE - gapX)
+    const maxY = Math.max(viewport.y + gapY, viewport.y + viewport.height - LAUNCHER_SIZE - gapY)
     launcherPosition = {
       x: Math.min(Math.max(launcherPosition.x, viewport.x + gapX), maxX),
       y: Math.min(Math.max(launcherPosition.y, viewport.y + gapY), maxY),
@@ -277,6 +306,8 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
     instance.open()
   })
   closeButton.addEventListener('click', () => instance.close())
+  newConversationButton.addEventListener('click', () => iframe.contentWindow?.postMessage({ version: 1, type: 'new-conversation' }, config.targetOrigin!))
+  conversationsButton.addEventListener('click', () => iframe.contentWindow?.postMessage({ version: 1, type: 'toggle-conversations' }, config.targetOrigin!))
   maximizeButton.addEventListener('click', () => layout.mode === 'normal' ? instance.maximize() : instance.restore())
   instances.set(config.instanceId, instance)
   render(false)

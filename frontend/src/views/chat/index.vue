@@ -19,6 +19,18 @@
                 </div>
                 <!-- 推荐问题卡片 - 仅在新会话（无消息）时展示 -->
                 <div v-if="messagesList.length === 0 && !loading" class="suggested-questions-container" :class="{ 'has-questions': suggestedQuestions.length > 0 || suggestedQuestionsLoading }">
+                    <div v-if="embeddedMode && !suggestedQuestionsLoading && suggestedQuestions.length === 0" class="embedded-welcome">
+                        <div class="embedded-welcome-icon" aria-hidden="true">
+                            <img src="/widget/icons/message-chatbot.svg" alt="" />
+                        </div>
+                        <h2>你好，我是知识助手</h2>
+                        <p>我会基于当前授权知识库回答，并在答案中保留引用来源。</p>
+                        <div class="embedded-starters" aria-label="快捷问题">
+                            <button type="button" @click="handleSuggestedQuestionClick('总结当前知识库的主要内容')">总结知识库</button>
+                            <button type="button" @click="handleSuggestedQuestionClick('列出当前知识库中的关键事实')">提取关键事实</button>
+                            <button type="button" @click="handleSuggestedQuestionClick('帮我查找与当前项目相关的资料')">查找相关资料</button>
+                        </div>
+                    </div>
                     <!-- 骨架屏占位 -->
                     <div v-if="suggestedQuestionsLoading && suggestedQuestions.length === 0" class="suggested-questions-inner">
                         <div class="suggested-questions-title"><t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '18px' }]" /></div>
@@ -1239,8 +1251,9 @@ onBeforeRouteUpdate((to, from, next) => {
     &.is-embedded {
         max-width: 100%;
         min-width: 100%;
-        padding: 0;
+        padding: 0 12px 12px;
         overflow-x: hidden;
+        background: #f7f9fc;
     }
 
     &.is-embedded :deep(.answers-input) {
@@ -1265,6 +1278,8 @@ onBeforeRouteUpdate((to, from, next) => {
     flex: 1;
     width: 100%;
     overflow-y: auto;
+    padding: 18px 4px 8px;
+    box-sizing: border-box;
 
     &::-webkit-scrollbar {
         width: 0;
@@ -1370,10 +1385,57 @@ onBeforeRouteUpdate((to, from, next) => {
 
     &.is-embedded {
         max-width: 100%;
-        width: 100%;
+        width: calc(100% - 8px);
         margin: 0;
         overflow-x: hidden;
     }
+}
+
+.embedded-welcome {
+    width: min(100%, 460px);
+    margin: auto;
+    padding: 28px 20px 20px;
+    text-align: center;
+    color: var(--td-text-color-primary);
+
+    h2 { margin: 14px 0 8px; font-size: 20px; line-height: 1.35; }
+    p { margin: 0 auto; max-width: 360px; color: var(--td-text-color-secondary); font-size: 13px; line-height: 1.7; }
+}
+
+.embedded-welcome-icon {
+    display: grid;
+    width: 52px;
+    height: 52px;
+    margin: 0 auto;
+    place-items: center;
+    border-radius: 16px;
+    color: #0b5f8a;
+    background: #e7f3f8;
+    box-shadow: inset 0 0 0 1px rgba(11, 95, 138, .12);
+
+    img { width: 28px; height: 28px; }
+}
+
+.embedded-starters {
+    display: grid;
+    gap: 8px;
+    margin-top: 20px;
+
+    button {
+        min-height: 40px;
+        padding: 8px 14px;
+        border: 1px solid #d8e2e8;
+        border-radius: 10px;
+        color: #253442;
+        background: #fff;
+        font: inherit;
+        font-size: 13px;
+        text-align: left;
+        cursor: pointer;
+        transition: border-color .16s ease, background .16s ease;
+    }
+    button:hover { border-color: #77a9c1; background: #f1f8fb; }
+    button:focus-visible { outline: 2px solid #0b5f8a; outline-offset: 2px; }
 }
 
 .msg_list {

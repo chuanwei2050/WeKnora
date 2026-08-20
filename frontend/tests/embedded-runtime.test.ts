@@ -10,6 +10,8 @@ describe('embedded runtime', () => {
 
   it('parses only versioned known messages', () => {
     expect(parseEmbeddedMessage({ version: 1, type: 'auth-ready', ticket: 'ticket' })).toEqual({ version: 1, type: 'auth-ready', ticket: 'ticket' })
+    expect(parseEmbeddedMessage({ version: 1, type: 'new-conversation' })).toEqual({ version: 1, type: 'new-conversation' })
+    expect(parseEmbeddedMessage({ version: 1, type: 'toggle-conversations' })).toEqual({ version: 1, type: 'toggle-conversations' })
     expect(parseEmbeddedMessage({ version: 1, type: 'set-theme', theme: 'unsafe' })).toBeNull()
     expect(parseEmbeddedMessage({ version: 2, type: 'auth-ready', ticket: 'ticket' })).toBeNull()
 		expect(parseEmbeddedMessage({ version: 1, type: 'auth-ready', ticket: '' })).toBeNull()

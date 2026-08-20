@@ -77,4 +77,12 @@ describe('floating widget', () => {
     first.destroy()
     second.destroy()
   })
+
+  it('renders controls for creating and switching conversations', () => {
+    const instance = initWidget(config())
+    const host = document.querySelector<HTMLElement>('[data-weknora-widget]')
+    expect(host?.shadowRoot?.querySelector('[aria-label="新建会话"]')).not.toBeNull()
+    expect(host?.shadowRoot?.querySelector('[aria-label="切换对话"]')).not.toBeNull()
+    instance.destroy()
+  })
 })

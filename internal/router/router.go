@@ -210,6 +210,7 @@ func RegisterIntegrationPublicRoutes(r *gin.Engine, h *handler.IntegrationHandle
 	integration.Use(h.Authenticate())
 	integration.GET("/knowledge-bases", h.ListKnowledgeBases)
 	integration.POST("/rag/search", h.Search)
+	integration.GET("/chat/sessions", h.ListChatSessions)
 	integration.POST("/chat/sessions", h.CreateChatSession)
 	integration.GET("/chat/sessions/:session_id", h.GetChatSession)
 	integration.GET("/chat/sessions/:session_id/messages", h.ListChatMessages)

@@ -496,6 +496,30 @@ func (h *IntegrationHandler) CreateChatSession(c *gin.Context) {
 	integrationData(c, http.StatusCreated, gin.H{"id": session.ID, "title": session.Title, "knowledge_base_mode": req.KnowledgeBaseMode, "allowed_knowledge_base_ids": allowed})
 }
 
+func (h *IntegrationHandler) ListChatSessions(c *gin.Context) {
+	if !h.requireScope(c, "chat:read") {
+		return
+	}
+	bindings, err := h.service.ListChatBindings(c.Request.Context(), integrationPrincipal(c))
+	if err != nil {
+		integrationError(c, http.StatusInternalServerError, "session_list_failed", "failed to list chat sessions")
+		return
+	}
+	sessions := make([]gin.H, 0, len(bindings))
+	for _, binding := range bindings {
+		session, getErr := h.sessions.GetSession(c.Request.Context(), binding.SessionID)
+		if getErr == nil {
+			sessions = append(sessions, gin.H{
+				"id":         session.ID,
+				"title":      session.Title,
+				"created_at": session.CreatedAt,
+				"updated_at": session.UpdatedAt,
+			})
+		}
+	}
+	integrationData(c, http.StatusOK, sessions)
+}
+
 func (h *IntegrationHandler) GetChatSession(c *gin.Context) {
 	if !h.requireScope(c, "chat:read") {
 		return
@@ -585,6 +609,14 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 		h.service.ReleaseIdempotency(c.Request.Context(), principal, c.FullPath(), c.GetHeader("Idempotency-Key"))
 		integrationError(c, http.StatusInternalServerError, "message_create_failed", "failed to create user message")
 		return
+	}
+	if session, getErr := h.sessions.GetSession(c.Request.Context(), binding.SessionID); getErr == nil && strings.TrimSpace(session.Title) == "" {
+		title := []rune(strings.TrimSpace(req.Query))
+		if len(title) > 30 {
+			title = title[:30]
+		}
+		session.Title = string(title)
+		_ = h.sessions.UpdateSession(c.Request.Context(), session)
 	}
 	assistantMessage, err := h.messages.CreateMessage(c.Request.Context(), &types.Message{ID: assistantID, SessionID: binding.SessionID, RequestID: requestID, Role: "assistant", Channel: "integration"})
 	if err != nil {

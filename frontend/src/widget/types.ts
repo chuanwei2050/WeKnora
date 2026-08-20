@@ -52,6 +52,8 @@ export interface WidgetInstance {
 
 export type WidgetHostMessage =
   | { version: 1; type: 'auth-ready'; ticket: string }
+  | { version: 1; type: 'new-conversation' }
+  | { version: 1; type: 'toggle-conversations' }
   | { version: 1; type: 'set-theme'; theme: WidgetTheme }
   | { version: 1; type: 'configure'; selection: KnowledgeBaseSelection; theme?: WidgetTheme }
 

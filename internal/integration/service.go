@@ -682,6 +682,19 @@ func (s *Service) GetChatBinding(ctx context.Context, principal *Principal, sess
 	return &binding, nil
 }
 
+func (s *Service) ListChatBindings(ctx context.Context, principal *Principal) ([]ChatBinding, error) {
+	if principal == nil {
+		return nil, ErrForbidden
+	}
+	var bindings []ChatBinding
+	err := s.db.WithContext(ctx).
+		Where("client_id = ? AND tenant_id = ? AND user_id = ?", principal.ClientID, principal.TenantID, principal.UserID).
+		Order("created_at DESC").
+		Limit(100).
+		Find(&bindings).Error
+	return bindings, err
+}
+
 func (s *Service) ResolveMessageKnowledgeBases(principal *Principal, binding *ChatBinding, selected *[]string) ([]string, error) {
 	if binding == nil {
 		return nil, ErrForbidden

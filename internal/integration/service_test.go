@@ -174,6 +174,20 @@ func TestChatBindingRejectsOtherSubjectAndModeConflicts(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalid)
 }
 
+func TestListChatBindingsOnlyReturnsCurrentSubject(t *testing.T) {
+	svc := testService(t)
+	owner := &Principal{ClientID: "client", TenantID: 1, UserID: "owner", KnowledgeBaseIDs: []string{"kb-1"}}
+	other := &Principal{ClientID: "client", TenantID: 1, UserID: "other", KnowledgeBaseIDs: []string{"kb-1"}}
+	other.UserID = "other-user"
+	require.NoError(t, svc.CreateChatBinding(context.Background(), owner, "owner-session", "selected", []string{"kb-1"}))
+	require.NoError(t, svc.CreateChatBinding(context.Background(), other, "other-session", "selected", []string{"kb-1"}))
+
+	bindings, err := svc.ListChatBindings(context.Background(), owner)
+	require.NoError(t, err)
+	require.Len(t, bindings, 1)
+	require.Equal(t, "owner-session", bindings[0].SessionID)
+}
+
 func TestConcurrentStreamEventsKeepMonotonicSequence(t *testing.T) {
 	svc := testService(t)
 	var wg sync.WaitGroup
