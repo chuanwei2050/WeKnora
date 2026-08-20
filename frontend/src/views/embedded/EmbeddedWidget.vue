@@ -20,6 +20,8 @@ const instanceId = params.get('instance_id') || 'default'
 const preserveSession = params.get('preserve_session') !== 'false'
 const sessionStorageKey = `weknora-widget-chat:${instanceId}`
 let refreshTimer: number | undefined
+let readyTimer: number | undefined
+let authenticating = false
 
 async function createChatSession() {
   const chatSession = await createIntegrationChatSession(selectionMode.value === 'all-allowed'
@@ -75,7 +77,8 @@ async function onMessage(event: MessageEvent) {
     return
   }
   if (message.type !== 'auth-ready') return
-  if (authenticated.value) return
+  if (authenticated.value || authenticating) return
+  authenticating = true
   try {
     const session = await exchangeBootstrapTicket(message.ticket)
     const configuredSelection = [...knowledgeBaseIds.value]
@@ -98,6 +101,7 @@ async function onMessage(event: MessageEvent) {
       await createChatSession()
     }
     authenticated.value = true
+    if (readyTimer !== undefined) window.clearInterval(readyTimer)
     await refreshConversations()
     if (refreshTimer !== undefined) window.clearInterval(refreshTimer)
     refreshTimer = window.setInterval(() => {
@@ -106,6 +110,8 @@ async function onMessage(event: MessageEvent) {
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '认证失败'
     notifyEmbeddedHost('unauthorized')
+  } finally {
+    authenticating = false
   }
 }
 
@@ -113,11 +119,15 @@ onMounted(() => {
   window.addEventListener('message', onMessage)
   window.addEventListener('weknora:integration-authorization-changed', refreshAuthorizedKnowledgeBases)
   notifyEmbeddedHost('ready')
+  readyTimer = window.setInterval(() => {
+    if (!authenticated.value) notifyEmbeddedHost('ready')
+  }, 1_500)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('message', onMessage)
   window.removeEventListener('weknora:integration-authorization-changed', refreshAuthorizedKnowledgeBases)
   if (refreshTimer !== undefined) window.clearInterval(refreshTimer)
+  if (readyTimer !== undefined) window.clearInterval(readyTimer)
   if (!preserveSession) sessionStorage.removeItem(sessionStorageKey)
 })
 </script>

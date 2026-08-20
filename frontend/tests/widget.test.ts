@@ -85,4 +85,24 @@ describe('floating widget', () => {
     expect(host?.shadowRoot?.querySelector('[aria-label="切换对话"]')).not.toBeNull()
     instance.destroy()
   })
+
+  it('buffers early authentication and replays ready to late listeners', async () => {
+    const instance = initWidget(config())
+    const host = document.querySelector<HTMLElement>('[data-weknora-widget]')
+    const iframe = host?.shadowRoot?.querySelector<HTMLIFrameElement>('iframe')
+    expect(iframe).not.toBeNull()
+
+    expect(() => instance.authenticate('ticket')).not.toThrow()
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: window.location.origin,
+      source: iframe?.contentWindow ?? null,
+      data: { version: 1, type: 'ready' },
+    }))
+
+    const lateReadyListener = vi.fn()
+    instance.on('ready', lateReadyListener)
+    await Promise.resolve()
+    expect(lateReadyListener).toHaveBeenCalledOnce()
+    instance.destroy()
+  })
 })

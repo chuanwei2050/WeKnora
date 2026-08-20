@@ -30,21 +30,36 @@ app.use(i18n);
 
 async function prepareEmbeddedPageSession() {
   const session = await new Promise<Awaited<ReturnType<typeof exchangeBootstrapTicket>>>((resolve, reject) => {
-    let timer = 0
+    let timeoutTimer = 0
+    let readyTimer = 0
+    let authenticating = false
+    let lastError: unknown
+    const cleanup = () => {
+      window.removeEventListener('message', receive)
+      window.clearTimeout(timeoutTimer)
+      window.clearInterval(readyTimer)
+    }
     const receive = async (event: MessageEvent) => {
       if (event.origin !== window.location.origin || event.source !== window.parent) return
       const message = parseEmbeddedMessage(event.data)
-      if (!message || message.type !== 'auth-ready') return
-      window.removeEventListener('message', receive)
-      window.clearTimeout(timer)
-      try { resolve(await exchangeBootstrapTicket(message.ticket)) } catch (error) { reject(error) }
+      if (!message || message.type !== 'auth-ready' || authenticating) return
+      authenticating = true
+      try {
+        const exchange = await exchangeBootstrapTicket(message.ticket)
+        cleanup()
+        resolve(exchange)
+      } catch (error) {
+        lastError = error
+        authenticating = false
+      }
     }
-    timer = window.setTimeout(() => {
-      window.removeEventListener('message', receive)
-      reject(new Error('等待宿主认证超时'))
+    timeoutTimer = window.setTimeout(() => {
+      cleanup()
+      reject(lastError ?? new Error('等待宿主认证超时'))
     }, 60_000)
     window.addEventListener('message', receive)
     notifyEmbeddedHost('ready')
+    readyTimer = window.setInterval(() => notifyEmbeddedHost('ready'), 1_500)
   })
   const authStore = useAuthStore(pinia)
   authStore.setUser({

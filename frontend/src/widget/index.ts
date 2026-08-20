@@ -72,6 +72,8 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   let layout: WidgetLayout = restored ? clampNormal(restored) : initial
   let opened = false
   let destroyed = false
+  let frameReady = false
+  let pendingTicket: string | null = null
   const listeners = new Map<WidgetEventName, Set<(detail: unknown) => void>>()
 
   const host = document.createElement('div')
@@ -267,6 +269,10 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   const instance: WidgetInstance = {
     authenticate(ticket) {
       if (destroyed || !ticket || ticket.length > 512) throw new Error('Invalid bootstrap ticket')
+      if (!frameReady) {
+        pendingTicket = ticket
+        return
+      }
       iframe.contentWindow?.postMessage({ version: 1, type: 'auth-ready', ticket }, config.targetOrigin!)
     },
     open() { if (destroyed || opened) return; opened = true; panel.style.display = 'block'; launcher.style.display = 'none'; render(false); emit('open') },
@@ -278,7 +284,17 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
     restore() { if (layout.mode !== 'maximized') return; layout = clampNormal(layout.restore); render() },
     resetLayout() { layout = initial; sessionStorage.removeItem(storageKey); render() },
     getLayout() { return structuredClone(layout) },
-    on(event, listener) { const bucket = listeners.get(event) ?? new Set(); bucket.add(listener); listeners.set(event, bucket); return () => bucket.delete(listener) },
+    on(event, listener) {
+      const bucket = listeners.get(event) ?? new Set()
+      bucket.add(listener)
+      listeners.set(event, bucket)
+      if (event === 'ready' && frameReady) {
+        queueMicrotask(() => {
+          if (!destroyed && bucket.has(listener)) listener({ version: 1, type: 'ready' })
+        })
+      }
+      return () => bucket.delete(listener)
+    },
   }
 
   const onMessage = (event: MessageEvent) => {
@@ -286,7 +302,13 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
     const message = parseFrameMessage(event.data)
     if (!message) return
     if (message.type === 'ready') {
+      if (frameReady) return
+      frameReady = true
       iframe.contentWindow?.postMessage({ version: 1, type: 'configure', selection: config.selection, theme: config.theme }, config.targetOrigin!)
+      if (pendingTicket) {
+        iframe.contentWindow?.postMessage({ version: 1, type: 'auth-ready', ticket: pendingTicket }, config.targetOrigin!)
+        pendingTicket = null
+      }
     }
     emit(message.type === 'answer-completed' ? 'answer-completed' : message.type, message)
   }
