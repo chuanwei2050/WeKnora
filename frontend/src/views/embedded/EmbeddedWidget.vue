@@ -228,7 +228,7 @@ onBeforeUnmount(() => {
       </div>
       <div v-for="(conversation, index) in compatibleConversations" :key="conversation.id" class="embedded-widget__conversation" :data-session-id="conversation.id" :class="{ active: conversation.id === sessionId }" @click="switchConversation(conversation)">
         <input v-if="editingConversationId === conversation.id" v-model="editingTitle" maxlength="100" aria-label="对话标题" @click.stop @keydown.enter.prevent.stop="saveRename(conversation)" @keydown.esc.prevent.stop="cancelRename" />
-        <span v-else>{{ conversation.title || `新对话 ${compatibleConversations.length - index}` }}</span>
+        <span v-else :title="conversation.title || `新对话 ${compatibleConversations.length - index}`">{{ conversation.title || `新对话 ${compatibleConversations.length - index}` }}</span>
         <time>{{ new Date(conversation.updated_at || conversation.created_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}</time>
         <span class="embedded-widget__conversation-actions">
           <template v-if="editingConversationId === conversation.id">

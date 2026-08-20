@@ -157,6 +157,48 @@ func TestExpiredClientWrongCredentialKindAndOriginAreRejected(t *testing.T) {
 	require.ErrorIs(t, svc.ValidateCSRF(context.Background(), "browser-token", "wrong"), ErrForbidden)
 }
 
+func TestValidateCSRFAcceptsActiveSameSubjectBrowserSession(t *testing.T) {
+	svc := testService(t)
+	now := svc.now()
+	base := Session{Kind: "browser", ClientID: "client", TenantID: 1, UserID: "user", ScopesJSON: `[]`, KnowledgeBaseIDsJSON: `[]`, ExpiresAt: now.Add(time.Hour), AbsoluteExpiresAt: now.Add(2 * time.Hour)}
+	current := base
+	current.ID = "current"
+	current.Digest = digest("current-token")
+	current.CSRFHash = digest("current-csrf")
+	peer := base
+	peer.ID = "peer"
+	peer.Digest = digest("peer-token")
+	peer.CSRFHash = digest("peer-csrf")
+	otherUser := base
+	otherUser.ID = "other-user"
+	otherUser.Digest = digest("other-user-token")
+	otherUser.CSRFHash = digest("other-user-csrf")
+	otherUser.UserID = "other"
+	otherClient := base
+	otherClient.ID = "other-client"
+	otherClient.Digest = digest("other-client-token")
+	otherClient.CSRFHash = digest("other-client-csrf")
+	otherClient.ClientID = "other-client"
+	otherTenant := base
+	otherTenant.ID = "other-tenant"
+	otherTenant.Digest = digest("other-tenant-token")
+	otherTenant.CSRFHash = digest("other-tenant-csrf")
+	otherTenant.TenantID = 2
+	expired := base
+	expired.ID = "expired-peer"
+	expired.Digest = digest("expired-token")
+	expired.CSRFHash = digest("expired-csrf")
+	expired.ExpiresAt = now.Add(-time.Minute)
+	require.NoError(t, svc.db.Create(&[]Session{current, peer, otherUser, otherClient, otherTenant, expired}).Error)
+
+	require.NoError(t, svc.ValidateCSRF(context.Background(), "current-token", "current-csrf"))
+	require.NoError(t, svc.ValidateCSRF(context.Background(), "current-token", "peer-csrf"))
+	require.ErrorIs(t, svc.ValidateCSRF(context.Background(), "current-token", "other-user-csrf"), ErrForbidden)
+	require.ErrorIs(t, svc.ValidateCSRF(context.Background(), "current-token", "other-client-csrf"), ErrForbidden)
+	require.ErrorIs(t, svc.ValidateCSRF(context.Background(), "current-token", "other-tenant-csrf"), ErrForbidden)
+	require.ErrorIs(t, svc.ValidateCSRF(context.Background(), "current-token", "expired-csrf"), ErrForbidden)
+}
+
 func TestChatBindingRejectsOtherSubjectAndModeConflicts(t *testing.T) {
 	svc := testService(t)
 	owner := &Principal{ClientID: "client", TenantID: 1, UserID: "owner", KnowledgeBaseIDs: []string{"kb-1"}}

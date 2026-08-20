@@ -254,7 +254,7 @@ func (h *IntegrationHandler) Refresh(c *gin.Context) {
 		integrationError(c, http.StatusForbidden, "csrf_failed", "CSRF validation failed")
 		return
 	}
-	csrf, err := h.service.Refresh(c.Request.Context(), token)
+	csrf, err := h.service.Refresh(c.Request.Context(), token, c.GetHeader("X-CSRF-Token"))
 	if err != nil {
 		h.service.Audit(c.Request.Context(), nil, "auth.refresh", "denied", "session_expired")
 		integrationError(c, http.StatusUnauthorized, "session_expired", "session refresh failed")

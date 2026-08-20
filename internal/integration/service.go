@@ -521,19 +521,30 @@ func (s *Service) Authenticate(ctx context.Context, token, kind string) (*Princi
 }
 
 func (s *Service) ValidateCSRF(ctx context.Context, browserToken, csrf string) error {
-	var session Session
-	if csrf == "" || s.db.WithContext(ctx).Where("digest = ? AND kind = 'browser'", digest(browserToken)).First(&session).Error != nil || !digestMatches(session.CSRFHash, digest(csrf)) {
+	if csrf == "" {
+		return ErrForbidden
+	}
+	var current Session
+	if s.db.WithContext(ctx).Where("digest = ? AND kind = 'browser'", digest(browserToken)).First(&current).Error != nil {
+		return ErrForbidden
+	}
+	if digestMatches(current.CSRFHash, digest(csrf)) {
+		return nil
+	}
+	var matching Session
+	now := s.now()
+	err := s.db.WithContext(ctx).
+		Where("csrf_hash = ? AND kind = 'browser' AND client_id = ? AND tenant_id = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ? AND absolute_expires_at > ?",
+			digest(csrf), current.ClientID, current.TenantID, current.UserID, now, now).
+		First(&matching).Error
+	if err != nil {
 		return ErrForbidden
 	}
 	return nil
 }
 
-func (s *Service) Refresh(ctx context.Context, browserToken string) (string, error) {
+func (s *Service) Refresh(ctx context.Context, browserToken, csrf string) (string, error) {
 	principal, _, _, err := s.Authenticate(ctx, browserToken, "browser")
-	if err != nil {
-		return "", err
-	}
-	csrf, err := randomToken()
 	if err != nil {
 		return "", err
 	}
@@ -546,7 +557,7 @@ func (s *Service) Refresh(ctx context.Context, browserToken string) (string, err
 	if expires.After(session.AbsoluteExpiresAt) {
 		expires = session.AbsoluteExpiresAt
 	}
-	err = s.db.WithContext(ctx).Model(&Session{}).Where("digest = ? AND client_id = ?", digest(browserToken), principal.ClientID).Updates(map[string]any{"expires_at": expires, "csrf_hash": digest(csrf)}).Error
+	err = s.db.WithContext(ctx).Model(&Session{}).Where("digest = ? AND client_id = ?", digest(browserToken), principal.ClientID).Update("expires_at", expires).Error
 	if err == nil {
 		s.Audit(ctx, principal, "auth.refresh", "allowed", "")
 	}
