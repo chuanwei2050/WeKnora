@@ -18,6 +18,7 @@ import { listModels, type ModelConfig } from '@/api/model';
 import { listAgents, type CustomAgent, type CustomAgentConfig, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider';
 import { getConversationConfig, updateConversationConfig, type ConversationConfig } from '@/api/system';
+import { listIntegrationKnowledgeBases } from '@/api/integration';
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
 import { useVoiceConversation } from '@/composables/useVoiceConversation';
@@ -92,13 +93,26 @@ const showAgentModeSelector = ref(false);
 const agentModeButtonRef = ref<HTMLElement>();
 const agentModeDropdownStyle = ref<Record<string, string>>({});
 
+const props = defineProps({
+  isReplying: { type: Boolean, required: false },
+  sessionId: { type: String, required: false },
+  assistantMessageId: { type: String, required: false },
+  embeddedMode: { type: Boolean, default: false },
+  agentId: { type: String, default: '' },
+  kbIds: { type: Array as () => string[], default: () => [] }
+});
+
 // 智能体相关状态（完整列表供选中态解析；对话下拉用 enabledAgents）
 const agents = ref<CustomAgent[]>([]);
 /** 当前租户自有停用项与平台全局停用智能体 ID 的合并结果 */
 const disabledOwnAgentIds = ref<string[]>([]);
 const selectedAgentId = computed({
-  get: () => settingsStore.selectedAgentId || BUILTIN_QUICK_ANSWER_ID,
-  set: (val: string) => settingsStore.selectAgent(val)
+  get: () => props.embeddedMode
+    ? (props.agentId || BUILTIN_QUICK_ANSWER_ID)
+    : (settingsStore.selectedAgentId || BUILTIN_QUICK_ANSWER_ID),
+  set: (val: string) => {
+    if (!props.embeddedMode) settingsStore.selectAgent(val);
+  }
 });
 const selectedAgent = computed(() => {
   const mine = agents.value.find(a => a.id === selectedAgentId.value);
@@ -166,6 +180,9 @@ const resolvedAsrModelId = computed(() => {
   }
   return '';
 });
+const resolvedAsrModel = computed(() => (
+  availableAsrModels.value.find((model) => model.id === resolvedAsrModelId.value)
+));
 const resolvedTtsModelId = computed(() => {
   const cfg = currentAgentConfig.value || {};
   if (cfg.tts_model_id) return String(cfg.tts_model_id);
@@ -330,6 +347,7 @@ const mentionEmptyHint = computed(() => {
 
 // 智能体是否启用了图片上传（多模态）
 const isImageUploadEnabledByAgent = computed(() => {
+  if (props.embeddedMode) return true;
   if (!hasAgentConfig.value) return false;
   return currentAgentConfig.value?.image_upload_enabled === true;
 });
@@ -370,29 +388,11 @@ const sharedAgentOrgName = computed(() => {
   return shared?.org_name || shared?.shared_by_username || '';
 });
 
-const props = defineProps({
-  isReplying: {
-    type: Boolean,
-    required: false
-  },
-  sessionId: {
-    type: String,
-    required: false
-  },
-  assistantMessageId: {
-    type: String,
-    required: false
-  },
-  embeddedMode: {
-    type: Boolean,
-    default: false
-  }
+const voiceConversation = useVoiceConversation({
+  sessionId: props.sessionId || '',
+  asrModelId: () => String(resolvedAsrModelId.value || ''),
+  streamingAsrEnabled: () => resolvedAsrModel.value?.parameters?.capabilities?.streaming === true,
 });
-
-const voiceConversation = useVoiceConversation(
-  props.sessionId || '',
-  () => String(resolvedAsrModelId.value || '')
-);
 const voiceInputAvailable = computed(() => Boolean(
   props.sessionId &&
   currentAgentConfig.value?.voice_input_enabled &&
@@ -400,8 +400,12 @@ const voiceInputAvailable = computed(() => Boolean(
   voiceConversation.supported.value
 ));
 const voiceTranscript = computed(() => voiceConversation.finalText.value);
-const voicePartialTranscript = computed(() => voiceConversation.partialText.value);
 const voiceState = computed(() => voiceConversation.state.value);
+const voiceWavePattern = [0.52, 0.78, 1, 0.66, 0.46, 0.84, 0.58, 0.92, 0.62];
+const voiceWaveHeight = (index: number) => {
+  const amplitude = Math.max(0.08, voiceConversation.volumeLevel.value);
+  return `${Math.round(3 + amplitude * 12 * voiceWavePattern[index - 1])}px`;
+};
 const voiceInputLabel = computed(() => {
   if (voiceState.value === 'recording') return '停止录音';
   if (voiceState.value === 'requesting') return '正在启动语音输入';
@@ -424,16 +428,28 @@ const toggleVoiceRecording = async () => {
   }
 };
 
-const confirmVoiceTranscript = () => {
-  const result = voiceConversation.confirmFinalText();
+const applyVoiceTranscript = async (text: string) => {
+  const result = voiceConversation.confirmFinalText(text);
   if (!result.text.trim()) return;
-  query.value = result.text;
+  const textarea = getTextareaEl();
+  const selectionStart = textarea?.selectionStart ?? query.value.length;
+  const selectionEnd = textarea?.selectionEnd ?? selectionStart;
+  query.value = `${query.value.slice(0, selectionStart)}${result.text}${query.value.slice(selectionEnd)}`;
   pendingVoiceMetadata.value = result.voice_metadata || undefined;
+  await nextTick();
+  const cursor = selectionStart + result.text.length;
+  const currentTextarea = getTextareaEl();
+  currentTextarea?.focus();
+  currentTextarea?.setSelectionRange(cursor, cursor);
 };
+
+watch(voiceTranscript, (text) => {
+  if (text.trim()) void applyVoiceTranscript(text);
+});
 
 const isAgentEnabled = computed(() => settingsStore.isAgentEnabled);
 const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
-const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
+const selectedKbIds = computed(() => props.embeddedMode ? props.kbIds : (settingsStore.settings.selectedKnowledgeBases || []));
 const selectedFileIds = computed(() => settingsStore.settings.selectedFiles || []);
 
 // 获取已选择的知识库信息
@@ -585,19 +601,13 @@ const loadKnowledgeBases = async () => {
   try {
     const response: any = await listKnowledgeBases();
     if (response.data && Array.isArray(response.data)) {
-      const validKbs = response.data.filter((kb: any) => {
-        const strategy = kb.indexing_strategy
-        const needsEmbedding = !strategy || strategy.vector_enabled
-        if (needsEmbedding && (!kb.embedding_model_id || kb.embedding_model_id === '')) return false
-        return true
-      });
-      knowledgeBases.value = validKbs;
+      knowledgeBases.value = response.data;
 
       // 拉取共享知识库（供 @ 提及与清理选中项时识别）
       await orgStore.fetchSharedKnowledgeBases().catch(() => {});
 
       // 清理无效的知识库ID：只移除既不在自己列表、也不在组织共享、也不在共享智能体知识库中的 ID（刷新后保留共享智能体下已选知识库）
-      const validKbIds = new Set(validKbs.map((kb: any) => kb.id));
+      const validKbIds = new Set(response.data.map((kb: any) => kb.id));
       const sharedKbIds = new Set(
         (orgStore.sharedKnowledgeBases || []).map((s: any) => s.knowledge_base?.id).filter(Boolean)
       );
@@ -709,10 +719,8 @@ const loadWebSearchConfig = async () => {
 // 加载智能体列表（我的 + 共享，供选中态与就绪检查用）
 const loadAgents = async () => {
   try {
-    const [agentsRes] = await Promise.all([
-      listAgents(),
-      orgStore.fetchSharedAgents(),
-    ]);
+    const agentsRes = await listAgents();
+    if (!props.embeddedMode) await orgStore.fetchSharedAgents();
     const res = agentsRes as { data?: CustomAgent[]; disabled_own_agent_ids?: string[] }
     agents.value = res.data || []
     disabledOwnAgentIds.value = res.disabled_own_agent_ids || []
@@ -1459,12 +1467,17 @@ let resizeHandler: (() => void) | null = null;
 let scrollHandler: (() => void) | null = null;
 
 onMounted(() => {
-  if (!props.embeddedMode) {
+  loadConversationConfig();
+  loadChatModels();
+  loadAgents();
+  if (props.embeddedMode) {
+    listIntegrationKnowledgeBases().then((items) => {
+      const allowed = new Set(props.kbIds);
+      knowledgeBases.value = items.filter((item) => allowed.has(item.id));
+    }).catch(() => { knowledgeBases.value = []; });
+  } else {
     loadKnowledgeBases();
     loadWebSearchConfig();
-    loadConversationConfig();
-    loadChatModels();
-    loadAgents();
   }
 
   // 从持久化恢复 fileId -> kbId，刷新后共享知识库文件可带 kb_id 拉取（仅保留当前仍选中的文件）
@@ -2055,7 +2068,7 @@ defineExpose({
 
 </script>
 <template>
-  <div class="answers-input" @drop="onDrop" @dragover="onDragOver">
+  <div class="answers-input" :class="{ 'is-embedded': embeddedMode }" @drop="onDrop" @dragover="onDragOver">
     <!-- Hidden file input for image upload -->
     <input
       ref="imageInputRef"
@@ -2121,7 +2134,6 @@ defineExpose({
         @compositionend="onCompositionEnd"
         @paste="onPaste"
       />
-    </div>
     
     <!-- Mention Selector -->
     <Teleport to="body">
@@ -2141,9 +2153,9 @@ defineExpose({
     <!-- 控制栏 -->
     <div class="control-bar">
       <!-- 左侧控制按钮 -->
-      <div class="control-left" v-if="!embeddedMode">
+      <div class="control-left">
         <!-- Agent 模式切换按钮 -->
-        <div 
+        <div v-if="!embeddedMode"
           ref="agentModeButtonRef"
           class="control-btn agent-mode-btn"
           :class="{ 
@@ -2169,7 +2181,7 @@ defineExpose({
         </div>
 
         <!-- Agent 选择器下拉菜单 -->
-        <AgentSelector
+        <AgentSelector v-if="!embeddedMode"
           :visible="showAgentModeSelector"
           :anchorEl="agentModeButtonRef"
           :currentAgentId="selectedAgentId"
@@ -2179,7 +2191,7 @@ defineExpose({
         />
 
         <!-- WebSearch 开关按钮 -->
-        <t-tooltip v-if="isWebSearchConfigured" placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+        <t-tooltip v-if="!embeddedMode && isWebSearchConfigured" placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
           <template #content>
             <div v-if="isWebSearchDisabledByAgent" class="tooltip-with-link">
               <span>{{ $t('input.webSearchDisabledByAgent') }}</span>
@@ -2228,6 +2240,8 @@ defineExpose({
           </template>
           <div
             class="control-btn image-upload-btn"
+            role="button"
+            :aria-label="$t('chat.imageUploadTooltip')"
             :class="{ 
               'active': uploadedImages.length > 0,
               'disabled': !isImageUploadEnabledByAgent
@@ -2250,6 +2264,8 @@ defineExpose({
           </template>
           <div
             class="control-btn attachment-upload-btn"
+            role="button"
+            :aria-label="$t('chat.attachmentUploadTooltip')"
             :class="{ 'active': uploadedAttachments.length > 0 }"
             @click.stop="attachmentUploadRef?.triggerFileSelect()"
           >
@@ -2292,39 +2308,42 @@ defineExpose({
 
       <!-- 右侧控制按钮组 -->
       <div class="control-right">
-        <!-- 语音输入按钮；转写结果需显式确认后才会作为消息发送 -->
+        <!-- 语音输入：停止后自动将转写结果写入输入框 -->
         <t-tooltip v-if="voiceInputAvailable" :content="voiceInputLabel" placement="top">
-          <div
-            class="control-btn voice-btn"
-            :class="{
-              recording: voiceState === 'recording',
-              processing: voiceState === 'requesting' || voiceState === 'finalizing',
-              disabled: isReplying
-            }"
-            role="button"
-            tabindex="0"
-            :aria-label="voiceInputLabel"
-            :aria-pressed="voiceState === 'recording'"
-            :aria-busy="voiceState === 'requesting' || voiceState === 'finalizing'"
-            @click.stop="toggleVoiceRecording"
-            @keydown.enter.prevent="toggleVoiceRecording"
-            @keydown.space.prevent="toggleVoiceRecording"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="9" y="3" width="6" height="11" rx="3" />
-              <path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" />
-            </svg>
+          <div class="voice-control" :class="{ recording: voiceState === 'recording' }">
+            <div v-if="voiceState === 'recording'" class="voice-wave" aria-hidden="true">
+              <span v-for="index in 9" :key="index" :style="{ height: voiceWaveHeight(index) }"></span>
+            </div>
+            <div
+              class="control-btn voice-btn"
+              :class="{
+                recording: voiceState === 'recording',
+                processing: voiceState === 'requesting' || voiceState === 'finalizing',
+                disabled: isReplying
+              }"
+              role="button"
+              tabindex="0"
+              :aria-label="voiceInputLabel"
+              :aria-pressed="voiceState === 'recording'"
+              :aria-busy="voiceState === 'requesting' || voiceState === 'finalizing'"
+              @click.stop="toggleVoiceRecording"
+              @keydown.enter.prevent="toggleVoiceRecording"
+              @keydown.space.prevent="toggleVoiceRecording"
+            >
+              <svg v-if="voiceState === 'recording'" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <rect x="5" y="5" width="6" height="6" rx="1" />
+              </svg>
+              <svg v-else-if="voiceState === 'requesting' || voiceState === 'finalizing'" class="voice-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" opacity="0.22" />
+                <path d="M20 12a8 8 0 0 0-8-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="9" y="3" width="6" height="11" rx="3" />
+                <path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" />
+              </svg>
+            </div>
           </div>
         </t-tooltip>
-        <span v-if="voicePartialTranscript" class="voice-transcript" role="status">{{ voicePartialTranscript }}</span>
-        <button
-          v-if="voiceTranscript && !isReplying"
-          type="button"
-          class="voice-confirm-btn"
-          @click.stop="confirmVoiceTranscript"
-        >
-          使用转写
-        </button>
         <!-- 停止按钮（仅在回复中时显示） -->
         <t-tooltip 
           v-if="isReplying"
@@ -2347,10 +2366,13 @@ defineExpose({
         @click="createSession(query)" 
         class="control-btn send-btn"
         :class="{ 'disabled': !query.length }"
+        role="button"
+        :aria-label="$t('input.send')"
       >
         <img src="../assets/img/sending-aircraft.svg" :alt="$t('input.send')" />
         </div>
       </div>
+    </div>
     </div>
 
     <!-- 知识库选择下拉（使用 Teleport 传送到 body，避免父容器定位影响） -->
@@ -2968,6 +2990,35 @@ const getImgSrc = (url: string) => {
   gap: 8px;
 }
 
+.voice-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  &.recording {
+    min-width: 112px;
+    border-radius: 999px;
+    padding-left: 10px;
+    background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+  }
+}
+
+.voice-wave {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  height: 18px;
+
+  span {
+    width: 3px;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--td-text-color-placeholder, #b5b5b5);
+    transition: height 80ms ease-out;
+  }
+}
+
 .voice-btn {
   width: 28px;
   height: 28px;
@@ -2975,11 +3026,10 @@ const getImgSrc = (url: string) => {
   border: 1px solid var(--td-component-border, #e7e7e7);
 
   &.recording {
-    color: var(--td-error-color, #d54941);
-    background: var(--td-error-color-light, #fdecee);
-    border-color: var(--td-error-color, #d54941);
-    box-shadow: 0 0 0 3px var(--td-error-color-light, #fdecee);
-    animation: voice-state-pulse 1.4s ease-in-out infinite;
+    flex: none;
+    color: var(--td-text-color-primary, #1d1d1f);
+    background: transparent;
+    border-color: transparent;
   }
 
   &.processing {
@@ -2990,38 +3040,19 @@ const getImgSrc = (url: string) => {
   }
 }
 
-@keyframes voice-state-pulse {
-  50% {
-    box-shadow: 0 0 0 5px var(--td-error-color-light, #fdecee);
-  }
+.voice-spinner {
+  animation: voice-spin 0.8s linear infinite;
+}
+
+@keyframes voice-spin {
+  to { transform: rotate(360deg); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .voice-btn.recording {
+  .voice-wave span,
+  .voice-spinner {
     animation: none;
-  }
-}
-
-.voice-transcript {
-  max-width: 180px;
-  overflow: hidden;
-  color: var(--td-text-color-secondary, #666);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.voice-confirm-btn {
-  border: 0;
-  border-radius: 6px;
-  padding: 5px 8px;
-  color: var(--td-brand-color);
-  background: rgba(16, 185, 129, 0.08);
-  cursor: pointer;
-  font-size: 12px;
-
-  &:hover {
-    background: rgba(16, 185, 129, 0.14);
+    transition: none;
   }
 }
 
@@ -3089,6 +3120,43 @@ const getImgSrc = (url: string) => {
   img {
     width: 16px;
     height: 16px;
+  }
+}
+
+.answers-input.is-embedded {
+  width: 100%;
+
+  .rich-input-container {
+    width: min(100%, 800px);
+    margin-inline: auto;
+    box-shadow: 0 3px 12px rgba(27, 75, 96, 0.08);
+
+    &:focus-within {
+      box-shadow: 0 0 0 3px rgba(66, 168, 207, 0.1), 0 4px 14px rgba(27, 75, 96, 0.08);
+    }
+  }
+
+  :deep(.t-textarea__inner) {
+    min-height: 104px !important;
+    max-height: 180px !important;
+    padding-bottom: 52px;
+  }
+
+  .control-bar {
+    flex-wrap: nowrap;
+    width: auto;
+    min-width: 0;
+  }
+
+  .control-left,
+  .control-right {
+    flex-wrap: nowrap;
+    flex: 0 0 auto;
+  }
+
+  .send-btn.disabled {
+    opacity: 0.72;
+    background-color: #d8e8f2;
   }
 }
 

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/handler/session"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	integrationauth "github.com/Tencent/WeKnora/internal/integration"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -25,13 +28,18 @@ type IntegrationHandler struct {
 	sessions    interfaces.SessionService
 	messages    interfaces.MessageService
 	streams     interfaces.StreamManager
+	attachments *session.AttachmentProcessor
 	limiter     *integrationRateLimiter
 	limits      integrationLimits
 	generations sync.Map
 }
 
-func NewIntegrationHandler(service *integrationauth.Service, kbs interfaces.KnowledgeBaseService, sessions interfaces.SessionService, messages interfaces.MessageService, streams interfaces.StreamManager) *IntegrationHandler {
-	return &IntegrationHandler{service: service, kbs: kbs, sessions: sessions, messages: messages, streams: streams, limiter: newIntegrationRateLimiter(), limits: loadIntegrationLimits()}
+func NewIntegrationHandler(service *integrationauth.Service, kbs interfaces.KnowledgeBaseService, sessions interfaces.SessionService, messages interfaces.MessageService, streams interfaces.StreamManager, files interfaces.FileService, models interfaces.ModelService, documents interfaces.DocumentReader, imageResolver *docparser.ImageResolver) *IntegrationHandler {
+	return &IntegrationHandler{
+		service: service, kbs: kbs, sessions: sessions, messages: messages, streams: streams,
+		attachments: session.NewAttachmentProcessor(files, documents, imageResolver, models),
+		limiter:     newIntegrationRateLimiter(), limits: loadIntegrationLimits(),
+	}
 }
 
 type integrationLimits struct {
@@ -55,7 +63,7 @@ func loadIntegrationLimits() integrationLimits {
 		defaultTopK:       positiveEnv("INTEGRATION_DEFAULT_TOP_K", 10),
 		maxTopK:           positiveEnv("INTEGRATION_MAX_TOP_K", 50),
 		maxQueryBytes:     positiveEnv("INTEGRATION_MAX_QUERY_BYTES", 8192),
-		maxRequestBytes:   positiveEnv("INTEGRATION_MAX_REQUEST_BYTES", 64*1024),
+		maxRequestBytes:   positiveEnv("INTEGRATION_MAX_REQUEST_BYTES", 25*1024*1024),
 	}
 	if limits.defaultTopK > limits.maxTopK {
 		limits.defaultTopK = limits.maxTopK
@@ -223,7 +231,7 @@ func (h *IntegrationHandler) Exchange(c *gin.Context) {
 	c.Header("Vary", "Origin")
 	c.Header("Referrer-Policy", "strict-origin")
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(integrationauth.BrowserCookieName, token, int(integrationauth.SessionMaxTTL.Seconds()), "/knowledge/", "", true, true)
+	c.SetCookie(integrationauth.BrowserCookieName, token, int(integrationauth.SessionMaxTTL.Seconds()), "/", "", true, true)
 	integrationData(c, http.StatusOK, gin.H{"csrf_token": csrf, "user": user, "knowledge_base_ids": principal.KnowledgeBaseIDs})
 }
 
@@ -265,7 +273,7 @@ func (h *IntegrationHandler) Logout(c *gin.Context) {
 		_ = h.service.Logout(c.Request.Context(), token)
 	}
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(integrationauth.BrowserCookieName, "", -1, "/knowledge/", "", true, true)
+	c.SetCookie(integrationauth.BrowserCookieName, "", -1, "/", "", true, true)
 	integrationData(c, http.StatusOK, gin.H{"logged_out": true})
 }
 
@@ -546,6 +554,61 @@ func (h *IntegrationHandler) GetChatSession(c *gin.Context) {
 	})
 }
 
+func (h *IntegrationHandler) UpdateChatSession(c *gin.Context) {
+	if !h.requireScope(c, "chat:write") {
+		return
+	}
+	if _, err := h.service.GetChatBinding(c.Request.Context(), integrationPrincipal(c), c.Param("session_id")); err != nil {
+		integrationError(c, http.StatusForbidden, "session_denied", "session access denied")
+		return
+	}
+	var req struct {
+		Title string `json:"title" binding:"required"`
+	}
+	if c.ShouldBindJSON(&req) != nil {
+		integrationError(c, http.StatusBadRequest, "invalid_session_title", "title is required")
+		return
+	}
+	req.Title = strings.TrimSpace(req.Title)
+	if req.Title == "" || len([]rune(req.Title)) > 100 {
+		integrationError(c, http.StatusBadRequest, "invalid_session_title", "title must be between 1 and 100 characters")
+		return
+	}
+	session, err := h.sessions.GetSession(c.Request.Context(), c.Param("session_id"))
+	if err != nil {
+		integrationError(c, http.StatusNotFound, "session_not_found", "session not found")
+		return
+	}
+	session.Title = req.Title
+	if err = h.sessions.UpdateSession(c.Request.Context(), session); err != nil {
+		integrationError(c, http.StatusInternalServerError, "session_update_failed", "failed to update chat session")
+		return
+	}
+	h.audit(c, "api.chat.session.update", "allowed", "")
+	integrationData(c, http.StatusOK, gin.H{"id": session.ID, "title": session.Title})
+}
+
+func (h *IntegrationHandler) DeleteChatSession(c *gin.Context) {
+	if !h.requireScope(c, "chat:write") {
+		return
+	}
+	principal := integrationPrincipal(c)
+	if _, err := h.service.GetChatBinding(c.Request.Context(), principal, c.Param("session_id")); err != nil {
+		integrationError(c, http.StatusForbidden, "session_denied", "session access denied")
+		return
+	}
+	if err := h.sessions.DeleteSession(c.Request.Context(), c.Param("session_id")); err != nil {
+		integrationError(c, http.StatusInternalServerError, "session_delete_failed", "failed to delete chat session")
+		return
+	}
+	if err := h.service.DeleteChatBinding(c.Request.Context(), principal, c.Param("session_id")); err != nil {
+		integrationError(c, http.StatusInternalServerError, "session_binding_delete_failed", "chat session was deleted but its integration binding could not be removed")
+		return
+	}
+	h.audit(c, "api.chat.session.delete", "allowed", "")
+	c.Status(http.StatusNoContent)
+}
+
 func (h *IntegrationHandler) ListChatMessages(c *gin.Context) {
 	if !h.requireScope(c, "chat:read") {
 		return
@@ -580,9 +643,51 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	var req struct {
 		Query                    string    `json:"query" binding:"required"`
 		SelectedKnowledgeBaseIDs *[]string `json:"selected_knowledge_base_ids"`
+		Images                   []struct {
+			Data string `json:"data"`
+		} `json:"images"`
+		AttachmentUploads []struct {
+			Data     string `json:"data"`
+			FileName string `json:"file_name"`
+			FileSize int64  `json:"file_size"`
+		} `json:"attachment_uploads"`
+		VoiceMetadata map[string]string `json:"voice_metadata"`
 	}
 	if c.ShouldBindJSON(&req) != nil || strings.TrimSpace(req.Query) == "" || len(req.Query) > h.limits.maxQueryBytes {
 		integrationError(c, http.StatusBadRequest, "invalid_message", "query is required")
+		return
+	}
+	if len(req.Images) > 5 || len(req.AttachmentUploads) > 5 {
+		integrationError(c, http.StatusBadRequest, "invalid_attachment", "at most 5 images and 5 files are allowed")
+		return
+	}
+	imageURLs := make([]string, 0, len(req.Images))
+	messageImages := make(types.MessageImages, 0, len(req.Images))
+	for _, image := range req.Images {
+		if !isSupportedIntegrationImage(image.Data) {
+			integrationError(c, http.StatusBadRequest, "invalid_image", "image must be a supported base64 data URL")
+			return
+		}
+		imageURLs = append(imageURLs, image.Data)
+		messageImages = append(messageImages, types.MessageImage{URL: image.Data})
+	}
+	processedAttachments := make(types.MessageAttachments, 0, len(req.AttachmentUploads))
+	for _, upload := range req.AttachmentUploads {
+		decoded, decodeErr := base64.StdEncoding.DecodeString(upload.Data)
+		if decodeErr != nil || int64(len(decoded)) != upload.FileSize || upload.FileSize <= 0 || upload.FileSize > 20*1024*1024 {
+			integrationError(c, http.StatusBadRequest, "invalid_attachment", "file payload or size is invalid")
+			return
+		}
+		processed, processErr := h.attachments.ProcessAttachment(c.Request.Context(), decoded, upload.FileName, upload.FileSize, principal.TenantID, "")
+		if processErr != nil {
+			integrationError(c, http.StatusBadRequest, "invalid_attachment", processErr.Error())
+			return
+		}
+		processedAttachments = append(processedAttachments, *processed)
+	}
+	voiceMetadata, marshalErr := json.Marshal(req.VoiceMetadata)
+	if marshalErr != nil {
+		integrationError(c, http.StatusBadRequest, "invalid_voice_metadata", "voice metadata is invalid")
 		return
 	}
 	selected, err := h.service.ResolveMessageKnowledgeBases(principal, binding, req.SelectedKnowledgeBaseIDs)
@@ -614,7 +719,7 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 		return
 	}
 	requestID := uuid.NewString()
-	userMessage, err := h.messages.CreateMessage(c.Request.Context(), &types.Message{ID: uuid.NewString(), SessionID: binding.SessionID, RequestID: requestID, Content: req.Query, Role: "user", IsCompleted: true, Channel: "integration"})
+	userMessage, err := h.messages.CreateMessage(c.Request.Context(), &types.Message{ID: uuid.NewString(), SessionID: binding.SessionID, RequestID: requestID, Content: req.Query, Role: "user", IsCompleted: true, Channel: "integration", Images: messageImages, Attachments: processedAttachments, VoiceMetadata: types.JSON(voiceMetadata)})
 	if err != nil {
 		h.service.ReleaseIdempotency(c.Request.Context(), principal, c.FullPath(), c.GetHeader("Idempotency-Key"))
 		integrationError(c, http.StatusInternalServerError, "message_create_failed", "failed to create user message")
@@ -639,13 +744,24 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	eventBus := event.NewEventBus()
 	var answer strings.Builder
 	var references any = []any{}
+	generationDone := make(chan error, 1)
+	var generationDoneOnce sync.Once
 	eventBus.On(event.EventAgentFinalAnswer, func(ctx context.Context, evt event.Event) error {
 		data, ok := evt.Data.(event.AgentFinalAnswerData)
-		if !ok || data.Content == "" {
+		if !ok {
 			return nil
 		}
-		answer.WriteString(data.Content)
-		_, _ = h.service.AppendStreamEvent(ctx, binding.SessionID, assistantMessage.ID, "answer.delta", gin.H{"content": data.Content})
+		if data.Content != "" {
+			answer.WriteString(data.Content)
+			_, _ = h.service.AppendStreamEvent(ctx, binding.SessionID, assistantMessage.ID, "answer.delta", gin.H{"content": data.Content})
+		}
+		if data.Done {
+			generationDoneOnce.Do(func() { generationDone <- nil })
+		}
+		return nil
+	})
+	eventBus.On(event.EventError, func(_ context.Context, _ event.Event) error {
+		generationDoneOnce.Do(func() { generationDone <- errors.New("generation stream failed") })
 		return nil
 	})
 	eventBus.On(event.EventAgentReferences, func(ctx context.Context, evt event.Event) error {
@@ -663,7 +779,14 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	}()
 	session, err := h.sessions.GetSession(generationCtx, binding.SessionID)
 	if err == nil {
-		err = h.sessions.KnowledgeQA(generationCtx, &types.QARequest{Session: session, Query: req.Query, AssistantMessageID: assistantMessage.ID, KnowledgeBaseIDs: selected, UserMessageID: userMessage.ID}, eventBus)
+		err = h.sessions.KnowledgeQA(generationCtx, &types.QARequest{Session: session, Query: req.Query, AssistantMessageID: assistantMessage.ID, KnowledgeBaseIDs: selected, UserMessageID: userMessage.ID, ImageURLs: imageURLs, Attachments: processedAttachments}, eventBus)
+	}
+	if err == nil {
+		select {
+		case err = <-generationDone:
+		case <-generationCtx.Done():
+			err = generationCtx.Err()
+		}
 	}
 	if generationCtx.Err() != nil {
 		h.writeStoredEvents(c, binding, assistantMessage.ID, "")
@@ -684,6 +807,16 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	_, _ = h.service.AppendStreamEvent(c.Request.Context(), binding.SessionID, assistantMessage.ID, "answer.completed", gin.H{"status": "completed", "answer": assistantMessage.Content, "selected_knowledge_base_ids": selected, "references": references})
 	h.service.AuditResources(c.Request.Context(), principal, "api.chat.message.create", "allowed", "", selected)
 	h.writeStoredEvents(c, binding, assistantMessage.ID, "")
+}
+
+func isSupportedIntegrationImage(data string) bool {
+	for _, prefix := range []string{"data:image/jpeg;base64,", "data:image/png;base64,", "data:image/gif;base64,", "data:image/webp;base64,"} {
+		if strings.HasPrefix(data, prefix) {
+			decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(data, prefix))
+			return err == nil && len(decoded) > 0 && len(decoded) <= 10*1024*1024
+		}
+	}
+	return false
 }
 
 func (h *IntegrationHandler) writeStoredEvents(c *gin.Context, binding *integrationauth.ChatBinding, messageID, after string) {

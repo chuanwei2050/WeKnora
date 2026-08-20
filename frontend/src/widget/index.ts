@@ -130,7 +130,7 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   const titleIcon = document.createElement('img')
   titleIcon.src = icon.src
   titleIcon.alt = ''
-  applyStyles(titleIcon, { width: '38px', height: '38px', flex: '0 0 auto', padding: '2px', borderRadius: '12px', background: '#e7f6fa', objectFit: 'contain', boxShadow: 'inset 0 0 0 1px rgba(11,95,138,.1)' })
+  applyStyles(titleIcon, { width: '38px', height: '38px', flex: '0 0 auto', padding: '2px', borderRadius: '12px', background: '#e7f6fa', objectFit: 'contain' })
   titlebar.append(titleIcon)
   const titleCopy = document.createElement('span')
   const title = document.createElement('strong')
@@ -161,7 +161,9 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   maximizeButton.className = 'weknora-shell-button'
   maximizeButton.type = 'button'
   maximizeButton.setAttribute('aria-label', '最大化聊天窗口')
-  maximizeButton.textContent = '□'
+  const maximizeIcon = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 4H4v4M16 4h4v4M20 16v4h-4M8 20H4v-4"/></svg>'
+  const restoreIcon = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 4H4v5M15 4h5v5M20 15v5h-5M4 15v5h5"/><path d="m4 9 5-5m6 0 5 5m0 6-5 5M9 20l-5-5"/></svg>'
+  maximizeButton.innerHTML = maximizeIcon
   applyStyles(maximizeButton, { position: 'absolute', top: '16px', right: '46px', width: '32px', height: '32px', border: '0', borderRadius: '10px', color: '#405560', background: '#edf4f6', pointerEvents: 'auto', cursor: 'pointer', transition: 'background .16s ease,color .16s ease' })
 
   const closeButton = document.createElement('button')
@@ -176,6 +178,7 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   const iframeURL = new URL(config.iframeUrl)
   iframeURL.searchParams.set('instance_id', config.instanceId)
   iframeURL.searchParams.set('preserve_session', config.preserveSession === false ? 'false' : 'true')
+  iframeURL.searchParams.set('parent_origin', window.location.origin)
   iframe.src = iframeURL.href
   iframe.referrerPolicy = 'strict-origin'
   iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-downloads')
@@ -203,12 +206,12 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
     if (layout.mode === 'normal') {
       layout = normal
       applyStyles(panel, { left: `${normal.position.x}px`, top: `${normal.position.y}px`, width: `${normal.size.width}px`, height: `${normal.size.height}px`, borderRadius: '18px' })
-      maximizeButton.textContent = '□'
+      maximizeButton.innerHTML = maximizeIcon
       maximizeButton.setAttribute('aria-label', '最大化聊天窗口')
       sessionStorage.setItem(storageKey, JSON.stringify(normal))
     } else {
       applyStyles(panel, { left: `${viewport.x}px`, top: `${viewport.y}px`, width: `${viewport.width}px`, height: `${viewport.height}px`, borderRadius: '0' })
-      maximizeButton.textContent = '❐'
+      maximizeButton.innerHTML = restoreIcon
       maximizeButton.setAttribute('aria-label', '还原聊天窗口')
     }
     if (notify) emit('layout-changed', layout)

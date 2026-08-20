@@ -16,12 +16,20 @@ function isCanceledError(cause: unknown): boolean {
   );
 }
 
-export function useVoiceConversation(sessionId: string, asrModelId: () => string) {
+type VoiceConversationOptions = {
+  sessionId: string;
+  asrModelId: () => string;
+  streamingAsrEnabled: () => boolean;
+};
+
+export function useVoiceConversation({ sessionId, asrModelId, streamingAsrEnabled }: VoiceConversationOptions) {
   const state = ref<VoiceRecorderState>('idle');
   const partialText = ref('');
   const finalText = ref('');
   const finalVoiceMetadata = ref<{ source: 'voice'; asr_model_id: string; confirmed_at: string } | null>(null);
   const error = ref('');
+  const batchFallback = ref(false);
+  const volumeLevel = ref(0);
   const playbackState = ref<'idle' | 'loading' | 'playing' | 'paused'>('idle');
   const supported = computed(() => typeof window !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined');
   let recorder: MediaRecorder | null = null;
@@ -35,10 +43,17 @@ export function useVoiceConversation(sessionId: string, asrModelId: () => string
   let ttsAbortController: AbortController | null = null;
   let asrAbortController: AbortController | null = null;
   let cancelRequested = false;
+  let audioContext: AudioContext | null = null;
+  let audioSource: MediaStreamAudioSourceNode | null = null;
+  let analyser: AnalyserNode | null = null;
+  let volumeFrame = 0;
 
   async function start() {
     if (!supported.value || state.value !== 'idle') return false;
     cancelRequested = false;
+    batchFallback.value = false;
+    finalText.value = '';
+    finalVoiceMetadata.value = null;
     stopPlayback();
     state.value = 'requesting';
     error.value = '';
@@ -51,11 +66,12 @@ export function useVoiceConversation(sessionId: string, asrModelId: () => string
       }
       const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(type => MediaRecorder.isTypeSupported(type));
       recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      startVolumeMeter(stream);
       chunks = [];
       recorder.ondataavailable = event => {
         if (event.data.size === 0) return;
+        chunks.push(event.data);
         if (socket?.readyState === WebSocket.OPEN) socket.send(event.data);
-        else chunks.push(event.data);
       };
       recorder.onerror = () => { state.value = 'error'; error.value = 'recording_failed'; cleanup(); };
       recorder.onstop = () => {
@@ -63,13 +79,14 @@ export function useVoiceConversation(sessionId: string, asrModelId: () => string
         else void finalizeBatch();
       };
       recorder.start(250);
-      await openStreamingSocket();
+      state.value = 'recording';
+      if (streamingAsrEnabled()) await openStreamingSocket();
+      else batchFallback.value = true;
       if (cancelRequested) {
         cleanup();
         state.value = 'idle';
         return false;
       }
-      state.value = 'recording';
       return true;
     } catch (cause) {
       state.value = cancelRequested ? 'idle' : 'error';
@@ -82,6 +99,16 @@ export function useVoiceConversation(sessionId: string, asrModelId: () => string
   function stop() {
     if (state.value !== 'recording' || !recorder) return;
     state.value = 'finalizing';
+    if (socket && socket.readyState !== WebSocket.OPEN) {
+      socket.onopen = null;
+      socket.onclose = null;
+      socket.onerror = null;
+      socket.onmessage = null;
+      socket.close();
+      socket = null;
+      batchFallback.value = true;
+    }
+    stopVolumeMeter();
     recorder.stop();
     stream?.getTracks().forEach(track => track.stop());
   }
@@ -129,12 +156,54 @@ export function useVoiceConversation(sessionId: string, asrModelId: () => string
   }
 
   function cleanup(resetRecorder = true) {
+    stopVolumeMeter();
     stream?.getTracks().forEach(track => track.stop());
     stream = null;
     socket?.close();
     socket = null;
     if (resetRecorder) recorder = null;
     chunks = [];
+  }
+
+  function startVolumeMeter(mediaStream: MediaStream) {
+    stopVolumeMeter();
+    if (typeof window === 'undefined' || typeof window.AudioContext === 'undefined') return;
+    try {
+      audioContext = new window.AudioContext();
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.72;
+      audioSource = audioContext.createMediaStreamSource(mediaStream);
+      audioSource.connect(analyser);
+      const samples = new Uint8Array(analyser.fftSize);
+      const updateVolume = () => {
+        if (!analyser) return;
+        analyser.getByteTimeDomainData(samples);
+        let squareSum = 0;
+        for (let index = 0; index < samples.length; index += 1) {
+          const centered = (samples[index] - 128) / 128;
+          squareSum += centered * centered;
+        }
+        volumeLevel.value = Math.min(1, Math.sqrt(squareSum / samples.length) * 4);
+        volumeFrame = window.requestAnimationFrame(updateVolume);
+      };
+      volumeFrame = window.requestAnimationFrame(updateVolume);
+    } catch {
+      stopVolumeMeter();
+    }
+  }
+
+  function stopVolumeMeter() {
+    if (volumeFrame) window.cancelAnimationFrame(volumeFrame);
+    volumeFrame = 0;
+    audioSource?.disconnect();
+    analyser?.disconnect();
+    audioSource = null;
+    analyser = null;
+    const context = audioContext;
+    audioContext = null;
+    if (context && context.state !== 'closed') void context.close().catch(() => undefined);
+    volumeLevel.value = 0;
   }
 
   async function playAnswerTTS(messageId: string, ttsModelId: string, options: { language?: string; voice?: string; speed?: number; format?: string } = {}) {
@@ -225,42 +294,93 @@ export function useVoiceConversation(sessionId: string, asrModelId: () => string
     if (typeof WebSocket === 'undefined') return;
     try {
       const ticket = await issueVoiceWSTicket(sessionId);
+      if (state.value !== 'recording' || cancelRequested) {
+        batchFallback.value = true;
+        return;
+      }
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       socket = new WebSocket(`${protocol}//${window.location.host}/api/v1/sessions/${encodeURIComponent(sessionId)}/voice/ws?ticket=${encodeURIComponent(ticket.ticket)}`);
-      socket.onmessage = event => {
-        try {
-          const message = JSON.parse(event.data) as { type?: string; text?: string; message?: string };
-          if (message.type === 'partial') partialText.value = message.text || '';
-          if (message.type === 'final') {
-            finalText.value = message.text || '';
-            finalVoiceMetadata.value = { source: 'voice', asr_model_id: asrModelId(), confirmed_at: new Date().toISOString() };
-            partialText.value = '';
-            state.value = 'idle';
-            cleanup();
-          }
-          if (message.type === 'error') error.value = message.message || 'transcription_failed';
-        } catch {
-          error.value = 'invalid_transcription_message';
-        }
-      };
       await new Promise<void>((resolve, reject) => {
         const timeout = window.setTimeout(() => reject(new Error('voice_socket_timeout')), 5000);
         socket!.onopen = () => {
-          window.clearTimeout(timeout);
           socket!.send(JSON.stringify({ type: 'start', model_id: asrModelId() }));
           for (const chunk of chunks) socket!.send(chunk);
-          chunks = [];
-          resolve();
+        };
+        socket!.onmessage = event => {
+          try {
+            const message: unknown = JSON.parse(event.data);
+            if (typeof message !== 'object' || message === null || !('type' in message) || typeof message.type !== 'string') {
+              throw new Error('invalid_transcription_message');
+            }
+            if (message.type === 'started') {
+              window.clearTimeout(timeout);
+              batchFallback.value = !('streaming' in message && message.streaming === true);
+              resolve();
+              return;
+            }
+            if (message.type === 'partial') {
+              partialText.value = 'text' in message && typeof message.text === 'string' ? message.text : '';
+              return;
+            }
+            if (message.type === 'final') {
+              finalText.value = 'text' in message && typeof message.text === 'string' ? message.text : '';
+              finalVoiceMetadata.value = { source: 'voice', asr_model_id: asrModelId(), confirmed_at: new Date().toISOString() };
+              partialText.value = '';
+              state.value = 'idle';
+              cleanup();
+              return;
+            }
+            if (message.type === 'error') {
+              const messageText = 'message' in message && typeof message.message === 'string' ? message.message : 'transcription_failed';
+              if (state.value === 'requesting') {
+                window.clearTimeout(timeout);
+                reject(new Error(messageText));
+              } else {
+                switchToBatchFallback();
+              }
+            }
+          } catch {
+            if (state.value === 'requesting') {
+              window.clearTimeout(timeout);
+              reject(new Error('invalid_transcription_message'));
+            } else {
+              switchToBatchFallback();
+            }
+          }
         };
         socket!.onerror = () => {
           window.clearTimeout(timeout);
-          reject(new Error('voice_socket_unavailable'));
+          if (state.value === 'requesting') reject(new Error('voice_socket_unavailable'));
+          else switchToBatchFallback();
+        };
+        socket!.onclose = () => {
+          if (state.value === 'requesting') {
+            window.clearTimeout(timeout);
+            reject(new Error('voice_socket_unavailable'));
+          } else if (state.value === 'recording' || state.value === 'finalizing') {
+            switchToBatchFallback();
+          }
         };
       });
     } catch {
       socket?.close();
       socket = null;
+      batchFallback.value = true;
     }
+  }
+
+  function switchToBatchFallback() {
+    const failedSocket = socket;
+    socket = null;
+    if (failedSocket) {
+      failedSocket.onclose = null;
+      failedSocket.onerror = null;
+      failedSocket.onmessage = null;
+      failedSocket.close();
+    }
+    batchFallback.value = true;
+    partialText.value = '';
+    if (state.value === 'finalizing') void finalizeBatch();
   }
 
   onBeforeUnmount(() => { cancel(); stopPlayback(); });
@@ -274,7 +394,7 @@ export function useVoiceConversation(sessionId: string, asrModelId: () => string
     finalVoiceMetadata.value = null;
   }
 
-  return { state, partialText, finalText, finalVoiceMetadata, error, supported, playbackState, start, stop, cancel, confirmFinalText, cancelFinalText, playAnswerTTS, pausePlayback, resumePlayback, stopPlayback };
+  return { state, partialText, finalText, finalVoiceMetadata, error, batchFallback, volumeLevel, supported, playbackState, start, stop, cancel, confirmFinalText, cancelFinalText, playAnswerTTS, pausePlayback, resumePlayback, stopPlayback };
 }
 
 function waitForMediaSourceOpen(source: MediaSource, signal: AbortSignal): Promise<void> {

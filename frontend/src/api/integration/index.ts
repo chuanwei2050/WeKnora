@@ -40,7 +40,7 @@ export async function createIntegrationChatSession(input: { mode: 'selected'; kn
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-    'X-CSRF-Token': getEmbeddedCSRFToken(),
+      'X-CSRF-Token': getEmbeddedCSRFToken(),
       'Idempotency-Key': crypto.randomUUID(),
     },
     body: JSON.stringify(input.mode === 'selected'
@@ -80,4 +80,23 @@ export async function listIntegrationChatSessions(): Promise<IntegrationChatSess
   if (!response.ok) throw new Error(`chat session list failed: ${response.status}`)
   const payload = await response.json() as { data: IntegrationChatSession[] }
   return payload.data
+}
+
+export async function renameIntegrationChatSession(sessionId: string, title: string): Promise<void> {
+  const response = await fetch(`${getApiBaseUrl()}/api/integration/v1/chat/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getEmbeddedCSRFToken() },
+    body: JSON.stringify({ title }),
+  })
+  if (!response.ok) throw new Error(`chat session rename failed: ${response.status}`)
+}
+
+export async function deleteIntegrationChatSession(sessionId: string): Promise<void> {
+  const response = await fetch(`${getApiBaseUrl()}/api/integration/v1/chat/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'X-CSRF-Token': getEmbeddedCSRFToken() },
+  })
+  if (!response.ok) throw new Error(`chat session deletion failed: ${response.status}`)
 }

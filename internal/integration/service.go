@@ -695,6 +695,12 @@ func (s *Service) ListChatBindings(ctx context.Context, principal *Principal) ([
 	return bindings, err
 }
 
+func (s *Service) DeleteChatBinding(ctx context.Context, principal *Principal, sessionID string) error {
+	return s.db.WithContext(ctx).
+		Where("session_id = ? AND client_id = ? AND tenant_id = ? AND user_id = ?", sessionID, principal.ClientID, principal.TenantID, principal.UserID).
+		Delete(&ChatBinding{}).Error
+}
+
 func (s *Service) ResolveMessageKnowledgeBases(principal *Principal, binding *ChatBinding, selected *[]string) ([]string, error) {
 	if binding == nil {
 		return nil, ErrForbidden

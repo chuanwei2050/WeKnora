@@ -70,7 +70,7 @@
                 <t-input v-if="!embeddedMode && feedbackRating === 1" v-model="feedbackCorrection" size="small" placeholder="可选：说明需要纠正的内容" @click.stop />
                 <t-button v-if="!embeddedMode && feedbackRating === 1" size="small" theme="primary" @click.stop="submitFeedback(1)">提交纠错</t-button>
                 <t-button
-                    v-if="!embeddedMode && voiceOutputEnabled && ttsModelId && session.id"
+                    v-if="voiceOutputEnabled && ttsModelId && session.id"
                     size="small"
                     variant="outline"
                     shape="round"
@@ -84,8 +84,8 @@
                 >
                     {{ voicePlaybackState === 'idle' ? '朗读' : voicePlaybackLabel }}
                 </t-button>
-                <span v-if="!embeddedMode && voicePlaybackState === 'loading'" class="voice-playback-status" role="status" aria-live="polite">正在加载语音</span>
-                <span v-else-if="!embeddedMode && voicePlaybackError" class="voice-playback-status" role="status" aria-live="polite">朗读失败，请点击“朗读”重试</span>
+                <span v-if="voicePlaybackState === 'loading'" class="voice-playback-status" role="status" aria-live="polite">正在加载语音</span>
+                <span v-else-if="voicePlaybackError" class="voice-playback-status" role="status" aria-live="polite">朗读失败，请点击“朗读”重试</span>
                 <span v-if="!embeddedMode && feedbackSubmitted" class="feedback-done" role="status">反馈已提交</span>
             </div>
             <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{ $t('common.loading') }}</span></div>
@@ -184,10 +184,11 @@ const props = defineProps({
 const graphPathsOpen = ref(false);
 const graphPaths = computed(() => (Array.isArray(props.session?.graph_paths) ? props.session.graph_paths : []));
 
-const voiceConversation = useVoiceConversation(
-    props.sessionId,
-    () => String(props.voiceConfig?.asr_model_id || '')
-);
+const voiceConversation = useVoiceConversation({
+    sessionId: props.sessionId,
+    asrModelId: () => String(props.voiceConfig?.asr_model_id || ''),
+    streamingAsrEnabled: () => false,
+});
 const voiceOutputEnabled = computed(() => Boolean(props.voiceConfig?.voice_output_enabled));
 const ttsModelId = computed(() => String(props.voiceConfig?.tts_model_id || ''));
 const voicePlaybackState = computed(() => voiceConversation.playbackState.value);
@@ -413,6 +414,14 @@ onBeforeUnmount(() => {
 .bot_msg {
     &.is-embedded {
         width: 100%;
+
+        .content-wrapper {
+            padding: 14px 16px;
+            border: 1px solid #dce7ec;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, .96);
+            box-shadow: 0 5px 18px rgba(35, 69, 83, .07);
+        }
         
         :deep(.agent-stream-display) {
             width: 100%;

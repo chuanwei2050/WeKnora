@@ -22,6 +22,8 @@ class FakeTrack {
 }
 
 class FakeRecorder {
+  static latest: FakeRecorder | null = null
+
   static isTypeSupported() {
     return true
   }
@@ -31,6 +33,10 @@ class FakeRecorder {
   ondataavailable: ((event: { data: Blob }) => void) | null = null
   onerror: (() => void) | null = null
   onstop: (() => void) | null = null
+
+  constructor() {
+    FakeRecorder.latest = this
+  }
 
   start() {
     this.state = 'recording'
@@ -67,11 +73,15 @@ function installMediaRecorder() {
   return { tracks, stream }
 }
 
-function mountVoice(sessionId: string, modelId: string) {
+function mountVoice(sessionId: string, modelId: string, streamingAsrEnabled = false) {
   let voice: ReturnType<typeof useVoiceConversation> | undefined
   const component = defineComponent({
     setup() {
-      voice = useVoiceConversation(sessionId, () => modelId)
+      voice = useVoiceConversation({
+        sessionId,
+        asrModelId: () => modelId,
+        streamingAsrEnabled: () => streamingAsrEnabled,
+      })
       return () => h('div')
     },
   })
@@ -86,7 +96,9 @@ describe('useVoiceConversation', () => {
     apiMocks.synthesizeVoice.mockReset()
     apiMocks.synthesizeVoiceStream.mockReset()
     apiMocks.transcribeVoice.mockReset()
+    FakeRecorder.latest = null
     Object.defineProperty(globalThis, 'MediaSource', { configurable: true, value: undefined })
+    Object.defineProperty(window, 'AudioContext', { configurable: true, value: undefined })
     installMediaRecorder()
   })
 
@@ -99,6 +111,8 @@ describe('useVoiceConversation', () => {
     expect(voice.finalText.value).toBe('')
     expect(await voice.start()).toBe(true)
     expect(voice.state.value).toBe('recording')
+    expect(voice.batchFallback.value).toBe(true)
+    expect(apiMocks.issueVoiceWSTicket).not.toHaveBeenCalled()
     expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1)
 
     voice.stop()
@@ -113,6 +127,129 @@ describe('useVoiceConversation', () => {
     })
     voice.cancelFinalText()
     expect(voice.finalText.value).toBe('')
+    wrapper.unmount()
+  })
+
+  it('reports microphone volume while recording and releases the meter when stopped', async () => {
+    let animationFrame: FrameRequestCallback | undefined
+    const cancelAnimationFrame = vi.fn()
+    Object.defineProperty(window, 'requestAnimationFrame', {
+      configurable: true,
+      value: vi.fn((callback: FrameRequestCallback) => {
+        animationFrame = callback
+        return 7
+      }),
+    })
+    Object.defineProperty(window, 'cancelAnimationFrame', { configurable: true, value: cancelAnimationFrame })
+
+    const disconnectSource = vi.fn()
+    const disconnectAnalyser = vi.fn()
+    const close = vi.fn(async () => undefined)
+    class FakeAudioContext {
+      state: AudioContextState = 'running'
+
+      createAnalyser() {
+        return {
+          fftSize: 256,
+          smoothingTimeConstant: 0,
+          disconnect: disconnectAnalyser,
+          getByteTimeDomainData(samples: Uint8Array) {
+            samples.fill(160)
+          },
+        }
+      }
+
+      createMediaStreamSource() {
+        return { connect: vi.fn(), disconnect: disconnectSource }
+      }
+
+      close = close
+    }
+    Object.defineProperty(window, 'AudioContext', { configurable: true, value: FakeAudioContext })
+
+    const { voice, wrapper } = mountVoice('session-volume', 'asr-volume')
+    expect(await voice.start()).toBe(true)
+    animationFrame?.(0)
+
+    expect(voice.volumeLevel.value).toBeGreaterThan(0)
+    voice.cancel()
+    expect(voice.volumeLevel.value).toBe(0)
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(7)
+    expect(disconnectSource).toHaveBeenCalledTimes(1)
+    expect(disconnectAnalyser).toHaveBeenCalledTimes(1)
+    expect(close).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('keeps the full recording and falls back to batch ASR when streaming finalization fails', async () => {
+    class FailingStreamingWebSocket {
+      static OPEN = 1
+
+      readyState = FailingStreamingWebSocket.OPEN
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: string }) => void) | null = null
+      onerror: (() => void) | null = null
+      onclose: (() => void) | null = null
+
+      constructor() {
+        queueMicrotask(() => this.onopen?.())
+      }
+
+      send(data: string | Blob) {
+        if (typeof data !== 'string') return
+        const message: unknown = JSON.parse(data)
+        if (typeof message !== 'object' || message === null || !('type' in message)) return
+        if (message.type === 'start') {
+          queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ type: 'started', streaming: true }) }))
+        }
+        if (message.type === 'stop') {
+          queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ type: 'error', message: 'stream failed' }) }))
+        }
+      }
+
+      close() {
+        this.readyState = 3
+      }
+    }
+    Object.defineProperty(globalThis, 'WebSocket', {
+      configurable: true,
+      value: FailingStreamingWebSocket,
+    })
+    apiMocks.issueVoiceWSTicket.mockResolvedValue({ ticket: 'ticket-1' })
+    apiMocks.transcribeVoice.mockResolvedValue({ text: '批量降级转写' })
+    const { voice, wrapper } = mountVoice('session-fallback', 'asr-selected', true)
+
+    expect(await voice.start()).toBe(true)
+    FakeRecorder.latest?.ondataavailable?.({ data: new Blob(['complete-audio'], { type: 'audio/webm' }) })
+    voice.stop()
+
+    await vi.waitFor(() => expect(voice.finalText.value).toBe('批量降级转写'))
+    expect(apiMocks.transcribeVoice).toHaveBeenCalledTimes(1)
+    const audio: unknown = apiMocks.transcribeVoice.mock.calls[0][2]
+    expect(audio).toBeInstanceOf(Blob)
+    if (!(audio instanceof Blob)) throw new Error('expected recorded audio blob')
+    expect(audio.size).toBeGreaterThan(0)
+    expect(voice.state.value).toBe('idle')
+    wrapper.unmount()
+  })
+
+  it('enters recording before the streaming handshake and can stop while the ticket is pending', async () => {
+    let resolveTicket: (ticket: { ticket: string }) => void = () => undefined
+    apiMocks.issueVoiceWSTicket.mockImplementation(() => new Promise(resolve => { resolveTicket = resolve }))
+    apiMocks.transcribeVoice.mockResolvedValue({ text: '快速停止转写' })
+    const { voice, wrapper } = mountVoice('session-fast-start', 'asr-fast', true)
+
+    const startPromise = voice.start()
+    await vi.waitFor(() => expect(voice.state.value).toBe('recording'))
+    FakeRecorder.latest?.ondataavailable?.({ data: new Blob(['quick-audio'], { type: 'audio/webm' }) })
+    voice.stop()
+
+    await vi.waitFor(() => expect(voice.finalText.value).toBe('快速停止转写'))
+    resolveTicket({ ticket: 'late-ticket' })
+    expect(await startPromise).toBe(true)
+    expect(voice.state.value).toBe('idle')
+    expect(voice.batchFallback.value).toBe(true)
+    expect(apiMocks.transcribeVoice).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 

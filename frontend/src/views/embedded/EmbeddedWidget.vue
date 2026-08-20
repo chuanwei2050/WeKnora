@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import ChatView from '@/views/chat/index.vue'
-import { createIntegrationChatSession, exchangeBootstrapTicket, getIntegrationChatSession, listIntegrationChatSessions, listIntegrationKnowledgeBases, refreshIntegrationSession, type IntegrationChatSession } from '@/api/integration'
+import { createIntegrationChatSession, deleteIntegrationChatSession, exchangeBootstrapTicket, getIntegrationChatSession, listIntegrationChatSessions, listIntegrationKnowledgeBases, refreshIntegrationSession, renameIntegrationChatSession, type IntegrationChatSession } from '@/api/integration'
 import { notifyEmbeddedHost, parseEmbeddedMessage } from '@/utils/embedded-runtime'
 
 const authenticated = ref(false)
 const sessionId = ref('')
 const errorMessage = ref('')
+const noticeMessage = ref('')
 const params = new URLSearchParams(window.location.search)
-const allowedParentOrigin = window.location.origin
+const configuredParentOrigin = params.get('parent_origin')
+const referrerOrigin = document.referrer ? new URL(document.referrer).origin : ''
+const allowedParentOrigin = configuredParentOrigin ? new URL(configuredParentOrigin).origin : (referrerOrigin || window.location.origin)
 const agentId = computed(() => params.get('agent_id') || '')
 const knowledgeBaseIds = ref<string[]>(params.getAll('knowledge_base_id'))
 const selectionMode = ref<'selected' | 'all-allowed'>('selected')
@@ -22,12 +25,21 @@ const selectionReady = computed(() => selectionMode.value === 'all-allowed' || k
 const conversations = ref<IntegrationChatSession[]>([])
 const compatibleConversations = computed(() => conversations.value.filter(isCompatibleConversation))
 const conversationsOpen = ref(false)
+const editingConversationId = ref('')
+const editingTitle = ref('')
 const instanceId = params.get('instance_id') || 'default'
 const preserveSession = params.get('preserve_session') !== 'false'
 const sessionStorageKey = `weknora-widget-chat:${instanceId}`
 let refreshTimer: number | undefined
 let readyTimer: number | undefined
 let authenticating = false
+let noticeTimer: number | undefined
+
+function showNotice(message: string) {
+  noticeMessage.value = message
+  if (noticeTimer !== undefined) window.clearTimeout(noticeTimer)
+  noticeTimer = window.setTimeout(() => { noticeMessage.value = '' }, 1600)
+}
 
 async function createChatSession() {
   const sessionKnowledgeBaseIds = widgetMode.value === 'selectable'
@@ -37,6 +49,7 @@ async function createChatSession() {
     ? { mode: 'all-allowed' }
     : { mode: 'selected', knowledgeBaseIds: sessionKnowledgeBaseIds })
   sessionId.value = chatSession.id
+  showNotice('已新建对话')
   if (preserveSession) sessionStorage.setItem(sessionStorageKey, chatSession.id)
   refreshConversations().catch(() => undefined)
 }
@@ -47,6 +60,38 @@ async function createConversationFromDrawer() {
     conversationsOpen.value = false
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '创建会话失败'
+  }
+}
+
+function beginRename(conversation: IntegrationChatSession) {
+  editingConversationId.value = conversation.id
+  editingTitle.value = conversation.title || '新对话'
+}
+
+async function saveRename(conversation: IntegrationChatSession) {
+  const title = editingTitle.value.trim()
+  if (!title) return
+  try {
+    await renameIntegrationChatSession(conversation.id, title)
+    editingConversationId.value = ''
+    await refreshConversations()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '重命名失败'
+  }
+}
+
+function cancelRename() {
+  editingConversationId.value = ''
+  editingTitle.value = ''
+}
+
+async function deleteConversation(conversation: IntegrationChatSession) {
+  try {
+    await deleteIntegrationChatSession(conversation.id)
+    if (conversation.id === sessionId.value) await createChatSession()
+    await refreshConversations()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '删除会话失败'
   }
 }
 
@@ -164,12 +209,14 @@ onBeforeUnmount(() => {
   window.removeEventListener('weknora:integration-authorization-changed', refreshAuthorizedKnowledgeBases)
   if (refreshTimer !== undefined) window.clearInterval(refreshTimer)
   if (readyTimer !== undefined) window.clearInterval(readyTimer)
+  if (noticeTimer !== undefined) window.clearTimeout(noticeTimer)
   if (!preserveSession) sessionStorage.removeItem(sessionStorageKey)
 })
 </script>
 
 <template>
   <main class="embedded-widget">
+    <div v-if="noticeMessage" class="embedded-widget__notice" role="status">{{ noticeMessage }}</div>
     <button v-if="authenticated && conversationsOpen" class="embedded-widget__backdrop" type="button" aria-label="关闭对话列表" @click="conversationsOpen = false" />
     <aside v-if="authenticated && conversationsOpen" class="embedded-widget__conversations" aria-label="对话列表">
       <div class="embedded-widget__conversations-heading">
@@ -179,10 +226,23 @@ onBeforeUnmount(() => {
           <button type="button" aria-label="关闭对话列表" @click="conversationsOpen = false">×</button>
         </span>
       </div>
-      <button v-for="(conversation, index) in compatibleConversations" :key="conversation.id" type="button" :class="{ active: conversation.id === sessionId }" @click="switchConversation(conversation)">
-        <span>{{ conversation.title || `新对话 ${compatibleConversations.length - index}` }}</span>
+      <div v-for="(conversation, index) in compatibleConversations" :key="conversation.id" class="embedded-widget__conversation" :data-session-id="conversation.id" :class="{ active: conversation.id === sessionId }" @click="switchConversation(conversation)">
+        <input v-if="editingConversationId === conversation.id" v-model="editingTitle" maxlength="100" aria-label="对话标题" @click.stop @keydown.enter.prevent.stop="saveRename(conversation)" @keydown.esc.prevent.stop="cancelRename" />
+        <span v-else>{{ conversation.title || `新对话 ${compatibleConversations.length - index}` }}</span>
         <time>{{ new Date(conversation.updated_at || conversation.created_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}</time>
-      </button>
+        <span class="embedded-widget__conversation-actions">
+          <template v-if="editingConversationId === conversation.id">
+            <button type="button" aria-label="保存对话名称" title="保存" @click.stop="saveRename(conversation)">✓</button>
+            <button type="button" aria-label="取消重命名" title="取消" @click.stop="cancelRename">×</button>
+          </template>
+          <template v-else>
+            <button type="button" aria-label="重命名对话" title="重命名" @click.stop="beginRename(conversation)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16-.8 4.8L8 20l11-11-4-4L4 16Zm9.5-9.5 4 4" /></svg></button>
+            <t-popconfirm content="确认删除此对话？" placement="left" :confirm-btn="{ content: '删除', theme: 'danger' }" :cancel-btn="{ content: '取消' }" @confirm="deleteConversation(conversation)">
+              <button type="button" aria-label="删除对话" title="删除" @click.stop><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" /></svg></button>
+            </t-popconfirm>
+          </template>
+        </span>
+      </div>
       <div v-if="compatibleConversations.length === 0" class="embedded-widget__conversations-empty">暂无对话</div>
     </aside>
     <section v-if="authenticated" class="embedded-widget__scope" aria-label="当前回答范围">
@@ -210,19 +270,26 @@ onBeforeUnmount(() => {
 <style scoped>
 .embedded-widget { position: relative; display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: #f4f8fb; }
 .embedded-widget > * { min-width: 0; min-height: 0; }
+.embedded-widget__notice { position: absolute; z-index: 12; top: 12px; left: 50%; padding: 7px 12px; transform: translateX(-50%); border: 1px solid #b8ddea; border-radius: 999px; color: #155f7d; background: rgba(240, 250, 253, .96); box-shadow: 0 8px 24px rgba(22, 74, 96, .14); font-size: 12px; white-space: nowrap; }
 .embedded-widget__backdrop { position: absolute; z-index: 4; inset: 0; border: 0; background: rgba(19, 42, 52, .12); }
-.embedded-widget__conversations { position: absolute; z-index: 5; inset: 0 auto 0 0; width: min(82%, 300px); padding: 14px 10px; overflow-y: auto; border-right: 1px solid #dce4e8; background: rgba(255, 255, 255, .98); box-shadow: 12px 0 30px rgba(19, 42, 52, .12); }
+.embedded-widget__conversations { position: absolute; z-index: 5; box-sizing: border-box; inset: 0 auto 0 0; width: min(82%, 300px); padding: 14px 10px; overflow-x: hidden; overflow-y: auto; border-right: 1px solid #dce4e8; background: rgba(255, 255, 255, .98); box-shadow: 12px 0 30px rgba(19, 42, 52, .12); }
 .embedded-widget__conversations-heading { display: flex; align-items: center; justify-content: space-between; padding: 2px 8px 12px; color: #263a45; font-size: 13px; }
 .embedded-widget__conversations-heading span { display: flex; gap: 6px; }
 .embedded-widget__conversations-heading button { display: grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 8px; color: #42606e; background: #edf5f8; font-size: 17px; line-height: 1; }
-.embedded-widget__conversations > button { display: flex; width: 100%; flex-direction: column; gap: 4px; padding: 10px; border: 0; border-radius: 10px; color: #20343d; background: transparent; text-align: left; cursor: pointer; }
-.embedded-widget__conversations > button:hover, .embedded-widget__conversations > button.active { background: #eaf3f6; }
-.embedded-widget__conversations > button span { width: 100%; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.embedded-widget__conversation { position: relative; display: grid; box-sizing: border-box; width: 100%; min-width: 0; gap: 4px; padding: 10px 66px 10px 10px; overflow: hidden; border-radius: 10px; color: #20343d; text-align: left; cursor: pointer; }
+.embedded-widget__conversation:hover, .embedded-widget__conversation.active { background: #eaf3f6; }
+.embedded-widget__conversation > span:first-child { width: 100%; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.embedded-widget__conversation input { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid #8fc8dd; border-radius: 6px; padding: 4px 6px; outline: none; }
+.embedded-widget__conversation-actions { position: absolute; top: 9px; right: 8px; display: flex; gap: 4px; opacity: .78; }
+.embedded-widget__conversation:hover .embedded-widget__conversation-actions, .embedded-widget__conversation:focus-within .embedded-widget__conversation-actions { opacity: 1; }
+.embedded-widget__conversation-actions button { display: grid; width: 25px; height: 25px; place-items: center; border: 0; border-radius: 7px; color: #526b76; background: #fff; cursor: pointer; }
+.embedded-widget__conversation-actions button.danger { color: #b42318; background: #fff0ee; }
+.embedded-widget__conversation-actions svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .embedded-widget__conversations time, .embedded-widget__conversations-empty { color: #7b8d95; font-size: 12px; }
 .embedded-widget__conversations-empty { padding: 20px 10px; text-align: center; }
-.embedded-widget__scope { position: relative; z-index: 3; display: flex; min-height: 44px; flex: 0 0 auto; align-items: center; gap: 7px; padding: 6px 12px; overflow-x: auto; border-bottom: 1px solid #dce8ed; background: #fff; scrollbar-width: none; }
+.embedded-widget__scope { position: relative; z-index: 3; display: flex; min-height: 44px; max-height: 92px; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 7px; padding: 6px 12px; overflow-y: auto; overflow-x: hidden; border-bottom: 1px solid #dce8ed; background: #fff; }
 .embedded-widget__scope-label { flex: 0 0 auto; color: #6a7d87; font-size: 12px; }
-.embedded-widget__scope-chip, .embedded-widget__scope-picker summary { display: block; max-width: 210px; overflow: hidden; padding: 5px 9px; border-radius: 8px; color: #185f7d; background: #e9f7fb; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.embedded-widget__scope-chip, .embedded-widget__scope-picker summary { display: block; max-width: min(210px, calc(100vw - 96px)); overflow: hidden; padding: 5px 9px; border-radius: 8px; color: #185f7d; background: #e9f7fb; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .embedded-widget__scope-picker { position: relative; flex: 0 0 auto; }
 .embedded-widget__scope-picker summary { cursor: pointer; list-style: none; }
 .embedded-widget__scope-picker summary::-webkit-details-marker { display: none; }

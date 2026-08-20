@@ -88,6 +88,9 @@ export function useStream() {
       const postBody: any = isIntegrationWidget ? {
         query: params.query,
         ...(params.knowledge_base_ids?.length ? { selected_knowledge_base_ids: params.knowledge_base_ids } : {}),
+        ...(params.images?.length ? { images: params.images } : {}),
+        ...(params.attachment_uploads?.length ? { attachment_uploads: params.attachment_uploads } : {}),
+        ...(params.voice_metadata && Object.keys(params.voice_metadata).length > 0 ? { voice_metadata: params.voice_metadata } : {}),
       } : {
         query: params.query,
         agent_enabled: params.agent_enabled !== undefined ? params.agent_enabled : true
@@ -167,7 +170,11 @@ export function useStream() {
         },
 
         onerror: (err) => {
-          if (isIntegrationWidget) return;
+          if (isIntegrationWidget) {
+            error.value = `${i18n.global.t('error.streamFailed')}: ${err}`;
+            stopStream();
+            throw err;
+          }
           throw new Error(`${i18n.global.t('error.streamFailed')}: ${err}`);
         },
 

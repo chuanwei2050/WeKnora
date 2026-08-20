@@ -91,6 +91,8 @@
                 :sessionId="session_id"
                 :assistantMessageId="currentAssistantMessageId"
                 :embeddedMode="embeddedMode"
+                :agentId="agentId"
+                :kbIds="kbIds"
             ></InputField>
         </div>
     </div>
@@ -1259,7 +1261,7 @@ onBeforeRouteUpdate((to, from, next) => {
         max-width: 100%;
         min-width: 0;
         width: 100%;
-        height: 100%;
+        height: auto;
         min-height: 0;
         padding: 0 12px 12px;
         overflow-x: hidden;
@@ -1405,6 +1407,7 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 .embedded-welcome {
+    box-sizing: border-box;
     width: min(100%, 460px);
     margin: auto;
     padding: 28px 20px 20px;
@@ -1428,10 +1431,15 @@ onBeforeRouteUpdate((to, from, next) => {
 
 .embedded-starters {
     display: grid;
+    width: 100%;
+    min-width: 0;
     gap: 8px;
     margin-top: 20px;
 
     button {
+        box-sizing: border-box;
+        width: 100%;
+        min-width: 0;
         min-height: 40px;
         padding: 8px 14px;
         border: 1px solid #d8e2e8;

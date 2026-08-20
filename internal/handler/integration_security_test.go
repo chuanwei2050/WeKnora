@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/base64"
 	"io"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +19,13 @@ func TestIntegrationRateLimiterBoundsDistinctKeys(t *testing.T) {
 		require.True(t, limiter.allow(string(rune(i))+"-key", 1))
 	}
 	require.False(t, limiter.allow("overflow-key", 1))
+}
+
+func TestSupportedIntegrationImageValidatesTypeBase64AndSize(t *testing.T) {
+	valid := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("png"))
+	require.True(t, isSupportedIntegrationImage(valid))
+	require.False(t, isSupportedIntegrationImage("data:image/svg+xml;base64,"+base64.StdEncoding.EncodeToString([]byte("svg"))))
+	require.False(t, isSupportedIntegrationImage("data:image/png;base64,not-base64"))
 }
 
 func TestIntegrationMessageStatusPreservesRunningAndCancelled(t *testing.T) {

@@ -213,6 +213,8 @@ func RegisterIntegrationPublicRoutes(r *gin.Engine, h *handler.IntegrationHandle
 	integration.GET("/chat/sessions", h.ListChatSessions)
 	integration.POST("/chat/sessions", h.CreateChatSession)
 	integration.GET("/chat/sessions/:session_id", h.GetChatSession)
+	integration.PATCH("/chat/sessions/:session_id", h.UpdateChatSession)
+	integration.DELETE("/chat/sessions/:session_id", h.DeleteChatSession)
 	integration.GET("/chat/sessions/:session_id/messages", h.ListChatMessages)
 	integration.POST("/chat/sessions/:session_id/messages", h.SendChatMessage)
 	integration.GET("/chat/sessions/:session_id/messages/:message_id", h.GetMessageSnapshot)
