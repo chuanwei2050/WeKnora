@@ -233,6 +233,7 @@ func RegisterIntegrationAdminRoutes(r *gin.RouterGroup, h *handler.IntegrationHa
 	clients.POST("/:client_id/rotate-secret", h.RotateClientSecret)
 	clients.POST("/:client_id/revoke-previous-secret", h.RevokePreviousClientSecret)
 	clients.POST("/:client_id/disable", h.DisableClient)
+	clients.PUT("/:client_id/administrator", h.BindClientAdministrator)
 	providers := r.Group("/admin/integration-identity-providers")
 	providers.GET("", h.ListIdentityProviders)
 	providers.POST("", h.CreateIdentityProvider)
@@ -444,6 +445,7 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		kb.GET("/:id", handler.GetKnowledgeBase)
 		// 更新知识库
 		kb.PUT("/:id", handler.UpdateKnowledgeBase)
+		kb.POST("/:id/rebuild-index", handler.RebuildIndex)
 		// 删除知识库
 		kb.DELETE("/:id", handler.DeleteKnowledgeBase)
 		// 置顶/取消置顶知识库

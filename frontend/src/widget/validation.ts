@@ -60,6 +60,16 @@ export function parseFrameMessage(value: unknown): WidgetFrameMessage | null {
     return typeof message.messageId === 'string' && message.messageId.length > 0 && message.messageId.length <= 128
         ? { version: 1, type: message.type, messageId: message.messageId }
         : null
+    case 'open-document': {
+      const validID = (id: unknown) => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(id)
+      if (!validID(message.knowledgeBaseId) || (message.knowledgeId !== undefined && !validID(message.knowledgeId))) return null
+      return {
+        version: 1,
+        type: message.type,
+        knowledgeBaseId: message.knowledgeBaseId as string,
+        knowledgeId: message.knowledgeId as string | undefined,
+      }
+    }
     case 'error':
     return typeof message.code === 'string' && message.code.length <= 128 && typeof message.message === 'string' && message.message.length <= 1024
         ? { version: 1, type: message.type, code: message.code, message: message.message }

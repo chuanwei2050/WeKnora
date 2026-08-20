@@ -119,8 +119,6 @@ export default {
     audiosFilteredNoASR: "{count}개 오디오 파일 필터링됨(ASR 미활성화)",
     invalidFilesFiltered: "{count}개 지원되지 않는 파일 필터링됨",
     unsupportedFileType: "지원되지 않는 파일 형식",
-    unsupportedTypesHint: "일부 문서 유형({types})에 사용 가능한 파서 엔진이 없어 처리할 수 없습니다",
-    goToParserSettings: "설정으로 이동",
     failedFilesList: "실패한 파일 목록:",
     andMoreFiles: "...외 {count}개 파일",
     duplicateFilesSkipped: "{count}개 중복 파일 무시됨",
@@ -187,12 +185,6 @@ export default {
       "이 질문을 삭제하시겠습니까? 삭제 시 해당 벡터 인덱스도 함께 제거됩니다.",
     legacyQuestionCannotDelete: "이전 형식의 질문은 삭제할 수 없습니다. 질문을 다시 생성하세요",
     docActionUnsupported: "현재 지식베이스 유형은 이 작업을 지원하지 않습니다",
-    notInitialized:
-      "이 지식베이스는 아직 초기화되지 않았습니다. 설정 페이지에서 모델 정보를 먼저 구성한 후 파일을 업로드하세요",
-    missingStorageEngine:
-      "이 지식베이스에 스토리지 엔진이 선택되지 않았습니다. 콘텐츠를 업로드하기 전에 설정 페이지에서 스토리지 엔진을 구성하세요.",
-    missingStorageEngineUpload: "콘텐츠를 업로드하기 전에 스토리지 엔진을 구성하세요",
-    goToStorageSettings: "설정으로 이동",
     getInfoFailed: "지식베이스 정보를 가져오는 데 실패하여 파일을 업로드할 수 없습니다",
     missingId: "지식베이스 ID가 없습니다",
     deleteFailed: "삭제 실패, 나중에 다시 시도하세요!",
@@ -842,6 +834,12 @@ export default {
       "엔티티 관계 추출 기능을 구성하여 텍스트에서 자동으로 엔티티와 관계를 추출하여 지식 그래프 구축",
     enableLabel: "엔티티 관계 추출 활성화",
     enableDescription: "활성화하면 텍스트에서 자동으로 엔티티와 관계를 추출합니다",
+    templateLabel: "구성 템플릿",
+    templateDescription: "템플릿으로 추출 규칙을 채운 뒤 고급 설정에서 편집할 수 있습니다.",
+    generalExtractionTemplate: "일반 추출(분야 제한 없음)",
+    softwareTestingTemplate: "소프트웨어 테스트",
+    advancedSettingsTitle: "고급 추출 설정",
+    exampleSettingsTitle: "추출 예시 및 테스트(선택 사항)",
     tagsLabel: "관계 유형",
     tagsDescription: "추출할 관계 유형 태그 정의, 여러 태그는 쉼표로 구분",
     tagsPlaceholder: "관계 유형 입력, 예: 근무처, 동료, 친구 등",
@@ -2096,8 +2094,6 @@ export default {
       myKnowledgeBases: "내 지식베이스",
       sharedToMe: "나와 공유됨",
     },
-    uninitializedBanner:
-      "일부 지식베이스가 아직 초기화되지 않았습니다. 지식 문서를 추가하려면 먼저 설정에서 모델 정보를 구성해야 합니다",
     emptyShared:
       "현재 공동 작업 지식베이스가 없습니다. 공유 스페이스에 참여하여 다른 사람들이 공유하는 지식베이스를 얻을 수 있습니다.",
     empty: {

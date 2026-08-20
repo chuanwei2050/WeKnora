@@ -173,20 +173,30 @@ async def transcriptions(
 
     suffix = Path(file.filename or "audio.wav").suffix or ".wav"
     tmp_path = ""
+    inference_path = ""
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(await file.read())
             tmp_path = tmp.name
+        inference_path = tmp_path
+        if suffix.lower() != ".wav":
+            from pydub import AudioSegment
+
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as wav_tmp:
+                inference_path = wav_tmp.name
+            AudioSegment.from_file(tmp_path).export(inference_path, format="wav")
         if _backend == "funasr-onnx":
-            text = _transcribe_onnx(tmp_path, language)
+            text = _transcribe_onnx(inference_path, language)
         else:
-            text = _transcribe_funasr(tmp_path, language)
+            text = _transcribe_funasr(inference_path, language)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"ASR 推理失败: {exc}") from exc
     finally:
-        if tmp_path:
+        for path in {tmp_path, inference_path}:
+            if not path:
+                continue
             try:
-                os.unlink(tmp_path)
+                os.unlink(path)
             except OSError:
                 pass
 

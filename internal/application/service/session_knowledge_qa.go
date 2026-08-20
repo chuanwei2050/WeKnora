@@ -131,6 +131,7 @@ func (s *sessionService) KnowledgeQA(
 			ChatModelSupportsVision: chatModelSupportsVision,
 			Attachments:             req.Attachments,
 			Language:                types.LanguageNameFromContext(ctx),
+			ComplexityRouting:       types.DefaultComplexityRoutingConfig(),
 		},
 		PipelineState: types.PipelineState{
 			RewriteQuery:     req.Query,
@@ -786,8 +787,10 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 		return
 	}
 
-	// Start goroutine to consume stream and emit events
-	go s.consumeFallbackStream(ctx, chatManage, responseChan)
+	// The caller persists the assistant message after this method returns, so the
+	// fallback stream must finish before returning or the request context is
+	// cancelled with an empty answer.
+	s.consumeFallbackStream(ctx, chatManage, responseChan)
 }
 
 // renderFallbackPrompt renders the fallback prompt template with query and image context.

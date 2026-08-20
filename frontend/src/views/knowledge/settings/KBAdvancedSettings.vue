@@ -59,7 +59,6 @@ interface QuestionGenerationConfig {
 interface Props {
   questionGeneration?: QuestionGenerationConfig
   ragEnabled?: boolean
-  allModels?: any[]
 }
 
 const props = defineProps<Props>()

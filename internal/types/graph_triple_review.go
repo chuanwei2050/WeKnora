@@ -26,6 +26,7 @@ type GraphTripleCandidate struct {
 	KnowledgeVersionID string                  `json:"knowledge_version_id,omitempty" gorm:"type:varchar(36)"`
 	ChunkID            string                  `json:"chunk_id" gorm:"type:varchar(36);index:idx_graph_triple_chunk;not null"`
 	ModelID            string                  `json:"model_id,omitempty" gorm:"type:varchar(36)"`
+	ConfigFingerprint  string                  `json:"config_fingerprint,omitempty" gorm:"type:varchar(64)"`
 	GraphData          GraphDataPayload        `json:"graph_data" gorm:"type:jsonb;not null"`
 	Status             GraphTripleReviewStatus `json:"status" gorm:"type:varchar(16);index:idx_graph_triple_scope;not null"`
 	ReviewerID         string                  `json:"reviewer_id,omitempty" gorm:"type:varchar(36)"`

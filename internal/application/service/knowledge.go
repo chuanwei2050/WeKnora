@@ -349,7 +349,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		}
 
 		// 检查VLM配置
-		if !kb.VLMConfig.Enabled || kb.VLMConfig.ModelID == "" {
+		if !kb.VLMConfig.Enabled {
 			logger.Error(ctx, "VLM model is not configured")
 			return nil, werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
 		}
@@ -2608,23 +2608,6 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get knowledge: %v", err)
-		return nil
-	}
-
-	if kb.SummaryModelID == "" {
-		logger.Warn(ctx, "Knowledge base summary model ID is empty, skipping summary generation")
-		if knowledge.SummaryStatus == types.SummaryStatusPending || knowledge.SummaryStatus == types.SummaryStatusProcessing {
-			latest, getErr := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
-			if getErr != nil {
-				logger.Warnf(ctx, "Failed to reload knowledge before resetting summary status: %v", getErr)
-				return nil
-			}
-			latest.SummaryStatus = types.SummaryStatusNone
-			latest.UpdatedAt = time.Now()
-			if err := s.repo.UpdateKnowledge(ctx, latest); err != nil {
-				logger.Warnf(ctx, "Failed to reset summary status to none: %v", err)
-			}
-		}
 		return nil
 	}
 
@@ -7800,12 +7783,17 @@ func (s *knowledgeService) getVLMConfig(ctx context.Context, kb *types.Knowledge
 		}, nil
 	}
 
-	// 新版本：未启用或无模型ID时返回nil
-	if !kb.VLMConfig.Enabled || kb.VLMConfig.ModelID == "" {
+	if !kb.VLMConfig.Enabled {
 		return nil, nil
 	}
 
-	model, err := s.modelService.GetModelByID(ctx, kb.VLMConfig.ModelID)
+	var model *types.Model
+	var err error
+	if kb.VLMConfig.ModelID == "" {
+		model, err = s.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm")
+	} else {
+		model, err = s.modelService.GetModelByID(ctx, kb.VLMConfig.ModelID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -8500,13 +8488,15 @@ func (s *knowledgeService) convert(
 		}
 	}
 
-	parserEngine := kb.ChunkingConfig.ResolveParserEngine(fileType)
-	if isURL {
-		parserEngine = kb.ChunkingConfig.ResolveParserEngine("url")
+	parserEngine := ""
+	if !isURL {
+		docreaderConnected := s.documentReader != nil && s.documentReader.IsConnected()
+		hasCloudCredentials := s.tenantService != nil && s.tenantService.GetWeKnoraCloudCredentials(ctx) != nil
+		parserEngine = docparser.SelectConfiguredEngine(fileType, docreaderConnected, hasCloudCredentials, overrides)
 	}
 
-	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
-		kb.ID, fileType, isURL, parserEngine, kb.ChunkingConfig.ParserEngineRules)
+	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v platformEngine=%q",
+		kb.ID, fileType, isURL, parserEngine)
 
 	var reader interfaces.DocReader = s.resolveDocReader(ctx, parserEngine, fileType, isURL, overrides)
 	if reader == nil {

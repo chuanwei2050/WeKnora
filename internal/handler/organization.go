@@ -1279,10 +1279,6 @@ func (h *OrganizationHandler) ShareAgent(c *gin.Context) {
 			c.Error(apperrors.NewForbiddenError("Only editors and admins can share agents to this organization"))
 			return
 		}
-		if errors.Is(err, service.ErrAgentNotConfigured) {
-			c.Error(apperrors.NewValidationError("Agent is not fully configured. Please set the chat model, and set the rerank model if the knowledge_search tool is enabled in agent settings."))
-			return
-		}
 		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
 		return
 	}

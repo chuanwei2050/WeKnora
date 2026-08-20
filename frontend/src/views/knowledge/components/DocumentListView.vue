@@ -5,6 +5,7 @@ import { formatFileSize, getFileIcon } from '@/utils/files';
 import {
   canOperateGovernanceRow,
   getGovernanceRowActions,
+  isKnowledgeDeleteDisabled,
   isGovernanceRowActionDisabled,
   type GovernanceRowAction,
 } from './knowledge-governance-actions';
@@ -277,7 +278,7 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
             <button v-if="canEdit && item.type === 'manual'" class="row-action-btn" type="button" @click="handleAction('edit', item)">
               {{ t('knowledgeBase.rowEdit') }}
             </button>
-            <button v-if="canEdit" class="row-action-btn" type="button" @click="handleAction('reparse', item)">
+            <button v-if="canEdit && item.parse_status !== 'pending_review'" class="row-action-btn" type="button" @click="handleAction('reparse', item)">
               {{ t('knowledgeBase.rowRebuild') }}
             </button>
             <t-dropdown
@@ -294,7 +295,7 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
               v-if="canEdit && !hasGovernanceAction(item, 'delete')"
               class="row-action-btn danger"
               type="button"
-              :disabled="item.parse_status === 'pending_review'"
+              :disabled="isKnowledgeDeleteDisabled(item)"
               @click="handleAction('delete', item)"
             >
               {{ t('knowledgeBase.governanceDelete') }}

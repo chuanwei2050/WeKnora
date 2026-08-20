@@ -9,7 +9,7 @@ WeKnora 已有独立登录、租户 API Key 和 BidReview 专用 SSO，但缺少
 - 为交互式嵌入和服务间 API 提供分离且统一的认证协议。
 - 将 integration client 固定绑定到租户、identity provider、角色映射、权限上限、scopes、知识库 allowlist 和浏览器来源。
 - 支持票据防重放、短期会话、CSRF、密钥轮换、撤销、审计和限流。
-- 让同一身份源下的用户跨宿主保持一致所有权，并让嵌入会话安全复用现有知识管理 API。
+- 让每个项目的外部用户稳定映射且互不串号，并让嵌入会话安全复用现有知识管理 API。
 - 保持现有独立登录和内部 API 兼容。
 
 **Non-Goals:**
@@ -27,7 +27,7 @@ Integration 层只新增 client 约束、外部身份映射和 Cookie/CSRF 凭�
 
 ### Integration client 服务端绑定租户
 
-每个外部项目创建独立 integration client，服务端保存 `client_id`、secret 哈希、租户、`identity_provider_id`、外部角色映射、最高可授予角色、scopes、知识库 allowlist、允许浏览器来源、状态和有效期。请求中的租户标识只用于外部身份映射，不能覆盖 client 的所属租户。相比接受 `X-Tenant-ID`，该方案消除了客户端横向切换租户的能力。
+每个外部项目创建独立 integration client，服务端保存 `client_id`、secret 哈希、租户、`identity_provider_id`、显式绑定的租户管理员、外部角色映射、最高可授予角色、scopes、知识库 allowlist、允许浏览器来源、状态和有效期。请求中的租户标识只用于外部身份映射，不能覆盖 client 的所属租户。相比接受 `X-Tenant-ID`，该方案消除了客户端横向切换租户的能力。允许映射管理员角色的 client 必须绑定一个处于同一租户且有效的现有租户管理员。
 
 ### 交互用户使用一次性 bootstrap ticket
 
@@ -47,7 +47,9 @@ Integration 层只新增 client 约束、外部身份映射和 Cookie/CSRF 凭�
 
 ### 外部身份、角色与有效资源范围
 
-外部用户唯一键为 `(identity_provider_id, external_tenant_id, external_user_id)`。需要共享用户身份的多个 client 绑定同一个 `identity_provider_id`；没有共同身份源的项目默认使用各自独立 provider ID。client 只决定接入权限，不参与共享身份源的用户唯一键。最终角色由服务端角色映射和 client 最高可授予角色共同限制；最终知识库范围为请求选择、client allowlist、当前用户权限和租户/显式共享关系的交集。请求包含任何越权资源时整次拒绝并记录原因，不静默返回部分结果。
+外部用户唯一键为 `(client_id, external_tenant_id, external_user_id)`。普通用户首次访问时在 client 绑定租户下自动创建 `member`，并将映射保存在集成身份表。映射为管理员的外部身份只允许绑定到 client 显式配置的现有租户管理员，不自动创建管理员，也不选择“租户下第一个管理员”。已存在映射不得静默改绑到其他内部用户。最终角色由服务端角色映射和 client 最高可授予角色共同限制；最终知识库范围为请求选择、client allowlist、当前用户权限和租户/显式共享关系的交集。请求包含任何越权资源时整次拒绝并记录原因，不静默返回部分结果。
+
+bootstrap 接受外部用户启用状态，省略时按启用处理。宿主传入停用状态时，服务端将该项目身份标记为停用、撤销该 client 与内部用户组合下的浏览器会话，并拒绝签发 ticket；不得因此停用显式绑定的共享租户管理员或影响同一内部用户的其他 client。
 
 ### 浏览器来源和 CORS 精确校验
 
@@ -62,7 +64,7 @@ bootstrap 申请的预期 origin 必须在 client 允许来源中，exchange 请
 - [同域 iframe 可访问宿主同源数据] → 不把 iframe 当作安全边界；缩小 Cookie Path、执行后端授权并保持消息负载最小化。
 - [一次性票据存储需要原子消费] → 使用支持 compare-and-set 或唯一状态更新的共享存储，并对 `jti` 建唯一约束。
 - [短会话增加刷新请求] → 使用滚动续期；刷新时只执行必要状态和授权检查。
-- [同租户多个项目可能产生授权混淆] → 每个项目使用独立 client 和 allowlist，审计记录同时包含 client、租户和用户。
+- [同租户多个项目可能产生身份或授权混淆] → 外部身份唯一键包含 client，每个项目使用独立 allowlist，审计记录同时包含 client、租户和用户。
 - [错误角色映射造成权限提升] → 映射配置仅由 WeKnora 管理员维护，并以 client 最高角色、scopes 和资源 allowlist 多重封顶。
 - [现有 Bearer 认证与嵌入 Cookie 产生主体差异] → 两种凭证统一进入同一主体构造和后端资源授权链，只在凭证解析与 CSRF 要求上分流。
 

@@ -293,11 +293,11 @@ func agentGraphRelationTypes(ctx context.Context, knowledgeBaseService interface
 		if err != nil || kb == nil || kb.ExtractConfig == nil {
 			continue
 		}
-		for _, relation := range kb.ExtractConfig.Relations {
-			if relation == nil || strings.TrimSpace(relation.Type) == "" {
+		for _, relationType := range kb.ExtractConfig.Tags {
+			if strings.TrimSpace(relationType) == "" {
 				continue
 			}
-			typ := strings.ToLower(strings.TrimSpace(relation.Type))
+			typ := strings.ToLower(strings.TrimSpace(relationType))
 			if !seen[typ] {
 				seen[typ] = true
 				result = append(result, typ)

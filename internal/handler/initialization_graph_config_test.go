@@ -2,10 +2,47 @@ package handler
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/gin-gonic/gin"
 )
+
+func TestExtractionRequestsAllowDefaultModel(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+		target  any
+	}{
+		{
+			name:    "text relation extraction",
+			payload: `{"text":"example","model_id":""}`,
+			target:  &TextRelationExtractionRequest{},
+		},
+		{
+			name:    "example text generation",
+			payload: `{"tags":[],"model_id":""}`,
+			target:  &FabriTextRequest{},
+		},
+	}
+
+	gin.SetMode(gin.TestMode)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.payload))
+			request.Header.Set("Content-Type", "application/json")
+			context, _ := gin.CreateTestContext(httptest.NewRecorder())
+			context.Request = request
+
+			if err := context.ShouldBindJSON(tt.target); err != nil {
+				t.Fatalf("bind request with default model: %v", err)
+			}
+		})
+	}
+}
 
 func TestGraphExtractConfigRequestPreservesPolicyFields(t *testing.T) {
 	var req KBModelConfigRequest
@@ -20,6 +57,8 @@ func TestGraphExtractConfigRequestPreservesPolicyFields(t *testing.T) {
 			"text": "example",
 			"tags": ["uses"],
 			"entity_types": ["tool"],
+			"entity_schema": [{"type":"tool","base_type":"RESOURCE","description":"测试工具"}],
+			"relation_schema": [{"type":"uses","source_type":"tool","target_type":"tool","description":"工具使用工具"}],
 			"strict_schema": true,
 			"require_triple_review": true,
 			"nodes": [{"name":"A","entity_type":"tool","aliases":["Alpha"]}],
@@ -39,6 +78,9 @@ func TestGraphExtractConfigRequestPreservesPolicyFields(t *testing.T) {
 	if !config.StrictSchema || !config.RequireTripleReview || len(config.EntityTypes) != 1 {
 		t.Fatalf("schema or review policy lost: %#v", config)
 	}
+	if len(config.EntitySchema) != 1 || config.EntitySchema[0].BaseType != "RESOURCE" || config.EntitySchema[0].Description != "测试工具" || len(config.RelationSchema) != 1 || config.RelationSchema[0].SourceType != "tool" {
+		t.Fatalf("structured schema lost: %#v %#v", config.EntitySchema, config.RelationSchema)
+	}
 	if len(config.Nodes) != 1 || len(config.Nodes[0].Aliases) != 1 || config.Nodes[0].Aliases[0] != "Alpha" {
 		t.Fatalf("node aliases lost: %#v", config.Nodes)
 	}
@@ -47,8 +89,24 @@ func TestGraphExtractConfigRequestPreservesPolicyFields(t *testing.T) {
 	}
 }
 
+func TestValidateExtractConfigRejectsInvalidStructuredRelationDirection(t *testing.T) {
+	config := &types.ExtractConfig{
+		Enabled: true,
+		Mode:    types.GraphExtractionCustom,
+		EntitySchema: []types.GraphEntityTypeDefinition{
+			{Type: "tool", BaseType: "RESOURCE", Description: "工具"},
+		},
+		RelationSchema: []types.GraphRelationTypeDefinition{
+			{Type: "uses", SourceType: "method", TargetType: "tool", Description: "使用"},
+		},
+	}
+	if err := validateExtractConfig(config); err == nil {
+		t.Fatal("unknown relation source type must be rejected")
+	}
+}
+
 func TestValidateExtractConfigDefaultsPolicyAndAllowsNoExamples(t *testing.T) {
-	config := &types.ExtractConfig{Enabled: true, Text: "example"}
+	config := &types.ExtractConfig{Enabled: true, Mode: types.GraphExtractionGeneral}
 	if err := validateExtractConfig(config); err != nil {
 		t.Fatalf("validate config: %v", err)
 	}
@@ -57,6 +115,13 @@ func TestValidateExtractConfigDefaultsPolicyAndAllowsNoExamples(t *testing.T) {
 		config.MaxRelations != types.DefaultGraphMaxRelations ||
 		config.MinConfidence != types.DefaultGraphMinConfidence {
 		t.Fatalf("policy defaults not applied: %#v", config)
+	}
+}
+
+func TestValidateExtractConfigRejectsPartialFewShot(t *testing.T) {
+	config := &types.ExtractConfig{Enabled: true, Mode: types.GraphExtractionGeneral, Text: "example"}
+	if err := validateExtractConfig(config); err == nil {
+		t.Fatal("partial few-shot must be rejected")
 	}
 }
 

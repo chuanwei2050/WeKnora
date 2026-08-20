@@ -275,6 +275,28 @@ DETACH DELETE e`,
 	return nil
 }
 
+func (n *Neo4jRepository) DeleteCanonicalKnowledgeBase(ctx context.Context, tenantID uint64, knowledgeBaseID string) error {
+	if n.driver == nil {
+		return fmt.Errorf("neo4j driver is unavailable")
+	}
+	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer session.Close(ctx)
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		_, runErr := tx.Run(ctx, `MATCH (n)
+WHERE n.tenant_id = $tenant_id AND n.knowledge_base_id = $knowledge_base_id
+  AND (n:CanonicalEntity OR n:DocumentEntityInstance OR n:CanonicalRelation
+    OR n:GraphEvidence OR n:GraphNamespace OR n:GraphConflict)
+DETACH DELETE n`, map[string]interface{}{
+			"tenant_id": tenantID, "knowledge_base_id": knowledgeBaseID,
+		})
+		return nil, runErr
+	})
+	if err != nil {
+		return fmt.Errorf("delete canonical knowledge base: %w", err)
+	}
+	return nil
+}
+
 func (n *Neo4jRepository) RebuildCanonicalGraph(ctx context.Context, tenantID uint64, knowledgeBaseID, namespace string, records []types.GraphRebuildRecord, switchActive bool) (types.GraphRebuildResult, error) {
 	if err := n.UpsertCanonicalRecords(ctx, tenantID, knowledgeBaseID, namespace, records); err != nil {
 		return types.GraphRebuildResult{}, err
@@ -432,7 +454,7 @@ func (n *Neo4jRepository) searchCanonicalPaths(ctx context.Context, query types.
 	}
 	searchCtx, cancel := context.WithTimeout(ctx, query.Timeout)
 	defer cancel()
-	namespace, err := n.activeCanonicalNamespace(searchCtx, query.Scope.TenantID, query.Scope.KnowledgeBaseID)
+	namespaces, err := n.canonicalSearchNamespaces(searchCtx, query.Scope)
 	if err != nil {
 		return types.GraphSearchResult{}, false, err
 	}
@@ -444,7 +466,7 @@ func (n *Neo4jRepository) searchCanonicalPaths(ctx context.Context, query types.
 			"entity_type":     types.NormalizeEntityName(seed.EntityType),
 		})
 	}
-	nodes, err := n.loadCanonicalSeeds(searchCtx, query.Scope, namespace, seeds)
+	nodes, err := n.loadCanonicalSeeds(searchCtx, query.Scope, namespaces, seeds)
 	if err != nil {
 		return types.GraphSearchResult{}, false, err
 	}
@@ -464,7 +486,7 @@ func (n *Neo4jRepository) searchCanonicalPaths(ctx context.Context, query types.
 	truncated := false
 	truncationReason := ""
 	for depth := 0; depth < query.MaxDepth && len(frontier) > 0; depth++ {
-		frontierResult, err := n.loadCanonicalFrontier(searchCtx, query.Scope, namespace, frontier, query.RelationTypes)
+		frontierResult, err := n.loadCanonicalFrontier(searchCtx, query.Scope, namespaces, frontier, query.RelationTypes)
 		if err != nil {
 			return types.GraphSearchResult{}, false, err
 		}
@@ -518,18 +540,36 @@ func (n *Neo4jRepository) searchCanonicalPaths(ctx context.Context, query types.
 	return result, true, nil
 }
 
-func (n *Neo4jRepository) loadCanonicalSeeds(ctx context.Context, scope types.GraphScope, namespace string, seeds []map[string]interface{}) ([]types.CanonicalEntity, error) {
+func (n *Neo4jRepository) canonicalSearchNamespaces(ctx context.Context, scope types.GraphScope) ([]string, error) {
+	active, err := n.activeCanonicalNamespace(ctx, scope.TenantID, scope.KnowledgeBaseID)
+	if err != nil {
+		return nil, err
+	}
+	// Keep the unversioned namespace searchable while legacy documents are
+	// progressively rebuilt alongside governed version namespaces.
+	namespaces := []string{"default", active}
+	for _, versionID := range scope.CurrentKnowledgeVersions {
+		if namespace := types.GraphNamespaceForVersion(versionID, true); namespace != "default" {
+			namespaces = append(namespaces, namespace)
+		}
+	}
+	sort.Strings(namespaces)
+	return uniqueStrings(namespaces), nil
+}
+
+func (n *Neo4jRepository) loadCanonicalSeeds(ctx context.Context, scope types.GraphScope, namespaces []string, seeds []map[string]interface{}) ([]types.CanonicalEntity, error) {
 	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
 	defer session.Close(ctx)
 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		cursor, err := tx.Run(ctx, `UNWIND $seeds AS seed
-MATCH (node:CanonicalEntity {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id, namespace: $namespace})
-WHERE (seed.canonical_key <> '' AND node.canonical_key = seed.canonical_key)
+MATCH (node:CanonicalEntity {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id})
+WHERE node.namespace IN $namespaces AND (
+	(seed.canonical_key <> '' AND node.canonical_key = seed.canonical_key)
    OR (seed.canonical_key = '' AND seed.normalized_name <> '' AND
       (node.normalized_name = seed.normalized_name OR seed.normalized_name IN coalesce(node.normalized_aliases, [])) AND
-      (seed.entity_type = '' OR node.entity_type = seed.entity_type))
+      (seed.entity_type = '' OR node.entity_type = seed.entity_type)))
 RETURN node`, map[string]interface{}{
-			"seeds": seeds, "tenant_id": scope.TenantID, "knowledge_base_id": scope.KnowledgeBaseID, "namespace": namespace,
+			"seeds": seeds, "tenant_id": scope.TenantID, "knowledge_base_id": scope.KnowledgeBaseID, "namespaces": namespaces,
 		})
 		if err != nil {
 			return nil, err
@@ -567,20 +607,26 @@ type canonicalFrontierResult struct {
 	Edges []types.GraphEdge
 }
 
-func (n *Neo4jRepository) loadCanonicalFrontier(ctx context.Context, scope types.GraphScope, namespace string, frontier, relationTypes []string) (canonicalFrontierResult, error) {
+func (n *Neo4jRepository) loadCanonicalFrontier(ctx context.Context, scope types.GraphScope, namespaces []string, frontier, relationTypes []string) (canonicalFrontierResult, error) {
 	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
 	defer session.Close(ctx)
 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-		cursor, err := tx.Run(ctx, `MATCH (source:CanonicalEntity {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id, namespace: $namespace})
-<-[:CONNECTS_FROM]-(relation:CanonicalRelation {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id, namespace: $namespace})
--[:CONNECTS_TO]->(target:CanonicalEntity {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id, namespace: $namespace})
-MATCH (relation)-[:EVIDENCED_BY]->(evidence:GraphEvidence {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id, namespace: $namespace})
-WHERE (source.canonical_key IN $frontier OR target.canonical_key IN $frontier)
+		cursor, err := tx.Run(ctx, `MATCH (source:CanonicalEntity {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id})
+<-[:CONNECTS_FROM]-(relation:CanonicalRelation {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id})
+-[:CONNECTS_TO]->(target:CanonicalEntity {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id})
+MATCH (relation)-[:EVIDENCED_BY]->(evidence:GraphEvidence {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id})
+WHERE relation.namespace IN $namespaces
+  AND source.namespace = relation.namespace
+  AND target.namespace = relation.namespace
+  AND evidence.namespace = relation.namespace
+  AND (source.canonical_key IN $frontier OR target.canonical_key IN $frontier)
   AND ($relation_types = [] OR relation.relation_type IN $relation_types)
   AND ($allowed_knowledge_ids = [] OR evidence.knowledge_id IN $allowed_knowledge_ids)
+  AND ($current_version_ids = [] OR coalesce(evidence.knowledge_version_id, '') = '' OR evidence.knowledge_version_id IN $current_version_ids)
 RETURN source, target, relation, collect(evidence) AS evidences`, map[string]interface{}{
-			"tenant_id": scope.TenantID, "knowledge_base_id": scope.KnowledgeBaseID, "namespace": namespace,
+			"tenant_id": scope.TenantID, "knowledge_base_id": scope.KnowledgeBaseID, "namespaces": namespaces,
 			"frontier": frontier, "relation_types": normalizedRelationTypes(relationTypes), "allowed_knowledge_ids": scope.AllowedKnowledgeIDs,
+			"current_version_ids": currentVersionIDs(scope.CurrentKnowledgeVersions),
 		})
 		if err != nil {
 			return canonicalFrontierResult{}, err
@@ -660,6 +706,17 @@ func normalizedRelationTypes(values []string) []string {
 		result = append(result, normalized)
 	}
 	return result
+}
+
+func currentVersionIDs(versions map[string]string) []string {
+	result := make([]string, 0, len(versions))
+	for _, versionID := range versions {
+		if versionID = strings.TrimSpace(versionID); versionID != "" {
+			result = append(result, versionID)
+		}
+	}
+	sort.Strings(result)
+	return uniqueStrings(result)
 }
 
 func neo4jNode(value interface{}) (neo4j.Node, bool) {

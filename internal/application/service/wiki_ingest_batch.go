@@ -162,18 +162,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		return fmt.Errorf("wiki ingest: KB %s is not wiki type", kb.ID)
 	}
 
-	var synthesisModelID string
-	if kb.WikiConfig != nil {
-		synthesisModelID = kb.WikiConfig.SynthesisModelID
-	}
-	if synthesisModelID == "" {
-		synthesisModelID = kb.SummaryModelID
-	}
-	if synthesisModelID == "" {
-		exitStatus = "missing_synthesis_model"
-		return fmt.Errorf("wiki ingest: no synthesis model configured for KB %s", kb.ID)
-	}
-	chatModel, err := s.modelService.GetChatModel(ctx, synthesisModelID)
+	chatModel, err := s.modelService.GetChatModel(ctx, "")
 	if err != nil {
 		exitStatus = "get_chat_model_failed"
 		return fmt.Errorf("wiki ingest: get chat model: %w", err)

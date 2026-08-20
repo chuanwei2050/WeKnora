@@ -187,13 +187,14 @@ func (h *IntegrationHandler) Bootstrap(c *gin.Context) {
 		ExternalTenantID string   `json:"external_tenant_id" binding:"required"`
 		ExternalUserID   string   `json:"external_user_id" binding:"required"`
 		ExternalRoles    []string `json:"external_roles"`
+		Active           *bool    `json:"active"`
 		Origin           string   `json:"origin" binding:"required"`
 	}
 	if c.ShouldBindJSON(&req) != nil {
 		integrationError(c, http.StatusBadRequest, "invalid_request", "external identity and origin are required")
 		return
 	}
-	ticket, err := h.service.CreateBootstrap(c.Request.Context(), bearerToken(c), integrationauth.BootstrapRequest{ExternalTenantID: req.ExternalTenantID, ExternalUserID: req.ExternalUserID, ExternalRoles: req.ExternalRoles, Origin: req.Origin})
+	ticket, err := h.service.CreateBootstrap(c.Request.Context(), bearerToken(c), integrationauth.BootstrapRequest{ExternalTenantID: req.ExternalTenantID, ExternalUserID: req.ExternalUserID, ExternalRoles: req.ExternalRoles, Active: req.Active, Origin: req.Origin})
 	if err != nil {
 		h.service.Audit(c.Request.Context(), nil, "auth.bootstrap", "denied", "bootstrap_denied")
 		integrationError(c, http.StatusForbidden, "bootstrap_denied", "bootstrap request denied")
@@ -789,13 +790,13 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	})
 	eventBus.On(event.EventAgentReferences, func(ctx context.Context, evt event.Event) error {
 		if data, ok := evt.Data.(event.AgentReferencesData); ok {
-			if values, ok := data.References.([]*types.SearchResult); ok {
-				references = types.References(values)
+			if values, ok := integrationReferences(data.References); ok {
+				references = values
 			}
 		}
 		return nil
 	})
-	generationCtx, cancelGeneration := context.WithCancel(c.Request.Context())
+	generationCtx, cancelGeneration := newIntegrationGenerationContext(c.Request.Context())
 	generationKey := binding.SessionID + ":" + assistantMessage.ID
 	h.generations.Store(generationKey, cancelGeneration)
 	defer func() {
@@ -825,14 +826,39 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	assistantMessage.Content = answer.String()
 	assistantMessage.IsCompleted = true
 	assistantMessage.KnowledgeReferences = references
-	if err = h.messages.UpdateMessage(c.Request.Context(), assistantMessage); err != nil {
-		_, _ = h.service.AppendStreamEvent(c.Request.Context(), binding.SessionID, assistantMessage.ID, "error", gin.H{"code": "message_persist_failed", "retryable": true, "status": "failed"})
+	if err = h.messages.UpdateMessage(generationCtx, assistantMessage); err != nil {
+		_, _ = h.service.AppendStreamEvent(generationCtx, binding.SessionID, assistantMessage.ID, "error", gin.H{"code": "message_persist_failed", "retryable": true, "status": "failed"})
 		h.writeStoredEvents(c, binding, assistantMessage.ID, "")
 		return
 	}
-	_, _ = h.service.AppendStreamEvent(c.Request.Context(), binding.SessionID, assistantMessage.ID, "answer.completed", gin.H{"status": "completed", "answer": assistantMessage.Content, "selected_knowledge_base_ids": selected, "references": references})
-	h.service.AuditResources(c.Request.Context(), principal, "api.chat.message.create", "allowed", "", selected)
+	_, _ = h.service.AppendStreamEvent(generationCtx, binding.SessionID, assistantMessage.ID, "answer.completed", gin.H{"status": "completed", "answer": assistantMessage.Content, "selected_knowledge_base_ids": selected, "references": references})
+	h.service.AuditResources(generationCtx, principal, "api.chat.message.create", "allowed", "", selected)
 	h.writeStoredEvents(c, binding, assistantMessage.ID, "")
+}
+
+func newIntegrationGenerationContext(requestContext context.Context) (context.Context, context.CancelFunc) {
+	return context.WithCancel(context.WithoutCancel(requestContext))
+}
+
+func integrationReferences(value any) (types.References, bool) {
+	switch references := value.(type) {
+	case types.References:
+		return references, true
+	case []*types.SearchResult:
+		return types.References(references), true
+	case []interface{}:
+		result := make(types.References, 0, len(references))
+		for _, reference := range references {
+			searchResult, ok := reference.(*types.SearchResult)
+			if !ok {
+				return nil, false
+			}
+			result = append(result, searchResult)
+		}
+		return result, true
+	default:
+		return nil, false
+	}
 }
 
 func isSupportedIntegrationImage(data string) bool {
@@ -975,22 +1001,23 @@ func (h *IntegrationHandler) CreateClient(c *gin.Context) {
 	actor, _ := c.Get(types.UserContextKey.String())
 	user, _ := actor.(*types.User)
 	var req struct {
-		ID                 string            `json:"id"`
-		Name               string            `json:"name" binding:"required"`
-		TenantID           uint64            `json:"tenant_id" binding:"required"`
-		IdentityProviderID string            `json:"identity_provider_id" binding:"required"`
-		Scopes             []string          `json:"scopes"`
-		KnowledgeBaseIDs   []string          `json:"knowledge_base_ids"`
-		AllowedOrigins     []string          `json:"allowed_origins" binding:"required"`
-		RoleMappings       map[string]string `json:"role_mappings"`
-		MaxRole            string            `json:"max_role"`
+		ID                  string            `json:"id"`
+		Name                string            `json:"name" binding:"required"`
+		TenantID            uint64            `json:"tenant_id" binding:"required"`
+		IdentityProviderID  string            `json:"identity_provider_id" binding:"required"`
+		AdministratorUserID string            `json:"administrator_user_id"`
+		Scopes              []string          `json:"scopes"`
+		KnowledgeBaseIDs    []string          `json:"knowledge_base_ids"`
+		AllowedOrigins      []string          `json:"allowed_origins" binding:"required"`
+		RoleMappings        map[string]string `json:"role_mappings"`
+		MaxRole             string            `json:"max_role"`
 	}
 	if c.ShouldBindJSON(&req) != nil || len(req.AllowedOrigins) == 0 {
 		integrationError(c, http.StatusBadRequest, "invalid_client", "invalid integration client")
 		return
 	}
 	encode := func(value any) string { data, _ := jsonMarshal(value); return data }
-	client := &integrationauth.Client{ID: req.ID, Name: req.Name, TenantID: req.TenantID, IdentityProviderID: req.IdentityProviderID, ScopesJSON: encode(req.Scopes), KnowledgeBaseIDsJSON: encode(req.KnowledgeBaseIDs), AllowedOriginsJSON: encode(req.AllowedOrigins), RoleMappingsJSON: encode(req.RoleMappings), MaxRole: req.MaxRole}
+	client := &integrationauth.Client{ID: req.ID, Name: req.Name, TenantID: req.TenantID, IdentityProviderID: req.IdentityProviderID, AdministratorUserID: req.AdministratorUserID, ScopesJSON: encode(req.Scopes), KnowledgeBaseIDsJSON: encode(req.KnowledgeBaseIDs), AllowedOriginsJSON: encode(req.AllowedOrigins), RoleMappingsJSON: encode(req.RoleMappings), MaxRole: req.MaxRole}
 	secret, err := h.service.CreateClient(c.Request.Context(), user, client, "")
 	if err != nil {
 		status := http.StatusForbidden
@@ -1013,7 +1040,7 @@ func (h *IntegrationHandler) ListClients(c *gin.Context) {
 	}
 	result := make([]gin.H, 0, len(clients))
 	for _, client := range clients {
-		result = append(result, gin.H{"id": client.ID, "name": client.Name, "tenant_id": client.TenantID, "identity_provider_id": client.IdentityProviderID, "enabled": client.Enabled, "expires_at": client.ExpiresAt})
+		result = append(result, gin.H{"id": client.ID, "name": client.Name, "tenant_id": client.TenantID, "identity_provider_id": client.IdentityProviderID, "administrator_user_id": client.AdministratorUserID, "enabled": client.Enabled, "expires_at": client.ExpiresAt})
 	}
 	integrationData(c, http.StatusOK, result)
 }
@@ -1082,4 +1109,21 @@ func (h *IntegrationHandler) DisableClient(c *gin.Context) {
 		return
 	}
 	integrationData(c, http.StatusOK, gin.H{"enabled": false})
+}
+
+func (h *IntegrationHandler) BindClientAdministrator(c *gin.Context) {
+	actor, _ := c.Get(types.UserContextKey.String())
+	user, _ := actor.(*types.User)
+	var req struct {
+		UserID string `json:"user_id" binding:"required"`
+	}
+	if c.ShouldBindJSON(&req) != nil {
+		integrationError(c, http.StatusBadRequest, "invalid_administrator", "user_id is required")
+		return
+	}
+	if err := h.service.BindClientAdministrator(c.Request.Context(), user, c.Param("client_id"), req.UserID); err != nil {
+		integrationError(c, http.StatusForbidden, "administrator_bind_failed", "administrator binding denied")
+		return
+	}
+	integrationData(c, http.StatusOK, gin.H{"administrator_user_id": req.UserID})
 }

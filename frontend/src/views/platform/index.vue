@@ -62,8 +62,7 @@ const getCurrentKbId = (): string | null => {
     return (route.params as any)?.kbId as string || null
 }
 
-// 检查知识库初始化状态
-const checkKnowledgeBaseInitialization = async (): Promise<any | null> => {
+const loadCurrentKnowledgeBase = async (): Promise<any | null> => {
     const currentKbId = getCurrentKbId();
     
     if (!currentKbId) {
@@ -75,16 +74,6 @@ const checkKnowledgeBaseInitialization = async (): Promise<any | null> => {
         const kbResponse = await getKnowledgeBaseById(currentKbId);
         const kb = kbResponse.data;
         
-        if (!kb.summary_model_id) {
-            MessagePlugin.warning(t('knowledgeBase.notInitialized'));
-            return null;
-        }
-        const strategy = kb.indexing_strategy;
-        const needsEmbedding = !strategy || strategy.vector_enabled;
-        if (needsEmbedding && !kb.embedding_model_id) {
-            MessagePlugin.warning(t('knowledgeBase.notInitialized'));
-            return null;
-        }
         return kb;
     } catch (error) {
         MessagePlugin.error(t('knowledgeBase.getInfoFailed'));
@@ -130,7 +119,7 @@ const handleGlobalDrop = async (event: DragEvent) => {
     const DataTransferFiles = event.dataTransfer?.files ? Array.from(event.dataTransfer.files) : [];
     const DataTransferItemList = event.dataTransfer?.items ? Array.from(event.dataTransfer.items) : [];
     
-    const knowledgeBase = await checkKnowledgeBaseInitialization();
+    const knowledgeBase = await loadCurrentKnowledgeBase();
     if (!knowledgeBase) {
         return;
     }

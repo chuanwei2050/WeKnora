@@ -194,14 +194,9 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	currentTenantID := types.MustTenantIDFromContext(ctx)
 	var retrieveParams []types.RetrieveParams
 
-	// Respect the KB's IndexingStrategy: a KB that does not have vector
-	// indexing enabled (e.g. wiki-only or graph-only KBs) has no embeddings
-	// to retrieve from, and typically has no EmbeddingModelID configured
-	// either. Skipping vector retrieval for such KBs avoids spurious
-	// "model ID cannot be empty" errors when an agent's retrieval scope
-	// happens to include them (e.g. KBSelectionMode=all picking up a
-	// wiki-only KB).
-	vectorIndexed := kb.IsVectorEnabled() && kb.EmbeddingModelID != ""
+	// The platform default supplies a missing embedding model ID. Only the
+	// indexing strategy decides whether this knowledge base has vector data.
+	vectorIndexed := shouldUseVectorRetrieval(kb)
 
 	// Add vector retrieval params if supported
 	if retrieveEngine.SupportRetriever(types.VectorRetrieverType) && !params.DisableVectorMatch && vectorIndexed {
@@ -278,4 +273,8 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	}
 
 	return retrieveParams, nil
+}
+
+func shouldUseVectorRetrieval(kb *types.KnowledgeBase) bool {
+	return kb != nil && kb.IsVectorEnabled()
 }

@@ -777,12 +777,9 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 // GetEmbeddingModel retrieves and initializes an embedding model instance
 // Takes a model ID and returns an Embedder interface implementation
 func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (embedding.Embedder, error) {
-	if modelId == "" {
-		model, err := s.GetDefaultModel(ctx, types.ModelTypeEmbedding, "embedding")
-		if err != nil {
-			return nil, err
-		}
-		modelId = model.ID
+	modelId, err := s.resolveEmbeddingModelID(ctx, modelId)
+	if err != nil {
+		return nil, err
 	}
 	// Get the model details
 	model, err := s.GetModelByID(ctx, modelId)
@@ -822,10 +819,9 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 // This is used for cross-tenant knowledge base sharing where the embedding model from
 // the source tenant must be used to ensure vector compatibility
 func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId string, tenantID uint64) (embedding.Embedder, error) {
-	// Check if model ID is empty
-	if modelId == "" {
-		logger.Error(ctx, "Model ID is empty")
-		return nil, errors.New("model ID cannot be empty")
+	modelId, err := s.resolveEmbeddingModelID(ctx, modelId)
+	if err != nil {
+		return nil, err
 	}
 
 	// Fetch model from repository using the specified tenant ID
@@ -876,6 +872,17 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 
 	logger.Info(ctx, "Cross-tenant embedding model initialized successfully")
 	return embedder, nil
+}
+
+func (s *modelService) resolveEmbeddingModelID(ctx context.Context, modelID string) (string, error) {
+	if modelID != "" {
+		return modelID, nil
+	}
+	model, err := s.GetDefaultModel(ctx, types.ModelTypeEmbedding, "embedding")
+	if err != nil {
+		return "", err
+	}
+	return model.ID, nil
 }
 
 // GetRerankModel retrieves and initializes a reranking model instance

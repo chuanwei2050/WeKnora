@@ -45,6 +45,10 @@ func (f *graphRepositoryFixture) RemoveCanonicalSource(context.Context, uint64, 
 	return nil
 }
 
+func (f *graphRepositoryFixture) DeleteCanonicalKnowledgeBase(context.Context, uint64, string) error {
+	return nil
+}
+
 func (f *graphRepositoryFixture) RebuildCanonicalGraph(context.Context, uint64, string, string, []types.GraphRebuildRecord, bool) (types.GraphRebuildResult, error) {
 	return types.GraphRebuildResult{}, nil
 }
@@ -143,6 +147,20 @@ func TestFilterGovernedGraphResultBeforeRendering(t *testing.T) {
 	}
 }
 
+func TestFilterGovernedGraphResultPreservesCurrentPathEdges(t *testing.T) {
+	plugin := &PluginSearchEntity{knowledgeRepo: graphGovernanceKnowledgeFixture{items: []*types.Knowledge{{ID: "doc", CurrentVersionID: "current"}}}}
+	evidence := types.GraphEvidence{KnowledgeID: "doc", KnowledgeVersionID: "current", ChunkID: "chunk"}
+	result := &types.GraphSearchResult{
+		Nodes: []types.CanonicalEntity{{CanonicalKey: "a"}, {CanonicalKey: "b"}},
+		Edges: []types.GraphEdge{{ID: "edge", Source: "a", Target: "b", Evidence: []types.GraphEvidence{evidence}}},
+		Paths: []types.GraphPath{{NodeKeys: []string{"a", "b"}, Edges: []types.GraphEdge{{ID: "edge", Evidence: []types.GraphEvidence{evidence}}}, Evidence: []types.GraphEvidence{evidence}}},
+	}
+	filtered := plugin.filterGovernedGraphResult(context.Background(), &types.ChatManage{PipelineRequest: types.PipelineRequest{TenantID: 7}}, result)
+	if filtered == nil || len(filtered.Paths) != 1 || len(filtered.Paths[0].Edges) != 1 || len(filtered.Nodes) != 2 {
+		t.Fatalf("current graph path was dropped: %+v", filtered)
+	}
+}
+
 func TestFilterGovernedGraphResultRejectsNonRetrievableCurrentVersion(t *testing.T) {
 	plugin := &PluginSearchEntity{
 		knowledgeRepo:  graphGovernanceKnowledgeFixture{items: []*types.Knowledge{{ID: "doc", CurrentVersionID: "current"}}},
@@ -181,7 +199,7 @@ func TestQueryKnowledgeGraphToolReturnsTypedGraphData(t *testing.T) {
 		Edges: []types.GraphEdge{{ID: "edge-1", Source: "1:kb:tool:alpha", Target: "1:kb:tool:beta", RelationType: "uses", Evidence: []types.GraphEvidence{{KnowledgeID: "doc-1", ChunkID: "chunk-1"}}}},
 		Paths: []types.GraphPath{{NodeKeys: []string{"1:kb:tool:alpha", "1:kb:tool:beta"}, Evidence: []types.GraphEvidence{{KnowledgeID: "doc-1", ChunkID: "chunk-1"}}}},
 	}}
-	tool := tools.NewQueryKnowledgeGraphTool(graphKnowledgeServiceFixture{kb: &types.KnowledgeBase{ID: "kb", TenantID: 1, IndexingStrategy: types.IndexingStrategy{GraphEnabled: true}, ExtractConfig: &types.ExtractConfig{Enabled: true, Relations: []*types.GraphRelation{{Type: "uses"}}}}}, fixture, nil, nil, types.SearchTargets{&types.SearchTarget{KnowledgeBaseID: "kb", Type: types.SearchTargetTypeKnowledgeBase, TenantID: 1}})
+	tool := tools.NewQueryKnowledgeGraphTool(graphKnowledgeServiceFixture{kb: &types.KnowledgeBase{ID: "kb", TenantID: 1, IndexingStrategy: types.IndexingStrategy{GraphEnabled: true}, ExtractConfig: &types.ExtractConfig{Enabled: true, Tags: []string{"uses"}, Relations: []*types.GraphRelation{{Type: "few-shot-only"}}}}}, fixture, nil, nil, types.SearchTargets{&types.SearchTarget{KnowledgeBaseID: "kb", Type: types.SearchTargetTypeKnowledgeBase, TenantID: 1}})
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	result, err := tool.Execute(ctx, []byte(`{"knowledge_base_ids":["kb"],"query":"Alpha"}`))
 	if err != nil {

@@ -10,9 +10,10 @@ import (
 
 // SchemaFilterOptions controls graph schema filtering for extract paths.
 type SchemaFilterOptions struct {
-	Tags         []string
-	EntityTypes  []string
-	StrictSchema bool
+	Tags           []string
+	EntityTypes    []string
+	RelationSchema []types.GraphRelationTypeDefinition
+	StrictSchema   bool
 }
 
 // SchemaFilterResult reports whether the filtered graph should skip persistence.
@@ -27,9 +28,10 @@ func SchemaFilterOptionsFromExtract(cfg *types.ExtractConfig) SchemaFilterOption
 		return SchemaFilterOptions{}
 	}
 	return SchemaFilterOptions{
-		Tags:         append([]string(nil), cfg.Tags...),
-		EntityTypes:  append([]string(nil), cfg.EntityTypes...),
-		StrictSchema: cfg.StrictSchema,
+		Tags:           append([]string(nil), cfg.Tags...),
+		EntityTypes:    append([]string(nil), cfg.EntityTypes...),
+		RelationSchema: append([]types.GraphRelationTypeDefinition(nil), cfg.RelationSchema...),
+		StrictSchema:   cfg.StrictSchema,
 	}
 }
 
@@ -39,9 +41,10 @@ func SchemaFilterOptionsFromTemplate(tpl *types.PromptTemplateStructured) Schema
 		return SchemaFilterOptions{}
 	}
 	return SchemaFilterOptions{
-		Tags:         append([]string(nil), tpl.Tags...),
-		EntityTypes:  append([]string(nil), tpl.EntityTypes...),
-		StrictSchema: tpl.StrictSchema,
+		Tags:           append([]string(nil), tpl.Tags...),
+		EntityTypes:    append([]string(nil), tpl.EntityTypes...),
+		RelationSchema: append([]types.GraphRelationTypeDefinition(nil), tpl.RelationSchema...),
+		StrictSchema:   tpl.StrictSchema,
 	}
 }
 
@@ -93,7 +96,7 @@ func ApplyGraphSchemaFilter(ctx context.Context, graph *types.GraphData, opts Sc
 			}
 			allowedTypes[strings.ToLower(entityType)] = entityType
 		}
-		validNodes := make(map[string]struct{})
+		validNodes := make(map[string]string)
 		keptNodes := make([]*types.GraphNode, 0, len(graph.Node))
 		for _, node := range graph.Node {
 			if node == nil {
@@ -111,7 +114,7 @@ func ApplyGraphSchemaFilter(ctx context.Context, graph *types.GraphData, opts Sc
 			}
 			node.EntityType = canonicalType
 			keptNodes = append(keptNodes, node)
-			validNodes[node.Name] = struct{}{}
+			validNodes[node.Name] = canonicalType
 		}
 		graph.Node = keptNodes
 
@@ -120,12 +123,18 @@ func ApplyGraphSchemaFilter(ctx context.Context, graph *types.GraphData, opts Sc
 			if relation == nil {
 				continue
 			}
-			if _, ok := validNodes[relation.Node1]; !ok {
+			sourceType, ok := validNodes[relation.Node1]
+			if !ok {
 				logger.Infof(ctx, "strict schema drop relation %s-%s: invalid source entity", relation.Node1, relation.Node2)
 				continue
 			}
-			if _, ok := validNodes[relation.Node2]; !ok {
+			targetType, ok := validNodes[relation.Node2]
+			if !ok {
 				logger.Infof(ctx, "strict schema drop relation %s-%s: invalid target entity", relation.Node1, relation.Node2)
+				continue
+			}
+			if !matchesConfiguredRelationDirection(relation, sourceType, targetType, opts.RelationSchema) {
+				logger.Infof(ctx, "strict schema drop relation %s-%s: invalid configured direction", relation.Node1, relation.Node2)
 				continue
 			}
 			keptRelations = append(keptRelations, relation)
@@ -137,4 +146,17 @@ func ApplyGraphSchemaFilter(ctx context.Context, graph *types.GraphData, opts Sc
 		return SchemaFilterResult{SkipWrite: true, Reason: "no_valid_relations"}
 	}
 	return SchemaFilterResult{}
+}
+
+func matchesConfiguredRelationDirection(relation *types.GraphRelation, sourceType, targetType string, schema []types.GraphRelationTypeDefinition) bool {
+	for _, definition := range schema {
+		if !strings.EqualFold(strings.TrimSpace(definition.Type), strings.TrimSpace(relation.Type)) {
+			continue
+		}
+		if strings.TrimSpace(definition.SourceType) == "" || strings.TrimSpace(definition.TargetType) == "" {
+			return true
+		}
+		return strings.EqualFold(definition.SourceType, sourceType) && strings.EqualFold(definition.TargetType, targetType)
+	}
+	return true
 }

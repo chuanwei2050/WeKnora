@@ -19,12 +19,16 @@ func TestShouldEnqueueGraphExtract(t *testing.T) {
 		IndexingStrategy: types.IndexingStrategy{GraphEnabled: false},
 		ExtractConfig:    &types.ExtractConfig{Enabled: true},
 	}
+	legacyEnabled := &types.KnowledgeBase{IndexingStrategy: types.IndexingStrategy{GraphEnabled: true}}
 
 	if ShouldEnqueueGraphExtract(disabled, "A 和 B 是什么关系？") {
 		t.Fatal("disabled graph must not enqueue")
 	}
 	if !ShouldEnqueueGraphExtract(enabled, "张三任职于腾讯。") {
 		t.Fatal("default all mode must enqueue non-empty facts")
+	}
+	if !ShouldEnqueueGraphExtract(legacyEnabled, "张三任职于腾讯。") {
+		t.Fatal("graph-enabled legacy knowledge base without extract config must use general extraction")
 	}
 	if !ShouldEnqueueGraphExtract(enabled, "A 和 B 是什么关系？") {
 		t.Fatal("relation-bearing chunk on graph-enabled KB must enqueue")
@@ -51,5 +55,15 @@ func TestGraphExtractionModelID(t *testing.T) {
 	kb.ExtractConfig.ModelID = ""
 	if got := kb.GraphExtractionModelID(); got != "summary" {
 		t.Fatalf("expected summary fallback, got %q", got)
+	}
+}
+
+func TestDocumentSummaryUsesPlatformModelWhenKnowledgeBaseModelIDIsEmpty(t *testing.T) {
+	chunks := []*types.Chunk{{ChunkType: types.ChunkTypeText, Content: "content"}}
+	if !shouldGenerateDocumentSummary(chunks) {
+		t.Fatal("text chunks must enqueue summary generation through the platform model")
+	}
+	if shouldGenerateDocumentSummary(nil) {
+		t.Fatal("empty documents must not enqueue summary generation")
 	}
 }

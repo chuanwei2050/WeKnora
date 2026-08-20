@@ -55,6 +55,8 @@ export interface InitializationConfig {
     storageType?: 'cos' | 'minio';
     nodeExtract: {
         enabled: boolean,
+        mode?: 'general' | 'template' | 'custom',
+        template_key?: string,
         model_id?: string,
         ingestion_mode?: 'all' | 'signal',
         max_entities?: number,
@@ -98,7 +100,6 @@ export interface KBModelConfigRequest {
         chunkSize: number
         chunkOverlap: number
         separators: string[]
-        parserEngineRules?: { file_types: string[]; engine: string }[]
         enableParentChild?: boolean
         parentChunkSize?: number
         childChunkSize?: number
@@ -108,6 +109,8 @@ export interface KBModelConfigRequest {
     }
     nodeExtract: {
         enabled: boolean
+        mode?: 'general' | 'template' | 'custom'
+        template_key?: string
         model_id?: string
         ingestion_mode?: 'all' | 'signal'
         max_entities?: number
@@ -116,6 +119,8 @@ export interface KBModelConfigRequest {
         text: string
         tags: string[]
         entity_types?: string[]
+        entity_schema?: Array<{ type: string; base_type: string; description: string }>
+        relation_schema?: Array<{ type: string; source_type: string; target_type: string; description: string }>
         strict_schema?: boolean
         require_triple_review?: boolean
         nodes: Node[]
@@ -496,6 +501,8 @@ export interface TextRelationExtractionRequest {
 
 export interface Node {
     name: string;
+    entity_type?: string;
+    description?: string;
     attributes: string[];
     aliases?: string[];
 }
@@ -505,6 +512,7 @@ export interface Relation {
     node2: string;
     type: string;
     confidence?: number;
+    description?: string;
 }
 
 export interface TextRelationExtractionResponse {

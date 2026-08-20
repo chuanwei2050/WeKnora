@@ -18,6 +18,7 @@ type Client struct {
 	ID                   string     `gorm:"type:varchar(64);primaryKey"`
 	TenantID             uint64     `gorm:"not null;index"`
 	IdentityProviderID   string     `gorm:"type:varchar(64);not null;index"`
+	AdministratorUserID  string     `gorm:"type:varchar(36);not null;default:''"`
 	Name                 string     `gorm:"type:varchar(128);not null"`
 	SecretHash           string     `gorm:"type:varchar(64);not null"`
 	PreviousSecretHash   string     `gorm:"type:varchar(64)"`
@@ -36,10 +37,12 @@ func (Client) TableName() string { return "integration_clients" }
 
 type ExternalIdentity struct {
 	ID                 uint64 `gorm:"primaryKey"`
-	IdentityProviderID string `gorm:"type:varchar(64);not null;uniqueIndex:idx_integration_identity"`
+	ClientID           string `gorm:"type:varchar(64);not null;uniqueIndex:idx_integration_identity"`
+	IdentityProviderID string `gorm:"type:varchar(64);not null"`
 	ExternalTenantID   string `gorm:"type:varchar(128);not null;uniqueIndex:idx_integration_identity"`
 	ExternalUserID     string `gorm:"type:varchar(128);not null;uniqueIndex:idx_integration_identity"`
 	UserID             string `gorm:"type:varchar(36);not null;index"`
+	Active             bool   `gorm:"not null;default:true;index"`
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }

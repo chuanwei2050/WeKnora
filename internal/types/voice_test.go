@@ -10,7 +10,7 @@ import (
 func TestVoiceTicketIsSingleUseAndScoped(t *testing.T) {
 	store := NewVoiceWSTicketStore()
 	now := time.Unix(100, 0)
-	ticket, err := store.Issue("u1", "s1", "asr", time.Minute, now)
+	ticket, err := store.Issue("u1", 7, "s1", "asr", time.Minute, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,7 +20,7 @@ func TestVoiceTicketIsSingleUseAndScoped(t *testing.T) {
 	if _, err := store.Consume(ticket.Value, "u1", "s1", "asr", now); err == nil {
 		t.Fatal("mismatched consume must burn the ticket")
 	}
-	ticket, _ = store.Issue("u1", "s1", "asr", time.Minute, now)
+	ticket, _ = store.Issue("u1", 7, "s1", "asr", time.Minute, now)
 	if _, err := store.Consume(ticket.Value, "u1", "s1", "asr", now); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestCleanupVoiceTempFilesHonorsMaxAge(t *testing.T) {
 func TestVoiceTicketPurgeExpired(t *testing.T) {
 	store := NewVoiceWSTicketStore()
 	now := time.Unix(100, 0)
-	if _, err := store.Issue("u", "s", "asr", time.Minute, now); err != nil {
+	if _, err := store.Issue("u", 7, "s", "asr", time.Minute, now); err != nil {
 		t.Fatal(err)
 	}
 	if removed := store.PurgeExpired(now.Add(2 * time.Minute)); removed != 1 {

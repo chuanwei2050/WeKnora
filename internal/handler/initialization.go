@@ -56,6 +56,7 @@ type InitializationHandler struct {
 	modelService     interfaces.ModelService
 	kbService        interfaces.KnowledgeBaseService
 	kbRepository     interfaces.KnowledgeBaseRepository
+	tripleReviewRepo interfaces.GraphTripleReviewRepository
 	knowledgeService interfaces.KnowledgeService
 	ollamaService    *ollama.OllamaService
 	documentReader   interfaces.DocumentReader
@@ -69,6 +70,7 @@ func NewInitializationHandler(
 	modelService interfaces.ModelService,
 	kbService interfaces.KnowledgeBaseService,
 	kbRepository interfaces.KnowledgeBaseRepository,
+	tripleReviewRepo interfaces.GraphTripleReviewRepository,
 	knowledgeService interfaces.KnowledgeService,
 	ollamaService *ollama.OllamaService,
 	documentReader interfaces.DocumentReader,
@@ -80,6 +82,7 @@ func NewInitializationHandler(
 		modelService:     modelService,
 		kbService:        kbService,
 		kbRepository:     kbRepository,
+		tripleReviewRepo: tripleReviewRepo,
 		knowledgeService: knowledgeService,
 		ollamaService:    ollamaService,
 		documentReader:   documentReader,
@@ -96,13 +99,12 @@ type KBModelConfigRequest struct {
 
 	// 文档分块配置
 	DocumentSplitting struct {
-		ChunkSize         int                      `json:"chunkSize"`
-		ChunkOverlap      int                      `json:"chunkOverlap"`
-		Separators        []string                 `json:"separators"`
-		ParserEngineRules []types.ParserEngineRule `json:"parserEngineRules,omitempty"`
-		EnableParentChild bool                     `json:"enableParentChild"`
-		ParentChunkSize   int                      `json:"parentChunkSize,omitempty"`
-		ChildChunkSize    int                      `json:"childChunkSize,omitempty"`
+		ChunkSize         int      `json:"chunkSize"`
+		ChunkOverlap      int      `json:"chunkOverlap"`
+		Separators        []string `json:"separators"`
+		EnableParentChild bool     `json:"enableParentChild"`
+		ParentChunkSize   int      `json:"parentChunkSize,omitempty"`
+		ChildChunkSize    int      `json:"childChunkSize,omitempty"`
 	} `json:"documentSplitting"`
 
 	// 多模态配置（仅模型相关；存储引擎沿用平台设置）
@@ -182,19 +184,23 @@ type InitializationRequest struct {
 }
 
 type graphExtractConfigRequest struct {
-	Enabled             bool                     `json:"enabled"`
-	ModelID             string                   `json:"model_id"`
-	IngestionMode       types.GraphIngestionMode `json:"ingestion_mode"`
-	MaxEntities         int                      `json:"max_entities"`
-	MaxRelations        int                      `json:"max_relations"`
-	MinConfidence       float64                  `json:"min_confidence"`
-	Text                string                   `json:"text"`
-	Tags                []string                 `json:"tags"`
-	EntityTypes         []string                 `json:"entity_types"`
-	StrictSchema        bool                     `json:"strict_schema"`
-	RequireTripleReview bool                     `json:"require_triple_review"`
-	Nodes               []types.GraphNode        `json:"nodes"`
-	Relations           []types.GraphRelation    `json:"relations"`
+	Enabled             bool                                `json:"enabled"`
+	Mode                types.GraphExtractionMode           `json:"mode"`
+	TemplateKey         string                              `json:"template_key"`
+	ModelID             string                              `json:"model_id"`
+	IngestionMode       types.GraphIngestionMode            `json:"ingestion_mode"`
+	MaxEntities         int                                 `json:"max_entities"`
+	MaxRelations        int                                 `json:"max_relations"`
+	MinConfidence       float64                             `json:"min_confidence"`
+	Text                string                              `json:"text"`
+	Tags                []string                            `json:"tags"`
+	EntityTypes         []string                            `json:"entity_types"`
+	EntitySchema        []types.GraphEntityTypeDefinition   `json:"entity_schema"`
+	RelationSchema      []types.GraphRelationTypeDefinition `json:"relation_schema"`
+	StrictSchema        bool                                `json:"strict_schema"`
+	RequireTripleReview bool                                `json:"require_triple_review"`
+	Nodes               []types.GraphNode                   `json:"nodes"`
+	Relations           []types.GraphRelation               `json:"relations"`
 }
 
 func (r graphExtractConfigRequest) extractConfig() *types.ExtractConfig {
@@ -213,6 +219,8 @@ func (r graphExtractConfigRequest) extractConfig() *types.ExtractConfig {
 	}
 	return &types.ExtractConfig{
 		Enabled:             true,
+		Mode:                r.Mode,
+		TemplateKey:         r.TemplateKey,
 		ModelID:             r.ModelID,
 		IngestionMode:       r.IngestionMode,
 		MaxEntities:         r.MaxEntities,
@@ -221,6 +229,8 @@ func (r graphExtractConfigRequest) extractConfig() *types.ExtractConfig {
 		Text:                r.Text,
 		Tags:                append([]string(nil), r.Tags...),
 		EntityTypes:         append([]string(nil), r.EntityTypes...),
+		EntitySchema:        append([]types.GraphEntityTypeDefinition(nil), r.EntitySchema...),
+		RelationSchema:      append([]types.GraphRelationTypeDefinition(nil), r.RelationSchema...),
 		StrictSchema:        r.StrictSchema,
 		RequireTripleReview: r.RequireTripleReview,
 		Nodes:               nodes,
@@ -316,7 +326,8 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	if len(req.DocumentSplitting.Separators) > 0 {
 		kb.ChunkingConfig.Separators = req.DocumentSplitting.Separators
 	}
-	kb.ChunkingConfig.ParserEngineRules = req.DocumentSplitting.ParserEngineRules
+	// Parser selection is platform-managed; clear any legacy KB-level override.
+	kb.ChunkingConfig.ParserEngineRules = nil
 	kb.ChunkingConfig.EnableParentChild = req.DocumentSplitting.EnableParentChild
 	if req.DocumentSplitting.ParentChunkSize > 0 {
 		kb.ChunkingConfig.ParentChunkSize = req.DocumentSplitting.ParentChunkSize
@@ -333,6 +344,10 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 
 	// 更新知识图谱配置
+	previousFingerprint := ""
+	if kb.ExtractConfig != nil {
+		previousFingerprint = kb.ExtractConfig.GraphConfigFingerprint()
+	}
 	kb.ExtractConfig = req.NodeExtract.extractConfig()
 	if err := validateExtractConfig(kb.ExtractConfig); err != nil {
 		logger.Error(ctx, "Invalid extract configuration", err)
@@ -362,6 +377,9 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		logger.Error(ctx, "Failed to update knowledge base", err)
 		c.Error(errors.NewInternalServerError("更新知识库失败: " + err.Error()))
 		return
+	}
+	if h.tripleReviewRepo != nil && previousFingerprint != kb.ExtractConfig.GraphConfigFingerprint() {
+		_ = h.tripleReviewRepo.SupersedePendingByKnowledgeBase(ctx, kb.TenantID, kb.ID)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1348,6 +1366,8 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	if kb.ExtractConfig != nil {
 		config["nodeExtract"] = map[string]interface{}{
 			"enabled":               kb.ExtractConfig.Enabled,
+			"mode":                  kb.ExtractConfig.Mode,
+			"template_key":          kb.ExtractConfig.TemplateKey,
 			"model_id":              kb.ExtractConfig.ModelID,
 			"ingestion_mode":        kb.ExtractConfig.IngestionMode.Normalize(),
 			"max_entities":          kb.ExtractConfig.MaxEntities,
@@ -1356,6 +1376,8 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 			"text":                  kb.ExtractConfig.Text,
 			"tags":                  kb.ExtractConfig.Tags,
 			"entity_types":          kb.ExtractConfig.EntityTypes,
+			"entity_schema":         kb.ExtractConfig.EntitySchema,
+			"relation_schema":       kb.ExtractConfig.RelationSchema,
 			"strict_schema":         kb.ExtractConfig.StrictSchema,
 			"require_triple_review": kb.ExtractConfig.RequireTripleReview,
 			"nodes":                 kb.ExtractConfig.Nodes,
@@ -2114,7 +2136,7 @@ type TextRelationExtractionRequest struct {
 	MaxEntities   int      `json:"max_entities"`
 	MaxRelations  int      `json:"max_relations"`
 	MinConfidence float64  `json:"min_confidence"`
-	ModelID       string   `json:"model_id"       binding:"required"`
+	ModelID       string   `json:"model_id"`
 }
 
 // TextRelationExtractionResponse 文本关系提取响应结构
@@ -2172,7 +2194,7 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 	req.MinConfidence = policy.MinConfidence
 
 	// 根据模型ID获取chat模型
-	chatModel, err := h.modelService.GetChatModel(ctx, req.ModelID)
+	chatModel, err := h.modelService.GetChatModel(ctx, "")
 	if err != nil {
 		logger.Error(ctx, "获取模型失败", err)
 		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
@@ -2228,7 +2250,7 @@ func (h *InitializationHandler) extractRelationsFromText(
 // FabriTextRequest is a request for generating example text
 type FabriTextRequest struct {
 	Tags    []string `json:"tags"`
-	ModelID string   `json:"model_id" binding:"required"`
+	ModelID string   `json:"model_id"`
 }
 
 // FabriTextResponse is a response for generating example text
@@ -2258,7 +2280,7 @@ func (h *InitializationHandler) FabriText(c *gin.Context) {
 		return
 	}
 
-	chatModel, err := h.modelService.GetChatModel(ctx, req.ModelID)
+	chatModel, err := h.modelService.GetChatModel(ctx, "")
 	if err != nil {
 		logger.Error(ctx, "获取模型失败", err)
 		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))

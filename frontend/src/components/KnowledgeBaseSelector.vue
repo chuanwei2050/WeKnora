@@ -67,16 +67,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import { useI18n } from 'vue-i18n'
-
-interface KnowledgeBase {
-  id: string
-  name: string
-  type?: 'document' | 'faq'
-  knowledge_count?: number
-  chunk_count?: number
-  embedding_model_id?: string
-  summary_model_id?: string
-}
+import { filterSelectableKnowledgeBases, type SelectableKnowledgeBase } from './knowledge-base-selection'
 
 const { t } = useI18n()
 
@@ -94,7 +85,7 @@ const settingsStore = useSettingsStore()
 // 本地状态
 const searchQuery = ref('')
 const highlightedIndex = ref(0)
-const knowledgeBases = ref<KnowledgeBase[]>([])
+const knowledgeBases = ref<SelectableKnowledgeBase[]>([])
 const searchInput = ref<HTMLInputElement | null>(null)
 const kbList = ref<HTMLElement | null>(null)
 const dropdownStyle = ref<Record<string, string>>({})
@@ -103,18 +94,8 @@ const dropdownStyle = ref<Record<string, string>>({})
 const dropdownWidth = props.dropdownWidth ?? 300
 const offsetY = props.offsetY ?? 8
 
-const isKnowledgeBaseReady = (kb: KnowledgeBase) => {
-  const strategy = (kb as any).indexing_strategy
-  const needsEmbedding = !strategy || strategy.vector_enabled
-  return !needsEmbedding || Boolean(kb.embedding_model_id)
-}
-
-// 过滤：只显示可用于问答检索的知识库
 const filteredKnowledgeBases = computed(() => {
-  const valid = knowledgeBases.value.filter(isKnowledgeBaseReady)
-  if (!searchQuery.value) return valid
-  const q = searchQuery.value.toLowerCase()
-  return valid.filter(k => k.name.toLowerCase().includes(q))
+  return filterSelectableKnowledgeBases(knowledgeBases.value, searchQuery.value)
 })
 
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || [])

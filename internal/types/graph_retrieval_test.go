@@ -31,6 +31,9 @@ func TestTraverseGraphBoundsAndEvidenceScope(t *testing.T) {
 	if len(result.Paths[0].Evidence) != 1 || result.Paths[0].Evidence[0].KnowledgeID != "k1" {
 		t.Fatalf("unexpected evidence: %#v", result.Paths[0].Evidence)
 	}
+	if len(result.Edges) != 1 || result.Edges[0].ID != "ab" {
+		t.Fatalf("unexpected result edges: %#v", result.Edges)
+	}
 	if result.Paths[0].NodeKeys[0] != "a" || result.Paths[0].NodeKeys[1] != "b" {
 		t.Fatalf("unexpected path: %#v", result.Paths[0].NodeKeys)
 	}

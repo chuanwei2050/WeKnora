@@ -1,7 +1,9 @@
 package types
 
 import (
+	"crypto/sha256"
 	"database/sql/driver"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -161,7 +163,8 @@ type KnowledgeBaseConfig struct {
 	ReviewerIDs      *StringArray               `yaml:"reviewer_ids" json:"reviewer_ids"`
 }
 
-// ParserEngineRule maps a set of file types to a specific parser engine.
+// ParserEngineRule decodes legacy knowledge-base parser configuration.
+// Deprecated: parser selection is platform-managed.
 type ParserEngineRule struct {
 	FileTypes []string `yaml:"file_types" json:"file_types"`
 	Engine    string   `yaml:"engine"     json:"engine"`
@@ -177,8 +180,8 @@ type ChunkingConfig struct {
 	Separators []string `yaml:"separators"    json:"separators"`
 	// EnableMultimodal (deprecated, kept for backward compatibility with old data)
 	EnableMultimodal bool `yaml:"enable_multimodal,omitempty" json:"enable_multimodal,omitempty"`
-	// ParserEngineRules configures which parser engine to use for each file type.
-	// When empty, the builtin engine is used for all types.
+	// ParserEngineRules is kept only for backward-compatible data decoding.
+	// Parser selection is platform-managed and runtime code ignores this field.
 	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty"`
 	// EnableParentChild enables two-level parent-child chunking strategy.
 	// When enabled, large parent chunks provide context while small child chunks
@@ -190,20 +193,6 @@ type ChunkingConfig struct {
 	// ChildChunkSize is the size of child chunks used for embedding (default: 384).
 	// Only used when EnableParentChild is true.
 	ChildChunkSize int `yaml:"child_chunk_size,omitempty" json:"child_chunk_size,omitempty"`
-}
-
-// ResolveParserEngine returns the engine name for the given file type
-// based on the configured rules. Returns empty string (builtin) when
-// no rule matches.
-func (c ChunkingConfig) ResolveParserEngine(fileType string) string {
-	for _, rule := range c.ParserEngineRules {
-		for _, ft := range rule.FileTypes {
-			if ft == fileType {
-				return rule.Engine
-			}
-		}
-	}
-	return ""
 }
 
 // StorageProviderConfig is the legacy KB-level storage provider selection.
@@ -388,11 +377,10 @@ type VLMConfig struct {
 }
 
 // IsEnabled 判断多模态是否启用（兼容新老版本）
-// 新版本：Enabled && ModelID != ""
+// 新版本的模型由平台统一解析，知识库只保留启用开关。
 // 老版本：ModelName != "" && BaseURL != ""
 func (c VLMConfig) IsEnabled() bool {
-	// 新版本配置
-	if c.Enabled && c.ModelID != "" {
+	if c.Enabled {
 		return true
 	}
 	// 兼容老版本配置
@@ -452,9 +440,9 @@ type ASRConfig struct {
 	Language string `yaml:"language" json:"language"` // optional: language hint for transcription
 }
 
-// IsASREnabled checks if ASR is enabled with a valid model
+// IsASREnabled checks whether ASR is enabled. The model is resolved from platform settings.
 func (c ASRConfig) IsASREnabled() bool {
-	return c.Enabled && c.ModelID != ""
+	return c.Enabled
 }
 
 // Value implements the driver.Valuer interface, used to convert ASRConfig to database value
@@ -476,19 +464,100 @@ func (c *ASRConfig) Scan(value interface{}) error {
 
 // ExtractConfig represents the extract configuration for a knowledge base
 type ExtractConfig struct {
-	Enabled             bool               `yaml:"enabled"       json:"enabled"`
-	ModelID             string             `yaml:"model_id"      json:"model_id,omitempty"`
-	IngestionMode       GraphIngestionMode `yaml:"ingestion_mode" json:"ingestion_mode,omitempty"`
-	MaxEntities         int                `yaml:"max_entities"  json:"max_entities,omitempty"`
-	MaxRelations        int                `yaml:"max_relations" json:"max_relations,omitempty"`
-	MinConfidence       float64            `yaml:"min_confidence" json:"min_confidence,omitempty"`
-	Text                string             `yaml:"text"          json:"text,omitempty"`
-	Tags                []string           `yaml:"tags"          json:"tags,omitempty"`
-	EntityTypes         []string           `yaml:"entity_types"  json:"entity_types,omitempty"`
-	StrictSchema        bool               `yaml:"strict_schema" json:"strict_schema,omitempty"`
-	RequireTripleReview bool               `yaml:"require_triple_review" json:"require_triple_review,omitempty"`
-	Nodes               []*GraphNode       `yaml:"nodes"         json:"nodes,omitempty"`
-	Relations           []*GraphRelation   `yaml:"relations"     json:"relations,omitempty"`
+	Enabled             bool                          `yaml:"enabled"       json:"enabled"`
+	Mode                GraphExtractionMode           `yaml:"mode"          json:"mode,omitempty"`
+	TemplateKey         string                        `yaml:"template_key"  json:"template_key,omitempty"`
+	ModelID             string                        `yaml:"model_id"      json:"model_id,omitempty"`
+	IngestionMode       GraphIngestionMode            `yaml:"ingestion_mode" json:"ingestion_mode,omitempty"`
+	MaxEntities         int                           `yaml:"max_entities"  json:"max_entities,omitempty"`
+	MaxRelations        int                           `yaml:"max_relations" json:"max_relations,omitempty"`
+	MinConfidence       float64                       `yaml:"min_confidence" json:"min_confidence,omitempty"`
+	Text                string                        `yaml:"text"          json:"text,omitempty"`
+	Tags                []string                      `yaml:"tags"          json:"tags,omitempty"`
+	EntityTypes         []string                      `yaml:"entity_types"  json:"entity_types,omitempty"`
+	EntitySchema        []GraphEntityTypeDefinition   `yaml:"entity_schema" json:"entity_schema,omitempty"`
+	RelationSchema      []GraphRelationTypeDefinition `yaml:"relation_schema" json:"relation_schema,omitempty"`
+	StrictSchema        bool                          `yaml:"strict_schema" json:"strict_schema,omitempty"`
+	RequireTripleReview bool                          `yaml:"require_triple_review" json:"require_triple_review,omitempty"`
+	Nodes               []*GraphNode                  `yaml:"nodes"         json:"nodes,omitempty"`
+	Relations           []*GraphRelation              `yaml:"relations"     json:"relations,omitempty"`
+}
+
+type GraphExtractionMode string
+
+const (
+	GraphExtractionGeneral  GraphExtractionMode = "general"
+	GraphExtractionTemplate GraphExtractionMode = "template"
+	GraphExtractionCustom   GraphExtractionMode = "custom"
+)
+
+func (e *ExtractConfig) NormalizeMode() {
+	if e == nil {
+		return
+	}
+	if len(e.EntitySchema) == 0 && len(e.EntityTypes) > 0 {
+		e.EntitySchema = make([]GraphEntityTypeDefinition, 0, len(e.EntityTypes))
+		for _, entityType := range e.EntityTypes {
+			e.EntitySchema = append(e.EntitySchema, GraphEntityTypeDefinition{Type: entityType})
+		}
+	}
+	if len(e.RelationSchema) == 0 && len(e.Tags) > 0 {
+		e.RelationSchema = make([]GraphRelationTypeDefinition, 0, len(e.Tags))
+		for _, tag := range e.Tags {
+			e.RelationSchema = append(e.RelationSchema, GraphRelationTypeDefinition{Type: tag})
+		}
+	}
+	if len(e.EntitySchema) > 0 {
+		e.EntityTypes = make([]string, 0, len(e.EntitySchema))
+		for _, definition := range e.EntitySchema {
+			e.EntityTypes = append(e.EntityTypes, definition.Type)
+		}
+	}
+	if len(e.RelationSchema) > 0 {
+		e.Tags = make([]string, 0, len(e.RelationSchema))
+		for _, definition := range e.RelationSchema {
+			e.Tags = append(e.Tags, definition.Type)
+		}
+	}
+	switch e.Mode {
+	case GraphExtractionGeneral, GraphExtractionTemplate, GraphExtractionCustom:
+	default:
+		if len(e.Tags) == 0 && len(e.EntityTypes) == 0 {
+			e.Mode = GraphExtractionGeneral
+		} else {
+			e.Mode = GraphExtractionCustom
+		}
+	}
+	if e.Mode == GraphExtractionGeneral {
+		e.TemplateKey, e.Tags, e.EntityTypes, e.EntitySchema, e.RelationSchema, e.StrictSchema = "", nil, nil, nil, nil, false
+	} else {
+		e.StrictSchema = true
+	}
+}
+
+func (e *ExtractConfig) GraphConfigFingerprint() string {
+	if e == nil {
+		return ""
+	}
+	copy := *e
+	copy.NormalizeMode()
+	payload, _ := json.Marshal(struct {
+		Mode           GraphExtractionMode           `json:"mode"`
+		IngestionMode  GraphIngestionMode            `json:"ingestion_mode"`
+		MaxEntities    int                           `json:"max_entities"`
+		MaxRelations   int                           `json:"max_relations"`
+		MinConfidence  float64                       `json:"min_confidence"`
+		Tags           []string                      `json:"tags"`
+		EntityTypes    []string                      `json:"entity_types"`
+		EntitySchema   []GraphEntityTypeDefinition   `json:"entity_schema"`
+		RelationSchema []GraphRelationTypeDefinition `json:"relation_schema"`
+		StrictSchema   bool                          `json:"strict_schema"`
+		Text           string                        `json:"text"`
+		Nodes          []*GraphNode                  `json:"nodes"`
+		Relations      []*GraphRelation              `json:"relations"`
+	}{copy.Mode, copy.IngestionMode.Normalize(), copy.MaxEntities, copy.MaxRelations, copy.MinConfidence, copy.Tags, copy.EntityTypes, copy.EntitySchema, copy.RelationSchema, copy.StrictSchema, copy.Text, copy.Nodes, copy.Relations})
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
 }
 
 // GraphIngestionMode controls the recall/cost trade-off before LLM extraction.
@@ -607,6 +676,10 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	if kb.ExtractConfig != nil && kb.ExtractConfig.Enabled && !kb.IndexingStrategy.GraphEnabled {
 		kb.IndexingStrategy.GraphEnabled = true
 	}
+	if kb.ExtractConfig != nil {
+		kb.ExtractConfig.Enabled = kb.IndexingStrategy.GraphEnabled
+		kb.ExtractConfig.NormalizeMode()
+	}
 }
 
 // KBCapabilities describes the functional features a knowledge base exposes.
@@ -678,8 +751,7 @@ func (kb *KnowledgeBase) IsKeywordEnabled() bool {
 // IsGraphEnabled checks if knowledge graph extraction is enabled.
 // Requires both the IndexingStrategy flag and a valid ExtractConfig.
 func (kb *KnowledgeBase) IsGraphEnabled() bool {
-	return kb != nil && kb.IndexingStrategy.GraphEnabled &&
-		kb.ExtractConfig != nil && kb.ExtractConfig.Enabled
+	return kb != nil && kb.IndexingStrategy.GraphEnabled
 }
 
 // NeedsEmbeddingModel returns true if any enabled pipeline requires an embedding model.

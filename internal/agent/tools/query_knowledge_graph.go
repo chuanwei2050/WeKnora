@@ -407,15 +407,10 @@ func (t *QueryKnowledgeGraphTool) executeTypedGraphQuery(ctx context.Context, in
 			errorsFound = append(errorsFound, fmt.Sprintf("KB %s: %v", kbID, err))
 			continue
 		}
-		if !kb.IsGraphEnabled() || len(kb.ExtractConfig.Relations) == 0 {
+		relationTypes := configuredGraphRelationTypes(kb)
+		if len(relationTypes) == 0 {
 			errorsFound = append(errorsFound, fmt.Sprintf("KB %s: graph extraction not configured", kbID))
 			continue
-		}
-		relationTypes := make([]string, 0, len(kb.ExtractConfig.Relations))
-		for _, relation := range kb.ExtractConfig.Relations {
-			if relation != nil && relation.Type != "" {
-				relationTypes = append(relationTypes, relation.Type)
-			}
 		}
 		allowedRelationTypes := relationTypes
 		if configured, ok := ctx.Value(types.GraphRelationTypesContextKey).([]string); ok && len(configured) > 0 {
@@ -465,6 +460,13 @@ func (t *QueryKnowledgeGraphTool) executeTypedGraphQuery(ctx context.Context, in
 		"knowledge_base_ids": input.KnowledgeBaseIDs, "query": input.Query, "graph_data": merged,
 		"errors": errorsFound, "display_type": "graph_query_results",
 	}}, true
+}
+
+func configuredGraphRelationTypes(kb *types.KnowledgeBase) []string {
+	if kb == nil || !kb.IsGraphEnabled() || kb.ExtractConfig == nil {
+		return nil
+	}
+	return append([]string(nil), kb.ExtractConfig.Tags...)
 }
 
 func (t *QueryKnowledgeGraphTool) currentKnowledgeVersions(ctx context.Context, tenantID uint64, knowledgeBaseID string) (map[string]string, error) {

@@ -23,3 +23,21 @@ func TestQueryKnowledgeGraphToolRejectsWhenRelationTraversalIsNotNeeded(t *testi
 		t.Fatalf("expected graph query to be rejected, result=%+v err=%v", result, err)
 	}
 }
+
+func TestConfiguredGraphRelationTypesUseFormalSchemaTags(t *testing.T) {
+	kb := &types.KnowledgeBase{
+		IndexingStrategy: types.IndexingStrategy{GraphEnabled: true},
+		ExtractConfig: &types.ExtractConfig{
+			Tags:      []string{"uses", "tests"},
+			Relations: []*types.GraphRelation{{Type: "few-shot-only"}},
+		},
+	}
+
+	got := configuredGraphRelationTypes(kb)
+	if len(got) != 2 || got[0] != "uses" || got[1] != "tests" {
+		t.Fatalf("expected formal schema tags, got %v", got)
+	}
+	if got := configuredGraphRelationTypes(&types.KnowledgeBase{IndexingStrategy: types.IndexingStrategy{GraphEnabled: true}}); got != nil {
+		t.Fatalf("expected nil without extract config, got %v", got)
+	}
+}

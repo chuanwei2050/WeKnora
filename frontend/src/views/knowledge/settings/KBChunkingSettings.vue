@@ -135,16 +135,10 @@
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-interface ParserEngineRule {
-  file_types: string[]
-  engine: string
-}
-
 interface ChunkingConfig {
   chunkSize: number
   chunkOverlap: number
   separators: string[]
-  parserEngineRules?: ParserEngineRule[]
   enableParentChild: boolean
   parentChunkSize: number
   childChunkSize: number
@@ -200,7 +194,6 @@ const emitUpdate = () => {
     chunkSize: localChunkSize.value,
     chunkOverlap: localChunkOverlap.value,
     separators: localSeparators.value,
-    parserEngineRules: props.config.parserEngineRules,
     enableParentChild: localEnableParentChild.value,
     parentChunkSize: localParentChunkSize.value,
     childChunkSize: localChildChunkSize.value

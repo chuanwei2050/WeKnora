@@ -18,7 +18,7 @@
                     <span class="tag_name">{{ item.name }}</span>
                 </span>
             </div>
-            <docInfo :session="session"></docInfo>
+            <docInfo :session="session" :embedded-mode="embeddedMode"></docInfo>
             <div v-if="graphPaths.length" class="graph-paths-panel">
                 <button type="button" class="graph-paths-toggle" @click="graphPathsOpen = !graphPathsOpen">
                     {{ graphPathsOpen ? t('chat.graphPathsHide') : t('chat.graphPathsShow') }}

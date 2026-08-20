@@ -82,6 +82,8 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	// Storage is platform-managed; ignore legacy clients that still submit KB-level overrides.
 	kb.StorageProviderConfig = nil
 	kb.StorageConfig = types.StorageConfig{}
+	// Parser selection is platform-managed; discard legacy KB-level rules.
+	kb.ChunkingConfig.ParserEngineRules = nil
 	if err := s.applyPlatformModelDefaults(ctx, kb); err != nil {
 		return nil, err
 	}
@@ -644,6 +646,12 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 				"knowledge_base_id": kbID,
 			})
 			return err
+		}
+	}
+
+	if s.graphEngine != nil {
+		if err := s.graphEngine.DeleteCanonicalKnowledgeBase(ctx, tenantID, kbID); err != nil {
+			return fmt.Errorf("delete canonical knowledge graph for knowledge base %s: %w", kbID, err)
 		}
 	}
 

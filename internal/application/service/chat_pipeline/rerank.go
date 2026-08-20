@@ -81,15 +81,8 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		})
 		return next()
 	}
-	if chatManage.RerankModelID == "" {
-		pipelineWarn(ctx, "Rerank", "skip", map[string]interface{}{
-			"reason": "empty_model_id",
-		})
-		return next()
-	}
-
 	// Get rerank model from service
-	rerankModel, err := p.modelService.GetRerankModel(ctx, chatManage.RerankModelID)
+	rerankModel, err := p.modelService.GetRerankModel(ctx, "")
 	if err != nil {
 		pipelineError(ctx, "Rerank", "get_model", map[string]interface{}{
 			"model_id": chatManage.RerankModelID,

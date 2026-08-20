@@ -24,7 +24,7 @@ func ShouldEnqueueGraphExtract(kb *types.KnowledgeBase, chunkContent string) boo
 	if strings.TrimSpace(chunkContent) == "" {
 		return false
 	}
-	if kb.ExtractConfig.IngestionMode.Normalize() == types.GraphIngestionSignal {
+	if kb.ExtractConfig != nil && kb.ExtractConfig.IngestionMode.Normalize() == types.GraphIngestionSignal {
 		return types.NeedsEntityRelation(chunkContent)
 	}
 	return true
@@ -103,11 +103,10 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	// (Except if it's already completed or if it was marked as failed/deleting, but we'll just set it to completed if it's processing)
 	if knowledge.ParseStatus == types.ParseStatusProcessing {
 		knowledge.ParseStatus = types.ParseStatusCompleted
+		knowledge.ErrorMessage = ""
 		knowledge.UpdatedAt = time.Now()
 
-		// Setup summary status. Keyword-only knowledge bases may not have a
-		// summary model configured; those documents are ready after parsing.
-		if len(textChunks) > 0 && kb.SummaryModelID != "" {
+		if shouldGenerateDocumentSummary(textChunks) {
 			knowledge.SummaryStatus = types.SummaryStatusPending
 		} else {
 			knowledge.SummaryStatus = types.SummaryStatusNone
@@ -121,7 +120,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	}
 
 	// 4. Spawn Summary and Question Tasks
-	if len(textChunks) > 0 && kb.SummaryModelID != "" {
+	if shouldGenerateDocumentSummary(textChunks) {
 		s.enqueueSummaryGenerationTask(ctx, payload)
 	}
 	if len(textChunks) > 0 {
@@ -167,6 +166,10 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		}
 	}
 	return nil
+}
+
+func shouldGenerateDocumentSummary(textChunks []*types.Chunk) bool {
+	return len(textChunks) > 0
 }
 
 func (s *KnowledgePostProcessService) enqueueSummaryGenerationTask(ctx context.Context, payload types.KnowledgePostProcessPayload) {

@@ -107,7 +107,7 @@ type ComplexityRoutingConfig struct {
 
 func DefaultComplexityRoutingConfig() ComplexityRoutingConfig {
 	return ComplexityRoutingConfig{
-		TaxonomyID: "question-complexity", TaxonomyVersion: "1.0", ConfidenceThreshold: .60,
+		Enabled: true, TaxonomyID: "question-complexity", TaxonomyVersion: "1.0", ConfidenceThreshold: .60,
 		FallbackAction: RoutingContextualRAG,
 		LevelActions: map[ComplexityLevel]RoutingAction{
 			ComplexityL1: RoutingQuickRAG, ComplexityL2: RoutingContextualRAG,

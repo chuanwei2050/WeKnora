@@ -625,8 +625,17 @@ func finalizeGraphResult(result GraphSearchResult, query GraphQuery) GraphSearch
 		}
 	}
 	result.Paths = paths
+	edges := make(map[string]GraphEdge)
 	for _, path := range result.Paths {
 		result.Citations = append(result.Citations, path.Evidence...)
+		for _, edge := range path.Edges {
+			edges[edge.ID] = edge
+		}
 	}
+	result.Edges = result.Edges[:0]
+	for _, edge := range edges {
+		result.Edges = append(result.Edges, edge)
+	}
+	sort.Slice(result.Edges, func(i, j int) bool { return result.Edges[i].ID < result.Edges[j].ID })
 	return result
 }

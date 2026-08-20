@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -20,9 +21,137 @@ func testService(t *testing.T) *Service {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&IdentityProvider{}, &Client{}, &ExternalIdentity{}, &BootstrapTicket{}, &Session{}, &Audit{}, &ChatBinding{}, &IdempotencyRecord{}, &StreamEvent{}))
+	require.NoError(t, db.AutoMigrate(&types.User{}, &IdentityProvider{}, &Client{}, &ExternalIdentity{}, &BootstrapTicket{}, &Session{}, &Audit{}, &ChatBinding{}, &IdempotencyRecord{}, &StreamEvent{}))
 	require.NoError(t, db.Exec(`CREATE TABLE IF NOT EXISTS knowledge_bases (id TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL, deleted_at DATETIME)`).Error)
-	return NewService(db, nil, nil)
+	return NewService(db, databaseUserService{db: db}, nil)
+}
+
+type databaseUserService struct {
+	interfaces.UserService
+	db *gorm.DB
+}
+
+type staticTenantService struct {
+	interfaces.TenantService
+	tenant *types.Tenant
+}
+
+func (service staticTenantService) GetTenantByID(_ context.Context, id uint64) (*types.Tenant, error) {
+	if service.tenant == nil || service.tenant.ID != id {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return service.tenant, nil
+}
+
+func (service databaseUserService) GetUserByID(ctx context.Context, id string) (*types.User, error) {
+	var user types.User
+	if err := service.db.WithContext(ctx).First(&user, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (service databaseUserService) UpdateUser(ctx context.Context, user *types.User) error {
+	return service.db.WithContext(ctx).Save(user).Error
+}
+
+func TestExternalIdentityIsProjectScopedAndSupportsDeactivation(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	firstClient := &Client{ID: "project-a", TenantID: 1, IdentityProviderID: "shared-idp", KnowledgeBaseIDsJSON: `[]`, RoleMappingsJSON: `{}`}
+	secondClient := &Client{ID: "project-b", TenantID: 1, IdentityProviderID: "shared-idp", KnowledgeBaseIDsJSON: `[]`, RoleMappingsJSON: `{}`}
+	req := BootstrapRequest{ExternalTenantID: "external-tenant", ExternalUserID: "same-user"}
+
+	firstUser, err := svc.resolveExternalUser(ctx, firstClient, req)
+	require.NoError(t, err)
+	secondUser, err := svc.resolveExternalUser(ctx, secondClient, req)
+	require.NoError(t, err)
+	require.NotEqual(t, firstUser.ID, secondUser.ID)
+
+	require.NoError(t, svc.db.Create(&Session{ID: "browser-session", Digest: digest("browser-token"), Kind: "browser", ClientID: firstClient.ID, TenantID: 1, UserID: firstUser.ID, ScopesJSON: `[]`, KnowledgeBaseIDsJSON: `[]`, ExpiresAt: time.Now().Add(time.Hour), AbsoluteExpiresAt: time.Now().Add(time.Hour)}).Error)
+	inactive := false
+	_, err = svc.resolveExternalUser(ctx, firstClient, BootstrapRequest{ExternalTenantID: req.ExternalTenantID, ExternalUserID: req.ExternalUserID, Active: &inactive})
+	require.ErrorIs(t, err, ErrForbidden)
+	var identity ExternalIdentity
+	require.NoError(t, svc.db.First(&identity, "client_id = ? AND external_user_id = ?", firstClient.ID, req.ExternalUserID).Error)
+	require.False(t, identity.Active)
+	var session Session
+	require.NoError(t, svc.db.First(&session, "id = ?", "browser-session").Error)
+	require.NotNil(t, session.RevokedAt)
+
+	active := true
+	restoredUser, err := svc.resolveExternalUser(ctx, firstClient, BootstrapRequest{ExternalTenantID: req.ExternalTenantID, ExternalUserID: req.ExternalUserID, Active: &active})
+	require.NoError(t, err)
+	require.Equal(t, firstUser.ID, restoredUser.ID)
+}
+
+func TestTenantAdministratorMustBeExplicitlyBound(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	actor := &types.User{Role: types.UserRolePlatformAdmin, IsActive: true}
+	require.NoError(t, svc.CreateIdentityProvider(ctx, actor, &IdentityProvider{ID: "idp", Name: "Test IdP"}))
+	administrator := &types.User{ID: "tenant-admin", Username: "tenant-admin", Email: "tenant-admin@example.test", PasswordHash: "unused", TenantID: 1, IsActive: true, Role: types.UserRoleTenantAdmin}
+	require.NoError(t, svc.db.Create(administrator).Error)
+
+	client := &Client{ID: "admin-project", TenantID: 1, IdentityProviderID: "idp", Name: "host", AllowedOriginsJSON: `["https://host.example"]`, ScopesJSON: `[]`, KnowledgeBaseIDsJSON: `[]`, RoleMappingsJSON: `{"external_admin":"tenant_admin"}`, MaxRole: string(types.UserRoleTenantAdmin)}
+	_, err := svc.CreateClient(ctx, actor, client, "long-enough-secret")
+	require.ErrorIs(t, err, ErrInvalid)
+
+	client.AdministratorUserID = administrator.ID
+	_, err = svc.CreateClient(ctx, actor, client, "long-enough-secret")
+	require.NoError(t, err)
+	resolved, err := svc.resolveExternalUser(ctx, client, BootstrapRequest{ExternalTenantID: "external-tenant", ExternalUserID: "external-admin", ExternalRoles: []string{"external_admin"}})
+	require.NoError(t, err)
+	require.Equal(t, administrator.ID, resolved.ID)
+	var users int64
+	require.NoError(t, svc.db.Model(&types.User{}).Count(&users).Error)
+	require.Equal(t, int64(1), users)
+
+	secondAdministrator := &types.User{ID: "tenant-admin-2", Username: "tenant-admin-2", Email: "tenant-admin-2@example.test", PasswordHash: "unused", TenantID: 1, IsActive: true, Role: types.UserRoleTenantAdmin}
+	require.NoError(t, svc.db.Create(secondAdministrator).Error)
+	require.NoError(t, svc.BindClientAdministrator(ctx, actor, client.ID, secondAdministrator.ID))
+	var updated Client
+	require.NoError(t, svc.db.First(&updated, "id = ?", client.ID).Error)
+	require.Equal(t, secondAdministrator.ID, updated.AdministratorUserID)
+}
+
+func TestBrowserTicketExchangeRefreshAndLogoutLifecycle(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	user := &types.User{ID: "member", Username: "member", Email: "member@example.test", PasswordHash: "unused", TenantID: 1, IsActive: true, Role: types.UserRoleMember}
+	require.NoError(t, svc.db.Create(user).Error)
+	client := &Client{ID: "project", TenantID: 1, IdentityProviderID: "idp", Enabled: true, ScopesJSON: `["kb:list"]`, KnowledgeBaseIDsJSON: `[]`, AllowedOriginsJSON: `["https://host.example"]`, RoleMappingsJSON: `{}`, MaxRole: string(types.UserRoleMember)}
+	require.NoError(t, svc.db.Create(client).Error)
+	require.NoError(t, svc.db.Create(&ExternalIdentity{ClientID: client.ID, IdentityProviderID: "idp", ExternalTenantID: "external", ExternalUserID: "member", UserID: user.ID, Active: true}).Error)
+	ticket := "ticket"
+	require.NoError(t, svc.db.Create(&BootstrapTicket{Digest: digest(ticket), JTI: "jti", ClientID: client.ID, UserID: user.ID, Origin: "https://host.example", KnowledgeBaseIDsJSON: `[]`, ExpiresAt: time.Now().Add(time.Minute)}).Error)
+
+	browserToken, csrf, principal, exchangedUser, err := svc.Exchange(ctx, ticket, "https://host.example")
+	require.NoError(t, err)
+	require.Equal(t, user.ID, exchangedUser.ID)
+	require.Equal(t, client.ID, principal.ClientID)
+	_, _, _, _, err = svc.Exchange(ctx, ticket, "https://host.example")
+	require.ErrorIs(t, err, ErrConflict)
+
+	svc.tenants = staticTenantService{tenant: &types.Tenant{ID: 1, Status: string(types.TenantStatusActive)}}
+	require.NoError(t, svc.ValidateCSRF(ctx, browserToken, csrf))
+	require.ErrorIs(t, svc.ValidateCSRF(ctx, browserToken, ""), ErrForbidden)
+	refreshedCSRF, err := svc.Refresh(ctx, browserToken, csrf)
+	require.NoError(t, err)
+	require.Equal(t, csrf, refreshedCSRF)
+	require.NoError(t, svc.Logout(ctx, browserToken))
+	_, _, _, err = svc.Authenticate(ctx, browserToken, "browser")
+	require.ErrorIs(t, err, ErrUnauthorized)
+}
+
+func TestExpiredTicketAndUndeclaredRoleAreRejected(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	require.NoError(t, svc.db.Create(&BootstrapTicket{Digest: digest("expired"), JTI: "expired-jti", ClientID: "project", UserID: "member", Origin: "https://host.example", KnowledgeBaseIDsJSON: `[]`, ExpiresAt: time.Now().Add(-time.Second)}).Error)
+	_, err := svc.consumeTicket(ctx, "expired", "https://host.example")
+	require.ErrorIs(t, err, ErrUnauthorized)
+	_, err = svc.resolveExternalUser(ctx, &Client{ID: "project", TenantID: 1, IdentityProviderID: "idp", RoleMappingsJSON: `{"known":"member"}`, KnowledgeBaseIDsJSON: `[]`}, BootstrapRequest{ExternalTenantID: "external", ExternalUserID: "member", ExternalRoles: []string{"unknown"}})
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 func TestChatBindingExposesAllowedKnowledgeBaseIDs(t *testing.T) {

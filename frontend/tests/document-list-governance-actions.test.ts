@@ -4,6 +4,7 @@ import {
   canOperateGovernanceRow,
   getGovernanceActionNextStatus,
   getGovernanceRowActions,
+  isKnowledgeDeleteDisabled,
   isGovernanceRowActionDisabled,
 } from '../src/views/knowledge/components/knowledge-governance-actions'
 
@@ -59,6 +60,14 @@ describe('getGovernanceRowActions', () => {
       canReview: false,
       currentUserId: 'user-1',
     })).toEqual(['submit'])
+    expect(isKnowledgeDeleteDisabled({ ...draft, current_version_id: 'version-active' })).toBe(true)
+  })
+
+  it('filters used documents out of batch deletion', () => {
+    const active = { ...draft, current_version_id: 'version-active' }
+    const pending = { ...draft, parse_status: 'pending_review' }
+
+    expect([draft, active, pending].filter(item => !isKnowledgeDeleteDisabled(item))).toEqual([draft])
   })
 
   it('calculates each batch action from eligible rows in a mixed selection', () => {

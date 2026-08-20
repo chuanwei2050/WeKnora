@@ -220,9 +220,6 @@ func (s *WebSearchService) CompressWithRAG(
 	if cfg == nil {
 		return nil, tempKBID, seenURLs, knowledgeIDs, fmt.Errorf("web search config is required for RAG compression")
 	}
-	if cfg.EmbeddingModelID == "" {
-		return nil, tempKBID, seenURLs, knowledgeIDs, fmt.Errorf("embedding_model_id is required for RAG compression")
-	}
 	var createdKB *types.KnowledgeBase
 	// reuse or create temp KB
 	if strings.TrimSpace(tempKBID) != "" {
@@ -234,10 +231,9 @@ func (s *WebSearchService) CompressWithRAG(
 	}
 	if createdKB == nil {
 		kb := &types.KnowledgeBase{
-			Name:             fmt.Sprintf("tmp-websearch-%d", time.Now().UnixNano()),
-			Description:      "Ephemeral search compression KB",
-			IsTemporary:      true,
-			EmbeddingModelID: cfg.EmbeddingModelID,
+			Name:        fmt.Sprintf("tmp-websearch-%d", time.Now().UnixNano()),
+			Description: "Ephemeral search compression KB",
+			IsTemporary: true,
 		}
 		createdKB, err = kbSvc.CreateKnowledgeBase(ctx, kb)
 		if err != nil {

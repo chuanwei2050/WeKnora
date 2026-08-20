@@ -295,8 +295,9 @@ func (p *PluginSearchEntity) filterGovernedGraphResult(ctx context.Context, chat
 	filtered.Paths = nil
 	for _, path := range result.Paths {
 		path.Evidence = filterEvidence(path.Evidence)
+		pathEdges := path.Edges
 		path.Edges = nil
-		for _, edge := range path.Edges {
+		for _, edge := range pathEdges {
 			edge.Evidence = filterEvidence(edge.Evidence)
 			if len(edge.Evidence) > 0 {
 				path.Edges = append(path.Edges, edge)

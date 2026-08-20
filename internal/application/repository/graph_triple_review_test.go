@@ -26,6 +26,7 @@ func openGraphTripleTestDB(t *testing.T) *gorm.DB {
 		knowledge_version_id TEXT,
 		chunk_id TEXT NOT NULL,
 		model_id TEXT,
+		config_fingerprint TEXT,
 		graph_data TEXT NOT NULL,
 		status TEXT NOT NULL,
 		reviewer_id TEXT,

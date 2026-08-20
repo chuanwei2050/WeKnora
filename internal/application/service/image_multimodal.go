@@ -349,8 +349,9 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID string) (v
 		return nil, fmt.Errorf("VLM is not enabled for knowledge base %s", kbID)
 	}
 
-	// New-style: resolve model through ModelService
-	if vlmCfg.ModelID != "" {
+	// Platform-managed configs only need the feature toggle. Inline parameters
+	// are retained solely for legacy knowledge bases.
+	if vlmCfg.ModelID != "" || (vlmCfg.ModelName == "" && vlmCfg.BaseURL == "") {
 		return s.modelService.GetVLMModel(ctx, "")
 	}
 

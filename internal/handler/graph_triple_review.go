@@ -17,14 +17,16 @@ type GraphTripleReviewHandler struct {
 	repo      interfaces.GraphTripleReviewRepository
 	chunkRepo interfaces.ChunkRepository
 	graph     interfaces.RetrieveGraphRepository
+	kbRepo    interfaces.KnowledgeBaseRepository
 }
 
 func NewGraphTripleReviewHandler(
 	repo interfaces.GraphTripleReviewRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graph interfaces.RetrieveGraphRepository,
+	kbRepo interfaces.KnowledgeBaseRepository,
 ) *GraphTripleReviewHandler {
-	return &GraphTripleReviewHandler{repo: repo, chunkRepo: chunkRepo, graph: graph}
+	return &GraphTripleReviewHandler{repo: repo, chunkRepo: chunkRepo, graph: graph, kbRepo: kbRepo}
 }
 
 type graphTripleRejectRequest struct {
@@ -113,6 +115,17 @@ func (h *GraphTripleReviewHandler) Approve(c *gin.Context) {
 	chunk, err := h.chunkRepo.GetChunkByID(ctx, tenantID, item.ChunkID)
 	if err != nil || chunk == nil {
 		c.Error(errors.NewNotFoundError("chunk for graph triple candidate not found"))
+		return
+	}
+	stale := item.KnowledgeVersionID != chunk.KnowledgeVersionID
+	if item.ConfigFingerprint != "" {
+		kb, kbErr := h.kbRepo.GetKnowledgeBaseByID(ctx, item.KnowledgeBaseID)
+		stale = stale || kbErr != nil || kb == nil || !kb.IsGraphEnabled() || kb.ExtractConfig == nil ||
+			item.ConfigFingerprint != kb.ExtractConfig.GraphConfigFingerprint()
+	}
+	if stale {
+		_ = h.repo.MarkSuperseded(ctx, tenantID, item.ID)
+		c.Error(errors.NewBadRequestError("graph triple candidate is stale"))
 		return
 	}
 	graph := item.GraphData.AsGraphData()

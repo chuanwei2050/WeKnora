@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/base64"
 	"io"
 	"net/http/httptest"
@@ -9,9 +10,46 @@ import (
 	"time"
 
 	integrationauth "github.com/Tencent/WeKnora/internal/integration"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type integrationContextKey string
+
+func TestIntegrationGenerationContextSurvivesRequestCancellation(t *testing.T) {
+	requestContext, cancelRequest := context.WithCancel(context.WithValue(context.Background(), integrationContextKey("tenant"), "10000"))
+	generationContext, cancelGeneration := newIntegrationGenerationContext(requestContext)
+	cancelRequest()
+
+	require.NoError(t, generationContext.Err())
+	require.Equal(t, "10000", generationContext.Value(integrationContextKey("tenant")))
+
+	cancelGeneration()
+	require.ErrorIs(t, generationContext.Err(), context.Canceled)
+}
+
+func TestIntegrationReferencesAcceptsEventPayloadShapes(t *testing.T) {
+	reference := &types.SearchResult{ID: "chunk-1", KnowledgeTitle: "测试文档"}
+
+	for name, payload := range map[string]any{
+		"references":     types.References{reference},
+		"search results": []*types.SearchResult{reference},
+		"interfaces":     []interface{}{reference},
+	} {
+		t.Run(name, func(t *testing.T) {
+			references, ok := integrationReferences(payload)
+			require.True(t, ok)
+			require.Equal(t, types.References{reference}, references)
+		})
+	}
+}
+
+func TestIntegrationReferencesRejectsUnknownPayload(t *testing.T) {
+	references, ok := integrationReferences([]interface{}{map[string]any{"id": "chunk-1"}})
+	require.False(t, ok)
+	require.Nil(t, references)
+}
 
 func TestIntegrationRateLimiterBoundsDistinctKeys(t *testing.T) {
 	limiter := newIntegrationRateLimiter()

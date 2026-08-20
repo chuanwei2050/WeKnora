@@ -54,6 +54,13 @@ func (m *memoryTripleRepo) List(_ context.Context, tenantID uint64, knowledgeBas
 	}
 	return out, nil
 }
+
+func (m *memoryTripleRepo) SupersedePendingByKnowledgeBase(_ context.Context, tenantID uint64, knowledgeBaseID string) error {
+	return nil
+}
+func (m *memoryTripleRepo) MarkSuperseded(_ context.Context, tenantID uint64, id string) error {
+	return nil
+}
 func (m *memoryTripleRepo) MarkWritten(_ context.Context, tenantID uint64, id, reviewerID string) error {
 	item := m.items[id]
 	if item == nil || item.TenantID != tenantID || item.Status != types.GraphTriplePending {
@@ -87,7 +94,7 @@ func TestGraphTripleReviewRejectPending(t *testing.T) {
 			Status: types.GraphTriplePending, GraphData: types.GraphDataPayload{Relation: []*types.GraphRelation{{Node1: "A", Node2: "B", Type: "uses"}}},
 		},
 	}}
-	h := NewGraphTripleReviewHandler(repo, nil, nil)
+	h := NewGraphTripleReviewHandler(repo, nil, nil, nil)
 	r := gin.New()
 	r.POST("/graph-triple-reviews/:id/reject", func(c *gin.Context) {
 		c.Set(types.TenantIDContextKey.String(), uint64(1))

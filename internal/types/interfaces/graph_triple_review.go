@@ -13,4 +13,6 @@ type GraphTripleReviewRepository interface {
 	List(ctx context.Context, tenantID uint64, knowledgeBaseID string, status types.GraphTripleReviewStatus) ([]*types.GraphTripleCandidate, error)
 	MarkWritten(ctx context.Context, tenantID uint64, id, reviewerID string) error
 	MarkRejected(ctx context.Context, tenantID uint64, id, reviewerID, comment string) error
+	SupersedePendingByKnowledgeBase(ctx context.Context, tenantID uint64, knowledgeBaseID string) error
+	MarkSuperseded(ctx context.Context, tenantID uint64, id string) error
 }

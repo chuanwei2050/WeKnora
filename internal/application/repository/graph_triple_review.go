@@ -79,6 +79,17 @@ func (r *graphTripleReviewRepository) MarkRejected(ctx context.Context, tenantID
 	return r.transitionPending(ctx, tenantID, id, types.GraphTripleRejected, reviewerID, comment, false)
 }
 
+func (r *graphTripleReviewRepository) SupersedePendingByKnowledgeBase(ctx context.Context, tenantID uint64, knowledgeBaseID string) error {
+	now := time.Now().UTC()
+	return r.db.WithContext(ctx).Model(&types.GraphTripleCandidate{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND status = ?", tenantID, knowledgeBaseID, types.GraphTriplePending).
+		Updates(map[string]interface{}{"status": types.GraphTripleSuperseded, "reviewed_at": now}).Error
+}
+
+func (r *graphTripleReviewRepository) MarkSuperseded(ctx context.Context, tenantID uint64, id string) error {
+	return r.transitionPending(ctx, tenantID, id, types.GraphTripleSuperseded, "", "configuration or document version changed", false)
+}
+
 func (r *graphTripleReviewRepository) transitionPending(
 	ctx context.Context,
 	tenantID uint64,

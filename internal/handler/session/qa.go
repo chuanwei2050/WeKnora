@@ -162,10 +162,14 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 
 		tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-		// Use ASR only when the agent has audio upload enabled.
+		// Use the platform ASR only when the agent has audio upload enabled.
 		asrModelID := ""
-		if customAgent != nil && customAgent.Config.AudioUploadEnabled && customAgent.Config.ASRModelID != "" {
-			asrModelID = customAgent.Config.ASRModelID
+		if customAgent != nil && customAgent.Config.AudioUploadEnabled {
+			if model, modelErr := h.modelService.GetDefaultModel(ctx, types.ModelTypeASR, "asr"); modelErr == nil {
+				asrModelID = model.ID
+			} else {
+				logger.Warnf(ctx, "platform ASR is unavailable: %v", modelErr)
+			}
 		}
 
 		// Process all attachments concurrently.
@@ -673,7 +677,12 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 // RAG paths defer VLM to the pipeline rewrite step.
 // For agent mode, VLM always runs when images and a VLM model are present.
 func (h *Handler) runVLMAnalysisIfNeeded(streamCtx *sseStreamContext, reqCtx *qaRequestContext, mode qaMode) {
-	if len(reqCtx.images) == 0 || reqCtx.customAgent == nil || reqCtx.customAgent.Config.VLMModelID == "" {
+	if len(reqCtx.images) == 0 || reqCtx.customAgent == nil || !reqCtx.customAgent.Config.ImageUploadEnabled {
+		return
+	}
+	vlmModel, err := h.modelService.GetDefaultModel(streamCtx.asyncCtx, types.ModelTypeVLLM, "vlm")
+	if err != nil {
+		logger.Warnf(streamCtx.asyncCtx, "platform VLM is unavailable, skipping image analysis: %v", err)
 		return
 	}
 
@@ -716,7 +725,7 @@ func (h *Handler) runVLMAnalysisIfNeeded(streamCtx *sseStreamContext, reqCtx *qa
 
 	vlmStart := time.Now()
 	h.analyzeImageAttachments(streamCtx.asyncCtx, reqCtx.images,
-		reqCtx.customAgent.Config.VLMModelID, reqCtx.query)
+		vlmModel.ID, reqCtx.query)
 
 	outputMsg := "已分析图片内容"
 	if mode == qaModeAgent {

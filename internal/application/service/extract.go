@@ -197,28 +197,29 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		logger.Infof(ctx, "skip graph extraction for chunk %s: graph indexing is disabled", p.ChunkID)
 		return nil
 	}
+	extractConfig := kb.ExtractConfig
+	if extractConfig == nil {
+		extractConfig = &types.ExtractConfig{Enabled: true, Mode: types.GraphExtractionGeneral}
+	}
 
-	chatModel, err := s.modelService.GetChatModel(ctx, p.ModelID)
+	// Graph extraction models are platform-managed; task payload IDs are legacy compatibility fields.
+	chatModel, err := s.modelService.GetChatModel(ctx, "")
 	if err != nil {
 		logger.Errorf(ctx, "failed to get chat model: %v", err)
 		return err
 	}
 
 	template := &types.PromptTemplateStructured{
-		Description:   s.template.Description,
-		Tags:          kb.ExtractConfig.Tags,
-		EntityTypes:   kb.ExtractConfig.EntityTypes,
-		StrictSchema:  kb.ExtractConfig.StrictSchema,
-		MaxEntities:   kb.ExtractConfig.MaxEntities,
-		MaxRelations:  kb.ExtractConfig.MaxRelations,
-		MinConfidence: kb.ExtractConfig.MinConfidence,
-		Examples: []types.GraphData{
-			{
-				Text:     kb.ExtractConfig.Text,
-				Node:     kb.ExtractConfig.Nodes,
-				Relation: kb.ExtractConfig.Relations,
-			},
-		},
+		Description:    s.template.Description,
+		Tags:           extractConfig.Tags,
+		EntityTypes:    extractConfig.EntityTypes,
+		EntitySchema:   extractConfig.EntitySchema,
+		RelationSchema: extractConfig.RelationSchema,
+		StrictSchema:   extractConfig.StrictSchema,
+		MaxEntities:    extractConfig.MaxEntities,
+		MaxRelations:   extractConfig.MaxRelations,
+		MinConfidence:  extractConfig.MinConfidence,
+		Examples:       buildGraphFewShotExamples(extractConfig),
 	}
 	extractor := chatpipeline.NewExtractor(chatModel, template)
 	graph, err := extractor.Extract(ctx, chunk.Content)
@@ -257,6 +258,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			KnowledgeVersionID: chunk.KnowledgeVersionID,
 			ChunkID:            chunk.ID,
 			ModelID:            p.ModelID,
+			ConfigFingerprint:  kb.ExtractConfig.GraphConfigFingerprint(),
 			GraphData:          types.GraphDataPayload(*graph),
 			Status:             types.GraphTriplePending,
 		}
@@ -272,6 +274,35 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		return err
 	}
 	return nil
+}
+
+func buildGraphFewShotExamples(config *types.ExtractConfig) []types.GraphData {
+	if config == nil || strings.TrimSpace(config.Text) == "" || len(config.Nodes) == 0 {
+		return nil
+	}
+	entityNames := make(map[string]struct{}, len(config.Nodes))
+	for _, node := range config.Nodes {
+		if node == nil || strings.TrimSpace(node.Name) == "" || strings.TrimSpace(node.EntityType) == "" {
+			return nil
+		}
+		entityNames[node.Name] = struct{}{}
+	}
+	for _, relation := range config.Relations {
+		if relation == nil || strings.TrimSpace(relation.Type) == "" {
+			return nil
+		}
+		if _, ok := entityNames[relation.Node1]; !ok {
+			return nil
+		}
+		if _, ok := entityNames[relation.Node2]; !ok {
+			return nil
+		}
+	}
+	return []types.GraphData{{
+		Text:     config.Text,
+		Node:     config.Nodes,
+		Relation: config.Relations,
+	}}
 }
 
 // WriteExtractedGraph persists filtered extraction results via the existing graph engine.

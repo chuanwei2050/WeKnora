@@ -22,12 +22,6 @@
         </div>
       </div>
       <div class="kb-list-main">
-    <!-- 未初始化知识库提示 -->
-    <div v-if="hasUninitializedKbs" class="warning-banner">
-      <t-icon name="info-circle" size="16px" />
-      <span>{{ $t('knowledgeList.uninitializedBanner') }}</span>
-    </div>
-
     <!-- 上传进度提示 -->
     <div v-if="uploadSummaries.length" class="upload-progress-panel">
       <div 
@@ -94,7 +88,6 @@
           v-if="kb.isMine"
           class="kb-card"
           :class="{
-            'uninitialized': !isInitialized(kb),
             'kb-type-document': (kb.type || 'document') === 'document',
             'kb-type-faq': kb.type === 'faq',
             'highlight-flash': highlightedKbId !== null && highlightedKbId === kb.id
@@ -229,7 +222,7 @@
                     <t-icon name="relation" size="14px" />
                   </div>
                 </t-tooltip>
-                <t-tooltip v-if="kb.vlm_config?.enabled || (kb.storage_provider_config?.provider && kb.storage_provider_config.provider !== 'local')" :content="$t('knowledgeList.features.multimodal')" placement="top">
+                <t-tooltip v-if="kb.vlm_config?.enabled" :content="$t('knowledgeList.features.multimodal')" placement="top">
                   <div class="feature-badge multimodal">
                     <t-icon name="image" size="14px" />
                   </div>
@@ -261,7 +254,6 @@
         :key="kb.id"
         class="kb-card"
         :class="{
-          'uninitialized': !isInitialized(kb),
           'kb-type-document': (kb.type || 'document') === 'document',
           'kb-type-faq': kb.type === 'faq',
           'highlight-flash': highlightedKbId !== null && highlightedKbId === kb.id
@@ -335,7 +327,7 @@
                   <t-icon name="relation" size="14px" />
                 </div>
               </t-tooltip>
-              <t-tooltip v-if="kb.vlm_config?.enabled || (kb.storage_provider_config?.provider && kb.storage_provider_config.provider !== 'local')" :content="$t('knowledgeList.features.multimodal')" placement="top">
+              <t-tooltip v-if="kb.vlm_config?.enabled" :content="$t('knowledgeList.features.multimodal')" placement="top">
                 <div class="feature-badge multimodal">
                   <t-icon name="image" size="14px" />
                 </div>
@@ -640,14 +632,10 @@ interface KB {
   name: string; 
   description?: string; 
   updated_at?: string;
-  embedding_model_id?: string;
-  summary_model_id?: string;
   type?: 'document' | 'faq';
   showMore?: boolean;
   vlm_config?: { enabled?: boolean; model_id?: string };
   extract_config?: { enabled?: boolean };
-  storage_provider_config?: { provider?: string };
-  storage_config?: { provider?: string; bucket_name?: string }; // legacy
   question_generation_config?: { enabled?: boolean; question_count?: number };
   knowledge_count?: number;
   chunk_count?: number;
@@ -997,19 +985,6 @@ const confirmDelete = () => {
   })
 }
 
-const isInitialized = (kb: KB) => {
-  // Embedding model is only required for vector indexing; keyword-only KBs can be searched without it.
-  const strategy = (kb as any).indexing_strategy
-  const needsEmbedding = !strategy || strategy.vector_enabled
-  if (needsEmbedding && (!kb.embedding_model_id || kb.embedding_model_id === '')) return false
-  return true
-}
-
-// 计算是否有未初始化的知识库
-const hasUninitializedKbs = computed(() => {
-  return kbs.value.some(kb => !isInitialized(kb))
-})
-
 const getKbDisplayName = (kbId: string) => {
   const target = kbs.value.find(kb => kb.id === kbId)
   if (target?.name) return target.name
@@ -1106,11 +1081,7 @@ const ensureUploadTaskEntry = (detail?: UploadEventDetail) => {
 }
 
 const handleCardClick = (kb: KB) => {
-  if (isInitialized(kb)) {
-    goDetail(kb.id)
-  } else {
-    goSettings(kb.id)
-  }
+  goDetail(kb.id)
 }
 
 const goDetail = (id: string) => {
@@ -1507,25 +1478,6 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 }
 
-.warning-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  margin-bottom: 20px;
-  background: var(--td-warning-color-light);
-  border: 1px solid var(--td-warning-color-focus);
-  border-radius: 6px;
-  color: var(--td-warning-color);
-  font-family: "PingFang SC";
-  font-size: 14px;
-  
-  .t-icon {
-    color: var(--td-warning-color);
-    flex-shrink: 0;
-  }
-}
-
 .upload-progress-panel {
   display: flex;
   flex-direction: column;
@@ -1633,10 +1585,6 @@ const handleUploadFinishedEvent = (event: Event) => {
   &:hover {
     border-color: var(--td-brand-color);
     box-shadow: 0 4px 12px rgba(23, 74, 124, 0.12);
-  }
-
-  &.uninitialized {
-    opacity: 0.9;
   }
 
   // 文档类型样式

@@ -1150,7 +1150,9 @@ const updateAssistantSession = (payload) => {
         message.thinking = payload.thinking;
         message.thinkContent = payload.thinkContent;
         message.showThink = payload.showThink;
-        message.knowledge_references = message.knowledge_references ? message.knowledge_references : payload.knowledge_references;
+        message.knowledge_references = payload.knowledge_references?.length
+            ? payload.knowledge_references
+            : (message.knowledge_references || payload.knowledge_references);
         // 更新 fallback 状态
         if (payload.is_fallback) {
             message.is_fallback = true;

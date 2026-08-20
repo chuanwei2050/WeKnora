@@ -80,6 +80,25 @@ func TestNormalizedRelationTypes(t *testing.T) {
 	}
 }
 
+func TestCurrentVersionIDs(t *testing.T) {
+	t.Parallel()
+	got := currentVersionIDs(map[string]string{
+		"knowledge-b": " version-b ",
+		"knowledge-a": "version-a",
+		"empty":       " ",
+		"duplicate":   "version-a",
+	})
+	want := []string{"version-a", "version-b"}
+	if len(got) != len(want) {
+		t.Fatalf("currentVersionIDs() = %v, want %v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("currentVersionIDs()[%d] = %q, want %q", index, got[index], want[index])
+		}
+	}
+}
+
 func TestGraphSourceEvidenceKeyMatchesGraphEvidenceIdentity(t *testing.T) {
 	t.Parallel()
 	source := types.GraphSource{

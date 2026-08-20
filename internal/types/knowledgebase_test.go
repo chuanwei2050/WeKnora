@@ -93,10 +93,10 @@ func TestKnowledgeBase_VectorStoreID_JSON(t *testing.T) {
 	})
 
 	unmarshalCases := []struct {
-		name       string
-		body       string
-		wantNil    bool
-		wantValue  string
+		name      string
+		body      string
+		wantNil   bool
+		wantValue string
 	}{
 		{name: "missing field", body: `{"id":"kb-1"}`, wantNil: true},
 		{name: "explicit null", body: `{"id":"kb-1","vector_store_id":null}`, wantNil: true},
@@ -156,3 +156,36 @@ func TestKnowledgeBase_UnmarshalJSON_WithVectorStoreID(t *testing.T) {
 	// If a future change introduces such a shadow, the value above would fail to populate.
 }
 
+func TestPlatformManagedMediaModelsOnlyRequireFeatureToggle(t *testing.T) {
+	if !(VLMConfig{Enabled: true}).IsEnabled() {
+		t.Fatal("enabled multimodal config must inherit the platform VLM")
+	}
+	if !(ASRConfig{Enabled: true}).IsASREnabled() {
+		t.Fatal("enabled ASR config must inherit the platform ASR model")
+	}
+}
+
+func TestExtractConfigNormalizeModeAndFingerprint(t *testing.T) {
+	general := &ExtractConfig{Mode: GraphExtractionGeneral, Tags: []string{"uses"}, EntityTypes: []string{"tool"}, StrictSchema: true}
+	general.NormalizeMode()
+	if len(general.Tags) != 0 || len(general.EntityTypes) != 0 || general.StrictSchema {
+		t.Fatalf("general mode retained schema: %#v", general)
+	}
+	custom := &ExtractConfig{Mode: GraphExtractionCustom, Tags: []string{"uses"}, EntityTypes: []string{"tool"}}
+	custom.NormalizeMode()
+	if !custom.StrictSchema || custom.GraphConfigFingerprint() == "" {
+		t.Fatalf("custom mode was not normalized: %#v", custom)
+	}
+	changed := *custom
+	changed.RelationSchema = []GraphRelationTypeDefinition{{Type: "tests", SourceType: "method", TargetType: "tool", Description: "方法测试工具"}}
+	if custom.GraphConfigFingerprint() == changed.GraphConfigFingerprint() {
+		t.Fatal("schema change must change graph configuration fingerprint")
+	}
+}
+
+func TestGraphEnabledHasSingleSourceOfTruth(t *testing.T) {
+	kb := &KnowledgeBase{IndexingStrategy: IndexingStrategy{GraphEnabled: true}}
+	if !kb.IsGraphEnabled() {
+		t.Fatal("graph strategy must enable graph without a second extract flag")
+	}
+}

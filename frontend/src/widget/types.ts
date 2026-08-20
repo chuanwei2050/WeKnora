@@ -15,6 +15,7 @@ export type WidgetEventName =
   | 'layout-changed'
   | 'unauthorized'
   | 'answer-completed'
+  | 'open-document'
   | 'error'
 
 export interface WidgetTheme {
@@ -61,4 +62,5 @@ export type WidgetFrameMessage =
   | { version: 1; type: 'ready' }
   | { version: 1; type: 'unauthorized' }
   | { version: 1; type: 'answer-completed'; messageId: string }
+  | { version: 1; type: 'open-document'; knowledgeBaseId: string; knowledgeId?: string }
   | { version: 1; type: 'error'; code: string; message: string }

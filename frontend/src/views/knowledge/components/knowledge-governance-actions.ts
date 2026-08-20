@@ -37,7 +37,11 @@ export function getGovernanceRowActions(item: GovernanceRowItem, context: Govern
 }
 
 export function isGovernanceRowActionDisabled(item: GovernanceRowItem, action: GovernanceRowAction): boolean {
-  return action === 'delete' && item.parse_status === 'pending_review'
+  return action === 'delete' && isKnowledgeDeleteDisabled(item)
+}
+
+export function isKnowledgeDeleteDisabled(item: GovernanceRowItem): boolean {
+  return item.parse_status === 'pending_review' || Boolean(item.current_version_id)
 }
 
 export function canExecuteGovernanceRowAction(

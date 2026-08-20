@@ -126,6 +126,7 @@ func validateVoiceCleanupSchedule(root string, maxAge, interval time.Duration) e
 type VoiceWSTicket struct {
 	Value     string
 	UserID    string
+	TenantID  uint64
 	SessionID string
 	Purpose   string
 	ExpiresAt time.Time
@@ -140,7 +141,7 @@ func NewVoiceWSTicketStore() *VoiceWSTicketStore {
 	return &VoiceWSTicketStore{tickets: make(map[string]VoiceWSTicket)}
 }
 
-func (s *VoiceWSTicketStore) Issue(userID, sessionID, purpose string, ttl time.Duration, now time.Time) (VoiceWSTicket, error) {
+func (s *VoiceWSTicketStore) Issue(userID string, tenantID uint64, sessionID, purpose string, ttl time.Duration, now time.Time) (VoiceWSTicket, error) {
 	if s == nil {
 		return VoiceWSTicket{}, fmt.Errorf("voice ticket store is required")
 	}
@@ -151,7 +152,7 @@ func (s *VoiceWSTicketStore) Issue(userID, sessionID, purpose string, ttl time.D
 	if _, err := rand.Read(buf); err != nil {
 		return VoiceWSTicket{}, err
 	}
-	ticket := VoiceWSTicket{Value: base64.RawURLEncoding.EncodeToString(buf), UserID: userID, SessionID: sessionID, Purpose: purpose, ExpiresAt: now.Add(ttl)}
+	ticket := VoiceWSTicket{Value: base64.RawURLEncoding.EncodeToString(buf), UserID: userID, TenantID: tenantID, SessionID: sessionID, Purpose: purpose, ExpiresAt: now.Add(ttl)}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tickets[ticket.Value] = ticket
@@ -161,6 +162,17 @@ func (s *VoiceWSTicketStore) Issue(userID, sessionID, purpose string, ttl time.D
 // Consume atomically validates and deletes a ticket. A replay can therefore
 // never reach the WebSocket session handler.
 func (s *VoiceWSTicketStore) Consume(value, userID, sessionID, purpose string, now time.Time) (VoiceWSTicket, error) {
+	return s.consume(value, userID, sessionID, purpose, true, now)
+}
+
+// ConsumeForSession authenticates a WebSocket using only its short-lived
+// ticket. The ticket itself carries the user and tenant identity established
+// by the authenticated HTTP request that issued it.
+func (s *VoiceWSTicketStore) ConsumeForSession(value, sessionID, purpose string, now time.Time) (VoiceWSTicket, error) {
+	return s.consume(value, "", sessionID, purpose, false, now)
+}
+
+func (s *VoiceWSTicketStore) consume(value, userID, sessionID, purpose string, verifyUser bool, now time.Time) (VoiceWSTicket, error) {
 	if s == nil {
 		return VoiceWSTicket{}, fmt.Errorf("voice ticket store is required")
 	}
@@ -174,7 +186,7 @@ func (s *VoiceWSTicketStore) Consume(value, userID, sessionID, purpose string, n
 	if !now.Before(ticket.ExpiresAt) {
 		return VoiceWSTicket{}, fmt.Errorf("voice ticket expired")
 	}
-	if ticket.UserID != userID || ticket.SessionID != sessionID || ticket.Purpose != purpose {
+	if (verifyUser && ticket.UserID != userID) || ticket.SessionID != sessionID || ticket.Purpose != purpose {
 		return VoiceWSTicket{}, fmt.Errorf("voice ticket scope mismatch")
 	}
 	return ticket, nil

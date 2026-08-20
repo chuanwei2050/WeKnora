@@ -2,14 +2,44 @@ package chatpipeline
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/redis/go-redis/v9"
 )
+
+type platformRerankModelService struct {
+	interfaces.ModelService
+	requestedModelID string
+}
+
+func (s *platformRerankModelService) GetRerankModel(_ context.Context, modelID string) (rerank.Reranker, error) {
+	s.requestedModelID = modelID
+	return nil, errors.New("stop after model resolution")
+}
+
+func TestRerankUsesPlatformModelWhenRequestModelIDIsEmpty(t *testing.T) {
+	models := &platformRerankModelService{}
+	plugin := &PluginRerank{modelService: models}
+	manage := &types.ChatManage{
+		PipelineState: types.PipelineState{
+			RewriteQuery: "query",
+			SearchResult: []*types.SearchResult{{ID: "chunk", Content: "content"}},
+		},
+	}
+
+	if err := plugin.OnEvent(context.Background(), types.CHUNK_RERANK, manage, func() *PluginError { return nil }); err == nil {
+		t.Fatal("expected model resolution error")
+	}
+	if models.requestedModelID != "" {
+		t.Fatalf("requested model ID = %q, want platform default", models.requestedModelID)
+	}
+}
 
 func TestPrepareRerankCandidatesDeduplicatesAndLimits(t *testing.T) {
 	results := []*types.SearchResult{

@@ -346,6 +346,14 @@ func (qa *QAPromptGenerator) System(ctx context.Context) string {
 			"Each entity object MUST include entity_type. Do not invent types outside the whitelist when it is non-empty.",
 		)
 	}
+	if len(qa.Template.EntitySchema) > 0 {
+		entitySchema, _ := json.Marshal(qa.Template.EntitySchema)
+		promptLines = append(promptLines, "Entity schema definitions (business name, base type and meaning): "+string(entitySchema)+".")
+	}
+	if len(qa.Template.RelationSchema) > 0 {
+		relationSchema, _ := json.Marshal(qa.Template.RelationSchema)
+		promptLines = append(promptLines, "Directed relation schema (type, source_type, target_type and meaning): "+string(relationSchema)+". Every extracted relation MUST follow the configured source-to-target direction.")
+	}
 	maxEntities := qa.Template.MaxEntities
 	if maxEntities <= 0 {
 		maxEntities = defaultGraphMaxEntities

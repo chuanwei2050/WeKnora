@@ -89,16 +89,38 @@
 - **WHEN** 会话刷新时发现 client、用户或知识库授权已失效
 - **THEN** 系统拒绝续期并终止该会话
 
-### Requirement: 外部用户身份必须按稳定身份源解析
-系统 MUST 使用 `(identity_provider_id, external_tenant_id, external_user_id)` 作为外部身份唯一键；共享同一身份源的多个 client MUST 绑定相同 `identity_provider_id`，没有共同身份源的 client MUST 默认使用独立 provider ID。
+### Requirement: 外部用户身份必须按项目稳定解析
+系统 MUST 使用 `(client_id, external_tenant_id, external_user_id)` 作为外部身份唯一键；普通外部用户首次访问时 MUST 在 client 绑定租户下自动创建 `member` 并持久化映射，不同 client MUST NOT 因复用 identity provider 或相同外部用户编号而自动共享内部账号。
 
-#### Scenario: 同一用户从两个共享身份源的宿主进入
-- **WHEN** 两个 client 绑定同一 `identity_provider_id`、外部租户和 `external_user_id`
-- **THEN** 系统解析为同一个 WeKnora 用户，使文档所有权和用户级授权跨宿主保持一致
+#### Scenario: 普通用户首次访问
+- **WHEN** client 提交尚无映射的有效普通外部用户
+- **THEN** 系统在 client 绑定租户中创建 `member`，保存项目级身份映射并签发 ticket
 
-#### Scenario: 两个项目本地身份源使用相同用户 ID
-- **WHEN** 两个 client 使用不同 `identity_provider_id` 但提交相同外部租户和用户 ID
+#### Scenario: 两个项目使用相同用户 ID
+- **WHEN** 两个 client 提交相同外部租户和用户 ID
 - **THEN** 系统解析为两个隔离用户，不发生错误合并
+
+### Requirement: 外部管理员必须显式绑定现有租户管理员
+系统 MUST 要求可授予 `tenant_admin` 的 integration client 显式绑定一个同租户、有效的现有租户管理员；外部管理员身份 MUST 解析到该账号，MUST NOT 自动创建管理员或按查询顺序猜测管理员。
+
+#### Scenario: 显式绑定管理员进入
+- **WHEN** 外部角色映射结果为 `tenant_admin` 且 client 已绑定有效租户管理员
+- **THEN** 系统将该项目外部身份绑定到指定管理员并建立受 client 范围限制的会话
+
+#### Scenario: 缺少或非法管理员绑定
+- **WHEN** client 允许管理员映射但未绑定管理员，或绑定账号不属于该租户、已停用或不是租户管理员
+- **THEN** 系统拒绝 client 配置或 bootstrap，不创建管理员账号或 ticket
+
+### Requirement: 外部用户停用必须按项目传播
+系统 MUST 接受宿主后端同步外部用户启用状态；停用时 MUST 标记对应项目身份不可用、撤销该 client 与用户组合下的现有会话并拒绝新 ticket，且 MUST NOT 影响其他 client 或停用共享的内部管理员账号。
+
+#### Scenario: 停用普通外部用户
+- **WHEN** 宿主为已有映射提交停用状态
+- **THEN** 系统停用该项目身份、撤销对应会话并拒绝 bootstrap
+
+#### Scenario: 重新启用外部用户
+- **WHEN** 宿主再次提交启用状态且内部用户、client 和授权仍有效
+- **THEN** 系统恢复该项目身份并允许建立新会话
 
 ### Requirement: 浏览器来源和凭证 CORS 必须精确限制
 系统 MUST 对 bootstrap、exchange、refresh 和 logout 等浏览器认证流程校验 client 允许来源；带凭证的 CORS 响应 MUST 返回精确匹配的 origin 和 `Vary: Origin`，MUST NOT 返回 `Access-Control-Allow-Origin: *`。

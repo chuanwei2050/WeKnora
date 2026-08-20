@@ -175,8 +175,19 @@ func (s *Service) CreateClient(ctx context.Context, actor *types.User, client *C
 	if json.Unmarshal([]byte(client.RoleMappingsJSON), &mappings) != nil {
 		return "", ErrForbidden
 	}
+	hasAdministratorMapping := false
 	for _, mapped := range mappings {
 		if !types.IsTenantUserRole(types.UserRole(mapped)) {
+			return "", ErrForbidden
+		}
+		hasAdministratorMapping = hasAdministratorMapping || types.UserRole(mapped) == types.UserRoleTenantAdmin
+	}
+	if hasAdministratorMapping {
+		if client.AdministratorUserID == "" {
+			return "", ErrInvalid
+		}
+		var administrator types.User
+		if err = s.db.WithContext(ctx).First(&administrator, "id = ?", client.AdministratorUserID).Error; err != nil || administrator.TenantID != client.TenantID || !administrator.IsActive || administrator.EffectiveRole() != types.UserRoleTenantAdmin {
 			return "", ErrForbidden
 		}
 	}
@@ -258,6 +269,21 @@ func (s *Service) SetClientEnabled(ctx context.Context, actor *types.User, clien
 	})
 }
 
+func (s *Service) BindClientAdministrator(ctx context.Context, actor *types.User, clientID, userID string) error {
+	if actor == nil || !actor.IsPlatformAdmin() || strings.TrimSpace(userID) == "" {
+		return ErrForbidden
+	}
+	var client Client
+	if err := s.db.WithContext(ctx).First(&client, "id = ?", clientID).Error; err != nil {
+		return ErrForbidden
+	}
+	var administrator types.User
+	if err := s.db.WithContext(ctx).First(&administrator, "id = ?", userID).Error; err != nil || administrator.TenantID != client.TenantID || !administrator.IsActive || administrator.EffectiveRole() != types.UserRoleTenantAdmin {
+		return ErrForbidden
+	}
+	return s.db.WithContext(ctx).Model(&Client{}).Where("id = ?", clientID).Update("administrator_user_id", userID).Error
+}
+
 func (s *Service) IssueServiceToken(ctx context.Context, clientID, secret string) (string, time.Time, error) {
 	var client Client
 	if err := s.db.WithContext(ctx).First(&client, "id = ?", clientID).Error; err != nil || !validClient(&client, s.now()) {
@@ -287,6 +313,7 @@ type BootstrapRequest struct {
 	ExternalTenantID string
 	ExternalUserID   string
 	ExternalRoles    []string
+	Active           *bool
 	Origin           string
 }
 
@@ -326,8 +353,9 @@ func (s *Service) CreateBootstrap(ctx context.Context, serviceToken string, req 
 }
 
 func (s *Service) resolveExternalUser(ctx context.Context, client *Client, req BootstrapRequest) (*types.User, error) {
+	requestedActive := req.Active == nil || *req.Active
 	var identity ExternalIdentity
-	err := s.db.WithContext(ctx).Where("identity_provider_id = ? AND external_tenant_id = ? AND external_user_id = ?", client.IdentityProviderID, req.ExternalTenantID, req.ExternalUserID).First(&identity).Error
+	err := s.db.WithContext(ctx).Where("client_id = ? AND external_tenant_id = ? AND external_user_id = ?", client.ID, req.ExternalTenantID, req.ExternalUserID).First(&identity).Error
 	var declaredMappings map[string]string
 	_ = json.Unmarshal([]byte(client.RoleMappingsJSON), &declaredMappings)
 	for _, externalRole := range req.ExternalRoles {
@@ -336,25 +364,62 @@ func (s *Service) resolveExternalUser(ctx context.Context, client *Client, req B
 		}
 	}
 	role := mappedRole(client, req.ExternalRoles)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = s.db.WithContext(ctx).Where("client_id = '' AND identity_provider_id = ? AND external_tenant_id = ? AND external_user_id = ?", client.IdentityProviderID, req.ExternalTenantID, req.ExternalUserID).First(&identity).Error
+		if err == nil {
+			if role == types.UserRoleTenantAdmin && identity.UserID != client.AdministratorUserID {
+				return nil, ErrForbidden
+			}
+			if updateErr := s.db.WithContext(ctx).Model(&identity).Updates(map[string]any{"client_id": client.ID, "active": requestedActive}).Error; updateErr != nil {
+				return nil, updateErr
+			}
+			identity.ClientID = client.ID
+			identity.Active = requestedActive
+		}
+	}
 	if err == nil {
+		if !requestedActive {
+			if updateErr := s.disableExternalIdentity(ctx, client.ID, identity.UserID); updateErr != nil {
+				return nil, updateErr
+			}
+			return nil, ErrForbidden
+		}
+		if !identity.Active {
+			if updateErr := s.db.WithContext(ctx).Model(&identity).Update("active", true).Error; updateErr != nil {
+				return nil, updateErr
+			}
+		}
+		if role == types.UserRoleTenantAdmin && identity.UserID != client.AdministratorUserID {
+			return nil, ErrForbidden
+		}
 		user, getErr := s.users.GetUserByID(ctx, identity.UserID)
 		if getErr != nil || user == nil {
 			return user, getErr
 		}
-		if user.Role != role || user.TenantID != client.TenantID {
-			user.Role = role
-			user.TenantID = client.TenantID
-			if updateErr := s.users.UpdateUser(ctx, user); updateErr != nil {
-				return nil, updateErr
-			}
+		if user.TenantID != client.TenantID || !user.IsActive || user.EffectiveRole() != role {
+			return nil, ErrForbidden
 		}
 		return user, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
+	if !requestedActive {
+		return nil, ErrForbidden
+	}
+	if role == types.UserRoleTenantAdmin {
+		if client.AdministratorUserID == "" {
+			return nil, ErrForbidden
+		}
+		user, getErr := s.users.GetUserByID(ctx, client.AdministratorUserID)
+		if getErr != nil || user == nil || user.TenantID != client.TenantID || !user.IsActive || user.EffectiveRole() != types.UserRoleTenantAdmin {
+			return nil, ErrForbidden
+		}
+		identity = ExternalIdentity{ClientID: client.ID, IdentityProviderID: client.IdentityProviderID, ExternalTenantID: req.ExternalTenantID, ExternalUserID: req.ExternalUserID, UserID: user.ID, Active: true}
+		return user, s.db.WithContext(ctx).Create(&identity).Error
+	}
 	userID := uuid.NewString()
-	nameDigest := digest(client.IdentityProviderID + ":" + req.ExternalTenantID + ":" + req.ExternalUserID)[:20]
+	nameDigest := digest(client.ID + ":" + req.ExternalTenantID + ":" + req.ExternalUserID)[:20]
 	randomPassword, err := randomToken()
 	if err != nil {
 		return nil, err
@@ -368,7 +433,16 @@ func (s *Service) resolveExternalUser(ctx context.Context, client *Client, req B
 		if err := tx.Create(user).Error; err != nil {
 			return err
 		}
-		return tx.Create(&ExternalIdentity{IdentityProviderID: client.IdentityProviderID, ExternalTenantID: req.ExternalTenantID, ExternalUserID: req.ExternalUserID, UserID: user.ID}).Error
+		return tx.Create(&ExternalIdentity{ClientID: client.ID, IdentityProviderID: client.IdentityProviderID, ExternalTenantID: req.ExternalTenantID, ExternalUserID: req.ExternalUserID, UserID: user.ID, Active: true}).Error
+	})
+}
+
+func (s *Service) disableExternalIdentity(ctx context.Context, clientID, userID string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&ExternalIdentity{}).Where("client_id = ? AND user_id = ?", clientID, userID).Update("active", false).Error; err != nil {
+			return err
+		}
+		return tx.Model(&Session{}).Where("client_id = ? AND user_id = ? AND revoked_at IS NULL", clientID, userID).Update("revoked_at", s.now()).Error
 	})
 }
 
@@ -496,6 +570,10 @@ func (s *Service) Authenticate(ctx context.Context, token, kind string) (*Princi
 	var user *types.User
 	var err error
 	if session.UserID != "" {
+		var activeIdentities int64
+		if s.db.WithContext(ctx).Model(&ExternalIdentity{}).Where("user_id = ? AND active = ? AND (client_id = ? OR client_id = '')", session.UserID, true, session.ClientID).Count(&activeIdentities).Error != nil || activeIdentities == 0 {
+			return nil, nil, nil, ErrUnauthorized
+		}
 		user, err = s.users.GetUserByID(ctx, session.UserID)
 		if err != nil || user == nil || !user.IsActive {
 			return nil, nil, nil, ErrUnauthorized

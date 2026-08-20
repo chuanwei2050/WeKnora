@@ -110,6 +110,27 @@ func TestApplyGraphSchemaFilter_StrictKeepsValidTriple(t *testing.T) {
 	}
 }
 
+func TestApplyGraphSchemaFilter_StrictEnforcesConfiguredRelationDirection(t *testing.T) {
+	graph := &types.GraphData{
+		Node: []*types.GraphNode{{Name: "方法", EntityType: "method"}, {Name: "工具", EntityType: "tool"}},
+		Relation: []*types.GraphRelation{
+			{Node1: "方法", Node2: "工具", Type: "uses"},
+			{Node1: "工具", Node2: "方法", Type: "uses"},
+		},
+	}
+	result := ApplyGraphSchemaFilter(context.Background(), graph, SchemaFilterOptions{
+		StrictSchema: true,
+		Tags:         []string{"uses"},
+		EntityTypes:  []string{"method", "tool"},
+		RelationSchema: []types.GraphRelationTypeDefinition{
+			{Type: "uses", SourceType: "method", TargetType: "tool", Description: "方法使用工具"},
+		},
+	})
+	if result.SkipWrite || len(graph.Relation) != 1 || graph.Relation[0].Node1 != "方法" || graph.Relation[0].Node2 != "工具" {
+		t.Fatalf("expected only configured direction, result=%#v relations=%#v", result, graph.Relation)
+	}
+}
+
 func TestParseGraph_FillsEntityType(t *testing.T) {
 	f := NewFormater()
 	raw := "```json\n[{\"entity\":\"Alpha\",\"entity_type\":\"tool\",\"entity_attributes\":[\"x\"]},{\"entity1\":\"Alpha\",\"entity2\":\"Beta\",\"relation\":\"uses\"}]\n```"

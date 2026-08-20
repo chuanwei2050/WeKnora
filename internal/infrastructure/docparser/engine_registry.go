@@ -24,6 +24,50 @@ func RegisterEngine(e EngineRegistration) {
 	localEngines = append(localEngines, e)
 }
 
+// SelectConfiguredEngine chooses the first platform-configured engine that can
+// handle fileType. Simple formats stay on the local Go reader.
+func SelectConfiguredEngine(fileType string, docreaderConnected, hasWeKnoraCloudCredentials bool, overrides map[string]string) string {
+	fileType = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(fileType), "."))
+	if IsSimpleFormat(fileType) {
+		return SimpleEngineName
+	}
+
+	for _, engine := range localEngines {
+		name := engine.Name()
+		if name == SimpleEngineName || !containsFileType(engine.FileTypes(docreaderConnected), fileType) {
+			continue
+		}
+		switch name {
+		case "builtin":
+			if docreaderConnected {
+				return name
+			}
+		case WeKnoraCloudEngineName:
+			if hasWeKnoraCloudCredentials {
+				return name
+			}
+		case "mineru":
+			if strings.TrimSpace(overrides["mineru_endpoint"]) != "" {
+				return name
+			}
+		case "mineru_cloud":
+			if strings.TrimSpace(overrides["mineru_api_key"]) != "" {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
+func containsFileType(fileTypes []string, target string) bool {
+	for _, fileType := range fileTypes {
+		if strings.EqualFold(strings.TrimPrefix(fileType, "."), target) {
+			return true
+		}
+	}
+	return false
+}
+
 func init() {
 	RegisterEngine(&builtinEngine{})
 	RegisterEngine(&simpleEngine{})

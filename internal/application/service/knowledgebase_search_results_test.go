@@ -20,3 +20,17 @@ func TestBuildSearchResultPreservesKnowledgeVersionID(t *testing.T) {
 		t.Fatalf("knowledge version ID = %q, want %q", result.KnowledgeVersionID, chunk.KnowledgeVersionID)
 	}
 }
+
+func TestVectorRetrievalUsesPlatformEmbeddingWhenKnowledgeBaseModelIDIsEmpty(t *testing.T) {
+	kb := &types.KnowledgeBase{
+		IndexingStrategy: types.IndexingStrategy{VectorEnabled: true},
+	}
+	if !shouldUseVectorRetrieval(kb) {
+		t.Fatal("vector-enabled knowledge base must not be disabled by an empty legacy model ID")
+	}
+
+	kb.IndexingStrategy.VectorEnabled = false
+	if shouldUseVectorRetrieval(kb) {
+		t.Fatal("vector-disabled knowledge base must not use vector retrieval")
+	}
+}

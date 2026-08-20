@@ -58,6 +58,13 @@ describe('floating widget', () => {
     expect(parseFrameMessage({ version: 1, type: 'answer-completed' })).toBeNull()
     expect(parseFrameMessage({ version: 2, type: 'ready' })).toBeNull()
     expect(parseFrameMessage({ version: 1, type: 'ready' })).toEqual({ version: 1, type: 'ready' })
+    expect(parseFrameMessage({ version: 1, type: 'open-document', knowledgeBaseId: 'kb-1', knowledgeId: 'doc-1' })).toEqual({
+      version: 1,
+      type: 'open-document',
+      knowledgeBaseId: 'kb-1',
+      knowledgeId: 'doc-1',
+    })
+    expect(parseFrameMessage({ version: 1, type: 'open-document', knowledgeBaseId: '../login' })).toBeNull()
   })
 
   it('rejects cross-origin frames and unsafe runtime configuration', () => {

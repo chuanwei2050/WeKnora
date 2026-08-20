@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -56,7 +57,7 @@ func (h *Handler) TranscribeVoiceBatch(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("audio file is too large"))
 		return
 	}
-	model, err := h.modelService.GetASRModel(ctx, "")
+	model, err := h.modelService.GetASRModel(ctx, modelID)
 	if err != nil {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
@@ -107,7 +108,8 @@ func (h *Handler) IssueVoiceWSTicket(c *gin.Context) {
 	if purpose == "" {
 		purpose = "asr"
 	}
-	ticket, err := h.voiceTickets.Issue(userID, sessionID, purpose, h.config.Voice.WSTicketTTL, time.Now())
+	tenantID := types.MustTenantIDFromContext(ctx)
+	ticket, err := h.voiceTickets.Issue(userID, tenantID, sessionID, purpose, h.config.Voice.WSTicketTTL, time.Now())
 	if err != nil {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
@@ -140,17 +142,22 @@ var voiceSocketUpgrader = websocket.Upgrader{
 // the same endpoint; they emit a final transcript on stop and never persist
 // the buffered audio.
 func (h *Handler) VoiceWebSocket(c *gin.Context) {
-	userID := c.GetString(types.UserIDContextKey.String())
 	sessionID := strings.TrimSpace(c.Param("id"))
 	ticket := strings.TrimSpace(c.Query("ticket"))
-	if userID == "" || sessionID == "" || ticket == "" {
+	if sessionID == "" || ticket == "" {
 		c.Error(errors.NewUnauthorizedError("voice WebSocket ticket is required"))
 		return
 	}
-	if _, err := h.voiceTickets.Consume(ticket, userID, sessionID, "asr", time.Now()); err != nil {
+	identity, err := h.voiceTickets.ConsumeForSession(ticket, sessionID, "asr", time.Now())
+	if err != nil {
 		c.Error(errors.NewUnauthorizedError("voice WebSocket ticket is invalid"))
 		return
 	}
+	c.Set(types.UserIDContextKey.String(), identity.UserID)
+	c.Set(types.TenantIDContextKey.String(), identity.TenantID)
+	requestContext := context.WithValue(c.Request.Context(), types.UserIDContextKey, identity.UserID)
+	requestContext = context.WithValue(requestContext, types.TenantIDContextKey, identity.TenantID)
+	c.Request = c.Request.WithContext(requestContext)
 	conn, err := voiceSocketUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		return
@@ -217,7 +224,7 @@ func (h *Handler) VoiceWebSocket(c *gin.Context) {
 				_ = conn.WriteJSON(gin.H{"type": "error", "message": "unsupported audio mime type"})
 				continue
 			}
-			resolved, resolveErr := h.modelService.GetASRModel(c.Request.Context(), "")
+			resolved, resolveErr := h.modelService.GetASRModel(c.Request.Context(), message.ModelID)
 			if resolveErr != nil {
 				_ = conn.WriteJSON(gin.H{"type": "error", "message": resolveErr.Error()})
 				continue
@@ -229,7 +236,7 @@ func (h *Handler) VoiceWebSocket(c *gin.Context) {
 					streamingSession = nil
 				}
 			}
-			_ = conn.WriteJSON(gin.H{"type": "started", "model_id": modelID})
+			_ = conn.WriteJSON(gin.H{"type": "started", "model_id": modelID, "streaming": streamingSession != nil})
 		case "stop":
 			if !started || model == nil || len(audio) == 0 {
 				_ = conn.WriteJSON(gin.H{"type": "error", "message": "recording has no audio"})

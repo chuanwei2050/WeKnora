@@ -21,6 +21,7 @@ import {
 import {
   getGovernanceActionNextStatus,
   canExecuteGovernanceRowAction,
+  isKnowledgeDeleteDisabled,
   type DocumentBatchAction,
   type GovernanceReviewAction,
   type GovernanceRowAction,
@@ -64,6 +65,7 @@ import { formatFileSize } from '@/utils/files';
 import { getParserEngines, type ParserEngineInfo } from '@/api/system';
 import { canManageBidReviewKnowledge } from '@/utils/bidreview-sso';
 import { buildKnowledgeUploadMetadata } from '@/utils/knowledge-upload-metadata';
+import { collectPlatformSupportedFileTypes } from './platform-parser-support';
 const route = useRoute();
 const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
@@ -155,77 +157,19 @@ onUnmounted(() => {
   stopWikiStatusPolling()
   clearWikiStatusProbes()
 })
-const missingStorageEngine = computed(() => {
-  if (!kbInfo.value || isFAQ.value) return false
-  const spc = kbInfo.value.storage_provider_config
-  return !spc || !spc.provider
-})
 const parserEngines = ref<ParserEngineInfo[]>([]);
 
-const supportedFileTypes = computed<Set<string>>(() => {
-  const engines = parserEngines.value
-  if (!engines.length) return new Set<string>()
-
-  const rules: { file_types: string[]; engine: string }[] =
-    kbInfo.value?.chunking_config?.parser_engine_rules || []
-
-  const ruleMap = new Map<string, string>()
-  for (const r of rules) {
-    for (const ft of r.file_types) ruleMap.set(ft, r.engine)
-  }
-
-  const available = new Set<string>()
-  const availableEngineNames = new Set(
-    engines.filter(e => e.Available !== false).map(e => e.Name)
-  )
-
-  for (const engine of engines) {
-    for (const ft of engine.FileTypes || []) {
-      if (available.has(ft)) continue
-
-      const explicitEngine = ruleMap.get(ft)
-      if (explicitEngine) {
-        if (availableEngineNames.has(explicitEngine)) available.add(ft)
-      } else {
-        if (engine.Available !== false) available.add(ft)
-      }
-    }
-  }
-  return available
-})
+const supportedFileTypes = computed<Set<string>>(() =>
+  collectPlatformSupportedFileTypes(parserEngines.value)
+)
 
 const acceptFileTypes = computed(() =>
   [...supportedFileTypes.value].map(t => '.' + t).join(',')
 )
 
-const unsupportedFileTypes = computed<string[]>(() => {
-  const engines = parserEngines.value
-  if (!engines.length) return []
-
-  const allTypes = new Set<string>()
-  for (const engine of engines) {
-    for (const ft of engine.FileTypes || []) allTypes.add(ft)
-  }
-
-  const supported = supportedFileTypes.value
-  return [...allTypes].filter(ft => !supported.has(ft)).sort()
-})
-
-const goToParserSettings = () => {
-  if (kbId.value) {
-    uiStore.openKBSettings(kbId.value, 'parser')
-  }
-}
-
 const isSameTenantKnowledgeBase = computed(() => {
   if (!kbInfo.value) return false;
   return Number(kbInfo.value.tenant_id) === Number(authStore.effectiveTenantId);
-});
-
-// Permission control: check if current user owns this KB or has edit/manage permission
-const isOwner = computed(() => {
-  if (!kbInfo.value) return false;
-  return kbInfo.value.created_by === authStore.currentUserId;
 });
 
 // Can edit: owner, admin, or editor
@@ -246,42 +190,6 @@ const canContribute = computed(() => {
 });
 const canReview = computed(() => canManage.value || (kbInfo.value?.reviewer_ids || []).includes(authStore.currentUserId));
 const canUploadDocument = computed(() => canEdit.value || canContribute.value);
-
-// Current KB's shared record (when accessed via organization share)
-const currentSharedKb = computed(() =>
-  orgStore.sharedKnowledgeBases.find((s) => s.knowledge_base?.id === kbId.value) ?? null,
-);
-
-// Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
-const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
-const isAgentVisibleKnowledgeBase = computed(() =>
-  Boolean(effectiveKBPermission.value) && !currentSharedKb.value && !isSameTenantKnowledgeBase.value
-);
-
-// Display role label: owner or org role (admin/editor/viewer)
-const accessRoleLabel = computed(() => {
-  if (isOwner.value) return t('knowledgeBase.accessInfo.roleOwner');
-  const perm = effectiveKBPermission.value;
-  if (perm) return t(`organization.role.${perm}`);
-  return '--';
-});
-
-// Permission summary text for current role
-const accessPermissionSummary = computed(() => {
-  if (isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner');
-  const perm = effectiveKBPermission.value;
-  if (perm === 'admin') return t('knowledgeBase.accessInfo.permissionAdmin');
-  if (perm === 'editor') return t('knowledgeBase.accessInfo.permissionEditor');
-  if (perm === 'viewer') return t('knowledgeBase.accessInfo.permissionViewer');
-  return '--';
-});
-
-// Last updated time from kbInfo
-const kbLastUpdated = computed(() => {
-  const raw = kbInfo.value?.updated_at;
-  if (!raw) return null;
-  return formatStringDate(new Date(raw));
-});
 
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
 let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
@@ -384,18 +292,16 @@ const filteredTags = computed(() => {
 const untaggedTag = computed(() => tagList.value.find(tag => tag.name === UNTAGGED_TAG_NAME));
 const ordinaryTags = computed(() => tagList.value.filter(tag => tag.name !== UNTAGGED_TAG_NAME));
 const filteredOrdinaryTags = computed(() => filteredTags.value.filter(tag => tag.name !== UNTAGGED_TAG_NAME));
+const isFolderDeleteDisabled = (tag: any) => (
+  Number(tag.knowledge_count || 0) > 0 || Number(tag.chunk_count || 0) > 0
+);
 const folderOrderComplete = computed(() => tagList.value.length === tagTotal.value);
 const canReorderFolders = computed(() => canEdit.value && folderOrderComplete.value && !tagSearchQuery.value.trim());
 const draggedTagId = ref('');
 const dragOverTagId = ref('');
 const folderOrderSaving = ref(false);
-const allDocumentCount = computed(() => Number(
-  kbInfo.value?.knowledge_count
-  ?? tagList.value.reduce((sum, tag) => sum + Number(tag.knowledge_count || 0), 0),
-));
 const selectedFolder = computed(() => tagMap.value[selectedTagId.value]);
 const uploadTarget = computed(() => resolveUploadTarget(selectedFolder.value));
-const uploadTargetName = computed(() => uploadTarget.value.name);
 const uploadTargetTagId = computed(() => uploadTarget.value.tagId);
 
 const editingTagInputRefs = new Map<string, TagInputInstance | null>();
@@ -510,7 +416,8 @@ const loadTags = async (kbIdValue: string, reset = false) => {
     }));
     tagTotal.value = pageData.total || tagList.value.length;
     const actualUntagged = tagList.value.find(tag => tag.name === UNTAGGED_TAG_NAME);
-    if (selectedTagId.value === '__untagged__' && actualUntagged) {
+    const selectedTagExists = tagList.value.some(tag => tag.id === selectedTagId.value);
+    if (actualUntagged && (!selectedTagId.value || selectedTagId.value === '__untagged__' || !selectedTagExists)) {
       selectedTagId.value = actualUntagged.id;
       uiStore.setSelectedTagId(actualUntagged.id);
     }
@@ -543,8 +450,6 @@ const handleTagRowClick = (tagId: string) => {
   }
   handleTagFilterChange(tagId);
 };
-
-const selectAllDocuments = () => handleTagFilterChange('');
 
 const selectFolder = (tagId: string) => {
   if (creatingTag.value) cancelCreateTag();
@@ -691,6 +596,7 @@ const submitEditTag = async () => {
 };
 
 const confirmDeleteTag = (tag: any) => {
+  if (isFolderDeleteDisabled(tag)) return;
   if (!kbId.value) {
     MessagePlugin.warning(t('knowledgeEditor.messages.missingId'));
     return;
@@ -706,13 +612,11 @@ const confirmDeleteTag = (tag: any) => {
     t(deleteDescKey, { name: tag.name }) as string,
   );
   if (!confirm) return;
-  deleteKnowledgeBaseTag(kbId.value, tag.seq_id, { force: true })
+  deleteKnowledgeBaseTag(kbId.value, tag.seq_id, { force: false })
     .then(() => {
       MessagePlugin.success(t('knowledgeBase.tagDeleteSuccess'));
       if (selectedTagId.value === tag.id) {
-        // Reset to show all entries when current tag is deleted
-        selectedTagId.value = '';
-        handleTagFilterChange('');
+        handleTagFilterChange(untaggedTag.value?.id || '__untagged__');
       }
       loadTags(kbId.value);
       // 由于后端是异步删除文档，延迟刷新以确保看到最新数据
@@ -750,8 +654,8 @@ const loadKnowledgeBaseInfo = async (targetKbId: string) => {
     const res: any = await getKnowledgeBaseById(targetKbId);
     kbInfo.value = res?.data || null;
     selectedTagId.value = '';
-    // 重置store中的标签选择状态，避免上传文档时自动带上之前选择的标签
     uiStore.setSelectedTagId('');
+    await loadTags(targetKbId, true);
     if (!isFAQ.value) {
       docListLoading.value = true;
       loadKnowledgeFiles(targetKbId);
@@ -759,7 +663,6 @@ const loadKnowledgeBaseInfo = async (targetKbId: string) => {
       cardList.value = [];
       total.value = 0;
     }
-    loadTags(targetKbId, true);
   } catch (error) {
     console.error('Failed to load knowledge base info:', error);
     kbInfo.value = null;
@@ -819,7 +722,7 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
 
 watch(selectedTagId, (newVal, oldVal) => {
   if (oldVal === undefined) return
-  if (newVal !== oldVal && kbId.value) {
+  if (newVal !== oldVal && kbId.value && !kbLoading.value) {
     loadKnowledgeFiles(kbId.value);
   }
 });
@@ -961,11 +864,10 @@ const isSummaryStatusPending = (item: KnowledgeCard) => (
 );
 const shouldPollKnowledgeStatus = (item: KnowledgeCard) => {
   const isParsing = item.parse_status == 'pending' || item.parse_status == 'processing';
-  const shouldWaitForSummary = isSummaryStatusPending(item) && (!kbInfo.value || Boolean(kbInfo.value.summary_model_id));
-  return isParsing || shouldWaitForSummary;
+  return isParsing || isSummaryStatusPending(item);
 };
 const shouldShowSummaryGeneration = (item: KnowledgeCard) => (
-  isSummaryStatusPending(item) && Boolean(kbInfo.value?.summary_model_id)
+  isSummaryStatusPending(item)
 );
 const knowledgeCardDescription = (item: KnowledgeCard) => {
   const description = item.description?.trim();
@@ -1076,6 +978,7 @@ const onCardMouseLeave = () => {
 };
 
 const delCard = (index: number, item: KnowledgeCard) => {
+  if (isKnowledgeDeleteDisabled(item)) return;
   knowledgeIndex.value = index;
   knowledge.value = item;
   delDialog.value = true;
@@ -1237,21 +1140,6 @@ const ensureDocumentKbReady = () => {
   }
   if (!kbId.value) {
     MessagePlugin.warning(t('knowledgeEditor.messages.missingId'));
-    return false;
-  }
-  if (!kbInfo.value || !kbInfo.value.summary_model_id) {
-    MessagePlugin.warning(t('knowledgeBase.notInitialized'));
-    return false;
-  }
-  // Embedding model is only required for vector indexing; keyword-only KBs can be searched without it.
-  const strategy = (kbInfo.value as any).indexing_strategy
-  const needsEmbedding = !strategy || strategy.vector_enabled
-  if (needsEmbedding && !kbInfo.value.embedding_model_id) {
-    MessagePlugin.warning(t('knowledgeBase.notInitialized'));
-    return false;
-  }
-  if (missingStorageEngine.value) {
-    MessagePlugin.warning(t('knowledgeBase.missingStorageEngineUpload'));
     return false;
   }
   return true;
@@ -1799,9 +1687,7 @@ const governanceActionContext = computed(() => ({
 
 const getEligibleBatchItems = (action: GovernanceRowAction): KnowledgeCard[] => {
   if (action === 'delete' && canEdit.value) {
-    return selectedKnowledgeItems.value.filter((item: KnowledgeCard) => (
-      !governanceActionContext.value.enabled || item.parse_status !== 'pending_review'
-    ));
+    return selectedKnowledgeItems.value.filter((item: KnowledgeCard) => !isKnowledgeDeleteDisabled(item));
   }
   return selectedKnowledgeItems.value.filter((item: KnowledgeCard) => (
     canExecuteGovernanceRowAction(item, governanceActionContext.value, action)
@@ -2078,31 +1964,6 @@ async function createNewSession(value: string): Promise<void> {
               </template>
               <span v-else class="breadcrumb-current">{{ $t('knowledgeEditor.document.title') }}</span>
             </h2>
-            <!-- 身份与最后更新：紧凑单行，置于标题行右侧，悬停显示权限说明 -->
-            <div v-if="kbInfo && !authStore.isLiteMode" class="kb-access-meta">
-              <t-tooltip :content="accessPermissionSummary" placement="top">
-                <span class="kb-access-meta-inner">
-                  <t-tag size="small" :theme="isOwner ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')" class="kb-access-role-tag">
-                    {{ accessRoleLabel }}
-                  </t-tag>
-                  <template v-if="currentSharedKb">
-                    <span class="kb-access-meta-sep">·</span>
-                    <span class="kb-access-meta-text">
-                      {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
-                      {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatStringDate(new Date(currentSharedKb.shared_at)) }}
-                    </span>
-                  </template>
-                  <template v-else-if="isAgentVisibleKnowledgeBase">
-                    <span class="kb-access-meta-sep">·</span>
-                    <span class="kb-access-meta-text">{{ $t('knowledgeList.detail.sourceTypeAgent') }}</span>
-                  </template>
-                  <template v-else-if="kbLastUpdated">
-                    <span class="kb-access-meta-sep">·</span>
-                    <span class="kb-access-meta-text">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated }}</span>
-                  </template>
-                </span>
-              </t-tooltip>
-            </div>
             <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
               <button
                 type="button"
@@ -2114,17 +1975,6 @@ async function createNewSession(value: string): Promise<void> {
               </button>
             </t-tooltip>
           </div>
-          <p class="document-subtitle">{{ $t('knowledgeEditor.document.subtitle') }}</p>
-          <p v-if="unsupportedFileTypes.length" class="parser-hint" @click="goToParserSettings">
-            <t-icon name="info-circle" class="parser-hint-icon" />
-            <span>{{ $t('knowledgeBase.unsupportedTypesHint', { types: unsupportedFileTypes.map(t => '.' + t).join('、') }) }}</span>
-            <span class="parser-hint-link">{{ $t('knowledgeBase.goToParserSettings') }} →</span>
-          </p>
-          <p v-if="missingStorageEngine" class="storage-engine-warning" @click="handleOpenKBSettings">
-            <t-icon name="info-circle" class="warning-icon" />
-            <span>{{ $t('knowledgeBase.missingStorageEngine') }}</span>
-            <span class="warning-link">{{ $t('knowledgeBase.goToStorageSettings') }} →</span>
-          </p>
         </div>
       </div>
 
@@ -2181,19 +2031,6 @@ async function createNewSession(value: string): Promise<void> {
             </t-input>
           </div>
           <div class="tag-list knowledge-tree folder-list" role="list" :aria-label="$t('knowledgeBase.documentCategoryTitle')">
-            <button
-              type="button"
-              class="knowledge-tree-row folder-row fixed-folder-row"
-              :class="{ active: !selectedTagId }"
-              role="listitem"
-              @click="selectAllDocuments"
-            >
-              <span class="folder-drag-placeholder" />
-              <span class="folder-icon computer-folder-icon" aria-hidden="true" />
-              <span class="tree-name">{{ $t('knowledgeBase.allDocumentsFolder') }}</span>
-              <span class="tag-count">{{ allDocumentCount }}</span>
-            </button>
-
             <button
               type="button"
               class="knowledge-tree-row folder-row fixed-folder-row"
@@ -2299,7 +2136,12 @@ async function createNewSession(value: string): Promise<void> {
                             <t-icon class="menu-icon" name="edit" />
                             <span>{{ $t('knowledgeBase.folderRenameAction') }}</span>
                           </div>
-                          <div class="tag-menu-item danger" @click="confirmDeleteTag(tag)">
+                          <div
+                            class="tag-menu-item danger"
+                            :class="{ disabled: isFolderDeleteDisabled(tag) }"
+                            :aria-disabled="isFolderDeleteDisabled(tag)"
+                            @click="confirmDeleteTag(tag)"
+                          >
                             <t-icon class="menu-icon" name="delete" />
                             <span>{{ $t('knowledgeBase.folderDeleteAction') }}</span>
                           </div>
@@ -2341,10 +2183,6 @@ async function createNewSession(value: string): Promise<void> {
                 class="doc-type-select"
                 clearable
               />
-              <div v-if="canUploadDocument" class="upload-target" :title="$t('knowledgeBase.uploadTarget', { name: uploadTargetName })">
-                <t-icon name="folder" size="15px" />
-                <span>{{ $t('knowledgeBase.uploadTarget', { name: uploadTargetName }) }}</span>
-              </div>
               <div class="doc-view-toggle" role="group" :aria-label="$t('knowledgeBase.viewModeToggle')">
                 <t-tooltip :content="$t('knowledgeBase.viewModeGrid')" placement="top">
                   <button
@@ -2461,7 +2299,11 @@ async function createNewSession(value: string): Promise<void> {
                                 <t-icon class="icon" name="edit" />
                                 <span>{{ t('knowledgeBase.editDocument') }}</span>
                               </div>
-                              <div class="card-menu-item" @click.stop="handleKnowledgeReparse(index, item)">
+                              <div
+                                v-if="item.parse_status !== 'pending_review'"
+                                class="card-menu-item"
+                                @click.stop="handleKnowledgeReparse(index, item)"
+                              >
                                 <t-icon class="icon" name="refresh" />
                                 <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                               </div>
@@ -2469,7 +2311,12 @@ async function createNewSession(value: string): Promise<void> {
                                 <t-icon class="icon" name="swap" />
                                 <span>{{ t('knowledgeBase.moveDocument') }}</span>
                               </div>
-                              <div class="card-menu-item danger" @click.stop="delCard(index, item)">
+                              <div
+                                class="card-menu-item danger"
+                                :class="{ disabled: isKnowledgeDeleteDisabled(item) }"
+                                :aria-disabled="isKnowledgeDeleteDisabled(item)"
+                                @click.stop="delCard(index, item)"
+                              >
                                 <t-icon class="icon" name="delete" />
                                 <span>{{ t('knowledgeBase.deleteDocument') }}</span>
                               </div>
@@ -2650,7 +2497,6 @@ async function createNewSession(value: string): Promise<void> {
                   :selected-ids="selectedIds"
                   :tag-list="tagList"
                   :can-edit="canEdit"
-                  :can-generate-summary="Boolean(kbInfo?.summary_model_id)"
                   :governance-enabled="Boolean(kbInfo?.governance?.enabled)"
                   :can-contribute="canContribute"
                   :can-review="canReview"
@@ -2871,7 +2717,6 @@ async function createNewSession(value: string): Promise<void> {
       <DocContent
         :visible="isCardDetails"
         :details="details"
-        :can-generate-summary="Boolean(kbInfo?.summary_model_id)"
         @closeDoc="closeDoc"
         @getDoc="getDoc"
       ></DocContent>
@@ -3672,6 +3517,21 @@ async function createNewSession(value: string): Promise<void> {
       }
     }
   }
+
+  &.disabled {
+    cursor: not-allowed;
+    color: var(--td-text-color-disabled);
+    opacity: 0.6;
+
+    &:hover {
+      background: transparent;
+      color: var(--td-text-color-disabled);
+
+      .menu-icon {
+        color: var(--td-text-color-disabled);
+      }
+    }
+  }
 }
 
 .tag-content {
@@ -3701,7 +3561,9 @@ async function createNewSession(value: string): Promise<void> {
   align-items: center;
 
   .doc-search-input {
-    flex: 1;
+    width: 400px;
+    max-width: 100%;
+    flex: none;
     min-width: 0;
   }
 
@@ -3710,26 +3572,8 @@ async function createNewSession(value: string): Promise<void> {
     flex-shrink: 0;
   }
 
-  .upload-target {
-    max-width: 190px;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    flex-shrink: 0;
-    padding: 4px 8px;
-    border-radius: 5px;
-    background: #fff7e6;
-    color: #7c4a03;
-    font-size: 12px;
-
-    span {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-  }
-
   .doc-view-toggle {
+    margin-left: auto;
     flex-shrink: 0;
     display: inline-flex;
     align-items: center;
@@ -3845,33 +3689,6 @@ async function createNewSession(value: string): Promise<void> {
     flex-wrap: wrap;
   }
 
-  .kb-access-meta {
-    margin-left: auto;
-    flex-shrink: 0;
-  }
-
-  .kb-access-meta-inner {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: var(--td-text-color-secondary);
-    cursor: default;
-  }
-
-  .kb-access-role-tag {
-    flex-shrink: 0;
-  }
-
-  .kb-access-meta-sep {
-    color: var(--td-text-color-placeholder);
-    user-select: none;
-  }
-
-  .kb-access-meta-text {
-    white-space: nowrap;
-  }
-
   .document-breadcrumb {
     display: flex;
     align-items: center;
@@ -3941,76 +3758,6 @@ async function createNewSession(value: string): Promise<void> {
     line-height: 32px;
   }
 
-  .document-subtitle {
-    margin: 0;
-    color: var(--td-text-color-placeholder);
-    font-family: "PingFang SC";
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 20px;
-  }
-
-  .parser-hint {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin: 2px 0 0;
-    color: var(--td-warning-color);
-    font-size: 12px;
-    line-height: 1.4;
-    cursor: pointer;
-    transition: color 0.15s ease;
-
-    &:hover {
-      color: var(--td-warning-color-active);
-
-      .parser-hint-link {
-        text-decoration: underline;
-      }
-    }
-
-    .parser-hint-icon {
-      font-size: 12px;
-      flex-shrink: 0;
-    }
-
-    .parser-hint-link {
-      color: var(--td-brand-color);
-      margin-left: 2px;
-      white-space: nowrap;
-    }
-  }
-
-  .storage-engine-warning {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin: 2px 0 0;
-    color: var(--td-warning-color);
-    font-size: 12px;
-    line-height: 1.4;
-    cursor: pointer;
-    transition: color 0.15s ease;
-
-    &:hover {
-      color: var(--td-warning-color-active);
-
-      .warning-link {
-        text-decoration: underline;
-      }
-    }
-
-    .warning-icon {
-      font-size: 12px;
-      flex-shrink: 0;
-    }
-
-    .warning-link {
-      color: var(--td-brand-color);
-      margin-left: 2px;
-      white-space: nowrap;
-    }
-  }
 }
 
 
@@ -4340,6 +4087,24 @@ async function createNewSession(value: string): Promise<void> {
 
     &:active {
       background: var(--td-error-color-2);
+    }
+  }
+
+  &.disabled {
+    cursor: not-allowed;
+    color: var(--td-text-color-disabled);
+    opacity: 0.6;
+
+    &:hover,
+    &:active {
+      background: transparent;
+      color: var(--td-text-color-disabled);
+      transform: none;
+    }
+
+    .icon,
+    &:hover .icon {
+      color: var(--td-text-color-disabled);
     }
   }
 }

@@ -33,6 +33,9 @@ var noAuthAPI = map[string][]string{
 
 // 检查请求是否在无需认证的API列表中
 func isNoAuthAPI(path string, method string) bool {
+	if method == http.MethodGet && strings.HasPrefix(path, "/api/v1/sessions/") && strings.HasSuffix(path, "/voice/ws") {
+		return true
+	}
 	for api, methods := range noAuthAPI {
 		// 如果以*结尾，按照前缀匹配，否则按照全路径匹配
 		if strings.HasSuffix(api, "*") {
@@ -84,7 +87,8 @@ func Auth(
 			return
 		}
 
-		if len(integrationServices) > 0 && integrationServices[0] != nil {
+		authHeader := c.GetHeader("Authorization")
+		if !strings.HasPrefix(authHeader, "Bearer ") && len(integrationServices) > 0 && integrationServices[0] != nil {
 			if cookie, err := c.Cookie(integrationauth.BrowserCookieName); err == nil && cookie != "" {
 				service := integrationServices[0]
 				principal, user, tenant, authErr := service.Authenticate(c.Request.Context(), cookie, "browser")
@@ -98,7 +102,7 @@ func Auth(
 					c.Abort()
 					return
 				}
-				if !allowedIntegrationInternalPath(c.Request.URL.Path) {
+				if !allowedIntegrationInternalPath(c.Request.Method, c.Request.URL.Path) {
 					c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: endpoint is outside integration scope"})
 					c.Abort()
 					return
@@ -106,6 +110,9 @@ func Auth(
 				requiredScope := "knowledge:read"
 				if !isSafeMethod(c.Request.Method) {
 					requiredScope = "knowledge:write"
+				}
+				if isIntegrationVoiceTranscriptionPath(c.Request.Method, c.Request.URL.Path) {
+					requiredScope = "chat:write"
 				}
 				if c.Request.URL.Path == "/files" {
 					requiredScope = "file:read"
@@ -147,7 +154,6 @@ func Auth(
 		}
 
 		// 尝试JWT Token认证
-		authHeader := c.GetHeader("Authorization")
 		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
 			token := strings.TrimPrefix(authHeader, "Bearer ")
 			user, err := userService.ValidateToken(c.Request.Context(), token)
@@ -315,8 +321,23 @@ func isSafeMethod(method string) bool {
 	return method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions
 }
 
-func allowedIntegrationInternalPath(path string) bool {
+func allowedIntegrationInternalPath(method, path string) bool {
 	if path == "/files" {
+		return true
+	}
+	if isSafeMethod(method) {
+		for _, exact := range []string{
+			"/api/v1/agents",
+			"/api/v1/models",
+			"/api/v1/system/model-profile",
+			"/api/v1/tenants/kv/conversation-config",
+		} {
+			if path == exact {
+				return true
+			}
+		}
+	}
+	if isIntegrationVoiceTranscriptionPath(method, path) {
 		return true
 	}
 	for _, prefix := range []string{"/api/v1/knowledge-bases", "/api/v1/knowledge", "/api/v1/chunks", "/api/v1/tags", "/api/v1/faq"} {
@@ -325,6 +346,10 @@ func allowedIntegrationInternalPath(path string) bool {
 		}
 	}
 	return false
+}
+
+func isIntegrationVoiceTranscriptionPath(method, path string) bool {
+	return method == http.MethodPost && strings.HasPrefix(path, "/api/v1/sessions/") && strings.HasSuffix(path, "/voice/transcribe")
 }
 
 // GetTenantIDFromContext helper function to get tenant ID from context

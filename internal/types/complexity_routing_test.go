@@ -4,6 +4,9 @@ import "testing"
 
 func TestPlanRoutingDegradesFromTargetWithoutUpgrade(t *testing.T) {
 	cfg := DefaultComplexityRoutingConfig()
+	if !cfg.Enabled {
+		t.Fatal("default complexity routing must be enabled")
+	}
 	cfg.Capabilities.GraphReasoning = false
 	decision := PlanRouting(QuestionComplexity{Level: ComplexityL3, Subtype: SubtypeMultiHop, NeedsEntityRelation: true, Confidence: .95}, cfg)
 	if decision.PlannedAction != RoutingGraphReasoning || decision.ActualAction != RoutingContextualRAG {
