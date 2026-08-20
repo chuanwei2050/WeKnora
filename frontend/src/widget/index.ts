@@ -10,10 +10,13 @@ import type {
 import { parseFrameMessage, parseStoredLayout, parseWidgetConfig } from './validation'
 
 const instances = new Map<string, WidgetInstance>()
-const MIN_SIZE: WidgetSize = { width: 320, height: 420 }
-const DEFAULT_SIZE: WidgetSize = { width: 400, height: 620 }
-const LAUNCHER_SIZE = 58
+const MIN_SIZE: WidgetSize = { width: 360, height: 480 }
+const DEFAULT_SIZE: WidgetSize = { width: 460, height: 700 }
+const LAUNCHER_SIZE = 64
+const DOCKED_LAUNCHER_WIDTH = 46
+const DOCK_DISTANCE = 72
 const EDGE_GAP = 16
+const DEFAULT_ICON_URL = '/widget/icons/ai-assistant.png'
 
 function viewportRect() {
   const viewport = window.visualViewport
@@ -81,43 +84,54 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   applyStyles(host, { position: 'fixed', inset: '0', zIndex: '2147483000', pointerEvents: 'none' })
   const shadow = host.attachShadow({ mode: 'open' })
 
+  const shellStyles = document.createElement('style')
+  shellStyles.textContent = `
+    @keyframes weknora-assistant-float { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-3px) } }
+    @keyframes weknora-assistant-ring { 0%, 100% { opacity: .24; transform: scale(.9) } 50% { opacity: .06; transform: scale(1.1) } }
+    .weknora-launcher:not([data-docked])::before { content: ''; position: absolute; inset: 4px; z-index: -1; border-radius: 22px; background: rgba(32,184,216,.22); filter: blur(8px); animation: weknora-assistant-ring 2.8s ease-in-out infinite; }
+    .weknora-launcher[data-docked] { background: linear-gradient(160deg,#e9faff,#c8eff9) !important; box-shadow: 0 8px 24px rgba(16,91,125,.24) !important; }
+    .weknora-launcher[data-docked="left"] { border-radius: 0 18px 18px 0 !important; }
+    .weknora-launcher[data-docked="right"] { border-radius: 18px 0 0 18px !important; }
+    .weknora-launcher[data-docked] img { width: 42px !important; height: 42px !important; animation: none !important; }
+    .weknora-launcher:hover img { transform: translateY(-2px) scale(1.06); }
+    .weknora-shell-button:hover { color: #0b5f8a !important; background: #e5f2f7 !important; }
+    .weknora-shell-button:focus-visible, .weknora-launcher:focus-visible { outline: 3px solid rgba(32,184,216,.42); outline-offset: 2px; }
+    .weknora-resize-handle::after { content: ''; position: absolute; right: 6px; bottom: 6px; width: 11px; height: 11px; border-right: 2px solid rgba(11,95,138,.7); border-bottom: 2px solid rgba(11,95,138,.7); border-radius: 0 0 3px; }
+    @media (prefers-reduced-motion: reduce) { .weknora-launcher::before, .weknora-launcher img { animation: none !important; transition: none !important; } }
+  `
+
   const launcher = document.createElement('button')
   launcher.type = 'button'
+  launcher.className = 'weknora-launcher'
   launcher.setAttribute('aria-label', config.theme?.title || '打开知识库聊天')
-  if (config.theme?.iconUrl) {
-    const icon = document.createElement('img')
-    icon.src = new URL(config.theme.iconUrl, window.location.href).href
-    icon.alt = ''
-    applyStyles(icon, { width: '28px', height: '28px', objectFit: 'contain', pointerEvents: 'none' })
-    launcher.append(icon)
-  } else {
-    launcher.textContent = 'AI'
-  }
+  const icon = document.createElement('img')
+  icon.src = new URL(config.theme?.iconUrl || DEFAULT_ICON_URL, window.location.href).href
+  icon.alt = ''
+  applyStyles(icon, { width: '56px', height: '56px', objectFit: 'contain', pointerEvents: 'none', transition: 'transform .22s ease', animation: 'weknora-assistant-float 3.6s ease-in-out infinite' })
+  launcher.append(icon)
   applyStyles(launcher, {
-    position: 'fixed', right: '24px', bottom: '24px', width: '58px', height: '58px', borderRadius: '18px',
-    border: `1px solid ${config.theme?.primaryColor || '#0b5f8a'}`, color: config.theme?.primaryColor || '#0b5f8a', background: '#fff', cursor: 'grab',
-    pointerEvents: 'auto', boxShadow: '0 12px 32px rgba(15,45,61,.22)', fontSize: '14px', fontWeight: '700',
+    position: 'fixed', right: '24px', bottom: '24px', width: `${LAUNCHER_SIZE}px`, height: `${LAUNCHER_SIZE}px`, padding: '0', borderRadius: '22px',
+    border: '0', color: config.theme?.primaryColor || '#0b5f8a', background: 'transparent', cursor: 'grab',
+    pointerEvents: 'auto', boxShadow: 'none', fontSize: '14px', fontWeight: '700', overflow: 'visible', transition: 'left .22s ease, top .22s ease, width .22s ease, border-radius .22s ease, background .22s ease, box-shadow .2s ease',
   })
 
   const panel = document.createElement('section')
   panel.setAttribute('role', 'dialog')
   panel.setAttribute('aria-label', config.theme?.title || '知识库聊天')
   applyStyles(panel, {
-    position: 'fixed', display: 'none', overflow: 'hidden', borderRadius: '18px', background: config.theme?.colorMode === 'dark' ? '#1f1f1f' : '#fff',
+    position: 'fixed', display: 'none', overflow: 'hidden', minWidth: '0', minHeight: '0', containerType: 'inline-size', borderRadius: '20px', background: config.theme?.colorMode === 'dark' ? '#1f1f1f' : '#fff',
     border: '1px solid rgba(28,53,68,.14)', boxShadow: '0 24px 72px rgba(15,45,61,.25)', pointerEvents: 'auto',
   })
 
   const titlebar = document.createElement('header')
   titlebar.tabIndex = 0
   titlebar.setAttribute('aria-label', '拖动聊天窗口；方向键移动')
-  applyStyles(titlebar, { height: '58px', padding: '0 168px 0 16px', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'move', userSelect: 'none', background: '#fff', color: '#172b36', borderBottom: '1px solid #e4eaee', boxSizing: 'border-box' })
-  if (config.theme?.iconUrl) {
-    const titleIcon = document.createElement('img')
-    titleIcon.src = new URL(config.theme.iconUrl, window.location.href).href
-    titleIcon.alt = ''
-    applyStyles(titleIcon, { width: '26px', height: '26px', padding: '6px', borderRadius: '10px', background: '#e7f3f8', objectFit: 'contain' })
-    titlebar.append(titleIcon)
-  }
+  applyStyles(titlebar, { height: '64px', padding: '0 160px 0 14px', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'move', userSelect: 'none', background: 'linear-gradient(110deg,#fff 0%,#f5fbfd 100%)', color: '#172b36', borderBottom: '1px solid #dce8ed', boxSizing: 'border-box' })
+  const titleIcon = document.createElement('img')
+  titleIcon.src = icon.src
+  titleIcon.alt = ''
+  applyStyles(titleIcon, { width: '38px', height: '38px', flex: '0 0 auto', padding: '2px', borderRadius: '12px', background: '#e7f6fa', objectFit: 'contain', boxShadow: 'inset 0 0 0 1px rgba(11,95,138,.1)' })
+  titlebar.append(titleIcon)
   const titleCopy = document.createElement('span')
   const title = document.createElement('strong')
   title.textContent = config.theme?.title || '知识库助手'
@@ -125,33 +139,37 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   subtitle.textContent = '基于授权知识库回答'
   applyStyles(titleCopy, { display: 'grid', minWidth: '0', lineHeight: '1.2' })
   applyStyles(title, { overflow: 'hidden', fontSize: '14px', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })
-  applyStyles(subtitle, { marginTop: '4px', color: '#6b7c86', fontSize: '11px', fontWeight: '400' })
+  applyStyles(subtitle, { marginTop: '3px', overflow: 'hidden', color: '#6b7c86', fontSize: '11px', fontWeight: '400', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })
   titleCopy.append(title, subtitle)
   titlebar.append(titleCopy)
 
   const newConversationButton = document.createElement('button')
+  newConversationButton.className = 'weknora-shell-button'
   newConversationButton.type = 'button'
   newConversationButton.setAttribute('aria-label', '新建会话')
   newConversationButton.textContent = '+'
-  applyStyles(newConversationButton, { position: 'absolute', top: '14px', right: '84px', width: '30px', height: '30px', border: '0', borderRadius: '8px', color: '#405560', background: '#f1f5f7', pointerEvents: 'auto', cursor: 'pointer', fontSize: '20px', lineHeight: '28px' })
+  applyStyles(newConversationButton, { position: 'absolute', top: '16px', right: '82px', width: '32px', height: '32px', border: '0', borderRadius: '10px', color: '#405560', background: '#edf4f6', pointerEvents: 'auto', cursor: 'pointer', fontSize: '20px', lineHeight: '30px', transition: 'background .16s ease,color .16s ease' })
 
   const conversationsButton = document.createElement('button')
+  conversationsButton.className = 'weknora-shell-button'
   conversationsButton.type = 'button'
   conversationsButton.setAttribute('aria-label', '切换对话')
   conversationsButton.textContent = '☰'
-  applyStyles(conversationsButton, { position: 'absolute', top: '14px', right: '120px', width: '30px', height: '30px', border: '0', borderRadius: '8px', color: '#405560', background: '#f1f5f7', pointerEvents: 'auto', cursor: 'pointer', fontSize: '16px' })
+  applyStyles(conversationsButton, { position: 'absolute', top: '16px', right: '118px', width: '32px', height: '32px', border: '0', borderRadius: '10px', color: '#405560', background: '#edf4f6', pointerEvents: 'auto', cursor: 'pointer', fontSize: '16px', transition: 'background .16s ease,color .16s ease' })
 
   const maximizeButton = document.createElement('button')
+  maximizeButton.className = 'weknora-shell-button'
   maximizeButton.type = 'button'
   maximizeButton.setAttribute('aria-label', '最大化聊天窗口')
   maximizeButton.textContent = '□'
-  applyStyles(maximizeButton, { position: 'absolute', top: '14px', right: '48px', width: '30px', height: '30px', border: '0', borderRadius: '8px', color: '#405560', background: '#f1f5f7', pointerEvents: 'auto', cursor: 'pointer' })
+  applyStyles(maximizeButton, { position: 'absolute', top: '16px', right: '46px', width: '32px', height: '32px', border: '0', borderRadius: '10px', color: '#405560', background: '#edf4f6', pointerEvents: 'auto', cursor: 'pointer', transition: 'background .16s ease,color .16s ease' })
 
   const closeButton = document.createElement('button')
+  closeButton.className = 'weknora-shell-button'
   closeButton.type = 'button'
   closeButton.setAttribute('aria-label', '关闭聊天窗口')
   closeButton.textContent = '×'
-  applyStyles(closeButton, { position: 'absolute', top: '14px', right: '12px', width: '30px', height: '30px', border: '0', borderRadius: '8px', color: '#405560', background: '#f1f5f7', pointerEvents: 'auto', cursor: 'pointer', fontSize: '18px' })
+  applyStyles(closeButton, { position: 'absolute', top: '16px', right: '10px', width: '32px', height: '32px', border: '0', borderRadius: '10px', color: '#405560', background: '#edf4f6', pointerEvents: 'auto', cursor: 'pointer', fontSize: '18px', transition: 'background .16s ease,color .16s ease' })
 
   const iframe = document.createElement('iframe')
   iframe.title = config.theme?.title || '知识库聊天内容'
@@ -161,16 +179,17 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   iframe.src = iframeURL.href
   iframe.referrerPolicy = 'strict-origin'
   iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-downloads')
-  applyStyles(iframe, { width: '100%', height: 'calc(100% - 58px)', border: '0', display: 'block' })
+  applyStyles(iframe, { width: '100%', height: 'calc(100% - 64px)', minWidth: '0', minHeight: '0', border: '0', display: 'block', background: '#f7f9fc' })
 
   const resizeHandle = document.createElement('div')
+  resizeHandle.className = 'weknora-resize-handle'
   resizeHandle.tabIndex = 0
   resizeHandle.setAttribute('role', 'separator')
   resizeHandle.setAttribute('aria-label', '调整聊天窗口大小；方向键缩放')
-  applyStyles(resizeHandle, { position: 'absolute', right: '0', bottom: '0', width: '24px', height: '24px', cursor: 'nwse-resize' })
+  applyStyles(resizeHandle, { position: 'absolute', zIndex: '4', right: '0', bottom: '0', width: '30px', height: '30px', cursor: 'nwse-resize', borderRadius: '12px 0 18px 0', background: 'linear-gradient(135deg,transparent 35%,rgba(231,246,250,.94))', touchAction: 'none' })
 
   panel.append(titlebar, conversationsButton, newConversationButton, maximizeButton, closeButton, iframe, resizeHandle)
-  shadow.append(launcher, panel)
+  shadow.append(shellStyles, launcher, panel)
   document.body.append(host)
 
   const emit = (event: WidgetEventName, detail: unknown = undefined) => {
@@ -206,9 +225,9 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
     render()
   }
 
-  const pointerDrag = (target: HTMLElement, operation: (dx: number, dy: number) => void) => {
+  const pointerDrag = (target: HTMLElement, operation: (dx: number, dy: number) => void, onEnd?: () => void) => {
     target.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return
+      if (event.button !== 0 || event.target !== target) return
       let x = event.clientX
       let y = event.clientY
       target.setPointerCapture(event.pointerId)
@@ -222,6 +241,7 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
         target.removeEventListener('pointerup', end)
         target.removeEventListener('pointercancel', end)
         target.removeEventListener('lostpointercapture', end)
+        onEnd?.()
       }
       target.addEventListener('pointermove', move)
       target.addEventListener('pointerup', end)
@@ -234,26 +254,47 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
 
   const initialViewport = viewportRect()
   let launcherPosition = { x: initialViewport.x + initialViewport.width - 80, y: initialViewport.y + initialViewport.height - 80 }
+  let dockedSide: 'left' | 'right' | null = null
   let launcherMoved = false
   const clampLauncher = () => {
     const viewport = viewportRect()
-    const gapX = Math.min(EDGE_GAP, Math.max(0, (viewport.width - LAUNCHER_SIZE) / 2))
+    const launcherWidth = dockedSide ? DOCKED_LAUNCHER_WIDTH : LAUNCHER_SIZE
+    const gapX = dockedSide ? 0 : Math.min(EDGE_GAP, Math.max(0, (viewport.width - launcherWidth) / 2))
     const gapY = Math.min(EDGE_GAP, Math.max(0, (viewport.height - LAUNCHER_SIZE) / 2))
-    const maxX = Math.max(viewport.x + gapX, viewport.x + viewport.width - LAUNCHER_SIZE - gapX)
+    const maxX = Math.max(viewport.x + gapX, viewport.x + viewport.width - launcherWidth - gapX)
     const maxY = Math.max(viewport.y + gapY, viewport.y + viewport.height - LAUNCHER_SIZE - gapY)
     launcherPosition = {
       x: Math.min(Math.max(launcherPosition.x, viewport.x + gapX), maxX),
       y: Math.min(Math.max(launcherPosition.y, viewport.y + gapY), maxY),
     }
-    applyStyles(launcher, { left: `${launcherPosition.x}px`, top: `${launcherPosition.y}px`, right: 'auto', bottom: 'auto' })
+    if (dockedSide) launcher.dataset.docked = dockedSide
+    else delete launcher.dataset.docked
+    applyStyles(launcher, { left: `${launcherPosition.x}px`, top: `${launcherPosition.y}px`, right: 'auto', bottom: 'auto', width: `${launcherWidth}px` })
   }
   clampLauncher()
+  const snapLauncherToEdge = () => {
+    if (!launcherMoved) return
+    const viewport = viewportRect()
+    const leftDistance = launcherPosition.x - viewport.x
+    const rightDistance = viewport.x + viewport.width - (launcherPosition.x + LAUNCHER_SIZE)
+    if (leftDistance > DOCK_DISTANCE && rightDistance > DOCK_DISTANCE) return
+    dockedSide = leftDistance <= rightDistance ? 'left' : 'right'
+    launcherPosition.x = dockedSide === 'left'
+      ? viewport.x
+      : viewport.x + viewport.width - DOCKED_LAUNCHER_WIDTH
+    clampLauncher()
+  }
   pointerDrag(launcher, (dx, dy) => {
     if (dx === 0 && dy === 0) return
     launcherMoved = true
+    if (dockedSide) {
+      dockedSide = null
+      delete launcher.dataset.docked
+      launcher.style.width = `${LAUNCHER_SIZE}px`
+    }
     launcherPosition = { x: launcherPosition.x + dx, y: launcherPosition.y + dy }
     clampLauncher()
-  })
+  }, snapLauncherToEdge)
 
   const keyboardLayout = (operation: (dx: number, dy: number) => void) => (event: KeyboardEvent) => {
     const step = event.shiftKey ? 40 : 10

@@ -157,7 +157,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.embedded-widget { position: relative; display: flex; width: 100%; height: 100%; flex-direction: column; overflow: hidden; background: #f7f9fc; }
+.embedded-widget { position: relative; display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: #f4f8fb; }
+.embedded-widget > * { min-width: 0; min-height: 0; }
 .embedded-widget__conversations { position: absolute; z-index: 5; inset: 0 auto 0 0; width: min(82%, 300px); padding: 14px 10px; overflow-y: auto; border-right: 1px solid #dce4e8; background: rgba(255, 255, 255, .98); box-shadow: 12px 0 30px rgba(19, 42, 52, .12); }
 .embedded-widget__conversations-heading { padding: 4px 10px 12px; color: #61727a; font-size: 12px; font-weight: 600; letter-spacing: .04em; }
 .embedded-widget__conversations button { display: flex; width: 100%; flex-direction: column; gap: 4px; padding: 10px; border: 0; border-radius: 10px; color: #20343d; background: transparent; text-align: left; cursor: pointer; }
@@ -165,7 +166,8 @@ onBeforeUnmount(() => {
 .embedded-widget__conversations button span { width: 100%; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .embedded-widget__conversations time, .embedded-widget__conversations-empty { color: #7b8d95; font-size: 12px; }
 .embedded-widget__conversations-empty { padding: 20px 10px; text-align: center; }
-.embedded-widget__selector { display: flex; min-height: 44px; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--td-component-border); }
-.embedded-widget__selector select { min-width: 180px; max-height: 72px; }
+.embedded-widget__selector { display: flex; min-height: 44px; flex: 0 0 auto; align-items: center; gap: 8px; padding: 6px 12px; overflow: hidden; border-bottom: 1px solid var(--td-component-border); background: #fff; }
+.embedded-widget__selector span { flex: 0 0 auto; font-size: 12px; }
+.embedded-widget__selector select { min-width: 0; max-height: 72px; flex: 1; }
 .embedded-widget__status { display: grid; width: 100%; height: 100%; place-items: center; color: var(--td-text-color-secondary); }
 </style>

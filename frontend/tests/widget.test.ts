@@ -30,7 +30,7 @@ describe('floating widget', () => {
     expect(initial.mode).toBe('normal')
     if (initial.mode !== 'normal') return
     expect(initial.position.x).toBeGreaterThanOrEqual(16)
-    expect(initial.size).toEqual({ width: 320, height: 420 })
+    expect(initial.size).toEqual({ width: 360, height: 480 })
     instance.moveTo({ x: 100, y: 120 })
     instance.resizeTo({ width: 500, height: 550 })
     instance.maximize()
@@ -83,6 +83,54 @@ describe('floating widget', () => {
     const host = document.querySelector<HTMLElement>('[data-weknora-widget]')
     expect(host?.shadowRoot?.querySelector('[aria-label="新建会话"]')).not.toBeNull()
     expect(host?.shadowRoot?.querySelector('[aria-label="切换对话"]')).not.toBeNull()
+    expect(host?.shadowRoot?.querySelector<HTMLImageElement>('.weknora-launcher img')?.src).toContain('/widget/icons/ai-assistant.png')
+    expect(host?.shadowRoot?.querySelector('[aria-label^="调整聊天窗口大小"]')?.classList.contains('weknora-resize-handle')).toBe(true)
+    instance.destroy()
+  })
+
+  it('changes to a docked launcher only when released near a viewport edge', () => {
+    const instance = initWidget(config())
+    const host = document.querySelector<HTMLElement>('[data-weknora-widget]')
+    const launcher = host?.shadowRoot?.querySelector<HTMLButtonElement>('.weknora-launcher')
+    expect(launcher).not.toBeNull()
+    if (!launcher) return
+    launcher.setPointerCapture = vi.fn()
+    launcher.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 900, clientY: 500 }))
+    launcher.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: -100, clientY: 500 }))
+    launcher.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: -100, clientY: 500 }))
+    expect(launcher.style.left).toBe('0px')
+    expect(launcher.style.width).toBe('46px')
+    expect(launcher.dataset.docked).toBe('left')
+    instance.destroy()
+  })
+
+  it('keeps the launcher free when released outside the docking distance', () => {
+    const instance = initWidget(config())
+    const host = document.querySelector<HTMLElement>('[data-weknora-widget]')
+    const launcher = host?.shadowRoot?.querySelector<HTMLButtonElement>('.weknora-launcher')
+    expect(launcher).not.toBeNull()
+    if (!launcher) return
+    launcher.setPointerCapture = vi.fn()
+    launcher.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 900, clientY: 500 }))
+    launcher.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 500, clientY: 500 }))
+    launcher.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 500, clientY: 500 }))
+    expect(launcher.style.left).not.toBe('0px')
+    expect(launcher.style.width).toBe('64px')
+    expect(launcher.dataset.docked).toBeUndefined()
+    instance.destroy()
+  })
+
+  it('does not dock the launcher on a click without dragging', () => {
+    const instance = initWidget(config())
+    const host = document.querySelector<HTMLElement>('[data-weknora-widget]')
+    const launcher = host?.shadowRoot?.querySelector<HTMLButtonElement>('.weknora-launcher')
+    expect(launcher).not.toBeNull()
+    if (!launcher) return
+    launcher.setPointerCapture = vi.fn()
+    launcher.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 944, clientY: 688 }))
+    launcher.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 944, clientY: 688 }))
+    expect(launcher.dataset.docked).toBeUndefined()
+    expect(launcher.style.width).toBe('64px')
     instance.destroy()
   })
 

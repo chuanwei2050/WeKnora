@@ -21,7 +21,7 @@
                 <div v-if="messagesList.length === 0 && !loading" class="suggested-questions-container" :class="{ 'has-questions': suggestedQuestions.length > 0 || suggestedQuestionsLoading }">
                     <div v-if="embeddedMode && !suggestedQuestionsLoading && suggestedQuestions.length === 0" class="embedded-welcome">
                         <div class="embedded-welcome-icon" aria-hidden="true">
-                            <img src="/widget/icons/message-chatbot.svg" alt="" />
+                            <img src="/widget/icons/ai-assistant.png" alt="" />
                         </div>
                         <h2>你好，我是知识助手</h2>
                         <p>我会基于当前授权知识库回答，并在答案中保留引用来源。</p>
@@ -1250,10 +1250,13 @@ onBeforeRouteUpdate((to, from, next) => {
 
     &.is-embedded {
         max-width: 100%;
-        min-width: 100%;
+        min-width: 0;
+        width: 100%;
+        height: 100%;
+        min-height: 0;
         padding: 0 12px 12px;
         overflow-x: hidden;
-        background: #f7f9fc;
+        background: #f4f8fb;
     }
 
     &.is-embedded :deep(.answers-input) {
@@ -1276,6 +1279,8 @@ onBeforeRouteUpdate((to, from, next) => {
 
 .chat_scroll_box {
     flex: 1;
+    min-width: 0;
+    min-height: 0;
     width: 100%;
     overflow-y: auto;
     padding: 18px 4px 8px;
@@ -1385,7 +1390,8 @@ onBeforeRouteUpdate((to, from, next) => {
 
     &.is-embedded {
         max-width: 100%;
-        width: calc(100% - 8px);
+        min-width: 0;
+        width: 100%;
         margin: 0;
         overflow-x: hidden;
     }
@@ -1408,12 +1414,9 @@ onBeforeRouteUpdate((to, from, next) => {
     height: 52px;
     margin: 0 auto;
     place-items: center;
-    border-radius: 16px;
     color: #0b5f8a;
-    background: #e7f3f8;
-    box-shadow: inset 0 0 0 1px rgba(11, 95, 138, .12);
 
-    img { width: 28px; height: 28px; }
+    img { width: 52px; height: 52px; object-fit: contain; filter: drop-shadow(0 4px 7px rgba(11, 37, 69, .16)); }
 }
 
 .embedded-starters {
@@ -1438,6 +1441,16 @@ onBeforeRouteUpdate((to, from, next) => {
     button:focus-visible { outline: 2px solid #0b5f8a; outline-offset: 2px; }
 }
 
+@media (max-height: 560px) {
+    .chat_scroll_box { padding-top: 8px; }
+    .embedded-welcome { padding: 8px 12px 10px; }
+    .embedded-welcome-icon, .embedded-welcome-icon img { width: 42px; height: 42px; }
+    .embedded-welcome h2 { margin: 6px 0 4px; font-size: 18px; }
+    .embedded-welcome p { line-height: 1.45; }
+    .embedded-starters { gap: 5px; margin-top: 10px; }
+    .embedded-starters button { min-height: 34px; padding-block: 5px; }
+}
+
 .msg_list {
     display: flex;
     flex-direction: column;
@@ -1446,6 +1459,7 @@ onBeforeRouteUpdate((to, from, next) => {
     flex: 1;
     margin: 0 auto;
     width: 100%;
+    min-width: 0;
 
     .botanswer_laoding_gif {
         width: 24px;
