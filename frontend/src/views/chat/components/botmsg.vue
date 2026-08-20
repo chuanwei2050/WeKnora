@@ -56,7 +56,7 @@
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer" :title="$t('agent.copy')">
                     <t-icon name="copy" />
                 </t-button>
-                <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge" :title="$t('agent.addToKnowledgeBase')">
+                <t-button v-if="!embeddedMode" size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge" :title="$t('agent.addToKnowledgeBase')">
                     <t-icon name="add" />
                 </t-button>
                 <!-- Fallback 提示图标 -->
@@ -65,12 +65,12 @@
                         <t-icon name="info-circle" />
                     </t-button>
                 </t-tooltip>
-                <t-button v-if="!feedbackSubmitted" size="small" variant="outline" shape="round" aria-label="回答有帮助" @click.stop="submitFeedback(5)">有帮助</t-button>
-                <t-button v-if="!feedbackSubmitted" size="small" variant="outline" shape="round" aria-label="回答需要纠正" @click.stop="chooseCorrection">需要纠正</t-button>
-                <t-input v-if="feedbackRating === 1" v-model="feedbackCorrection" size="small" placeholder="可选：说明需要纠正的内容" @click.stop />
-                <t-button v-if="feedbackRating === 1" size="small" theme="primary" @click.stop="submitFeedback(1)">提交纠错</t-button>
+                <t-button v-if="!embeddedMode && !feedbackSubmitted" size="small" variant="outline" shape="round" aria-label="回答有帮助" @click.stop="submitFeedback(5)">有帮助</t-button>
+                <t-button v-if="!embeddedMode && !feedbackSubmitted" size="small" variant="outline" shape="round" aria-label="回答需要纠正" @click.stop="chooseCorrection">需要纠正</t-button>
+                <t-input v-if="!embeddedMode && feedbackRating === 1" v-model="feedbackCorrection" size="small" placeholder="可选：说明需要纠正的内容" @click.stop />
+                <t-button v-if="!embeddedMode && feedbackRating === 1" size="small" theme="primary" @click.stop="submitFeedback(1)">提交纠错</t-button>
                 <t-button
-                    v-if="voiceOutputEnabled && ttsModelId && session.id"
+                    v-if="!embeddedMode && voiceOutputEnabled && ttsModelId && session.id"
                     size="small"
                     variant="outline"
                     shape="round"
@@ -84,9 +84,9 @@
                 >
                     {{ voicePlaybackState === 'idle' ? '朗读' : voicePlaybackLabel }}
                 </t-button>
-                <span v-if="voicePlaybackState === 'loading'" class="voice-playback-status" role="status" aria-live="polite">正在加载语音</span>
-                <span v-else-if="voicePlaybackError" class="voice-playback-status" role="status" aria-live="polite">朗读失败，请点击“朗读”重试</span>
-                <span v-if="feedbackSubmitted" class="feedback-done" role="status">反馈已提交</span>
+                <span v-if="!embeddedMode && voicePlaybackState === 'loading'" class="voice-playback-status" role="status" aria-live="polite">正在加载语音</span>
+                <span v-else-if="!embeddedMode && voicePlaybackError" class="voice-playback-status" role="status" aria-live="polite">朗读失败，请点击“朗读”重试</span>
+                <span v-if="!embeddedMode && feedbackSubmitted" class="feedback-done" role="status">反馈已提交</span>
             </div>
             <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{ $t('common.loading') }}</span></div>
         </div>

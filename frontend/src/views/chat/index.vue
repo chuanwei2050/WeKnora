@@ -94,7 +94,7 @@
             ></InputField>
         </div>
     </div>
-    <KnowledgeBaseEditorModal 
+    <KnowledgeBaseEditorModal v-if="!embeddedMode"
         :visible="uiStore.showKBEditorModal"
         :mode="uiStore.kbEditorMode"
         :kb-id="uiStore.currentKBId || undefined"
@@ -120,6 +120,9 @@ import { useI18n } from 'vue-i18n';
 import { useUIStore } from '@/stores/ui';
 import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal.vue';
 import { useKnowledgeBaseCreationNavigation } from '@/hooks/useKnowledgeBaseCreationNavigation';
+import { notifyEmbeddedHost } from '@/utils/embedded-runtime';
+
+const emit = defineEmits(['answer-completed']);
 
 const props = defineProps({
   session_id: { type: String, default: '' },
@@ -795,6 +798,10 @@ onChunk((data) => {
         fullContent.value = "";
         // 清空当前 assistant message ID
         currentAssistantMessageId.value = '';
+        if (props.embeddedMode && data.id) {
+            emit('answer-completed', { messageId: data.id });
+            notifyEmbeddedHost('answer-completed', { messageId: data.id });
+        }
     }
     updateAssistantSession(obj);
 })

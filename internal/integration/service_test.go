@@ -25,6 +25,14 @@ func testService(t *testing.T) *Service {
 	return NewService(db, nil, nil)
 }
 
+func TestChatBindingExposesAllowedKnowledgeBaseIDs(t *testing.T) {
+	binding := ChatBinding{AllowedKnowledgeBaseIDsJSON: `["kb-1","kb-2"]`}
+	allowed := binding.AllowedKnowledgeBaseIDs()
+	require.Equal(t, []string{"kb-1", "kb-2"}, allowed)
+	allowed[0] = "changed"
+	require.Equal(t, []string{"kb-1", "kb-2"}, binding.AllowedKnowledgeBaseIDs())
+}
+
 func TestServiceTokenRotationAndRevocation(t *testing.T) {
 	svc := testService(t)
 	actor := &types.User{Role: types.UserRolePlatformAdmin, IsActive: true}

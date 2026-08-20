@@ -121,6 +121,10 @@ type ChatBinding struct {
 
 func (ChatBinding) TableName() string { return "integration_chat_bindings" }
 
+func (binding ChatBinding) AllowedKnowledgeBaseIDs() []string {
+	return decodeStrings(binding.AllowedKnowledgeBaseIDsJSON)
+}
+
 type IdempotencyRecord struct {
 	ID             uint64 `gorm:"primaryKey"`
 	ClientID       string `gorm:"type:varchar(64);not null;uniqueIndex:idx_integration_idempotency"`

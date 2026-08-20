@@ -78,7 +78,7 @@ export function parseEmbeddedMessage(value: unknown): EmbeddedInboundMessage | n
   return null
 }
 
-export function notifyEmbeddedHost(type: 'ready' | 'unauthorized' | 'route-change' | 'document-published', data: Record<string, unknown> = {}): void {
+export function notifyEmbeddedHost(type: 'ready' | 'unauthorized' | 'answer-completed' | 'route-change' | 'document-published', data: Record<string, unknown> = {}): void {
   if (window.parent === window) return
   window.parent.postMessage({ version: 1, type, ...data }, window.location.origin)
 }

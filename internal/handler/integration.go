@@ -510,10 +510,12 @@ func (h *IntegrationHandler) ListChatSessions(c *gin.Context) {
 		session, getErr := h.sessions.GetSession(c.Request.Context(), binding.SessionID)
 		if getErr == nil {
 			sessions = append(sessions, gin.H{
-				"id":         session.ID,
-				"title":      session.Title,
-				"created_at": session.CreatedAt,
-				"updated_at": session.UpdatedAt,
+				"id":                         session.ID,
+				"title":                      session.Title,
+				"created_at":                 session.CreatedAt,
+				"updated_at":                 session.UpdatedAt,
+				"knowledge_base_mode":        binding.KnowledgeBaseMode,
+				"allowed_knowledge_base_ids": binding.AllowedKnowledgeBaseIDs(),
 			})
 		}
 	}
@@ -524,7 +526,8 @@ func (h *IntegrationHandler) GetChatSession(c *gin.Context) {
 	if !h.requireScope(c, "chat:read") {
 		return
 	}
-	if _, err := h.service.GetChatBinding(c.Request.Context(), integrationPrincipal(c), c.Param("session_id")); err != nil {
+	binding, err := h.service.GetChatBinding(c.Request.Context(), integrationPrincipal(c), c.Param("session_id"))
+	if err != nil {
 		integrationError(c, http.StatusForbidden, "session_denied", "session access denied")
 		return
 	}
@@ -533,7 +536,14 @@ func (h *IntegrationHandler) GetChatSession(c *gin.Context) {
 		integrationError(c, http.StatusNotFound, "session_not_found", "session not found")
 		return
 	}
-	integrationData(c, http.StatusOK, session)
+	integrationData(c, http.StatusOK, gin.H{
+		"id":                         session.ID,
+		"title":                      session.Title,
+		"created_at":                 session.CreatedAt,
+		"updated_at":                 session.UpdatedAt,
+		"knowledge_base_mode":        binding.KnowledgeBaseMode,
+		"allowed_knowledge_base_ids": binding.AllowedKnowledgeBaseIDs(),
+	})
 }
 
 func (h *IntegrationHandler) ListChatMessages(c *gin.Context) {

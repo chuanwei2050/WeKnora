@@ -59,10 +59,10 @@ export async function listIntegrationKnowledgeBases(): Promise<Array<{ id: strin
   return payload.data
 }
 
-export async function getIntegrationChatSession(sessionId: string): Promise<{ id: string }> {
+export async function getIntegrationChatSession(sessionId: string): Promise<IntegrationChatSession> {
   const response = await fetch(`${getApiBaseUrl()}/api/integration/v1/chat/sessions/${encodeURIComponent(sessionId)}`, { credentials: 'include' })
   if (!response.ok) throw new Error(`chat session lookup failed: ${response.status}`)
-  const payload = await response.json() as { data: { id: string } }
+  const payload = await response.json() as { data: IntegrationChatSession }
   return payload.data
 }
 
@@ -71,6 +71,8 @@ export interface IntegrationChatSession {
   title: string
   created_at: string
   updated_at: string
+  knowledge_base_mode: 'selected' | 'all-allowed'
+  allowed_knowledge_base_ids: string[]
 }
 
 export async function listIntegrationChatSessions(): Promise<IntegrationChatSession[]> {
