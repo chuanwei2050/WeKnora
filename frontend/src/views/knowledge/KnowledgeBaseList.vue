@@ -622,6 +622,7 @@ import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type Or
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import { useI18n } from 'vue-i18n'
+import { isCookieEmbeddedMode } from '@/utils/embedded-runtime'
 
 const router = useRouter()
 const route = useRoute()
@@ -765,7 +766,7 @@ interface UploadSummary {
 
 const fetchList = () => {
   loading.value = true
-  return Promise.all([
+  const requests: Promise<unknown>[] = [
     listKnowledgeBases().then((res: any) => {
       const data = res.data || []
       // 格式化时间，并初始化 showMore 状态
@@ -777,10 +778,12 @@ const fetchList = () => {
         isProcessing: kb.is_processing || false,
         processing_count: kb.processing_count || 0
       }))
-    }),
-    orgStore.fetchSharedKnowledgeBases(),
-    orgStore.fetchOrganizations()
-  ]).finally(() => { loading.value = false }).then(() => {
+    })
+  ]
+  if (!isCookieEmbeddedMode()) {
+    requests.push(orgStore.fetchSharedKnowledgeBases(), orgStore.fetchOrganizations())
+  }
+  return Promise.all(requests).finally(() => { loading.value = false }).then(() => {
     // 各空间知识库数量已由 GET /organizations 的 resource_counts 带回，存于 orgStore.resourceCounts
     const counts = orgStore.resourceCounts?.knowledge_bases?.by_organization
     if (counts) spaceCountByOrg.value = { ...counts }
