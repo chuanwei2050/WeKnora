@@ -54,10 +54,10 @@ fi
 # Air 的 polling watcher 会为每个子目录启动一个轮询器。Windows bind mount 下，
 # 大量并发 stat 容易触发 I/O error；这里改为单线程生成源码快照。
 source_snapshot() {
-    find cmd internal config \
+    find cmd internal config migrations \
         -type f \
         ! -name '*_test.go' \
-        \( -name '*.go' -o -name '*.tpl' -o -name '*.tmpl' -o -name '*.html' -o -name '*.yaml' \) \
+        \( -name '*.go' -o -name '*.sql' -o -name '*.tpl' -o -name '*.tmpl' -o -name '*.html' -o -name '*.yaml' \) \
         -printf '%T@ %s %p\n' \
         | sort \
         | sha256sum \

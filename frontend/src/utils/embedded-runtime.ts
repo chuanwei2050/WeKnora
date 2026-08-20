@@ -23,6 +23,18 @@ export function getEmbeddedCSRFToken(): string {
   return csrfToken
 }
 
+export function resolveEmbeddedParentOrigin(configured: string | null, referrer: string, currentOrigin: string): string {
+  for (const candidate of [configured, referrer]) {
+    if (!candidate) continue
+    try {
+      return new URL(candidate).origin
+    } catch {
+      // Ignore malformed external values and keep the iframe on its own origin.
+    }
+  }
+  return currentOrigin
+}
+
 export type EmbeddedInboundMessage =
   | { version: 1; type: 'auth-ready'; ticket: string }
   | { version: 1; type: 'new-conversation' }

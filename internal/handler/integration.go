@@ -488,8 +488,13 @@ func (h *IntegrationHandler) CreateChatSession(c *gin.Context) {
 			integrationError(c, http.StatusConflict, "idempotency_incomplete", "original request is incomplete")
 			return
 		}
+		binding, bindingErr := h.service.GetChatBinding(c.Request.Context(), principal, resourceID)
+		if bindingErr != nil {
+			integrationError(c, http.StatusConflict, "idempotency_incomplete", "original request is incomplete")
+			return
+		}
 		h.audit(c, "api.chat.session.create", "allowed", "idempotent_replay")
-		integrationData(c, http.StatusOK, existing)
+		integrationData(c, http.StatusOK, integrationChatSessionResponse(existing, binding.KnowledgeBaseMode, binding.AllowedKnowledgeBaseIDs()))
 		return
 	}
 	session, err := h.sessions.CreateSession(c.Request.Context(), &types.Session{ID: sessionID, TenantID: principal.TenantID, Title: req.Title})
@@ -509,7 +514,11 @@ func (h *IntegrationHandler) CreateChatSession(c *gin.Context) {
 		allowed = principal.KnowledgeBaseIDs
 	}
 	h.audit(c, "api.chat.session.create", "allowed", "")
-	integrationData(c, http.StatusCreated, gin.H{"id": session.ID, "title": session.Title, "knowledge_base_mode": req.KnowledgeBaseMode, "allowed_knowledge_base_ids": allowed})
+	integrationData(c, http.StatusCreated, integrationChatSessionResponse(session, req.KnowledgeBaseMode, allowed))
+}
+
+func integrationChatSessionResponse(session *types.Session, mode string, allowed []string) gin.H {
+	return gin.H{"id": session.ID, "title": session.Title, "knowledge_base_mode": mode, "allowed_knowledge_base_ids": allowed}
 }
 
 func (h *IntegrationHandler) ListChatSessions(c *gin.Context) {

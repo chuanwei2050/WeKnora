@@ -457,6 +457,16 @@ func TestClientBoundaryRejectsWeakSecretUnknownScopeAndRole(t *testing.T) {
 	platformRole.MaxRole = string(types.UserRolePlatformAdmin)
 	_, err = svc.CreateClient(context.Background(), actor, platformRole, "long-enough-secret")
 	require.ErrorIs(t, err, ErrForbidden)
+	for _, origin := range []string{
+		"ftp://host.example",
+		"https://user@host.example",
+		"https://host.example?redirect=other",
+	} {
+		invalidOrigin := base()
+		invalidOrigin.AllowedOriginsJSON = encodeStrings([]string{origin})
+		_, err = svc.CreateClient(context.Background(), actor, invalidOrigin, "long-enough-secret")
+		require.Error(t, err, origin)
+	}
 }
 
 func TestPrincipalFromBidReviewUsesUnifiedShape(t *testing.T) {

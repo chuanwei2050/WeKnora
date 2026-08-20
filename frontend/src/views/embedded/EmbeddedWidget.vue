@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import ChatView from '@/views/chat/index.vue'
 import { createIntegrationChatSession, deleteIntegrationChatSession, exchangeBootstrapTicket, getIntegrationChatSession, listIntegrationChatSessions, listIntegrationKnowledgeBases, refreshIntegrationSession, renameIntegrationChatSession, type IntegrationChatSession } from '@/api/integration'
-import { notifyEmbeddedHost, parseEmbeddedMessage } from '@/utils/embedded-runtime'
+import { notifyEmbeddedHost, parseEmbeddedMessage, resolveEmbeddedParentOrigin } from '@/utils/embedded-runtime'
 
 const authenticated = ref(false)
 const sessionId = ref('')
@@ -10,8 +10,7 @@ const errorMessage = ref('')
 const noticeMessage = ref('')
 const params = new URLSearchParams(window.location.search)
 const configuredParentOrigin = params.get('parent_origin')
-const referrerOrigin = document.referrer ? new URL(document.referrer).origin : ''
-const allowedParentOrigin = configuredParentOrigin ? new URL(configuredParentOrigin).origin : (referrerOrigin || window.location.origin)
+const allowedParentOrigin = resolveEmbeddedParentOrigin(configuredParentOrigin, document.referrer, window.location.origin)
 const agentId = computed(() => params.get('agent_id') || '')
 const knowledgeBaseIds = ref<string[]>(params.getAll('knowledge_base_id'))
 const selectionMode = ref<'selected' | 'all-allowed'>('selected')

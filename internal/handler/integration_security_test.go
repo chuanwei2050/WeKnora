@@ -93,3 +93,12 @@ func TestIntegrationBrowserCookieIsLimitedToKnowledgePath(t *testing.T) {
 	require.True(t, cookie.HttpOnly)
 	require.True(t, cookie.Secure)
 }
+
+func TestIntegrationChatSessionResponseKeepsPublicModeAndScope(t *testing.T) {
+	response := integrationChatSessionResponse(&types.Session{ID: "session", Title: "title"}, "selected", []string{"kb-1"})
+
+	require.Equal(t, "session", response["id"])
+	require.Equal(t, "title", response["title"])
+	require.Equal(t, "selected", response["knowledge_base_mode"])
+	require.Equal(t, []string{"kb-1"}, response["allowed_knowledge_base_ids"])
+}

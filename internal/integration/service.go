@@ -197,7 +197,7 @@ func (s *Service) CreateClient(ctx context.Context, actor *types.User, client *C
 	}
 	for _, origin := range origins {
 		parsed, err := url.ParseRequestURI(origin)
-		if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.Path != "" {
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 			return "", fmt.Errorf("invalid allowed origin: %s", origin)
 		}
 	}
