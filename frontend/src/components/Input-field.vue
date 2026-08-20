@@ -1459,11 +1459,13 @@ let resizeHandler: (() => void) | null = null;
 let scrollHandler: (() => void) | null = null;
 
 onMounted(() => {
-  loadKnowledgeBases();
-  loadWebSearchConfig();
-  loadConversationConfig();
-  loadChatModels();
-  loadAgents();
+  if (!props.embeddedMode) {
+    loadKnowledgeBases();
+    loadWebSearchConfig();
+    loadConversationConfig();
+    loadChatModels();
+    loadAgents();
+  }
 
   // 从持久化恢复 fileId -> kbId，刷新后共享知识库文件可带 kb_id 拉取（仅保留当前仍选中的文件）
   const persisted = settingsStore.settings.selectedFileKbMap;
@@ -1567,24 +1569,26 @@ const createSession = async (val: string) => {
   if (props.isReplying) {
     return MessagePlugin.error(t('input.messages.replying'));
   }
-  // 发送前校验当前选中的智能体（含默认快速问答）是否已配置完成
-  const agentToCheck = selectedAgent.value;
-  let actualAgent = agentToCheck;
-  if (agentToCheck.is_builtin) {
-    let builtin = agents.value.find(a => a.id === selectedAgentId.value);
-    if (!builtin) {
-      await loadAgents();
-      builtin = agents.value.find(a => a.id === selectedAgentId.value);
+  if (!props.embeddedMode) {
+    // 发送前校验当前选中的智能体（含默认快速问答）是否已配置完成
+    const agentToCheck = selectedAgent.value;
+    let actualAgent = agentToCheck;
+    if (agentToCheck.is_builtin) {
+      let builtin = agents.value.find(a => a.id === selectedAgentId.value);
+      if (!builtin) {
+        await loadAgents();
+        builtin = agents.value.find(a => a.id === selectedAgentId.value);
+      }
+      actualAgent = builtin || agentToCheck;
     }
-    actualAgent = builtin || agentToCheck;
-  }
-  const isAgentMode = actualAgent.config?.agent_mode === 'smart-reasoning';
-  const notReadyReasons = actualAgent.is_builtin
-    ? getBuiltinAgentNotReadyReasons(actualAgent, isAgentMode)
-    : getCustomAgentNotReadyReasons(actualAgent);
-  if (notReadyReasons.length > 0) {
-    showAgentNotReadyMessage(actualAgent, notReadyReasons);
-    return;
+    const isAgentMode = actualAgent.config?.agent_mode === 'smart-reasoning';
+    const notReadyReasons = actualAgent.is_builtin
+      ? getBuiltinAgentNotReadyReasons(actualAgent, isAgentMode)
+      : getCustomAgentNotReadyReasons(actualAgent);
+    if (notReadyReasons.length > 0) {
+      showAgentNotReadyMessage(actualAgent, notReadyReasons);
+      return;
+    }
   }
   // 获取@提及的知识库和文件信息
   const mentionedItems = allSelectedItems.value.map(item => ({
