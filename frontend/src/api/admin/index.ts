@@ -87,6 +87,19 @@ export interface CreatedTenant {
 
 export interface IntegrationIdentityProvider { id: string; name: string }
 export interface CreatedIntegrationClient { client_id: string; client_secret: string }
+export interface IntegrationClient {
+  id: string
+  name: string
+  tenant_id: number
+  identity_provider_id: string
+  administrator_user_id: string
+  scopes: string[]
+  knowledge_base_access_mode: 'all' | 'selected'
+  knowledge_base_ids: string[]
+  allowed_origins: string[]
+  enabled: boolean
+  expires_at?: string | null
+}
 export interface IntegrationClientInput {
   name: string
   tenant_id: number
@@ -166,6 +179,18 @@ export async function createIntegrationIdentityProvider(input: IntegrationIdenti
   return (await post<ApiResponse<IntegrationIdentityProvider>>('/api/v1/admin/integration-identity-providers', input)).data
 }
 
+export async function listIntegrationClients(): Promise<IntegrationClient[]> {
+  return (await get<ApiResponse<IntegrationClient[]>>('/api/v1/admin/integration-clients')).data
+}
+
+export async function revealIntegrationClientSecret(clientId: string): Promise<{ client_secret: string }> {
+  return (await get<ApiResponse<{ client_secret: string }>>(`/api/v1/admin/integration-clients/${encodeURIComponent(clientId)}/secret`)).data
+}
+
 export async function createIntegrationClient(input: IntegrationClientInput): Promise<CreatedIntegrationClient> {
   return (await post<ApiResponse<CreatedIntegrationClient>>('/api/v1/admin/integration-clients', input)).data
+}
+
+export async function rotateIntegrationClientSecret(clientId: string): Promise<{ client_secret: string }> {
+  return (await post<ApiResponse<{ client_secret: string }>>(`/api/v1/admin/integration-clients/${encodeURIComponent(clientId)}/rotate-secret`, {})).data
 }

@@ -22,6 +22,7 @@ type Client struct {
 	Name                    string     `gorm:"type:varchar(128);not null"`
 	SecretHash              string     `gorm:"type:varchar(64);not null"`
 	PreviousSecretHash      string     `gorm:"type:varchar(64)"`
+	SecretCipher            string     `gorm:"type:text;not null;default:''"`
 	ScopesJSON              string     `gorm:"type:text;not null"`
 	KnowledgeBaseAccessMode string     `gorm:"type:varchar(16);not null;default:'selected'"`
 	KnowledgeBaseIDsJSON    string     `gorm:"type:text;not null"`
@@ -39,6 +40,8 @@ func (Client) TableName() string { return "integration_clients" }
 func (c Client) Scopes() []string { return decodeStrings(c.ScopesJSON) }
 
 func (c Client) KnowledgeBaseIDs() []string { return decodeStrings(c.KnowledgeBaseIDsJSON) }
+
+func (c Client) AllowedOrigins() []string { return decodeStrings(c.AllowedOriginsJSON) }
 
 type ExternalIdentity struct {
 	ID                 uint64 `gorm:"primaryKey"`

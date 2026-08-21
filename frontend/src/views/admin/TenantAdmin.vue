@@ -31,7 +31,7 @@
               <td><div class="actions">
                 <t-link theme="primary" @click="manageUsers(tenant)">用户</t-link>
                 <t-link theme="primary" @click="openEdit(tenant)">编辑</t-link>
-                <t-link theme="primary" @click="openIntegration(tenant)">创建接入</t-link>
+                <t-link theme="primary" @click="openIntegration(tenant)">{{ tenantIntegrationClient(tenant) ? '接入信息' : '创建接入' }}</t-link>
                 <t-link :disabled="isHomeTenant(tenant)" :theme="tenant.status === 'active' ? 'warning' : 'success'" @click="toggleStatus(tenant)">{{ tenant.status === 'active' ? '停用' : '启用' }}</t-link>
                 <t-tooltip :content="tenant.can_delete ? '删除未使用租户' : '租户已投入使用，请改为停用'">
                   <t-link :disabled="!tenant.can_delete" theme="danger" @click="removeTenant(tenant)">删除</t-link>
@@ -83,10 +83,13 @@
       </t-form>
     </t-dialog>
 
-    <t-dialog v-model:visible="integrationCredentialVisible" header="第三方接入信息（仅显示一次）" :footer="false">
-      <p class="credential-note">请立即复制并安全交给第三方项目。Client Secret 关闭后无法再次查看。</p>
+    <t-dialog v-model:visible="integrationCredentialVisible" header="第三方接入信息" :footer="false" width="640px">
+      <p class="credential-note">可随时查看并复制完整接入配置（含 Client Secret），与模型 API Key 一样由平台管理员管理。{{ integrationSecretLoading ? '正在加载密钥…' : (integrationSecretRevealed ? '' : '当前密钥创建于可回看能力上线前，请先重新生成后再复制。') }}</p>
       <pre class="integration-package">{{ integrationPackageText }}</pre>
-      <t-button theme="primary" @click="copyIntegrationPackage">复制接入信息</t-button>
+      <div class="credential-actions">
+        <t-button theme="primary" :disabled="!integrationSecretRevealed || integrationSecretLoading" :loading="integrationSecretLoading" @click="copyIntegrationPackage">复制接入信息</t-button>
+        <t-button v-if="viewingIntegrationClient" variant="outline" :loading="integrationRotating" @click="rotateIntegrationSecret">重新生成密钥</t-button>
+      </div>
     </t-dialog>
 
     <t-dialog v-model:visible="credentialVisible" header="租户创建成功" :footer="false">
@@ -103,12 +106,13 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
-import { createAdminTenant, createIntegrationClient, createIntegrationIdentityProvider, deleteAdminTenant, listAdminTenants, listIntegrationIdentityProviders, listTenantUsers, updateAdminTenant, updateAdminTenantStatus, type AdminTenant } from '@/api/admin'
+import { createAdminTenant, createIntegrationClient, createIntegrationIdentityProvider, deleteAdminTenant, listAdminTenants, listIntegrationClients, listIntegrationIdentityProviders, listTenantUsers, revealIntegrationClientSecret, rotateIntegrationClientSecret, updateAdminTenant, updateAdminTenantStatus, type AdminTenant, type IntegrationClient } from '@/api/admin'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const tenants = ref<AdminTenant[]>([])
+const integrationClients = ref<IntegrationClient[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const keyword = ref('')
@@ -122,7 +126,12 @@ const editingId = ref<number | null>(null)
 const integrationVisible = ref(false)
 const integrationCredentialVisible = ref(false)
 const integrationSaving = ref(false)
+const integrationRotating = ref(false)
+const integrationSecretRevealed = ref(false)
+const integrationSecretLoading = ref(false)
 const integrationTenant = ref<AdminTenant | null>(null)
+const viewingIntegrationClient = ref<IntegrationClient | null>(null)
+const integrationViewToken = ref(0)
 const integrationForm = reactive({ projectName: 'Bidder Agent', providerId: 'bidder-agent', administratorUserId: '', allowedOrigin: '' })
 const integrationAdministratorsLoading = ref(false)
 const integrationAdministratorOptions = ref<Array<{ label: string; value: string }>>([])
@@ -133,11 +142,40 @@ const form = reactive({ name: '', business: '', description: '', storageQuotaGb:
 const formatBytes = (value: number) => value > 0 ? `${(value / 1024 / 1024 / 1024).toFixed(value >= 10 * 1024 ** 3 ? 0 : 1)} GB` : '0 GB'
 const formatDate = (value: string) => value ? new Date(value).toLocaleString('zh-CN') : '—'
 const isHomeTenant = (tenant: AdminTenant) => String(tenant.id) === String(authStore.currentTenantId)
+const tenantIntegrationClient = (tenant: AdminTenant) => integrationClients.value.find(client => Number(client.tenant_id) === Number(tenant.id) && client.enabled)
+
+function buildIntegrationPackage(clientId: string, secret: string | null, integrationOrigin: string) {
+  const secretLine = secret
+    ? `WEKNORA_INTEGRATION_CLIENT_SECRET=${secret}`
+    : 'WEKNORA_INTEGRATION_CLIENT_SECRET=<暂不可回看，请重新生成密钥>'
+  return [
+    'WEKNORA_ENABLED=true',
+    `WEKNORA_INTEGRATION_BASE_URL=${window.location.origin}/api/integration/v1`,
+    `WEKNORA_FRONTEND_URL=${window.location.origin}`,
+    `WEKNORA_FRONTEND_ORIGIN=${window.location.origin}`,
+    `WEKNORA_INTEGRATION_ORIGIN=${integrationOrigin || '<请填写第三方项目 Origin>'}`,
+    'WEKNORA_INTEGRATION_TENANT_ID=<第三方项目内部租户ID>',
+    `WEKNORA_INTEGRATION_CLIENT_ID=${clientId}`,
+    secretLine,
+    'WEKNORA_TIMEOUT_SECONDS=60',
+  ].join('\n')
+}
+
+async function loadIntegrationClients() {
+  try {
+    integrationClients.value = await listIntegrationClients()
+  } catch {
+    integrationClients.value = []
+  }
+}
 
 async function loadTenants() {
   loading.value = true
   try {
-    const result = await listAdminTenants({ keyword: keyword.value, page: page.value, pageSize })
+    const [result] = await Promise.all([
+      listAdminTenants({ keyword: keyword.value, page: page.value, pageSize }),
+      loadIntegrationClients(),
+    ])
     tenants.value = result.items
     total.value = result.total
   } catch (error) {
@@ -162,6 +200,28 @@ function openEdit(tenant: AdminTenant) {
 }
 
 async function openIntegration(tenant: AdminTenant) {
+  const existing = tenantIntegrationClient(tenant)
+  if (existing) {
+    const viewToken = ++integrationViewToken.value
+    viewingIntegrationClient.value = existing
+    integrationSecretRevealed.value = false
+    integrationSecretLoading.value = true
+    integrationPackageText.value = buildIntegrationPackage(existing.id, null, existing.allowed_origins?.[0] || '')
+    integrationCredentialVisible.value = true
+    try {
+      const revealed = await revealIntegrationClientSecret(existing.id)
+      if (viewToken !== integrationViewToken.value) return
+      integrationSecretRevealed.value = true
+      integrationPackageText.value = buildIntegrationPackage(existing.id, revealed.client_secret, existing.allowed_origins?.[0] || '')
+    } catch {
+      // Legacy clients created before recoverable secrets remain rotatable only.
+    } finally {
+      if (viewToken === integrationViewToken.value) integrationSecretLoading.value = false
+    }
+    return
+  }
+  viewingIntegrationClient.value = null
+  integrationSecretLoading.value = false
   integrationTenant.value = tenant
   integrationForm.projectName = 'Bidder Agent'
   integrationForm.providerId = 'bidder-agent'
@@ -200,12 +260,39 @@ async function createIntegration() {
     const providerId = integrationForm.providerId.trim()
     const providers = await listIntegrationIdentityProviders()
     if (!providers.some(provider => provider.id === providerId)) await createIntegrationIdentityProvider({ id: providerId, name: `${integrationForm.projectName.trim()} 用户中心` })
-    const created = await createIntegrationClient({ name: integrationForm.projectName.trim(), tenant_id: tenant.id, identity_provider_id: providerId, administrator_user_id: integrationForm.administratorUserId, scopes: ['kb:list', 'rag:search', 'table:analyze', 'chat:read', 'chat:write', 'knowledge:read', 'knowledge:write', 'file:read'], knowledge_base_access_mode: 'all', knowledge_base_ids: [], allowed_origins: [window.location.origin], role_mappings: { tenant_admin: 'tenant_admin', member: 'member' }, max_role: 'tenant_admin' })
-    integrationPackageText.value = [`WEKNORA_ENABLED=true`, `WEKNORA_INTEGRATION_BASE_URL=${window.location.origin}/api/integration/v1`, `WEKNORA_FRONTEND_URL=${window.location.origin}`, `WEKNORA_FRONTEND_ORIGIN=${window.location.origin}`, `WEKNORA_INTEGRATION_ORIGIN=${origin.origin}`, `WEKNORA_INTEGRATION_TENANT_ID=<第三方项目内部租户ID>`, `WEKNORA_INTEGRATION_CLIENT_ID=${created.client_id}`, `WEKNORA_INTEGRATION_CLIENT_SECRET=${created.client_secret}`, `WEKNORA_TIMEOUT_SECONDS=60`].join('\n')
+    const created = await createIntegrationClient({ name: integrationForm.projectName.trim(), tenant_id: tenant.id, identity_provider_id: providerId, administrator_user_id: integrationForm.administratorUserId, scopes: ['kb:list', 'rag:search', 'table:analyze', 'chat:read', 'chat:write', 'knowledge:read', 'knowledge:write', 'file:read'], knowledge_base_access_mode: 'all', knowledge_base_ids: [], allowed_origins: [origin.origin], role_mappings: { tenant_admin: 'tenant_admin', member: 'member' }, max_role: 'tenant_admin' })
+    viewingIntegrationClient.value = { id: created.client_id, name: integrationForm.projectName.trim(), tenant_id: tenant.id, identity_provider_id: providerId, administrator_user_id: integrationForm.administratorUserId, scopes: [], knowledge_base_access_mode: 'all', knowledge_base_ids: [], allowed_origins: [origin.origin], enabled: true }
+    integrationSecretRevealed.value = true
+    integrationPackageText.value = buildIntegrationPackage(created.client_id, created.client_secret, origin.origin)
     integrationVisible.value = false
     integrationCredentialVisible.value = true
+    await loadIntegrationClients()
   } catch (error) { MessagePlugin.error((error as { message?: string }).message || '接入创建失败') }
   finally { integrationSaving.value = false }
+}
+
+async function rotateIntegrationSecret() {
+  const client = viewingIntegrationClient.value
+  if (!client) return
+  const dialog = DialogPlugin.confirm({
+    header: '重新生成密钥',
+    body: '重新生成后旧密钥将逐步失效，请确认第三方已准备好替换新密钥。',
+    confirmBtn: '重新生成',
+    onConfirm: async () => {
+      integrationRotating.value = true
+      try {
+        const rotated = await rotateIntegrationClientSecret(client.id)
+        integrationSecretRevealed.value = true
+        integrationPackageText.value = buildIntegrationPackage(client.id, rotated.client_secret, client.allowed_origins?.[0] || '')
+        MessagePlugin.success('新密钥已生成，可复制接入信息')
+        dialog.destroy()
+      } catch (error) {
+        MessagePlugin.error((error as { message?: string }).message || '重新生成密钥失败')
+      } finally {
+        integrationRotating.value = false
+      }
+    },
+  })
 }
 
 async function copyIntegrationPackage() {
@@ -288,6 +375,7 @@ onMounted(loadTenants)
 .table-scroll { overflow-x: auto; }
 table { width: 100%; min-width: 1120px; border-collapse: collapse; th, td { padding: 16px 18px; border-bottom: 1px solid #edf0f5; text-align: left; } th { background: #f8fafd; color: #596780; font-size: 13px; } td { font-size: 14px; } strong, small { display: block; } small { margin-top: 5px; color: #8a95a8; max-width: 280px; } }
 .credential-note { color: #65728a; line-height: 1.7; }
+.credential-actions { display: flex; gap: 12px; flex-wrap: wrap; }
 .field-control { width: 100%; min-width: 0; }
 .field-hint { margin-top: 6px; color: #7b879b; font-size: 12px; line-height: 1.5; }
 .credentials { margin: 16px 0 0; border: 1px solid #e1e6ef; border-radius: 8px; overflow: hidden; > div { display: grid; grid-template-columns: 100px 1fr; padding: 14px 16px; &:not(:last-child) { border-bottom: 1px solid #edf0f5; } } dt { color: #65728a; } dd { margin: 0; } code { color: #174a7c; font-size: 14px; } }

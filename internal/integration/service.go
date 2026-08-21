@@ -18,6 +18,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -88,6 +89,14 @@ func (s *Service) ListClients(ctx context.Context, actor *types.User) ([]Client,
 func digest(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+func sealClientSecret(secret string) (string, error) {
+	return utils.EncryptAESGCM(secret, utils.GetAESKey())
+}
+
+func unsealClientSecret(cipher string) (string, error) {
+	return utils.DecryptAESGCM(cipher, utils.GetAESKey())
 }
 
 func digestMatches(left, right string) bool {
@@ -233,6 +242,11 @@ func (s *Service) CreateClient(ctx context.Context, actor *types.User, client *C
 		return "", ErrInvalid
 	}
 	client.SecretHash = digest(secret)
+	sealed, err := sealClientSecret(secret)
+	if err != nil {
+		return "", err
+	}
+	client.SecretCipher = sealed
 	client.Enabled = true
 	return secret, s.db.WithContext(ctx).Create(client).Error
 }
@@ -340,13 +354,36 @@ func (s *Service) RotateSecret(ctx context.Context, actor *types.User, clientID 
 	if err != nil {
 		return "", err
 	}
+	sealed, err := sealClientSecret(secret)
+	if err != nil {
+		return "", err
+	}
 	result := s.db.WithContext(ctx).Model(&Client{}).Where("id = ?", clientID).
-		Updates(map[string]any{"previous_secret_hash": gorm.Expr("secret_hash"), "secret_hash": digest(secret)})
+		Updates(map[string]any{"previous_secret_hash": gorm.Expr("secret_hash"), "secret_hash": digest(secret), "secret_cipher": sealed})
 	if result.Error != nil {
 		return "", result.Error
 	}
 	if result.RowsAffected != 1 {
 		return "", ErrForbidden
+	}
+	return secret, nil
+}
+
+func (s *Service) RevealClientSecret(ctx context.Context, actor *types.User, clientID string) (string, error) {
+	if actor == nil || !actor.IsPlatformAdmin() || strings.TrimSpace(clientID) == "" {
+		return "", ErrForbidden
+	}
+	var client Client
+	if err := s.db.WithContext(ctx).First(&client, "id = ?", clientID).Error; err != nil {
+		return "", ErrForbidden
+	}
+	if strings.TrimSpace(client.SecretCipher) == "" {
+		return "", ErrInvalid
+	}
+	secret, err := unsealClientSecret(client.SecretCipher)
+	if err != nil || secret == "" || strings.HasPrefix(secret, utils.EncPrefix) {
+		// EncPrefix leftover means ciphertext could not be decrypted (missing/wrong SYSTEM_AES_KEY).
+		return "", ErrInvalid
 	}
 	return secret, nil
 }

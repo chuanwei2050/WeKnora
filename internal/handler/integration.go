@@ -1407,7 +1407,7 @@ func (h *IntegrationHandler) ListClients(c *gin.Context) {
 	}
 	result := make([]gin.H, 0, len(clients))
 	for _, client := range clients {
-		result = append(result, gin.H{"id": client.ID, "name": client.Name, "tenant_id": client.TenantID, "identity_provider_id": client.IdentityProviderID, "administrator_user_id": client.AdministratorUserID, "scopes": client.Scopes(), "knowledge_base_access_mode": client.KnowledgeBaseAccessMode, "knowledge_base_ids": client.KnowledgeBaseIDs(), "enabled": client.Enabled, "expires_at": client.ExpiresAt})
+		result = append(result, gin.H{"id": client.ID, "name": client.Name, "tenant_id": client.TenantID, "identity_provider_id": client.IdentityProviderID, "administrator_user_id": client.AdministratorUserID, "scopes": client.Scopes(), "knowledge_base_access_mode": client.KnowledgeBaseAccessMode, "knowledge_base_ids": client.KnowledgeBaseIDs(), "allowed_origins": client.AllowedOrigins(), "enabled": client.Enabled, "expires_at": client.ExpiresAt})
 	}
 	integrationData(c, http.StatusOK, result)
 }
@@ -1491,6 +1491,21 @@ func (h *IntegrationHandler) RotateClientSecret(c *gin.Context) {
 	secret, err := h.service.RotateSecret(c.Request.Context(), user, c.Param("client_id"))
 	if err != nil {
 		integrationError(c, http.StatusForbidden, "rotate_failed", "secret rotation failed")
+		return
+	}
+	integrationData(c, http.StatusOK, gin.H{"client_secret": secret})
+}
+
+func (h *IntegrationHandler) RevealClientSecret(c *gin.Context) {
+	actor, _ := c.Get(types.UserContextKey.String())
+	user, _ := actor.(*types.User)
+	secret, err := h.service.RevealClientSecret(c.Request.Context(), user, c.Param("client_id"))
+	if err != nil {
+		status := http.StatusForbidden
+		if errors.Is(err, integrationauth.ErrInvalid) {
+			status = http.StatusNotFound
+		}
+		integrationError(c, status, "secret_reveal_failed", "client secret is unavailable; rotate to generate a recoverable secret")
 		return
 	}
 	integrationData(c, http.StatusOK, gin.H{"client_secret": secret})

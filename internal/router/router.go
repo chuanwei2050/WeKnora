@@ -233,6 +233,7 @@ func RegisterIntegrationAdminRoutes(r *gin.RouterGroup, h *handler.IntegrationHa
 	clients := r.Group("/admin/integration-clients")
 	clients.GET("", h.ListClients)
 	clients.POST("", h.CreateClient)
+	clients.GET("/:client_id/secret", h.RevealClientSecret)
 	clients.POST("/:client_id/rotate-secret", h.RotateClientSecret)
 	clients.POST("/:client_id/revoke-previous-secret", h.RevokePreviousClientSecret)
 	clients.POST("/:client_id/disable", h.DisableClient)

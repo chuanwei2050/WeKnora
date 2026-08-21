@@ -192,6 +192,26 @@ func TestServiceTokenRotationAndRevocation(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnauthorized)
 }
 
+func TestRevealClientSecretLikeModelAPIKey(t *testing.T) {
+	svc := testService(t)
+	actor := &types.User{Role: types.UserRolePlatformAdmin, IsActive: true}
+	require.NoError(t, svc.CreateIdentityProvider(context.Background(), actor, &IdentityProvider{ID: "idp", Name: "Test IdP"}))
+	client := &Client{TenantID: 1, IdentityProviderID: "idp", Name: "host", AllowedOriginsJSON: `["https://host.example"]`, KnowledgeBaseIDsJSON: `[]`, ScopesJSON: `["kb:list"]`, RoleMappingsJSON: `{}`}
+	secret, err := svc.CreateClient(context.Background(), actor, client, "copyable-secret")
+	require.NoError(t, err)
+
+	revealed, err := svc.RevealClientSecret(context.Background(), actor, client.ID)
+	require.NoError(t, err)
+	require.Equal(t, secret, revealed)
+
+	rotated, err := svc.RotateSecret(context.Background(), actor, client.ID)
+	require.NoError(t, err)
+	revealed, err = svc.RevealClientSecret(context.Background(), actor, client.ID)
+	require.NoError(t, err)
+	require.Equal(t, rotated, revealed)
+	require.NotEqual(t, secret, revealed)
+}
+
 func TestClientRejectsCrossTenantKnowledgeBase(t *testing.T) {
 	svc := testService(t)
 	actor := &types.User{Role: types.UserRolePlatformAdmin, IsActive: true}
