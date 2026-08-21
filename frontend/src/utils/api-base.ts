@@ -1,19 +1,15 @@
 export function getApiBaseUrl(): string {
   const configured = String(import.meta.env.VITE_API_BASE_PATH || '').trim()
   if (configured) return normalizeBasePath(configured, 'VITE_API_BASE_PATH')
-  const mode = new URLSearchParams(window.location.search).get('mode')
-  if (mode === 'embedded-page' || mode === 'embedded-widget' || window.location.pathname.startsWith('/knowledge/embed/')) {
-    return '/knowledge'
-  }
-  // Use same-origin requests by default.
-  // In local Vite dev, `vite.config.ts` proxies `/api` to the Go backend.
+  // Embedded pages and widgets call the independent WeKnora API on their own
+  // origin. In local Vite dev, `/api` is proxied to the Go backend.
   return '';
 }
 
 export function getFileEndpoint(): string {
   const configured = String(import.meta.env.VITE_FILE_ENDPOINT || '').trim()
   if (configured) return normalizeBasePath(configured, 'VITE_FILE_ENDPOINT')
-  return getApiBaseUrl() === '/knowledge' ? '/knowledge/files' : '/files'
+  return '/files'
 }
 
 function normalizeBasePath(value: string, name: string): string {

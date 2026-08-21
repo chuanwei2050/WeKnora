@@ -10,8 +10,8 @@ export function parseWidgetConfig(input: WidgetConfig): WidgetConfig {
   if (!/^[a-zA-Z0-9_-]{1,64}$/.test(input.instanceId)) throw new Error('Invalid instanceId')
   const iframe = new URL(input.iframeUrl, window.location.href)
   if (!ALLOWED_PROTOCOLS.has(iframe.protocol)) throw new Error('Invalid iframeUrl protocol')
-  if (iframe.origin !== window.location.origin) throw new Error('iframeUrl must use the host origin proxy')
   const targetOrigin = input.targetOrigin ? new URL(input.targetOrigin).origin : iframe.origin
+  if (!input.targetOrigin && iframe.origin !== window.location.origin) throw new Error('iframeUrl must use the host origin proxy')
   if (targetOrigin !== iframe.origin) throw new Error('targetOrigin must match iframe origin')
   if (!input.selection || !['fixed', 'selectable', 'all-allowed'].includes(input.selection.mode)) {
     throw new Error('Invalid knowledge base selection mode')
@@ -43,7 +43,7 @@ export function parseWidgetConfig(input: WidgetConfig): WidgetConfig {
   if (input.theme?.iconUrl) {
     const icon = new URL(input.theme.iconUrl, window.location.href)
     if (!ALLOWED_PROTOCOLS.has(icon.protocol)) throw new Error('Invalid iconUrl protocol')
-    if (icon.origin !== window.location.origin) throw new Error('iconUrl must use the host origin')
+    if (icon.origin !== window.location.origin && icon.origin !== targetOrigin) throw new Error('iconUrl must use the host or target origin')
   }
   return { ...input, iframeUrl: iframe.href, targetOrigin }
 }

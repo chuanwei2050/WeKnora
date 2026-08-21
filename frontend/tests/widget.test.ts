@@ -75,6 +75,18 @@ describe('floating widget', () => {
     expect(() => initWidget({ ...config(), instanceId: 'all-with-ids', selection: { mode: 'all-allowed', knowledgeBaseIds: ['kb-1'] } as never })).toThrow(/cannot include/)
   })
 
+  it('allows an explicitly targeted independent widget origin', () => {
+    const instance = initWidget({
+      ...config(),
+      instanceId: 'independent-origin',
+      iframeUrl: 'https://knowledge.example/knowledge/embed/embed/widget',
+      targetOrigin: 'https://knowledge.example',
+      theme: { iconUrl: 'https://knowledge.example/widget/icons/ai-assistant.png' },
+    })
+    expect(instance).toBeDefined()
+    instance.destroy()
+  })
+
   it('supports multiple isolated instances and custom launcher icons', () => {
     const first = initWidget({ ...config(), instanceId: 'first', theme: { iconUrl: '/icon.svg' } })
     const second = initWidget({ ...config(), instanceId: 'second' })

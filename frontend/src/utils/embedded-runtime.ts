@@ -11,6 +11,11 @@ export function getRuntimeMode(location: Pick<Location, 'pathname' | 'search'> =
   return 'standalone'
 }
 
+export function getEmbeddedParentOrigin(location: Pick<Location, 'search'> = window.location): string {
+  const configured = new URLSearchParams(location.search).get('parent_origin')
+  return resolveEmbeddedParentOrigin(configured, document.referrer, window.location.origin)
+}
+
 export function isCookieEmbeddedMode(): boolean {
   return getRuntimeMode() === 'embedded-page' || getRuntimeMode() === 'embedded-widget'
 }
@@ -27,7 +32,8 @@ export function resolveEmbeddedParentOrigin(configured: string | null, referrer:
   for (const candidate of [configured, referrer]) {
     if (!candidate) continue
     try {
-      return new URL(candidate).origin
+      const url = new URL(candidate)
+      if (url.protocol === 'http:' || url.protocol === 'https:') return url.origin
     } catch {
       // Ignore malformed external values and keep the iframe on its own origin.
     }
@@ -91,6 +97,6 @@ export function parseEmbeddedMessage(value: unknown): EmbeddedInboundMessage | n
 }
 
 export function notifyEmbeddedHost(type: 'ready' | 'unauthorized' | 'answer-completed' | 'route-change' | 'document-published' | 'open-document', data: Record<string, unknown> = {}): void {
-  if (window.parent === window) return
-  window.parent.postMessage({ version: 1, type, ...data }, window.location.origin)
+  if (window.parent === window || getRuntimeMode() === 'standalone') return
+  window.parent.postMessage({ version: 1, type, ...data }, getEmbeddedParentOrigin())
 }

@@ -467,8 +467,9 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 // tenantID is the retrieval scope: session.TenantID or effective tenant from shared agent (set by handler).
 // This is called once at the request entry point to avoid repeated queries later in the pipeline.
 // Logic:
-//   - For each knowledgeBaseID: resolve actual TenantID (own, org-shared, or in retrieval-tenant scope for shared agent)
-//   - For each knowledgeID: find its knowledgeBaseID; if the KB is already in the list, skip; otherwise add SearchTargetTypeKnowledge
+//   - Without knowledgeIDs, each knowledgeBaseID becomes a full-KB target.
+//   - With knowledgeIDs, every document must belong to the supplied KB scope and
+//     only those documents become targets.
 func (s *sessionService) buildSearchTargets(
 	ctx context.Context,
 	tenantID uint64,
@@ -480,8 +481,7 @@ func (s *sessionService) buildSearchTargets(
 	// Build a map from KB ID to TenantID for all KBs we need to process
 	kbTenantMap := make(map[string]uint64)
 
-	// Track which KBs are fully searched
-	fullKBSet := make(map[string]bool)
+	allowedKBSet := make(map[string]struct{}, len(knowledgeBaseIDs))
 
 	// First pass: batch-fetch KBs, then resolve tenant per ID (tenant scope already set by caller)
 	if len(knowledgeBaseIDs) > 0 {
@@ -498,7 +498,7 @@ func (s *sessionService) buildSearchTargets(
 			if kb == nil {
 				return nil, werrors.NewForbiddenError("Knowledge base is outside the authorized scope")
 			}
-			fullKBSet[kbID] = true
+			allowedKBSet[kbID] = struct{}{}
 			if kb.TenantID == tenantID {
 				kbTenantMap[kbID] = tenantID
 			} else if s.kbShareService != nil && userID != "" {
@@ -511,11 +511,13 @@ func (s *sessionService) buildSearchTargets(
 			} else {
 				kbTenantMap[kbID] = tenantID
 			}
-			targets = append(targets, &types.SearchTarget{
-				Type:            types.SearchTargetTypeKnowledgeBase,
-				KnowledgeBaseID: kbID,
-				TenantID:        kbTenantMap[kbID],
-			})
+			if len(knowledgeIDs) == 0 {
+				targets = append(targets, &types.SearchTarget{
+					Type:            types.SearchTargetTypeKnowledgeBase,
+					KnowledgeBaseID: kbID,
+					TenantID:        kbTenantMap[kbID],
+				})
+			}
 		}
 	}
 
@@ -524,25 +526,44 @@ func (s *sessionService) buildSearchTargets(
 		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get knowledge batch for search targets: %v", err)
-			return targets, nil // Return what we have, don't fail
+			return nil, err
 		}
 
-		// Group knowledge IDs by their KB, excluding those already covered by full KB search
-		// Also track KB tenant IDs from knowledge items
+		requestedKnowledgeIDs := make(map[string]struct{}, len(knowledgeIDs))
+		for _, knowledgeID := range knowledgeIDs {
+			requestedKnowledgeIDs[knowledgeID] = struct{}{}
+		}
+		if len(knowledgeList) != len(requestedKnowledgeIDs) {
+			return nil, werrors.NewForbiddenError("Knowledge is outside the authorized scope")
+		}
+
+		// Group the explicitly requested documents by KB after enforcing the
+		// caller-supplied KB boundary.
 		kbToKnowledgeIDs := make(map[string][]string)
+		resolvedKnowledgeIDs := make(map[string]struct{}, len(knowledgeList))
 		for _, k := range knowledgeList {
 			if k == nil || k.KnowledgeBaseID == "" {
-				continue
+				return nil, werrors.NewForbiddenError("Knowledge is outside the authorized scope")
 			}
-			// Track KB -> TenantID mapping from knowledge items
+			if _, requested := requestedKnowledgeIDs[k.ID]; !requested {
+				return nil, werrors.NewForbiddenError("Knowledge is outside the authorized scope")
+			}
+			if _, duplicate := resolvedKnowledgeIDs[k.ID]; duplicate {
+				return nil, werrors.NewForbiddenError("Knowledge is outside the authorized scope")
+			}
+			resolvedKnowledgeIDs[k.ID] = struct{}{}
+			if len(allowedKBSet) > 0 {
+				if _, allowed := allowedKBSet[k.KnowledgeBaseID]; !allowed {
+					return nil, werrors.NewForbiddenError("Knowledge is outside the authorized knowledge base scope")
+				}
+			}
 			if kbTenantMap[k.KnowledgeBaseID] == 0 {
 				kbTenantMap[k.KnowledgeBaseID] = k.TenantID
 			}
-			// Skip if this KB is already fully searched
-			if fullKBSet[k.KnowledgeBaseID] {
-				continue
-			}
 			kbToKnowledgeIDs[k.KnowledgeBaseID] = append(kbToKnowledgeIDs[k.KnowledgeBaseID], k.ID)
+		}
+		if len(resolvedKnowledgeIDs) != len(requestedKnowledgeIDs) {
+			return nil, werrors.NewForbiddenError("Knowledge is outside the authorized scope")
 		}
 
 		// Create SearchTargetTypeKnowledge targets for each KB with specific files
@@ -560,8 +581,8 @@ func (s *sessionService) buildSearchTargets(
 		}
 	}
 
-	logger.Infof(ctx, "Built %d search targets: %d full KB, %d partial KB, kbTenantMap=%v",
-		len(targets), len(knowledgeBaseIDs), len(targets)-len(knowledgeBaseIDs), kbTenantMap)
+	logger.Infof(ctx, "Built %d search targets from %d KB IDs and %d knowledge IDs, kbTenantMap=%v",
+		len(targets), len(knowledgeBaseIDs), len(knowledgeIDs), kbTenantMap)
 
 	return targets, nil
 }
@@ -642,6 +663,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets: %v", err)
+		return nil, err
 	}
 
 	if len(searchTargets) == 0 {

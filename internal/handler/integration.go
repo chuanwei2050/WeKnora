@@ -7,11 +7,13 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -35,7 +37,10 @@ type IntegrationHandler struct {
 	generations sync.Map
 }
 
-const integrationBrowserCookiePath = "/knowledge/"
+// The embedded session is also used by the existing /api/v1 and /files routes.
+// A root path keeps those same-origin requests authenticated in both direct and
+// reverse-proxy deployments.
+const integrationBrowserCookiePath = "/"
 
 func NewIntegrationHandler(service *integrationauth.Service, kbs interfaces.KnowledgeBaseService, sessions interfaces.SessionService, messages interfaces.MessageService, streams interfaces.StreamManager, files interfaces.FileService, models interfaces.ModelService, documents interfaces.DocumentReader, imageResolver *docparser.ImageResolver) *IntegrationHandler {
 	return &IntegrationHandler{
@@ -47,6 +52,7 @@ func NewIntegrationHandler(service *integrationauth.Service, kbs interfaces.Know
 
 type integrationLimits struct {
 	maxKnowledgeBases int
+	maxKnowledgeIDs   int
 	defaultTopK       int
 	maxTopK           int
 	maxQueryBytes     int
@@ -63,6 +69,7 @@ func loadIntegrationLimits() integrationLimits {
 	}
 	limits := integrationLimits{
 		maxKnowledgeBases: positiveEnv("INTEGRATION_MAX_KNOWLEDGE_BASES", 20),
+		maxKnowledgeIDs:   positiveEnv("INTEGRATION_MAX_KNOWLEDGE_IDS", 100),
 		defaultTopK:       positiveEnv("INTEGRATION_DEFAULT_TOP_K", 10),
 		maxTopK:           positiveEnv("INTEGRATION_MAX_TOP_K", 50),
 		maxQueryBytes:     positiveEnv("INTEGRATION_MAX_QUERY_BYTES", 8192),
@@ -72,6 +79,20 @@ func loadIntegrationLimits() integrationLimits {
 		limits.defaultTopK = limits.maxTopK
 	}
 	return limits
+}
+
+var integrationKnowledgeIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
+
+func validIntegrationKnowledgeIDs(ids []string, limit int) bool {
+	if len(ids) > limit {
+		return false
+	}
+	for _, id := range ids {
+		if !integrationKnowledgeIDPattern.MatchString(id) {
+			return false
+		}
+	}
+	return true
 }
 
 type integrationRateBucket struct {
@@ -386,6 +407,7 @@ func (h *IntegrationHandler) Search(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, int64(h.limits.maxRequestBytes))
 	var req struct {
 		KnowledgeBaseIDs *[]string `json:"knowledge_base_ids" binding:"required"`
+		KnowledgeIDs     *[]string `json:"knowledge_ids"`
 		Query            string    `json:"query" binding:"required"`
 		TopK             int       `json:"top_k"`
 	}
@@ -399,13 +421,27 @@ func (h *IntegrationHandler) Search(c *gin.Context) {
 		integrationError(c, http.StatusBadRequest, "search_limit_exceeded", "search limits exceeded")
 		return
 	}
+	var knowledgeIDs []string
+	if req.KnowledgeIDs != nil {
+		if !validIntegrationKnowledgeIDs(*req.KnowledgeIDs, h.limits.maxKnowledgeIDs) {
+			h.audit(c, "api.search", "denied", "knowledge_limit_exceeded")
+			integrationError(c, http.StatusBadRequest, "invalid_search", "invalid knowledge ids")
+			return
+		}
+		knowledgeIDs = append([]string(nil), *req.KnowledgeIDs...)
+	}
 	if h.service.AuthorizeKnowledgeBases(integrationPrincipal(c), *req.KnowledgeBaseIDs) != nil {
 		h.service.AuditResources(c.Request.Context(), integrationPrincipal(c), "api.search", "denied", "knowledge_base_denied", *req.KnowledgeBaseIDs)
 		integrationError(c, http.StatusForbidden, "knowledge_base_denied", "knowledge base access denied")
 		return
 	}
-	results, err := h.sessions.SearchKnowledge(c.Request.Context(), *req.KnowledgeBaseIDs, nil, req.Query)
+	results, err := h.sessions.SearchKnowledge(c.Request.Context(), *req.KnowledgeBaseIDs, knowledgeIDs, req.Query)
 	if err != nil {
+		if appErr, ok := werrors.IsAppError(err); ok && appErr.Code == werrors.ErrForbidden {
+			h.audit(c, "api.search", "denied", "knowledge_denied")
+			integrationError(c, http.StatusForbidden, "knowledge_denied", "knowledge access denied")
+			return
+		}
 		integrationError(c, http.StatusInternalServerError, "search_failed", "knowledge search failed")
 		return
 	}

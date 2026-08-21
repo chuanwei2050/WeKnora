@@ -23,6 +23,7 @@ describe('embedded runtime', () => {
   it('falls back safely when an external parent origin is malformed', () => {
     expect(resolveEmbeddedParentOrigin('https://host.example/path', '', 'https://iframe.example')).toBe('https://host.example')
     expect(resolveEmbeddedParentOrigin('://bad', 'https://referrer.example/page', 'https://iframe.example')).toBe('https://referrer.example')
+    expect(resolveEmbeddedParentOrigin('data:text/plain,opaque', 'https://referrer.example/page', 'https://iframe.example')).toBe('https://referrer.example')
     expect(resolveEmbeddedParentOrigin('://bad', 'also bad', 'https://iframe.example')).toBe('https://iframe.example')
   })
 })

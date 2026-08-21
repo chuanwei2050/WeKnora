@@ -12,7 +12,7 @@ import i18n from "./i18n";
 import { initTheme } from "@/composables/useTheme";
 import { installTDesignIconOfflineGuard } from "@/utils/tdesign-icon-offline";
 import { ensureBidReviewSession } from "@/utils/bidreview-sso";
-import { getRuntimeMode, notifyEmbeddedHost, parseEmbeddedMessage } from '@/utils/embedded-runtime';
+import { getEmbeddedParentOrigin, getRuntimeMode, notifyEmbeddedHost, parseEmbeddedMessage } from '@/utils/embedded-runtime';
 import { exchangeBootstrapTicket, refreshIntegrationSession } from '@/api/integration';
 import { useAuthStore } from '@/stores/auth';
 
@@ -29,6 +29,7 @@ app.use(router);
 app.use(i18n);
 
 async function prepareEmbeddedPageSession() {
+  const embeddedParentOrigin = getEmbeddedParentOrigin()
   const session = await new Promise<Awaited<ReturnType<typeof exchangeBootstrapTicket>>>((resolve, reject) => {
     let timeoutTimer = 0
     let readyTimer = 0
@@ -40,7 +41,7 @@ async function prepareEmbeddedPageSession() {
       window.clearInterval(readyTimer)
     }
     const receive = async (event: MessageEvent) => {
-      if (event.origin !== window.location.origin || event.source !== window.parent) return
+      if (event.origin !== embeddedParentOrigin || event.source !== window.parent) return
       const message = parseEmbeddedMessage(event.data)
       if (!message || message.type !== 'auth-ready' || authenticating) return
       authenticating = true
@@ -80,8 +81,9 @@ async function prepareEmbeddedPageSession() {
 
 const mode = getRuntimeMode()
 if (mode === 'embedded-page') {
+  const embeddedParentOrigin = getEmbeddedParentOrigin()
   window.addEventListener('message', (event) => {
-    if (event.origin !== window.location.origin || event.source !== window.parent) return
+    if (event.origin !== embeddedParentOrigin || event.source !== window.parent) return
     const message = parseEmbeddedMessage(event.data)
     if (!message) return
     if (message.type === 'set-theme') document.documentElement.dataset.theme = message.theme

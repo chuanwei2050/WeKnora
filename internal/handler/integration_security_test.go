@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"io"
+	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -82,7 +85,14 @@ func TestIntegrationRequestBodyLimit(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestIntegrationBrowserCookieIsLimitedToKnowledgePath(t *testing.T) {
+func TestIntegrationKnowledgeIDsAreBoundedAndValidated(t *testing.T) {
+	require.True(t, validIntegrationKnowledgeIDs([]string{"doc-1", "doc_2"}, 2))
+	require.False(t, validIntegrationKnowledgeIDs([]string{"doc-1", "doc-2", "doc-3"}, 2))
+	require.False(t, validIntegrationKnowledgeIDs([]string{"../foreign"}, 2))
+	require.False(t, validIntegrationKnowledgeIDs([]string{strings.Repeat("x", 129)}, 2))
+}
+
+func TestIntegrationBrowserCookieCoversAPIAndFilesOnWeKnoraOrigin(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
 
@@ -92,6 +102,22 @@ func TestIntegrationBrowserCookieIsLimitedToKnowledgePath(t *testing.T) {
 	require.Equal(t, integrationBrowserCookiePath, cookie.Path)
 	require.True(t, cookie.HttpOnly)
 	require.True(t, cookie.Secure)
+
+	jar, err := cookiejar.New(nil)
+	require.NoError(t, err)
+	weknoraOrigin, err := url.Parse("https://weknora.example/")
+	require.NoError(t, err)
+	jar.SetCookies(weknoraOrigin, []*http.Cookie{cookie})
+
+	apiURL, err := url.Parse("https://weknora.example/api/v1/knowledge-bases")
+	require.NoError(t, err)
+	require.Len(t, jar.Cookies(apiURL), 1)
+	fileURL, err := url.Parse("https://weknora.example/files?file_path=local%3A%2F%2Fdocument.pdf")
+	require.NoError(t, err)
+	require.Len(t, jar.Cookies(fileURL), 1)
+	otherOrigin, err := url.Parse("https://host.example/api/v1/knowledge-bases")
+	require.NoError(t, err)
+	require.Empty(t, jar.Cookies(otherOrigin))
 }
 
 func TestIntegrationChatSessionResponseKeepsPublicModeAndScope(t *testing.T) {
