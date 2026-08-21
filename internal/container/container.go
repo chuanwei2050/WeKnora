@@ -181,6 +181,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(embedding.NewBatchEmbedder))
 	must(container.Provide(service.NewModelService))
 	must(container.Invoke(bootstrapProfileModels))
+	must(container.Invoke(bootstrapStorageEngineConfig))
 	must(container.Provide(service.NewDatasetService))
 	must(container.Provide(service.NewEvaluationService))
 	must(container.Provide(service.NewUserService))
@@ -341,6 +342,49 @@ func bootstrapProfileModels(
 	approvedEndpoints interfaces.ApprovedEndpointRepository,
 ) error {
 	return modelprofile.Bootstrap(context.Background(), repo, tenantRepo, approvedEndpoints)
+}
+
+type platformSettingsRepository interface {
+	GetPlatformSettings(ctx context.Context) (*types.PlatformSettings, error)
+	UpdatePlatformSettings(ctx context.Context, settings *types.PlatformSettings) error
+}
+
+func bootstrapStorageEngineConfig(repo interfaces.TenantRepository) error {
+	return bootstrapStorageEngineConfigWithRepository(repo)
+}
+
+func bootstrapStorageEngineConfigWithRepository(repo platformSettingsRepository) error {
+	ctx := context.Background()
+	settings, err := repo.GetPlatformSettings(ctx)
+	if err != nil {
+		return fmt.Errorf("load storage engine settings: %w", err)
+	}
+	if settings.StorageEngineConfig != nil && settings.StorageEngineConfig.DefaultProvider != "" {
+		return nil
+	}
+
+	storageType := strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
+	if storageType != "minio" {
+		return nil
+	}
+	config := &types.StorageEngineConfig{
+		DefaultProvider: storageType,
+		Local: &types.LocalEngineConfig{
+			PathPrefix: strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR")),
+		},
+	}
+	if storageType == "minio" {
+		config.MinIO = &types.MinIOEngineConfig{
+			Mode:       "docker",
+			BucketName: strings.TrimSpace(os.Getenv("MINIO_BUCKET_NAME")),
+			UseSSL:     strings.EqualFold(strings.TrimSpace(os.Getenv("MINIO_USE_SSL")), "true"),
+		}
+	}
+	settings.StorageEngineConfig = config
+	if err := repo.UpdatePlatformSettings(ctx, settings); err != nil {
+		return fmt.Errorf("save default storage engine settings: %w", err)
+	}
+	return nil
 }
 
 // must is a helper function for error handling

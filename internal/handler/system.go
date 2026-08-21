@@ -210,22 +210,9 @@ func (h *SystemHandler) UpdateModelProfile(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
-	models, err := h.modelSvc.ListModels(ctx)
-	if err != nil {
-		c.Error(errors.NewInternalServerError(err.Error()))
-		return
-	}
 	settings, err := h.tenantSvc.GetPlatformSettings(ctx)
 	if err != nil {
 		c.Error(errors.NewInternalServerError(err.Error()))
-		return
-	}
-	current, ok := types.ParseModelProfile(string(settings.ModelProfile))
-	if !ok {
-		current = types.ModelProfileOnline
-	}
-	if err := validateProfileSwitch(models, current, target); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	settings.ModelProfile = target
@@ -234,27 +221,6 @@ func (h *SystemHandler) UpdateModelProfile(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"profile": target}})
-}
-
-func validateProfileSwitch(models []*types.Model, current, target types.ModelProfile) error {
-	targetEmbedding := selectProfileEmbedding(models, target)
-	if targetEmbedding == nil {
-		return fmt.Errorf("profile %q has no embedding model", target)
-	}
-	return nil
-}
-
-func selectProfileEmbedding(models []*types.Model, profile types.ModelProfile) *types.Model {
-	var selected *types.Model
-	for _, model := range models {
-		if model == nil || model.Profile != profile || model.ProfileRole != "embedding" || model.Status != types.ModelStatusActive {
-			continue
-		}
-		if selected == nil || (!selected.IsDefault && model.IsDefault) || selected.IsDefault == model.IsDefault && model.ID < selected.ID {
-			selected = model
-		}
-	}
-	return selected
 }
 
 func (h *SystemHandler) getDocReaderConnInfo() (addr, transport string) {

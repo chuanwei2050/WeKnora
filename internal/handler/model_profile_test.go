@@ -1,121 +1,47 @@
 package handler
 
 import (
-	"strings"
+	"bytes"
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/gin-gonic/gin"
 )
 
-func TestValidateProfileSwitchAcceptsMatchingEmbeddingDimensions(t *testing.T) {
-	models := []*types.Model{
-		embeddingModel(types.ModelProfileOnline, 2560),
-		embeddingModel(types.ModelProfileOffline, 2560),
-	}
-	if err := validateProfileSwitch(models, types.ModelProfileOnline, types.ModelProfileOffline); err != nil {
-		t.Fatal(err)
-	}
+type modelProfileTenantService struct {
+	interfaces.TenantService
+	settings *types.PlatformSettings
 }
 
-func TestValidateProfileSwitchAcceptsDifferentEmbeddingDimensions(t *testing.T) {
-	models := []*types.Model{
-		embeddingModel(types.ModelProfileOnline, 1024),
-		embeddingModel(types.ModelProfileOffline, 2560),
-	}
-	if err := validateProfileSwitch(models, types.ModelProfileOnline, types.ModelProfileOffline); err != nil {
-		t.Fatal(err)
-	}
+func (s *modelProfileTenantService) GetPlatformSettings(context.Context) (*types.PlatformSettings, error) {
+	return s.settings, nil
 }
 
-func TestValidateProfileSwitchAcceptsMatchingEmbeddingCompatibilityIDs(t *testing.T) {
-	models := []*types.Model{
-		embeddingModelWithCompatibilityID(types.ModelProfileOnline, 2560, "qwen3-embedding-4b-v1"),
-		embeddingModelWithCompatibilityID(types.ModelProfileOffline, 2560, "qwen3-embedding-4b-v1"),
-	}
-	if err := validateProfileSwitch(models, types.ModelProfileOnline, types.ModelProfileOffline); err != nil {
-		t.Fatal(err)
-	}
+func (s *modelProfileTenantService) UpdatePlatformSettings(_ context.Context, settings *types.PlatformSettings) (*types.PlatformSettings, error) {
+	s.settings = settings
+	return settings, nil
 }
 
-func TestValidateProfileSwitchAcceptsDifferentEmbeddingCompatibilityIDs(t *testing.T) {
-	models := []*types.Model{
-		embeddingModelWithCompatibilityID(types.ModelProfileOnline, 2560, "qwen3-embedding-4b-v1"),
-		embeddingModelWithCompatibilityID(types.ModelProfileOffline, 2560, "other-embedding-space"),
-	}
-	if err := validateProfileSwitch(models, types.ModelProfileOnline, types.ModelProfileOffline); err != nil {
-		t.Fatal(err)
-	}
-}
+func TestUpdateModelProfileAllowsEmptyTargetProfile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tenantSvc := &modelProfileTenantService{settings: &types.PlatformSettings{ID: 1, ModelProfile: types.ModelProfileOnline}}
+	h := &SystemHandler{tenantSvc: tenantSvc}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/system/model-profile", bytes.NewBufferString(`{"profile":"offline"}`))
+	req.Header.Set("Content-Type", "application/json")
+	c.Request = req.WithContext(context.WithValue(req.Context(), types.UserContextKey, &types.User{Role: types.UserRolePlatformAdmin}))
 
-func TestValidateProfileSwitchAcceptsPartiallyConfiguredEmbeddingCompatibilityID(t *testing.T) {
-	models := []*types.Model{
-		embeddingModelWithCompatibilityID(types.ModelProfileOnline, 2560, "qwen3-embedding-4b-v1"),
-		embeddingModel(types.ModelProfileOffline, 2560),
-	}
-	if err := validateProfileSwitch(models, types.ModelProfileOnline, types.ModelProfileOffline); err != nil {
-		t.Fatal(err)
-	}
-}
+	h.UpdateModelProfile(c)
 
-func TestValidateProfileSwitchRejectsMissingTargetEmbedding(t *testing.T) {
-	err := validateProfileSwitch(
-		[]*types.Model{embeddingModel(types.ModelProfileOnline, 2560)},
-		types.ModelProfileOnline,
-		types.ModelProfileOffline,
-	)
-	if err == nil || !strings.Contains(err.Error(), "offline") {
-		t.Fatalf("error = %v, want missing target embedding", err)
+	if len(c.Errors) != 0 {
+		t.Fatalf("unexpected profile switch error: %v", c.Errors)
 	}
-}
-
-func TestValidateProfileSwitchUsesActiveDefaultEmbeddingModels(t *testing.T) {
-	onlineDefault := embeddingModel(types.ModelProfileOnline, 1024)
-	onlineDefault.ID = "online-default"
-	onlineDefault.IsDefault = true
-	offlineDefault := embeddingModel(types.ModelProfileOffline, 1024)
-	offlineDefault.ID = "offline-default"
-	offlineDefault.IsDefault = true
-	models := []*types.Model{
-		onlineDefault,
-		embeddingModel(types.ModelProfileOnline, 2560),
-		offlineDefault,
-		embeddingModel(types.ModelProfileOffline, 2560),
-	}
-
-	if err := validateProfileSwitch(models, types.ModelProfileOnline, types.ModelProfileOffline); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestValidateProfileSwitchIgnoresInactiveEmbeddingModels(t *testing.T) {
-	inactive := embeddingModel(types.ModelProfileOffline, 2560)
-	inactive.Status = types.ModelStatusDownloadFailed
-	models := []*types.Model{
-		embeddingModel(types.ModelProfileOnline, 1024),
-		embeddingModel(types.ModelProfileOffline, 1024),
-		inactive,
-	}
-
-	if err := validateProfileSwitch(models, types.ModelProfileOnline, types.ModelProfileOffline); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func embeddingModel(profile types.ModelProfile, dimension int) *types.Model {
-	return embeddingModelWithCompatibilityID(profile, dimension, "")
-}
-
-func embeddingModelWithCompatibilityID(profile types.ModelProfile, dimension int, compatibilityID string) *types.Model {
-	return &types.Model{
-		ID:          string(profile),
-		Profile:     profile,
-		ProfileRole: "embedding",
-		Status:      types.ModelStatusActive,
-		Parameters: types.ModelParameters{
-			EmbeddingParameters: types.EmbeddingParameters{
-				Dimension:       dimension,
-				CompatibilityID: compatibilityID,
-			},
-		},
+	if w.Code != http.StatusOK || tenantSvc.settings.ModelProfile != types.ModelProfileOffline {
+		t.Fatalf("profile switch failed: status=%d profile=%q", w.Code, tenantSvc.settings.ModelProfile)
 	}
 }
