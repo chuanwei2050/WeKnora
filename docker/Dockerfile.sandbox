@@ -8,6 +8,8 @@ FROM node:20-slim AS node-base
 # Stage 2: Final image
 FROM python:3.11-slim
 
+ARG APT_MIRROR_ARG
+
 # Copy Node.js from node image (avoids NodeSource install overhead)
 COPY --from=node-base /usr/local/bin/node /usr/local/bin/
 COPY --from=node-base /usr/local/lib/node_modules /usr/local/lib/node_modules
@@ -15,7 +17,10 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
 # Install minimal CLI tools (bash/grep/sed/coreutils already in slim image)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN if [ -n "$APT_MIRROR_ARG" ]; then \
+        sed -i -E "s@https?://(deb|security).debian.org@${APT_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && apt-get install -y --no-install-recommends \
     jq \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 

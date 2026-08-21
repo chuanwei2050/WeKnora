@@ -46,6 +46,7 @@ cmd/desktop/build/bin/
 
 # 本地数据 / 模型文件
 /models/
+model-scripts/
 data/files/
 data/*.db
 data/*.db-wal

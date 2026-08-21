@@ -32,6 +32,9 @@ services:
       dockerfile: docker/Dockerfile.app
       args:
         - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
+        - APT_MIRROR_ARG=${APT_MIRROR:-}
+        - GOPROXY_ARG=${GOPROXY_ARG:-https://proxy.golang.org,direct}
+        - UV_IMAGE=${UV_IMAGE:-ghcr.io/astral-sh/uv@sha256:75bc2f1d328b6d5bf38bf7120dcfebf619b932bd78570c8ea1ae93db25b25ace}
     container_name: WeKnora-app
     ports:
       - "${APP_PORT:-8080}:8080"
@@ -175,6 +178,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.sandbox
+      args:
+        - APT_MIRROR_ARG=${APT_MIRROR:-}
     profiles:
       - full
     command: ["true"]
@@ -187,6 +192,7 @@ services:
       dockerfile: docker/Dockerfile.docreader
       args:
         - APT_MIRROR=${APT_MIRROR:-}
+        - PYPI_INDEX_URL=${PYPI_INDEX_URL:-}
     container_name: WeKnora-docreader
     ports:
       - "${DOCREADER_PORT:-50051}:50051"
@@ -249,7 +255,7 @@ services:
     networks:
       - WeKnora-network
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS -u 'elastic:$${ELASTIC_PASSWORD}' 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS -u \"elastic:$${ELASTIC_PASSWORD}\" 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null || exit 1"]
       interval: 10s
       timeout: 10s
       retries: 12

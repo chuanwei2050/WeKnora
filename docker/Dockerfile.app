@@ -14,6 +14,7 @@ ARG GOPRIVATE_ARG
 ARG GOPROXY_ARG
 ARG GOSUMDB_ARG=off
 ARG APK_MIRROR_ARG
+ARG APT_MIRROR_ARG
 
 # 设置Go环境变量
 ENV GOPRIVATE=${GOPRIVATE_ARG}
@@ -22,7 +23,10 @@ ENV GOSUMDB=${GOSUMDB_ARG}
 
 # Install dependencies
 RUN if [ -n "$APK_MIRROR_ARG" ]; then \
-        sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
+        sed -i -E "s@https?://(deb|security).debian.org@http://${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    if [ -n "$APT_MIRROR_ARG" ]; then \
+        sed -i -E "s@https?://(deb|security).debian.org@${APT_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
     fi && \
     apt-get update && \
     apt-get install -y git build-essential libsqlite3-dev
@@ -59,6 +63,7 @@ FROM debian:12.12-slim
 WORKDIR /app
 
 ARG APK_MIRROR_ARG
+ARG APT_MIRROR_ARG
 
 # Create a non-root user first
 RUN useradd -m -s /bin/bash appuser
@@ -66,7 +71,9 @@ RUN useradd -m -s /bin/bash appuser
 # First, install ca-certificates. Use the configured mirror when provided so
 # public trial builds do not stall on the default Debian endpoint.
 RUN if [ -n "$APK_MIRROR_ARG" ]; then \
-        sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
+        sed -i -E "s@https?://(deb|security).debian.org@http://${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
+    elif [ -n "$APT_MIRROR_ARG" ]; then \
+        sed -i -E "s@https?://(deb|security).debian.org@http://${APT_MIRROR_ARG#*://}@g" /etc/apt/sources.list.d/debian.sources; \
     fi && \
     apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
@@ -74,7 +81,10 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
 
 # Then switch to mirror if specified and install other packages
 RUN if [ -n "$APK_MIRROR_ARG" ]; then \
-        sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
+        sed -i -E "s@https?://(deb|security).debian.org@http://${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    if [ -n "$APT_MIRROR_ARG" ]; then \
+        sed -i -E "s@https?://[^ /]+@${APT_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
     fi && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
