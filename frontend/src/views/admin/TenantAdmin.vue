@@ -84,11 +84,24 @@
     </t-dialog>
 
     <t-dialog v-model:visible="integrationCredentialVisible" header="第三方接入信息" :footer="false" width="640px">
-      <p class="credential-note">可随时查看并复制完整接入配置（含 Client Secret），与模型 API Key 一样由平台管理员管理。{{ integrationSecretLoading ? '正在加载密钥…' : (integrationSecretRevealed ? '' : '当前密钥创建于可回看能力上线前，请先重新生成后再复制。') }}</p>
+      <p v-if="integrationSecretLoading" class="credential-note">正在加载…</p>
+      <p v-else-if="!integrationSecretRevealed" class="credential-note">当前密钥不可回看，请先重新生成。</p>
       <pre class="integration-package">{{ integrationPackageText }}</pre>
       <div class="credential-actions">
-        <t-button theme="primary" :disabled="!integrationSecretRevealed || integrationSecretLoading" :loading="integrationSecretLoading" @click="copyIntegrationPackage">复制接入信息</t-button>
-        <t-button v-if="viewingIntegrationClient" variant="outline" :loading="integrationRotating" @click="rotateIntegrationSecret">重新生成密钥</t-button>
+        <t-button
+          :theme="integrationSecretRevealed ? 'primary' : 'default'"
+          variant="base"
+          :disabled="integrationSecretLoading"
+          :loading="integrationSecretLoading"
+          @click="copyIntegrationPackage"
+        >复制接入信息</t-button>
+        <t-button
+          v-if="viewingIntegrationClient"
+          :theme="integrationSecretRevealed ? 'default' : 'primary'"
+          variant="base"
+          :loading="integrationRotating"
+          @click="rotateIntegrationSecret"
+        >重新生成密钥</t-button>
       </div>
     </t-dialog>
 
@@ -147,7 +160,7 @@ const tenantIntegrationClient = (tenant: AdminTenant) => integrationClients.valu
 function buildIntegrationPackage(clientId: string, secret: string | null, integrationOrigin: string) {
   const secretLine = secret
     ? `WEKNORA_INTEGRATION_CLIENT_SECRET=${secret}`
-    : 'WEKNORA_INTEGRATION_CLIENT_SECRET=<暂不可回看，请重新生成密钥>'
+    : 'WEKNORA_INTEGRATION_CLIENT_SECRET='
   return [
     'WEKNORA_ENABLED=true',
     `WEKNORA_INTEGRATION_BASE_URL=${window.location.origin}/api/integration/v1`,
@@ -296,6 +309,11 @@ async function rotateIntegrationSecret() {
 }
 
 async function copyIntegrationPackage() {
+  if (integrationSecretLoading.value) return
+  if (!integrationSecretRevealed.value) {
+    MessagePlugin.warning('请先重新生成密钥后再复制')
+    return
+  }
   try {
     if (navigator.clipboard) await navigator.clipboard.writeText(integrationPackageText.value)
     else {
