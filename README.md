@@ -158,6 +158,8 @@ docker compose up -d   # 启动核心服务
 
 启动成功后访问 **http://localhost** 即可使用。
 
+如需部署到远程 Linux 服务器、从源码构建完整镜像、启用 `full` 服务集或规划升级回滚，请使用[生产环境 Docker Compose 部署指南](./docs/production-deployment.md)。
+
 ### 默认平台管理员
 
 启动时若不存在配置的默认管理员账号，系统会自动创建平台管理员：
