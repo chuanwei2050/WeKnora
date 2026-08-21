@@ -29,3 +29,27 @@ func TestValidatePreflightRoleStillChecksDeclaredCapabilities(t *testing.T) {
 		t.Fatal("declared chat role without streaming capability was accepted")
 	}
 }
+
+func TestModelEndpointUseDefaultsToModelRole(t *testing.T) {
+	tests := map[types.ModelType]string{
+		types.ModelTypeKnowledgeQA: "chat",
+		types.ModelTypeEmbedding:   "embedding",
+		types.ModelTypeRerank:      "rerank",
+		types.ModelTypeJudge:       "judge",
+		types.ModelTypeParserOCR:   "parser",
+	}
+	for modelType, want := range tests {
+		if got := modelEndpointUseForType(modelType); got != want {
+			t.Fatalf("endpoint use for %q = %q, want %q", modelType, got, want)
+		}
+	}
+}
+
+func TestDefaultModelEndpointUsePreservesLegacyModelAllowlist(t *testing.T) {
+	if got := defaultModelEndpointUse(types.ModelTypeKnowledgeQA, types.StringArray{"model"}); got != "model" {
+		t.Fatalf("legacy endpoint use = %q, want model", got)
+	}
+	if got := defaultModelEndpointUse(types.ModelTypeKnowledgeQA, types.StringArray{"model", "chat"}); got != "chat" {
+		t.Fatalf("role-specific endpoint use = %q, want chat", got)
+	}
+}

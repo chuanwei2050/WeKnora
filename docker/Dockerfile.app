@@ -83,7 +83,7 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         python3 python3-pip python3-dev libffi-dev libssl-dev \
         nodejs npm \
         gosu \
-        ffmpeg && \
+        ffmpeg libreoffice-calc && \
     python3 -m pip install --break-system-packages --upgrade pip setuptools wheel && \
     chown -R appuser:appuser /home/appuser && \
     apt-get clean && \

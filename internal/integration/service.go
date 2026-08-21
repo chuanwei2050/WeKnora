@@ -125,6 +125,17 @@ func validClient(client *Client, now time.Time) bool {
 	return client != nil && client.Enabled && (client.ExpiresAt == nil || client.ExpiresAt.After(now))
 }
 
+var allowedClientScopes = []string{"kb:list", "rag:search", "table:analyze", "chat:read", "chat:write", "knowledge:read", "knowledge:write", "file:read"}
+
+func validateClientScopes(scopes []string) error {
+	for _, scope := range scopes {
+		if !slices.Contains(allowedClientScopes, scope) {
+			return ErrForbidden
+		}
+	}
+	return nil
+}
+
 func (s *Service) CreateClient(ctx context.Context, actor *types.User, client *Client, secret string) (string, error) {
 	if actor == nil || !actor.IsPlatformAdmin() {
 		return "", ErrForbidden
@@ -151,11 +162,8 @@ func (s *Service) CreateClient(ctx context.Context, actor *types.User, client *C
 	if err != nil {
 		return "", err
 	}
-	allowedScopes := []string{"kb:list", "rag:search", "chat:read", "chat:write", "knowledge:read", "knowledge:write", "file:read"}
-	for _, scope := range scopes {
-		if !slices.Contains(allowedScopes, scope) {
-			return "", ErrForbidden
-		}
+	if err = validateClientScopes(scopes); err != nil {
+		return "", err
 	}
 	knowledgeBaseIDs, err := parseStringArray(client.KnowledgeBaseIDsJSON)
 	if err != nil {
@@ -213,6 +221,25 @@ func (s *Service) CreateClient(ctx context.Context, actor *types.User, client *C
 	client.SecretHash = digest(secret)
 	client.Enabled = true
 	return secret, s.db.WithContext(ctx).Create(client).Error
+}
+
+func (s *Service) UpdateClientScopes(ctx context.Context, actor *types.User, clientID string, scopes []string) error {
+	if actor == nil || !actor.IsPlatformAdmin() || strings.TrimSpace(clientID) == "" {
+		return ErrForbidden
+	}
+	if err := validateClientScopes(scopes); err != nil {
+		return err
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&Client{}).Where("id = ?", clientID).Update("scopes_json", encodeStrings(scopes))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrForbidden
+		}
+		return tx.Model(&Session{}).Where("client_id = ? AND revoked_at IS NULL", clientID).Update("revoked_at", s.now()).Error
+	})
 }
 
 func (s *Service) RotateSecret(ctx context.Context, actor *types.User, clientID string) (string, error) {

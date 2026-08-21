@@ -2,12 +2,16 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"io"
+	"net/url"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -73,6 +77,21 @@ func reconcileSQLColumnsWithSchema(sqlText string, schema *TableSchema) (string,
 	return rewritten, fixes
 }
 
+var sqlTableReferencePattern = regexp.MustCompile(`(?i)\b(FROM|JOIN)\s+(?:"[^"]+"|[a-zA-Z_][a-zA-Z0-9_-]*)`)
+
+func reconcileSQLTableWithSchema(sqlText string, schema *TableSchema) string {
+	if schema == nil || strings.TrimSpace(schema.TableName) == "" {
+		return sqlText
+	}
+	return sqlTableReferencePattern.ReplaceAllStringFunc(sqlText, func(reference string) string {
+		parts := strings.Fields(reference)
+		if len(parts) != 2 {
+			return reference
+		}
+		return parts[0] + ` "` + schema.TableName + `"`
+	})
+}
+
 func buildMissingColumnSuggestion(sqlErr error, schema *TableSchema) string {
 	if sqlErr == nil || schema == nil {
 		return ""
@@ -105,6 +124,7 @@ func buildMissingColumnSuggestion(sqlErr error, schema *TableSchema) string {
 type DataAnalysisInput struct {
 	KnowledgeID string `json:"knowledge_id" jsonschema:"id of the knowledge to query"`
 	Sql         string `json:"sql" jsonschema:"SQL to be executed on knowledge"`
+	MaxRows     int    `json:"max_rows,omitempty" jsonschema:"optional maximum rows returned by a read-only SELECT query"`
 }
 
 type DataAnalysisTool struct {
@@ -116,6 +136,7 @@ type DataAnalysisTool struct {
 	db                   *sql.DB
 	sessionID            string
 	createdTables        []string // Track tables created in this session
+	loadedSchemas        map[string]*TableSchema
 }
 
 func NewDataAnalysisTool(
@@ -134,6 +155,7 @@ func NewDataAnalysisTool(
 		tenantService:        tenantService,
 		db:                   db,
 		sessionID:            sessionID,
+		loadedSchemas:        make(map[string]*TableSchema),
 	}
 }
 
@@ -193,27 +215,26 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}, err
 	}
 
-	// Replace knowledge ID with table name
-	input.Sql = strings.ReplaceAll(input.Sql, input.KnowledgeID, schema.TableName)
+	// Legacy prompts may use the knowledge ID as a table placeholder. Do not
+	// rewrite it when the SQL already contains the session-isolated table name,
+	// because that name itself contains the knowledge ID.
+	if !strings.Contains(input.Sql, schema.TableName) {
+		input.Sql = strings.ReplaceAll(input.Sql, input.KnowledgeID, schema.TableName)
+	}
+	input.Sql = reconcileSQLTableWithSchema(input.Sql, schema)
 	if rewrittenSQL, fixes := reconcileSQLColumnsWithSchema(input.Sql, schema); len(fixes) > 0 {
 		logger.Infof(ctx, "[Tool][DataAnalysis] Auto-rewrote SQL identifiers for session %s: %v", t.sessionID, fixes)
 		input.Sql = rewrittenSQL
 	}
 
-	// Check if this is a read-only query
+	// Integration and agent callers may only execute SELECT statements.
 	normalizedSQL := strings.TrimSpace(strings.ToLower(input.Sql))
-	isReadOnly := strings.HasPrefix(normalizedSQL, "select") ||
-		strings.HasPrefix(normalizedSQL, "show") ||
-		strings.HasPrefix(normalizedSQL, "describe") ||
-		strings.HasPrefix(normalizedSQL, "explain") ||
-		strings.HasPrefix(normalizedSQL, "pragma")
-
-	if !isReadOnly {
+	if !strings.HasPrefix(normalizedSQL, "select") {
 		// Reject modification queries
 		logger.Warnf(ctx, "[Tool][DataAnalysis] Modification query rejected for session %s: %s", t.sessionID, input.Sql)
 		return &types.ToolResult{
 			Success: false,
-			Error:   "DuckDB tool only supports read-only queries (SELECT, SHOW, DESCRIBE, EXPLAIN, PRAGMA). Modification operations (INSERT, UPDATE, DELETE, CREATE, DROP, etc.) are not allowed.",
+			Error:   "DuckDB tool only supports SELECT queries.",
 		}, fmt.Errorf("modification queries are not allowed")
 	}
 
@@ -221,6 +242,8 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 	// IMPORTANT: Must enable validateSelectStmt to block RangeFunction attacks
 	_, validation := utils.ValidateSQL(input.Sql,
 		utils.WithAllowedTables(schema.TableName),
+		utils.WithSelectOnly(),
+		utils.WithNoSubqueries(),
 		utils.WithSingleStatement(),      // Block multiple statements
 		utils.WithNoDangerousFunctions(), // Block dangerous functions
 	)
@@ -232,9 +255,16 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}, fmt.Errorf("SQL validation failed: %v", validation.Errors)
 	}
 
-	logger.Infof(ctx, "[Tool][DataAnalysis] Received SQL query for session %s: %s", t.sessionID, input.Sql)
+	executionSQL := input.Sql
+	if input.MaxRows < 0 || input.MaxRows > 10000 {
+		return &types.ToolResult{Success: false, Error: "max_rows must be between 1 and 10000"}, fmt.Errorf("invalid max_rows")
+	}
+	if input.MaxRows > 0 {
+		executionSQL = fmt.Sprintf("SELECT * FROM (%s) AS limited_result LIMIT %d", strings.TrimSpace(strings.TrimSuffix(input.Sql, ";")), input.MaxRows)
+	}
+	logger.Infof(ctx, "[Tool][DataAnalysis] Received SQL query for session %s: %s", t.sessionID, executionSQL)
 	// Execute single query and get results
-	results, err := t.executeSingleQuery(ctx, input.Sql)
+	results, err := t.executeSingleQuery(ctx, executionSQL)
 	if err != nil {
 		if suggestion := buildMissingColumnSuggestion(err, schema); suggestion != "" {
 			return &types.ToolResult{
@@ -248,7 +278,7 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}, err
 	}
 
-	queryOutput := t.formatQueryResults(results, input.Sql)
+	queryOutput := t.formatQueryResults(results, executionSQL)
 	logger.Infof(ctx, "[Tool][DataAnalysis] Completed execution query, total %d rows for session %s", len(results), t.sessionID)
 	return &types.ToolResult{
 		Success: true,
@@ -256,7 +286,7 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		Data: map[string]interface{}{
 			"rows":         results,
 			"row_count":    len(results),
-			"query":        input.Sql,
+			"query":        executionSQL,
 			"display_type": ToolDataAnalysis,
 			"session_id":   t.sessionID,
 		},
@@ -552,8 +582,7 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *typ
 	}
 	tableName := t.TableName(knowledge)
 
-	// Normalize file type to lowercase for comparison
-	fileType := strings.ToLower(knowledge.FileType)
+	fileType := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(knowledge.FileType), "."))
 
 	logger.Infof(ctx, "[Tool][DataAnalysis] Loading knowledge '%s' (type: %s) into table '%s' for session %s",
 		knowledge.ID, fileType, tableName, t.sessionID)
@@ -563,17 +592,59 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *typ
 		return nil, fmt.Errorf("failed to materialize knowledge '%s' for DuckDB: %w", knowledge.ID, err)
 	}
 	defer cleanup()
+	if fileType == "xls" {
+		convertedPath, convertedCleanup, convertErr := convertLegacyXLS(ctx, localPath)
+		if convertErr != nil {
+			return nil, fmt.Errorf("failed to convert legacy XLS knowledge '%s': %w", knowledge.ID, convertErr)
+		}
+		defer convertedCleanup()
+		localPath = convertedPath
+	}
 
+	var schema *TableSchema
 	switch fileType {
 	case "csv":
-		return t.LoadFromCSV(ctx, localPath, tableName)
+		schema, err = t.LoadFromCSV(ctx, localPath, tableName)
 	case "xlsx", "xls":
-		return t.LoadFromExcel(ctx, localPath, tableName)
+		schema, err = t.LoadFromExcel(ctx, localPath, tableName)
 	default:
 		logger.Warnf(ctx, "[Tool][DataAnalysis] Unsupported file type '%s' for knowledge '%s' in session %s",
 			fileType, knowledge.ID, t.sessionID)
 		return nil, fmt.Errorf("unsupported file type: %s (supported types: csv, xlsx, xls)", fileType)
 	}
+	if err == nil {
+		t.loadedSchemas[knowledge.ID] = schema
+	}
+	return schema, err
+}
+
+func convertLegacyXLS(ctx context.Context, sourcePath string) (string, func(), error) {
+	soffice, err := exec.LookPath("soffice")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("LibreOffice is required for XLS analysis")
+	}
+	outDir, err := os.MkdirTemp("", "weknora-xls-convert-*")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create conversion directory: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(outDir) }
+	profileDir := filepath.Join(outDir, "profile")
+	if err := os.MkdirAll(profileDir, 0o700); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("create LibreOffice profile: %w", err)
+	}
+	profileURL := (&url.URL{Scheme: "file", Path: filepath.ToSlash(profileDir)}).String()
+	command := exec.CommandContext(ctx, soffice, "-env:UserInstallation="+profileURL, "--headless", "--convert-to", "xlsx", "--outdir", outDir, sourcePath)
+	if output, commandErr := command.CombinedOutput(); commandErr != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("LibreOffice conversion failed: %w (%s)", commandErr, strings.TrimSpace(string(output)))
+	}
+	convertedPath := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(sourcePath), filepath.Ext(sourcePath))+".xlsx")
+	if info, statErr := os.Stat(convertedPath); statErr != nil || info.Size() == 0 {
+		cleanup()
+		return "", func() {}, fmt.Errorf("LibreOffice did not produce a valid XLSX file")
+	}
+	return convertedPath, cleanup, nil
 }
 
 // materializeKnowledgeFile copies the knowledge's backing blob into a fresh
@@ -639,6 +710,9 @@ func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowled
 //   - *TableSchema: schema information of the created table
 //   - error: any error that occurred during the operation
 func (t *DataAnalysisTool) LoadFromKnowledgeID(ctx context.Context, knowledgeID string) (*TableSchema, error) {
+	if schema := t.loadedSchemas[knowledgeID]; schema != nil {
+		return schema, nil
+	}
 	// Use GetKnowledgeByIDOnly to support cross-tenant shared KB
 	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
 	if err != nil {
@@ -726,7 +800,21 @@ func (t *DataAnalysisTool) LoadFromTable(ctx context.Context, tableName string) 
 }
 
 func (t *DataAnalysisTool) TableName(knowledge *types.Knowledge) string {
-	return "k_" + strings.ReplaceAll(knowledge.ID, "-", "_")
+	knowledgePart := sanitizeDuckDBIdentifierPart(knowledge.ID)
+	sessionDigest := sha256.Sum256([]byte(t.sessionID))
+	sessionPart := fmt.Sprintf("%x", sessionDigest[:6])
+	return "k_" + knowledgePart + "_" + sessionPart
+}
+
+var nonDuckDBIdentifierPart = regexp.MustCompile(`[^a-zA-Z0-9_]+`)
+
+func sanitizeDuckDBIdentifierPart(value string) string {
+	value = nonDuckDBIdentifierPart.ReplaceAllString(strings.TrimSpace(value), "_")
+	value = strings.Trim(value, "_")
+	if value == "" {
+		return "unknown"
+	}
+	return value
 }
 
 // buildSchemaDescription builds a formatted schema description

@@ -304,9 +304,35 @@ func (s *modelService) validateApprovedModelEndpoint(ctx context.Context, model 
 	}
 	use := model.Parameters.EndpointUse
 	if use == "" {
-		use = "model"
+		use = defaultModelEndpointUse(model.Type, endpoint.AllowedUses)
 	}
 	return endpoint.ValidateConnection(model.Parameters.BaseURL, types.EndpointCategoryModel, use, ips, airGappedMode())
+}
+
+func defaultModelEndpointUse(modelType types.ModelType, allowedUses types.StringArray) string {
+	inferred := modelEndpointUseForType(modelType)
+	for _, allowed := range allowedUses {
+		if strings.EqualFold(strings.TrimSpace(allowed), inferred) {
+			return inferred
+		}
+	}
+	for _, allowed := range allowedUses {
+		if strings.EqualFold(strings.TrimSpace(allowed), "model") {
+			return "model"
+		}
+	}
+	return inferred
+}
+
+func modelEndpointUseForType(modelType types.ModelType) string {
+	switch modelRoleForType(modelType) {
+	case types.ModelRoleEvaluationJudge:
+		return "judge"
+	case types.ModelRoleParserOCR:
+		return "parser"
+	default:
+		return string(modelRoleForType(modelType))
+	}
 }
 
 func (s *modelService) modelIPValidator(ctx context.Context, model *types.Model) (func(net.IP) error, error) {

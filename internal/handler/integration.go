@@ -2,9 +2,11 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"regexp"
@@ -13,13 +15,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/tools"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	integrationauth "github.com/Tencent/WeKnora/internal/integration"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -27,9 +32,13 @@ import (
 type IntegrationHandler struct {
 	service     *integrationauth.Service
 	kbs         interfaces.KnowledgeBaseService
+	knowledges  interfaces.KnowledgeService
 	sessions    interfaces.SessionService
 	messages    interfaces.MessageService
 	models      interfaces.ModelService
+	tenant      interfaces.TenantService
+	files       interfaces.FileService
+	duckdb      *sql.DB
 	streams     interfaces.StreamManager
 	attachments *session.AttachmentProcessor
 	limiter     *integrationRateLimiter
@@ -42,9 +51,9 @@ type IntegrationHandler struct {
 // reverse-proxy deployments.
 const integrationBrowserCookiePath = "/"
 
-func NewIntegrationHandler(service *integrationauth.Service, kbs interfaces.KnowledgeBaseService, sessions interfaces.SessionService, messages interfaces.MessageService, streams interfaces.StreamManager, files interfaces.FileService, models interfaces.ModelService, documents interfaces.DocumentReader, imageResolver *docparser.ImageResolver) *IntegrationHandler {
+func NewIntegrationHandler(service *integrationauth.Service, kbs interfaces.KnowledgeBaseService, knowledges interfaces.KnowledgeService, sessions interfaces.SessionService, messages interfaces.MessageService, streams interfaces.StreamManager, files interfaces.FileService, models interfaces.ModelService, tenant interfaces.TenantService, duckdb *sql.DB, documents interfaces.DocumentReader, imageResolver *docparser.ImageResolver) *IntegrationHandler {
 	return &IntegrationHandler{
-		service: service, kbs: kbs, sessions: sessions, messages: messages, models: models, streams: streams,
+		service: service, kbs: kbs, knowledges: knowledges, sessions: sessions, messages: messages, models: models, tenant: tenant, files: files, duckdb: duckdb, streams: streams,
 		attachments: session.NewAttachmentProcessor(files, documents, imageResolver, models),
 		limiter:     newIntegrationRateLimiter(), limits: loadIntegrationLimits(),
 	}
@@ -395,6 +404,180 @@ func (h *IntegrationHandler) ListKnowledgeBases(c *gin.Context) {
 	}
 	h.audit(c, "api.knowledge_bases.list", "allowed", "")
 	integrationData(c, http.StatusOK, result)
+}
+
+func (h *IntegrationHandler) ListKnowledge(c *gin.Context) {
+	if !h.enforceRate(c, "api.knowledge.list", 120) {
+		return
+	}
+	if !h.requireScope(c, "knowledge:read") {
+		return
+	}
+	kbID := strings.TrimSpace(c.Param("knowledge_base_id"))
+	if kbID == "" || h.service.AuthorizeKnowledgeBases(integrationPrincipal(c), []string{kbID}) != nil {
+		h.audit(c, "api.knowledge.list", "denied", "knowledge_base_denied")
+		integrationError(c, http.StatusForbidden, "knowledge_base_denied", "knowledge base access denied")
+		return
+	}
+	rows, err := h.knowledges.ListKnowledgeByKnowledgeBaseID(c.Request.Context(), kbID)
+	if err != nil {
+		integrationError(c, http.StatusInternalServerError, "list_failed", "failed to list knowledge")
+		return
+	}
+	result := make([]gin.H, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		result = append(result, gin.H{
+			"id": row.ID, "knowledge_base_id": row.KnowledgeBaseID,
+			"title": row.Title, "description": row.Description,
+			"file_name": row.FileName, "file_type": row.FileType,
+			"tag_id": row.TagID, "parse_status": row.ParseStatus,
+			"enable_status": row.EnableStatus, "updated_at": row.UpdatedAt,
+		})
+	}
+	h.service.AuditResources(c.Request.Context(), integrationPrincipal(c), "api.knowledge.list", "allowed", "", []string{kbID})
+	integrationData(c, http.StatusOK, result)
+}
+
+type integrationTableAnalysisQuery struct {
+	ID    string `json:"id"`
+	Query string `json:"query"`
+}
+
+type integrationTableAnalysisResult struct {
+	ID       string              `json:"id"`
+	Status   string              `json:"status"`
+	SQL      string              `json:"sql,omitempty"`
+	Rows     []map[string]string `json:"rows,omitempty"`
+	RowCount int                 `json:"row_count"`
+	Error    string              `json:"error,omitempty"`
+}
+
+// AnalyzeKnowledgeTable generates and executes read-only DuckDB SQL for one
+// tabular knowledge item. The model and tool configuration remain owned by
+// WeKnora; callers only select an allowed KB/file and provide natural-language
+// questions.
+func (h *IntegrationHandler) AnalyzeKnowledgeTable(c *gin.Context) {
+	if !h.enforceRate(c, "api.table.analyze", 20) {
+		return
+	}
+	if !h.requireScope(c, "table:analyze") {
+		return
+	}
+	h.limitRequestBody(c)
+	var req struct {
+		KnowledgeBaseID string                          `json:"knowledge_base_id" binding:"required"`
+		KnowledgeID     string                          `json:"knowledge_id" binding:"required"`
+		Queries         []integrationTableAnalysisQuery `json:"queries" binding:"required"`
+		MaxRows         int                             `json:"max_rows"`
+	}
+	if c.ShouldBindJSON(&req) != nil {
+		integrationError(c, http.StatusBadRequest, "invalid_table_analysis", "knowledge_base_id, knowledge_id and queries are required")
+		return
+	}
+	req.KnowledgeBaseID = strings.TrimSpace(req.KnowledgeBaseID)
+	req.KnowledgeID = strings.TrimSpace(req.KnowledgeID)
+	if req.MaxRows == 0 {
+		req.MaxRows = 200
+	}
+	if req.KnowledgeBaseID == "" || req.KnowledgeID == "" || len(req.Queries) == 0 || len(req.Queries) > 20 || req.MaxRows < 1 || req.MaxRows > 1000 {
+		integrationError(c, http.StatusBadRequest, "invalid_table_analysis", "queries must contain 1-20 items and max_rows must be 1-1000")
+		return
+	}
+	for _, query := range req.Queries {
+		if strings.TrimSpace(query.ID) == "" || strings.TrimSpace(query.Query) == "" || len(query.Query) > h.limits.maxQueryBytes {
+			integrationError(c, http.StatusBadRequest, "invalid_table_analysis", "each query requires a non-empty id and query")
+			return
+		}
+	}
+	principal := integrationPrincipal(c)
+	if h.service.AuthorizeKnowledgeBases(principal, []string{req.KnowledgeBaseID}) != nil {
+		h.service.AuditResources(c.Request.Context(), principal, "api.table.analyze", "denied", "knowledge_base_denied", []string{req.KnowledgeBaseID})
+		integrationError(c, http.StatusForbidden, "knowledge_base_denied", "knowledge base access denied")
+		return
+	}
+	knowledge, err := h.knowledges.GetKnowledgeByIDOnly(c.Request.Context(), req.KnowledgeID)
+	if err != nil {
+		integrationError(c, http.StatusInternalServerError, "knowledge_lookup_failed", "failed to load knowledge")
+		return
+	}
+	if knowledge == nil || knowledge.KnowledgeBaseID != req.KnowledgeBaseID {
+		integrationError(c, http.StatusNotFound, "knowledge_not_found", "knowledge was not found in the requested knowledge base")
+		return
+	}
+	fileType := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(knowledge.FileType), "."))
+	if fileType != "csv" && fileType != "xlsx" && fileType != "xls" {
+		integrationError(c, http.StatusBadRequest, "unsupported_table_type", "only CSV, XLSX and XLS knowledge can be analyzed")
+		return
+	}
+	model, err := h.models.GetDefaultModel(c.Request.Context(), types.ModelTypeKnowledgeQA, "chat")
+	if err != nil || model == nil {
+		integrationError(c, http.StatusServiceUnavailable, "table_analysis_model_unavailable", "default chat model is unavailable")
+		return
+	}
+	chatModel, err := h.models.GetChatModel(c.Request.Context(), model.ID)
+	if err != nil {
+		integrationError(c, http.StatusServiceUnavailable, "table_analysis_model_unavailable", "default chat model is unavailable")
+		return
+	}
+	tool := tools.NewDataAnalysisTool(h.kbs, h.knowledges, h.tenant, h.files, h.duckdb, "integration_"+uuid.NewString())
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		tool.Cleanup(cleanupCtx)
+	}()
+	schema, err := tool.LoadFromKnowledge(c.Request.Context(), knowledge)
+	if err != nil {
+		integrationError(c, http.StatusUnprocessableEntity, "table_load_failed", "tabular knowledge could not be loaded")
+		return
+	}
+	results := make([]integrationTableAnalysisResult, 0, len(req.Queries))
+	for _, query := range req.Queries {
+		results = append(results, h.runIntegrationTableQuery(c.Request.Context(), chatModel, tool, schema, knowledge.ID, query, req.MaxRows))
+	}
+	h.service.AuditResources(c.Request.Context(), principal, "api.table.analyze", "allowed", "", []string{req.KnowledgeBaseID})
+	integrationData(c, http.StatusOK, gin.H{"knowledge_base_id": req.KnowledgeBaseID, "knowledge_id": req.KnowledgeID, "agent_id": types.BuiltinDataAnalystID, "results": results})
+}
+
+func (h *IntegrationHandler) runIntegrationTableQuery(ctx context.Context, model chat.Chat, tool *tools.DataAnalysisTool, schema *tools.TableSchema, knowledgeID string, query integrationTableAnalysisQuery, maxRows int) integrationTableAnalysisResult {
+	result := integrationTableAnalysisResult{ID: query.ID, Status: "failed", Rows: []map[string]string{}}
+	prompt := fmt.Sprintf(`You are the SQL planning component of WeKnora's built-in data analyst.
+Generate exactly one read-only DuckDB SELECT statement that answers the question using the table below.
+Use exact quoted column names from the schema. Do not use external files, table functions, PRAGMA, SHOW, DESCRIBE, EXPLAIN, or multiple statements.
+Question: %s
+Knowledge ID (return this unchanged in knowledge_id): %s
+SQL table name (use this exact quoted identifier in FROM): "%s"
+Schema:
+%s`, strings.TrimSpace(query.Query), knowledgeID, schema.TableName, schema.Description())
+	response, err := model.Chat(ctx, []chat.Message{{Role: "user", Content: prompt}}, &chat.ChatOptions{Temperature: 0.1, Format: utils.GenerateSchema[tools.DataAnalysisInput]()})
+	if err != nil {
+		result.Error = "failed to generate SQL"
+		return result
+	}
+	var input tools.DataAnalysisInput
+	if json.Unmarshal([]byte(response.Content), &input) != nil || strings.TrimSpace(input.Sql) == "" {
+		result.Error = "model returned invalid SQL"
+		return result
+	}
+	input.KnowledgeID = knowledgeID
+	input.MaxRows = maxRows
+	payload, _ := json.Marshal(input)
+	toolResult, err := tool.Execute(ctx, payload)
+	if err != nil || toolResult == nil || !toolResult.Success {
+		result.Error = "SQL execution failed"
+		return result
+	}
+	result.Status = "completed"
+	if value, ok := toolResult.Data["query"].(string); ok {
+		result.SQL = value
+	}
+	if rows, ok := toolResult.Data["rows"].([]map[string]string); ok {
+		result.Rows = rows
+	}
+	result.RowCount = len(result.Rows)
+	return result
 }
 
 func (h *IntegrationHandler) Search(c *gin.Context) {
@@ -1091,9 +1274,26 @@ func (h *IntegrationHandler) ListClients(c *gin.Context) {
 	}
 	result := make([]gin.H, 0, len(clients))
 	for _, client := range clients {
-		result = append(result, gin.H{"id": client.ID, "name": client.Name, "tenant_id": client.TenantID, "identity_provider_id": client.IdentityProviderID, "administrator_user_id": client.AdministratorUserID, "enabled": client.Enabled, "expires_at": client.ExpiresAt})
+		result = append(result, gin.H{"id": client.ID, "name": client.Name, "tenant_id": client.TenantID, "identity_provider_id": client.IdentityProviderID, "administrator_user_id": client.AdministratorUserID, "scopes": client.Scopes(), "enabled": client.Enabled, "expires_at": client.ExpiresAt})
 	}
 	integrationData(c, http.StatusOK, result)
+}
+
+func (h *IntegrationHandler) UpdateClientScopes(c *gin.Context) {
+	actor, _ := c.Get(types.UserContextKey.String())
+	user, _ := actor.(*types.User)
+	var req struct {
+		Scopes []string `json:"scopes" binding:"required"`
+	}
+	if c.ShouldBindJSON(&req) != nil {
+		integrationError(c, http.StatusBadRequest, "invalid_client_scopes", "scopes are required")
+		return
+	}
+	if err := h.service.UpdateClientScopes(c.Request.Context(), user, c.Param("client_id"), req.Scopes); err != nil {
+		integrationError(c, http.StatusForbidden, "client_scopes_update_failed", "integration client scope update denied")
+		return
+	}
+	integrationData(c, http.StatusOK, gin.H{"scopes": req.Scopes, "reauthentication_required": true})
 }
 
 func (h *IntegrationHandler) CreateIdentityProvider(c *gin.Context) {

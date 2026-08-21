@@ -469,6 +469,23 @@ func TestClientBoundaryRejectsWeakSecretUnknownScopeAndRole(t *testing.T) {
 	}
 }
 
+func TestUpdateClientScopesRevokesExistingSessions(t *testing.T) {
+	svc := testService(t)
+	actor := &types.User{Role: types.UserRolePlatformAdmin, IsActive: true}
+	require.NoError(t, svc.db.Create(&Client{ID: "client", TenantID: 1, Enabled: true, ScopesJSON: `["kb:list"]`, KnowledgeBaseIDsJSON: `[]`, AllowedOriginsJSON: `[]`, RoleMappingsJSON: `{}`}).Error)
+	require.NoError(t, svc.db.Create(&Session{ID: "session", ClientID: "client", TenantID: 1, Kind: "service", Digest: digest("token"), ScopesJSON: `["kb:list"]`, KnowledgeBaseIDsJSON: `[]`, ExpiresAt: time.Now().Add(time.Hour), AbsoluteExpiresAt: time.Now().Add(time.Hour)}).Error)
+
+	require.NoError(t, svc.UpdateClientScopes(context.Background(), actor, "client", []string{"kb:list", "table:analyze"}))
+	var client Client
+	require.NoError(t, svc.db.First(&client, "id = ?", "client").Error)
+	require.Equal(t, []string{"kb:list", "table:analyze"}, client.Scopes())
+	var session Session
+	require.NoError(t, svc.db.First(&session, "id = ?", "session").Error)
+	require.NotNil(t, session.RevokedAt)
+
+	require.ErrorIs(t, svc.UpdateClientScopes(context.Background(), actor, "client", []string{"unknown"}), ErrForbidden)
+}
+
 func TestPrincipalFromBidReviewUsesUnifiedShape(t *testing.T) {
 	user := &types.User{ID: "legacy-user", TenantID: 7, BidReviewRole: string(types.UserRoleMember), KnowledgeBaseIDs: types.StringArray{"kb-1"}}
 	principal := PrincipalFromBidReview(user)

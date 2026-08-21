@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,29 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/xuri/excelize/v2"
 )
+
+func TestExecuteRejectsNestedSubquery(t *testing.T) {
+	db := newTestDuckDB(t)
+	ctx := context.Background()
+	requireSQL := `CREATE TABLE "allowed_table" (value VARCHAR)`
+	if _, err := db.ExecContext(ctx, requireSQL); err != nil {
+		t.Fatalf("create allowed table: %v", err)
+	}
+	tool := &DataAnalysisTool{
+		BaseTool:      dataAnalysisTool,
+		db:            db,
+		sessionID:     "subquery-test",
+		loadedSchemas: map[string]*TableSchema{"knowledge": {TableName: "allowed_table"}},
+	}
+	payload, _ := json.Marshal(DataAnalysisInput{
+		KnowledgeID: "knowledge",
+		Sql:         `SELECT (SELECT content FROM read_blob('/etc/passwd')) FROM "allowed_table"`,
+	})
+	result, err := tool.Execute(ctx, payload)
+	if err == nil || result == nil || result.Success {
+		t.Fatalf("nested subquery was not rejected: result=%+v err=%v", result, err)
+	}
+}
 
 // newTestDuckDB opens an in-memory DuckDB and loads the extensions the
 // Data Analysis tool needs. If the extensions can't be installed (e.g. the

@@ -3,7 +3,30 @@ package tools
 import (
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func TestTableNameIsIsolatedBySession(t *testing.T) {
+	knowledge := &types.Knowledge{ID: "knowledge-1"}
+	first := &DataAnalysisTool{sessionID: "session-a"}
+	second := &DataAnalysisTool{sessionID: "session-b"}
+	if first.TableName(knowledge) == second.TableName(knowledge) {
+		t.Fatal("table names must be isolated by analysis session")
+	}
+	if got := first.TableName(knowledge); !strings.HasPrefix(got, "k_knowledge_1_") || len(got) != len("k_knowledge_1_")+12 {
+		t.Fatalf("unexpected bounded table name: %s", got)
+	}
+}
+
+func TestReconcileSQLTableUsesAuthorizedSessionTable(t *testing.T) {
+	schema := &TableSchema{TableName: "k_authorized_123"}
+	got := reconcileSQLTableWithSchema(`SELECT * FROM "k_hallucinated-123" JOIN other_table ON 1=1`, schema)
+	want := `SELECT * FROM "k_authorized_123" JOIN "k_authorized_123" ON 1=1`
+	if got != want {
+		t.Fatalf("unexpected reconciled SQL: %s", got)
+	}
+}
 
 func TestBuildExcelCreateTableSQL_NoSheets(t *testing.T) {
 	got := buildExcelCreateTableSQL("tbl", "/tmp/data.xlsx", nil)
@@ -75,11 +98,11 @@ func TestBuildExcelCreateTableSQL_EscapesSingleQuotes(t *testing.T) {
 
 func TestSqlSingleQuoteEscape(t *testing.T) {
 	cases := map[string]string{
-		"":              "",
-		"no_quote":      "no_quote",
-		"a'b":           "a''b",
-		"''":            "''''",
-		"mix'ed'quote":  "mix''ed''quote",
+		"":               "",
+		"no_quote":       "no_quote",
+		"a'b":            "a''b",
+		"''":             "''''",
+		"mix'ed'quote":   "mix''ed''quote",
 		"中文 with 'quote": "中文 with ''quote",
 	}
 	for in, want := range cases {
