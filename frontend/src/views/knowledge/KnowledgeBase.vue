@@ -64,6 +64,7 @@ import { formatStringDate, kbFileTypeVerification } from '@/utils';
 import { formatFileSize } from '@/utils/files';
 import { getParserEngines, type ParserEngineInfo } from '@/api/system';
 import { canManageBidReviewKnowledge } from '@/utils/bidreview-sso';
+import { getRuntimeMode } from '@/utils/embedded-runtime';
 import { buildKnowledgeUploadMetadata } from '@/utils/knowledge-upload-metadata';
 import { collectPlatformSupportedFileTypes } from './platform-parser-support';
 const route = useRoute();
@@ -172,14 +173,20 @@ const isSameTenantKnowledgeBase = computed(() => {
   return Number(kbInfo.value.tenant_id) === Number(authStore.effectiveTenantId);
 });
 
+const canManageEmbeddedKnowledge = computed(() =>
+  getRuntimeMode() === 'embedded-page' && authStore.canManageTenant && canManageBidReviewKnowledge()
+);
+
 // Can edit: owner, admin, or editor
 const canEdit = computed(() => {
-  return authStore.canManageTenant && canManageBidReviewKnowledge() && orgStore.canEditKB(kbId.value, isSameTenantKnowledgeBase.value);
+  return canManageEmbeddedKnowledge.value
+    || (authStore.canManageTenant && canManageBidReviewKnowledge() && orgStore.canEditKB(kbId.value, isSameTenantKnowledgeBase.value));
 });
 
 // Can manage (delete, settings, etc.): owner or admin
 const canManage = computed(() => {
-  return authStore.canManageTenant && canManageBidReviewKnowledge() && orgStore.canManageKB(kbId.value, isSameTenantKnowledgeBase.value);
+  return canManageEmbeddedKnowledge.value
+    || (authStore.canManageTenant && canManageBidReviewKnowledge() && orgStore.canManageKB(kbId.value, isSameTenantKnowledgeBase.value));
 });
 
 const canContribute = computed(() => {

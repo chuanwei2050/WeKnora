@@ -1270,6 +1270,7 @@ import Papa from 'papaparse'
 import FAQTagTooltip from '@/components/FAQTagTooltip.vue'
 import { useUIStore } from '@/stores/ui'
 import { canManageBidReviewKnowledge } from '@/utils/bidreview-sso'
+import { getRuntimeMode } from '@/utils/embedded-runtime'
 
 interface FAQEntry {
   id: number
@@ -1320,6 +1321,10 @@ const isSameTenantKnowledgeBase = computed(() => {
   return Number(kbInfo.value.tenant_id) === Number(authStore.effectiveTenantId)
 })
 
+const canManageEmbeddedKnowledge = computed(() =>
+  getRuntimeMode() === 'embedded-page' && authStore.canManageTenant && canManageBidReviewKnowledge()
+)
+
 // Permission control: check if current user owns this KB or has edit/manage permission
 const isOwner = computed(() => {
   if (!kbInfo.value) return false
@@ -1328,12 +1333,14 @@ const isOwner = computed(() => {
 
 // Can edit: owner, admin, or editor
 const canEdit = computed(() => {
-  return canManageBidReviewKnowledge() && orgStore.canEditKB(props.kbId, isSameTenantKnowledgeBase.value)
+  return canManageEmbeddedKnowledge.value
+    || (canManageBidReviewKnowledge() && orgStore.canEditKB(props.kbId, isSameTenantKnowledgeBase.value))
 })
 
 // Can manage (delete, settings, etc.): owner or admin
 const canManage = computed(() => {
-  return canManageBidReviewKnowledge() && orgStore.canManageKB(props.kbId, isSameTenantKnowledgeBase.value)
+  return canManageEmbeddedKnowledge.value
+    || (canManageBidReviewKnowledge() && orgStore.canManageKB(props.kbId, isSameTenantKnowledgeBase.value))
 })
 
 // Current KB's shared record (when accessed via organization share)
