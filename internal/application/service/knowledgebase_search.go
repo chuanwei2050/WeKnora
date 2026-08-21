@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -132,7 +133,14 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	}
 
 	// Build retrieval parameters for vector and keyword engines
-	retrieveParams, err := s.buildRetrievalParams(ctx, retrieveEngine, kb, params, searchKBIDs, matchCount)
+	var vectorKnowledgeIDs []string
+	if retrieveEngine.SupportRetriever(types.VectorRetrieverType) && !params.DisableVectorMatch && shouldUseVectorRetrieval(kb) {
+		vectorKnowledgeIDs, err = s.compatibleVectorKnowledgeIDs(ctx, kb, visibleKBs, params.KnowledgeIDs)
+		if err != nil {
+			logger.Warnf(ctx, "Skipping vector retrieval because embedding compatibility could not be resolved: %v", err)
+		}
+	}
+	retrieveParams, err := s.buildRetrievalParams(ctx, retrieveEngine, kb, params, searchKBIDs, vectorKnowledgeIDs, matchCount)
 	if err != nil {
 		return nil, err
 	}
@@ -189,6 +197,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	kb *types.KnowledgeBase,
 	params types.SearchParams,
 	searchKBIDs []string,
+	vectorKnowledgeIDs []string,
 	matchCount int,
 ) ([]types.RetrieveParams, error) {
 	currentTenantID := types.MustTenantIDFromContext(ctx)
@@ -199,7 +208,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	vectorIndexed := shouldUseVectorRetrieval(kb)
 
 	// Add vector retrieval params if supported
-	if retrieveEngine.SupportRetriever(types.VectorRetrieverType) && !params.DisableVectorMatch && vectorIndexed {
+	if retrieveEngine.SupportRetriever(types.VectorRetrieverType) && !params.DisableVectorMatch && vectorIndexed && vectorKnowledgeIDs != nil {
 		logger.Info(ctx, "Vector retrieval supported, preparing vector retrieval parameters")
 
 		var queryEmbedding []float32
@@ -243,7 +252,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 			TopK:             matchCount,
 			Threshold:        params.VectorThreshold,
 			RetrieverType:    types.VectorRetrieverType,
-			KnowledgeIDs:     params.KnowledgeIDs,
+			KnowledgeIDs:     vectorKnowledgeIDs,
 			TagIDs:           params.TagIDs,
 		}
 
@@ -273,6 +282,103 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	}
 
 	return retrieveParams, nil
+}
+
+func (s *knowledgeBaseService) compatibleVectorKnowledgeIDs(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	visibleKBs []*types.KnowledgeBase,
+	requestedKnowledgeIDs []string,
+) ([]string, error) {
+	activeModel, err := s.modelService.GetModelByID(ctx, kb.EmbeddingModelID)
+	if err != nil {
+		return nil, err
+	}
+	models, err := s.modelService.ListModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	knowledges := make([]*types.Knowledge, 0)
+	for _, visibleKB := range visibleKBs {
+		items, listErr := s.kgRepo.ListKnowledgeByKnowledgeBaseID(ctx, visibleKB.TenantID, visibleKB.ID)
+		if listErr != nil {
+			return nil, listErr
+		}
+		knowledges = append(knowledges, items...)
+	}
+	return compatibleKnowledgeIDs(activeModel, models, knowledges, requestedKnowledgeIDs), nil
+}
+
+func compatibleKnowledgeIDs(
+	activeModel *types.Model,
+	models []*types.Model,
+	knowledges []*types.Knowledge,
+	requestedKnowledgeIDs []string,
+) []string {
+	modelsByID := make(map[string]*types.Model, len(models))
+	for _, model := range models {
+		if model != nil {
+			modelsByID[model.ID] = model
+		}
+	}
+	requested := make(map[string]struct{}, len(requestedKnowledgeIDs))
+	for _, id := range requestedKnowledgeIDs {
+		requested[id] = struct{}{}
+	}
+	compatible := make([]string, 0, len(knowledges))
+	for _, knowledge := range knowledges {
+		if knowledge == nil {
+			continue
+		}
+		if len(requested) > 0 {
+			if _, ok := requested[knowledge.ID]; !ok {
+				continue
+			}
+		}
+		if knowledgeEmbeddingCompatible(activeModel, knowledge, modelsByID[knowledge.EmbeddingModelID]) {
+			compatible = append(compatible, knowledge.ID)
+		}
+	}
+	if len(compatible) == 0 {
+		return nil
+	}
+	return compatible
+}
+
+func knowledgeEmbeddingCompatible(activeModel *types.Model, knowledge *types.Knowledge, legacyModel *types.Model) bool {
+	if activeModel == nil || knowledge == nil {
+		return false
+	}
+	if knowledge.EmbeddingDimension > 0 {
+		activeParams := activeModel.Parameters.EmbeddingParameters
+		if activeParams.Dimension != knowledge.EmbeddingDimension {
+			return false
+		}
+		activeID := strings.TrimSpace(activeParams.CompatibilityID)
+		knowledgeID := strings.TrimSpace(knowledge.EmbeddingCompatibilityID)
+		if activeID != "" || knowledgeID != "" {
+			return activeID != "" && activeID == knowledgeID
+		}
+		return activeModel.ID == knowledge.EmbeddingModelID
+	}
+	return embeddingModelsCompatible(activeModel, legacyModel)
+}
+
+func embeddingModelsCompatible(left, right *types.Model) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	leftParams := left.Parameters.EmbeddingParameters
+	rightParams := right.Parameters.EmbeddingParameters
+	if leftParams.Dimension <= 0 || rightParams.Dimension <= 0 || leftParams.Dimension != rightParams.Dimension {
+		return false
+	}
+	leftID := strings.TrimSpace(leftParams.CompatibilityID)
+	rightID := strings.TrimSpace(rightParams.CompatibilityID)
+	if leftID == "" || rightID == "" {
+		return left.ID == right.ID
+	}
+	return leftID == rightID
 }
 
 func shouldUseVectorRetrieval(kb *types.KnowledgeBase) bool {

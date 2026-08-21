@@ -24,6 +24,9 @@ func TestBootstrapPlanBuildsExplicitOfflineRoleModels(t *testing.T) {
 	if embedding.Parameters.EmbeddingParameters.Dimension != 2560 || embedding.Parameters.Capabilities.EmbeddingDimension != 2560 {
 		t.Fatalf("embedding dimension mismatch: %+v", embedding.Parameters)
 	}
+	if embedding.Parameters.EmbeddingParameters.CompatibilityID != "qwen3-embedding-4b-v1" {
+		t.Fatalf("embedding compatibility ID mismatch: %+v", embedding.Parameters)
+	}
 	if embedding.Parameters.APIKey != "profile-secret" {
 		t.Fatal("referenced API key was not expanded")
 	}
@@ -192,7 +195,7 @@ func TestBootstrapBindsOfflineSeedsToApprovedEndpoints(t *testing.T) {
 	}
 }
 
-func TestBootstrapVersionSixUpgradesUnchangedExistingSeeds(t *testing.T) {
+func TestBootstrapUpgradesUnchangedExistingSeeds(t *testing.T) {
 	setBootstrapTestEnv(t)
 	models := BootstrapPlan(types.ModelProfileOffline)
 	for index, model := range models {
@@ -203,6 +206,9 @@ func TestBootstrapVersionSixUpgradesUnchangedExistingSeeds(t *testing.T) {
 		}
 		if model.Name == offlineLLMName {
 			model.Name = legacyOfflineLLMName
+		}
+		if model.ProfileRole == "embedding" {
+			model.Parameters.EmbeddingParameters.CompatibilityID = ""
 		}
 	}
 	repo := &bootstrapRepository{models: models}
@@ -215,7 +221,7 @@ func TestBootstrapVersionSixUpgradesUnchangedExistingSeeds(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(repo.models) != len(models) {
-		t.Fatalf("version 6 upgrade changed model count: %d != %d", len(repo.models), len(models))
+		t.Fatalf("seed upgrade changed model count: %d != %d", len(repo.models), len(models))
 	}
 	for _, model := range repo.models {
 		if model.Parameters.ApprovedEndpointID == "" {
@@ -229,6 +235,9 @@ func TestBootstrapVersionSixUpgradesUnchangedExistingSeeds(t *testing.T) {
 		}
 		if model.Name == legacyOfflineLLMName {
 			t.Fatalf("legacy model name was not normalized: %+v", model)
+		}
+		if model.ProfileRole == "embedding" && model.Parameters.EmbeddingParameters.CompatibilityID != "qwen3-embedding-4b-v1" {
+			t.Fatalf("embedding compatibility ID was not seeded: %+v", model)
 		}
 	}
 	if stateRepo.settings.ModelSeedVersion != modelSeedVersion {
@@ -323,6 +332,7 @@ func setBootstrapTestEnv(t *testing.T) {
 	t.Setenv("OFFLINE_EMBEDDING_MODEL_BASE_URL", "http://192.168.10.232:8001/v1")
 	t.Setenv("OFFLINE_EMBEDDING_MODEL_API_KEY", "${OFFLINE_MODEL_API_KEY}")
 	t.Setenv("OFFLINE_EMBEDDING_MODEL_DIMENSION", "2560")
+	t.Setenv("OFFLINE_EMBEDDING_MODEL_COMPATIBILITY_ID", "qwen3-embedding-4b-v1")
 	t.Setenv("OFFLINE_RERANK_MODEL_NAME", "rerank")
 	t.Setenv("OFFLINE_RERANK_MODEL_BASE_URL", "http://__FILL_HOST__:8002/v1")
 	t.Setenv("OFFLINE_VLM_MODEL_NAME", "${OFFLINE_LLM_MODEL_NAME}")

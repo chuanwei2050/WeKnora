@@ -30,7 +30,7 @@ var bootstrapRoles = map[string]bootstrapRole{
 	"tts":              {modelType: types.ModelTypeTTS, modelRole: types.ModelRoleTTS, use: "tts"},
 }
 
-const modelSeedVersion = 6
+const modelSeedVersion = 7
 
 const legacyPrivateOpenAICompatibleProvider = "private-openai-compatible"
 
@@ -74,8 +74,10 @@ func BootstrapPlan(profile types.ModelProfile) []*types.Model {
 			source = types.ModelSourceRemote
 		}
 		dimension := 0
+		compatibilityID := ""
 		if spec.HasDimension {
 			dimension, _ = strconv.Atoi(strings.TrimSpace(expandAllEnvRefs(os.Getenv(prefix + "_" + spec.Stem + "_DIMENSION"))))
+			compatibilityID = strings.TrimSpace(expandAllEnvRefs(os.Getenv(prefix + "_" + spec.Stem + "_COMPATIBILITY_ID")))
 		}
 
 		location := types.DeriveEndpointLocation(baseURL, nil)
@@ -88,7 +90,8 @@ func BootstrapPlan(profile types.ModelProfile) []*types.Model {
 			ArtifactPolicy: policy,
 			EndpointUse:    role.use,
 			EmbeddingParameters: types.EmbeddingParameters{
-				Dimension: dimension,
+				Dimension:       dimension,
+				CompatibilityID: compatibilityID,
 			},
 			Capabilities: capabilityFor(role.modelRole, policy, location, dimension),
 		}
@@ -178,6 +181,13 @@ func Bootstrap(
 				if settings.ModelSeedVersion < 4 && matched.Parameters.Provider == legacyPrivateOpenAICompatibleProvider {
 					matched.Parameters.Provider = "generic"
 					changed = true
+				}
+				if settings.ModelSeedVersion < 7 && candidate.ProfileRole == "embedding" {
+					compatibilityID := candidate.Parameters.EmbeddingParameters.CompatibilityID
+					if compatibilityID != "" && matched.Parameters.EmbeddingParameters.CompatibilityID != compatibilityID {
+						matched.Parameters.EmbeddingParameters.CompatibilityID = compatibilityID
+						changed = true
+					}
 				}
 				if changed {
 					if err := repo.Update(ctx, matched); err != nil {

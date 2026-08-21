@@ -105,6 +105,9 @@ type Knowledge struct {
 	EnableStatus string `json:"enable_status"`
 	// ID of the embedding model
 	EmbeddingModelID string `json:"embedding_model_id"`
+	// EmbeddingCompatibilityID and EmbeddingDimension snapshot the vector space used to index this document.
+	EmbeddingCompatibilityID string `json:"embedding_compatibility_id" gorm:"type:varchar(128);not null;default:''"`
+	EmbeddingDimension       int    `json:"embedding_dimension" gorm:"not null;default:0"`
 	// File name of the knowledge
 	FileName string `json:"file_name"`
 	// File type of the knowledge

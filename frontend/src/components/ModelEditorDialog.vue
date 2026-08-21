@@ -344,6 +344,7 @@ interface ModelFormData {
   baseUrl?: string
   apiKey?: string
   dimension?: number
+  compatibilityId?: string
   interfaceType?: 'ollama' | 'openai'
   isDefault: boolean
   supportsVision?: boolean

@@ -453,6 +453,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     apiKey: model.parameters.api_key || '',
     provider: model.parameters.provider || '', // 添加 provider 字段
     dimension: model.parameters.embedding_parameters?.dimension,
+    compatibilityId: model.parameters.embedding_parameters?.compatibility_id,
     isBuiltin: model.is_builtin || false,
     isDefault: model.is_default || false,
     status: model.status || '',
@@ -610,7 +611,8 @@ const handleModelSave = async (modelData: any) => {
         ...(currentModelType.value === 'embedding' && modelData.dimension ? {
           embedding_parameters: {
             dimension: modelData.dimension,
-            truncate_prompt_tokens: 0
+            truncate_prompt_tokens: 0,
+            ...(modelData.compatibilityId ? { compatibility_id: modelData.compatibilityId } : {})
           }
         } : {}),
         ...(currentModelType.value === 'vllm' ? {

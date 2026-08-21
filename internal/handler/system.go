@@ -241,14 +241,6 @@ func validateProfileSwitch(models []*types.Model, current, target types.ModelPro
 	if targetEmbedding == nil {
 		return fmt.Errorf("profile %q has no embedding model", target)
 	}
-	currentEmbedding := selectProfileEmbedding(models, current)
-	if currentEmbedding != nil {
-		from := currentEmbedding.Parameters.EmbeddingParameters.Dimension
-		to := targetEmbedding.Parameters.EmbeddingParameters.Dimension
-		if from > 0 && to > 0 && from != to {
-			return fmt.Errorf("embedding dimension differs across profiles: %d != %d", from, to)
-		}
-	}
 	return nil
 }
 

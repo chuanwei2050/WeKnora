@@ -2024,6 +2024,8 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// Get embedding model for vectorization — only needed when vector/keyword indexing is enabled
 	var embeddingModel embedding.Embedder
+	var resolvedEmbeddingModel *types.Model
+	oldEmbeddingDimension := knowledge.EmbeddingDimension
 	stagingVersionID := ""
 	if kb.Governance.Enabled {
 		stagingVersionID = strings.TrimSpace(knowledge.PendingVersionID)
@@ -2031,7 +2033,21 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	isGovernedStaging := stagingVersionID != ""
 	if kb.NeedsEmbeddingModel() {
 		var err error
-		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+		if oldEmbeddingDimension <= 0 {
+			models, listErr := s.modelService.ListModels(ctx)
+			if listErr == nil {
+				for _, model := range models {
+					if model != nil && model.ID == knowledge.EmbeddingModelID {
+						oldEmbeddingDimension = model.Parameters.EmbeddingParameters.Dimension
+						break
+					}
+				}
+			}
+		}
+		resolvedEmbeddingModel, err = s.modelService.GetModelByID(ctx, kb.EmbeddingModelID)
+		if err == nil {
+			embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, resolvedEmbeddingModel.ID)
+		}
 		if err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks get embedding model failed")
 			span.RecordError(err)
@@ -2059,7 +2075,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		indexingEnginesForKnowledgeBase(tenantInfo.GetEffectiveEngines(), kb),
 	)
 	if !isGovernedStaging && err == nil && embeddingModel != nil {
-		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
+		deleteDimension := oldEmbeddingDimension
+		if deleteDimension <= 0 {
+			deleteDimension = embeddingModel.GetDimensions()
+		}
+		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, deleteDimension, knowledge.Type); err != nil {
 			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
 			// 不返回错误，继续处理（可能没有旧数据）
 		} else {
@@ -2353,6 +2373,13 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			return
 		}
 		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
+		if resolvedEmbeddingModel != nil {
+			knowledge.EmbeddingModelID = resolvedEmbeddingModel.ID
+			knowledge.EmbeddingCompatibilityID = strings.TrimSpace(
+				resolvedEmbeddingModel.Parameters.EmbeddingParameters.CompatibilityID,
+			)
+			knowledge.EmbeddingDimension = resolvedEmbeddingModel.Parameters.EmbeddingParameters.Dimension
+		}
 
 		// Final check before marking as completed - if deleted during processing, don't update status
 		if s.isKnowledgeDeleting(ctx, knowledge.TenantID, knowledge.ID) {

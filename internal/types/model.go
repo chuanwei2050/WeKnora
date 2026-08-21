@@ -86,8 +86,9 @@ const (
 
 // EmbeddingParameters represents the embedding parameters for a model
 type EmbeddingParameters struct {
-	Dimension            int `yaml:"dimension"              json:"dimension"`
-	TruncatePromptTokens int `yaml:"truncate_prompt_tokens" json:"truncate_prompt_tokens"`
+	Dimension            int    `yaml:"dimension"              json:"dimension"`
+	TruncatePromptTokens int    `yaml:"truncate_prompt_tokens" json:"truncate_prompt_tokens"`
+	CompatibilityID      string `yaml:"compatibility_id"       json:"compatibility_id"`
 }
 
 type ModelParameters struct {
