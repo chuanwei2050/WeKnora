@@ -29,7 +29,7 @@
 <p align="center">
   <h4 align="center">
 
-  [项目介绍](#-项目介绍) • [架构设计](#-架构设计) • [核心特性](#-核心特性) • [快速开始](#-快速开始) • [文档](#-文档) • [开发指南](#-开发指南)
+  [项目介绍](#-项目介绍) • [功能概览](#-功能概览) • [快速开始](#-快速开始) • [集成方式](#-集成方式) • [开发指南](#-开发指南) • [文档](#-文档)
 
 # 💡 WeKnora — 让文档活起来：RAG、Agent 推理与自动 Wiki 一体化的知识框架
 
@@ -37,9 +37,7 @@
 
 **[WeKnora（维娜拉）](https://weknora.weixin.qq.com)** 是一款开源的、基于大语言模型（LLM）的知识管理框架，专为企业级文档理解、语义检索与智能推理场景打造。
 
-框架围绕三大核心能力构建：**RAG 快速问答**适合日常知识查询，**ReAct Agent 智能推理**自主编排知识检索、MCP 工具与网络搜索完成复杂多步任务，全新的 **Wiki 模式**则让 Agent 从原始文档中自治生成相互链接的 Markdown 知识库与可视化知识图谱。结合多源数据接入（飞书 / Notion / 语雀，更多持续接入中）、二十余家主流模型厂商集成、Langfuse 全链路可观测性，以及完全可私有化部署的模块化架构，WeKnora 帮助团队把分散文档沉淀为可查询、可推理、可持续演进的专属知识资产。
-
-框架支持从飞书、Notion 及语雀等外部平台自动同步知识（更多数据源持续接入中），覆盖 PDF、Word、图片、Excel 等十余种文档格式，并可通过企业微信、飞书、Slack、Telegram 等 IM 频道直接提供问答服务。模型层面兼容 OpenAI、DeepSeek、Qwen（阿里云）、智谱、混元、Gemini、MiniMax、NVIDIA、Ollama 等主流厂商。全流程模块化设计，大模型、向量数据库、存储等组件均可灵活替换，支持本地与私有云部署，数据完全自主可控。WeKnora 还无缝集成了 **Langfuse**，为 Agent 运行、Token 使用及任务流水线提供了全面的可观测性追踪。
+WeKnora 将 **RAG 快速问答、ReAct Agent 推理和自动 Wiki** 统一在一套知识工作流中：导入 PDF、Word、图片、网页或外部知识库后，系统完成解析、索引、检索和回答；Agent 可继续调用 MCP 工具与网络搜索处理多步任务。模型、向量数据库、对象存储和部署方式均可替换，支持本地及私有云部署。
 
 
 ## 📱 功能展示
@@ -106,28 +104,41 @@
 | 能力 | 详情 |
 |------|------|
 | 部署 | 本地 / Docker / Kubernetes (Helm)，支持私有化离线部署 |
-| 界面 | Web UI / RESTful API / Chrome Extension / 微信小程序 |
+| 界面 | Web UI / RESTful API / Chrome Extension / 微信小程序 / 可嵌入聊天 Widget |
 | 可观测性 | 集成 Langfuse 以追踪 ReAct 循环、Token 消耗、工具调用和任务流水线 |
 | 任务管理 | MQ 异步任务，版本升级自动数据库迁移 |
 | 模型管理 | 集中配置，知识库级别模型选择，多租户共享内置模型，WeKnora Cloud 托管模型与文档解析 |
 
-## 🧩 Chrome 插件
+## 🔗 集成方式
+
+### Chrome 插件
 
 [**WeKnora Chrome 插件**](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd)支持在浏览器中直接将网页内容采集到 WeKnora 知识库。选中文本、图片或整个页面，一键保存为知识条目，无需复制粘贴或手动上传文件。
 
 
-## 📱 微信小程序
+### 微信小程序
 
 [**WeKnora 微信小程序**](./miniprogram/README.md) 提供轻量移动端客户端，支持配置 WeKnora API、选择知识库、导入 URL，并在微信内向知识库提问。
 
 
-## 🦞 ClawHub Skill
+### ClawHub Skill
 
 [**WeKnora ClawHub Skill**](https://clawhub.ai/lyingbug/weknora) 是 WeKnora 发布在 ClawHub 平台上的技能。安装后，可通过 WeKnora REST API 上传文档（文件 / URL / Markdown）、执行混合检索（向量 + 关键词）以及管理知识条目。
 
 - **文档导入** — 通过 Agent 上传文件、导入网页或写入 Markdown 知识
 - **混合检索** — 在单个或多个知识库中进行向量 + 关键词混合搜索
 - **知识管理** — 以编程方式浏览、编辑和删除知识条目
+
+### 可嵌入聊天 Widget
+
+Widget 用于把 WeKnora 知识问答嵌入已有业务系统。宿主页面加载 `weknora-widget.iife.js` 后会显示悬浮入口，打开后通过隔离的 iframe 展示对话；支持固定知识库、用户可选知识库和全部授权知识库三种范围，并提供移动、缩放、最大化、会话切换及事件回调。
+
+```bash
+cd frontend
+npm run build:widget
+```
+
+构建结果位于 `frontend/dist-widget/`。接入方需要由自己的后端申请短期 bootstrap ticket，浏览器不应持有 integration client secret。完整认证流程、初始化示例和 API 边界参见[外挂知识库对接指南](./docs/外挂知识库指南.md)。
 
 ## 🚀 快速开始
 
@@ -164,6 +175,17 @@ docker compose up -d   # 启动核心服务
 系统角色分为平台管理员、租户管理员和普通成员。平台管理员管理全部租户；租户管理员仅管理所属租户的配置、知识库与图谱；普通成员仅使用被授权的知识和问答能力。
 
 > 如需使用本地 Ollama 模型，请先运行 `ollama serve > /dev/null 2>&1 &`
+
+### Lite 与标准版
+
+| 维度 | Lite | 标准版 |
+|------|------|--------|
+| 使用场景 | 个人或小团队本机使用 | 多团队协作与企业部署 |
+| 账号与协作 | 单租户、无需注册，不提供共享空间 | 多租户、账号与组织管理、共享空间 |
+| 依赖 | 单应用，本地存储 | Docker Compose 多服务架构 |
+| 文档解析 | 内置 Simple，可接入 Cloud 等外部能力 | 完整文档处理与解析引擎配置 |
+
+两种版本均可本地保存数据；是否对公网开放取决于实际监听地址、网关和网络策略。
 
 ### 🔧 可选服务（Docker Compose Profile）
 
@@ -231,15 +253,17 @@ LANGFUSE_SECRET_KEY=sk-lf-xxxxxxxx
 | MinIO Console | `http://localhost:9001` |
 | Jaeger UI | `http://localhost:16686` |
 
-## 文档知识图谱
+## 知识图谱
 
-WeKnora 支持将文档转化为知识图谱，展示文档中不同段落之间的关联关系。开启知识图谱功能后，系统会分析并构建文档内部的语义关联网络，不仅帮助用户理解文档内容，还为索引和检索提供结构化支撑，提升检索结果的相关性和广度。
+启用 `neo4j` profile 并在知识库设置中开启实体/关系抽取后，WeKnora 会从文档块提取实体和关系，并在检索时使用图谱补充上下文。抽取结果受实体数、关系数、置信度和 Schema 限制；同一文本块重新抽取时会替换旧的规范化图谱记录，避免保留过期关系。
 
-具体配置请参考 [知识图谱配置说明](./docs/KnowledgeGraph.md) 进行相关配置。
+配置与验证步骤参见[开启知识图谱功能](./docs/开启知识图谱功能.md)。
 
-## 配套MCP服务器
+## MCP 工具
 
-请参考 [MCP配置说明](./mcp-server/MCP_CONFIG.md) 进行相关配置。
+MCP（Model Context Protocol）用于向 Agent 接入外部工具和数据源。在「设置 → MCP 服务」中可添加 SSE、HTTP Streamable 或 Stdio 服务，配置认证、超时和重试策略，并执行连接测试、查看工具清单及启停服务。生产环境应使用最小权限凭证并定期轮换。
+
+如果需要运行仓库自带的独立 MCP Server，请参考 [MCP Server 配置](./mcp-server/MCP_CONFIG.md)。
 
 ## 🔌 使用微信对话开放平台
 
@@ -252,11 +276,16 @@ WeKnora 作为[微信对话开放平台](https://chatbot.weixin.qq.com)的核心
 
 ## 📘 文档
 
-常见问题排查：[常见问题排查](./docs/QA.md)
+README 保留安装、配置和日常开发所需信息；以下专题内容篇幅较大或面向特定角色，保留为独立文档：
 
-详细接口说明请参考：[API 文档](./docs/api/README.md)
-
-产品规划与计划：[路线图 (Roadmap)](./docs/ROADMAP.md)
+| 分类 | 文档 |
+|------|------|
+| 使用与运维 | [常见问题](./docs/QA.md) · [Langfuse 集成](./docs/Langfuse集成.md) · [共享空间](./docs/共享空间说明.md) |
+| API 与嵌入 | [API 文档](./docs/api/README.md) · [外挂知识库](./docs/外挂知识库指南.md) · [OIDC 认证](./docs/OIDC认证调用流程.md) |
+| 扩展开发 | [数据源导入](./docs/数据源导入开发文档.md) · [IM 集成](./docs/IM集成开发文档.md) · [向量数据库](./docs/使用其他向量数据库.md) · [网络搜索引擎](./docs/添加新的网络搜索引擎.md) |
+| Agent 与平台配置 | [Agent Skills](./docs/agent-skills.md) |
+| 离线与私有化 | [严格离线运行](./docs/airgap-operations.md) |
+| 维护者文档 | [内置模型](./docs/maintainers/BUILTIN_MODELS.md) · [内置 MCP 服务](./docs/maintainers/BUILTIN_MCP_SERVICES.md) · [ASR/TTS 能力契约](./docs/voice-capabilities.md) |
 
 ## 🧭 开发指南
 
@@ -315,8 +344,8 @@ bash ./scripts/quick-dev.sh
 ```text
 logs/backend.log
 logs/frontend.log
-tmp/backend.pid
-tmp/frontend.pid
+logs/backend.pid
+logs/frontend.pid
 ```
 
 停止本地后端、前端和 Docker 依赖：

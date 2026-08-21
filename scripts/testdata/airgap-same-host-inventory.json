@@ -1,6 +1,6 @@
 {
   "schema": "weknora-airgap-model-inventory/v1",
-  "source": "docs/airgap-model-inventory.md",
+  "source": "scripts/testdata/evidence/airgap-model-inventory.md",
   "models": [
     {
       "role": "chat",
