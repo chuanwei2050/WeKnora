@@ -3,6 +3,7 @@
  */
 
 import DOMPurify from 'dompurify';
+import { getFileEndpoint } from './api-base';
 
 const PROVIDER_IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 
@@ -128,7 +129,7 @@ function protectProviderImageSrcInHTML(html: string): string {
     (_m, before, quote, provider, restPathRaw, after) => {
       const restPath = decodeProviderURL(restPathRaw);
       const protectedSrc = `${provider}://${restPath}`;
-      const fileProxyURL = `/files?${new URLSearchParams({ file_path: protectedSrc }).toString()}`;
+      const fileProxyURL = `${getFileEndpoint()}?${new URLSearchParams({ file_path: protectedSrc }).toString()}`;
       return `<img${before} src=${quote}${fileProxyURL}${quote} data-protected-src=${quote}${protectedSrc}${quote}${after}>`;
     },
   );
@@ -325,11 +326,12 @@ export async function hydrateProtectedFileImages(root: ParentNode | null | undef
     img.dataset.authHydrated = '1';
 
     const isProviderScheme = /^(local|minio|cos|tos|s3|oss):\/\//.test(sourceURL);
+    const fileEndpoint = getFileEndpoint();
     const requestURL = isProviderScheme
-      ? `/files?${new URLSearchParams({ file_path: sourceURL }).toString()}`
+      ? `${fileEndpoint}?${new URLSearchParams({ file_path: sourceURL }).toString()}`
       : sourceURL;
 
-    if (!requestURL.startsWith('/files?') || !requestURL.includes('file_path=')) {
+    if (!requestURL.startsWith(`${fileEndpoint}?`) || !requestURL.includes('file_path=')) {
       img.dataset.authHydrated = '0';
       return;
     }
