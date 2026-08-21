@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import ChatView from '@/views/chat/index.vue'
 import { createIntegrationChatSession, deleteIntegrationChatSession, exchangeBootstrapTicket, getIntegrationChatSession, listIntegrationChatSessions, listIntegrationKnowledgeBases, refreshIntegrationSession, renameIntegrationChatSession, type IntegrationChatSession } from '@/api/integration'
-import { notifyEmbeddedHost, parseEmbeddedMessage, resolveEmbeddedParentOrigin } from '@/utils/embedded-runtime'
+import { isIntegrationAuthFailure, notifyEmbeddedHost, parseEmbeddedMessage, resolveEmbeddedParentOrigin } from '@/utils/embedded-runtime'
 
 const authenticated = ref(false)
 const sessionId = ref('')
@@ -200,11 +200,13 @@ async function onMessage(event: MessageEvent) {
     await refreshConversations()
     if (refreshTimer !== undefined) window.clearInterval(refreshTimer)
     refreshTimer = window.setInterval(() => {
-      refreshIntegrationSession().catch(() => notifyEmbeddedHost('unauthorized'))
+      refreshIntegrationSession().catch((error) => {
+        if (isIntegrationAuthFailure(error)) notifyEmbeddedHost('unauthorized')
+      })
     }, 10 * 60 * 1000)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '认证失败'
-    notifyEmbeddedHost('unauthorized')
+    if (isIntegrationAuthFailure(error)) notifyEmbeddedHost('unauthorized')
   } finally {
     authenticating = false
   }

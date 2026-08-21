@@ -1,8 +1,10 @@
 import { getApiBaseUrl } from '@/utils/api-base'
-import { getEmbeddedCSRFToken, setEmbeddedCSRFToken, setEmbeddedScopes } from '@/utils/embedded-runtime'
+import { getEmbeddedAuthHeaders, setEmbeddedCSRFToken, setEmbeddedScopes, setEmbeddedSessionToken } from '@/utils/embedded-runtime'
+import { createIdempotencyKey } from '@/utils/idempotency-key'
 
 export interface ExchangeResponse {
   csrf_token: string
+  session_token: string
   user: { id: string; username: string; role: string; tenant_id: number }
   knowledge_base_ids: string[]
   scopes: string[]
@@ -18,8 +20,9 @@ export async function exchangeBootstrapTicket(ticket: string): Promise<ExchangeR
   if (!response.ok) throw new Error(`ticket exchange failed: ${response.status}`)
   const payload = await response.json() as { data?: ExchangeResponse } & ExchangeResponse
   const data = payload.data ?? payload
-  if (!data.csrf_token || !data.user) throw new Error('invalid ticket exchange response')
+  if (!data.csrf_token || !data.session_token || !data.user) throw new Error('invalid ticket exchange response')
   setEmbeddedCSRFToken(data.csrf_token)
+  setEmbeddedSessionToken(data.session_token)
   setEmbeddedScopes(Array.isArray(data.scopes) ? data.scopes : [])
   return data
 }
@@ -28,7 +31,7 @@ export async function refreshIntegrationSession(): Promise<void> {
   const response = await fetch(`${getApiBaseUrl()}/api/integration/v1/auth/refresh`, {
     method: 'POST',
     credentials: 'include',
-    headers: { 'X-CSRF-Token': getEmbeddedCSRFToken() },
+    headers: getEmbeddedAuthHeaders({ csrf: true }),
   })
   if (!response.ok) throw new Error(`session refresh failed: ${response.status}`)
   const payload = await response.json() as { data?: { csrf_token?: string } }
@@ -41,9 +44,8 @@ export async function createIntegrationChatSession(input: { mode: 'selected'; kn
     method: 'POST',
     credentials: 'include',
     headers: {
-      'Content-Type': 'application/json',
-      'X-CSRF-Token': getEmbeddedCSRFToken(),
-      'Idempotency-Key': crypto.randomUUID(),
+      ...getEmbeddedAuthHeaders({ csrf: true, json: true }),
+      'Idempotency-Key': createIdempotencyKey(),
     },
     body: JSON.stringify(input.mode === 'selected'
       ? { knowledge_base_mode: 'selected', knowledge_base_ids: input.knowledgeBaseIds }
@@ -55,14 +57,20 @@ export async function createIntegrationChatSession(input: { mode: 'selected'; kn
 }
 
 export async function listIntegrationKnowledgeBases(): Promise<Array<{ id: string; name: string }>> {
-  const response = await fetch(`${getApiBaseUrl()}/api/integration/v1/knowledge-bases`, { credentials: 'include' })
+  const response = await fetch(`${getApiBaseUrl()}/api/integration/v1/knowledge-bases`, {
+    credentials: 'include',
+    headers: getEmbeddedAuthHeaders(),
+  })
   if (!response.ok) throw new Error(`knowledge base list failed: ${response.status}`)
   const payload = await response.json() as { data: Array<{ id: string; name: string }> }
   return payload.data
 }
 
 export async function getIntegrationChatSession(sessionId: string): Promise<IntegrationChatSession> {
-  const response = await fetch(`${getApiBaseUrl()}/api/integration/v1/chat/sessions/${encodeURIComponent(sessionId)}`, { credentials: 'include' })
+  const response = await fetch(`${getApiBaseUrl()}/api/integration/v1/chat/sessions/${encodeURIComponent(sessionId)}`, {
+    credentials: 'include',
+    headers: getEmbeddedAuthHeaders(),
+  })
   if (!response.ok) throw new Error(`chat session lookup failed: ${response.status}`)
   const payload = await response.json() as { data: IntegrationChatSession }
   return payload.data
@@ -78,7 +86,10 @@ export interface IntegrationChatSession {
 }
 
 export async function listIntegrationChatSessions(): Promise<IntegrationChatSession[]> {
-  const response = await fetch(`${getApiBaseUrl()}/api/integration/v1/chat/sessions`, { credentials: 'include' })
+  const response = await fetch(`${getApiBaseUrl()}/api/integration/v1/chat/sessions`, {
+    credentials: 'include',
+    headers: getEmbeddedAuthHeaders(),
+  })
   if (!response.ok) throw new Error(`chat session list failed: ${response.status}`)
   const payload = await response.json() as { data: IntegrationChatSession[] }
   return payload.data
@@ -88,7 +99,7 @@ export async function renameIntegrationChatSession(sessionId: string, title: str
   const response = await fetch(`${getApiBaseUrl()}/api/integration/v1/chat/sessions/${encodeURIComponent(sessionId)}`, {
     method: 'PATCH',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getEmbeddedCSRFToken() },
+    headers: getEmbeddedAuthHeaders({ csrf: true, json: true }),
     body: JSON.stringify({ title }),
   })
   if (!response.ok) throw new Error(`chat session rename failed: ${response.status}`)
@@ -98,7 +109,7 @@ export async function deleteIntegrationChatSession(sessionId: string): Promise<v
   const response = await fetch(`${getApiBaseUrl()}/api/integration/v1/chat/sessions/${encodeURIComponent(sessionId)}`, {
     method: 'DELETE',
     credentials: 'include',
-    headers: { 'X-CSRF-Token': getEmbeddedCSRFToken() },
+    headers: getEmbeddedAuthHeaders({ csrf: true }),
   })
   if (!response.ok) throw new Error(`chat session deletion failed: ${response.status}`)
 }

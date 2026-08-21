@@ -679,8 +679,11 @@ func intersectStrings(left, right []string) []string {
 }
 
 func (s *Service) Authenticate(ctx context.Context, token, kind string) (*Principal, *types.User, *types.Tenant, error) {
+	if s == nil || s.db == nil || token == "" || kind == "" {
+		return nil, nil, nil, ErrUnauthorized
+	}
 	var session Session
-	if token == "" || s.db.WithContext(ctx).Where("digest = ? AND kind = ?", digest(token), kind).First(&session).Error != nil {
+	if s.db.WithContext(ctx).Where("digest = ? AND kind = ?", digest(token), kind).First(&session).Error != nil {
 		return nil, nil, nil, ErrUnauthorized
 	}
 	now := s.now()

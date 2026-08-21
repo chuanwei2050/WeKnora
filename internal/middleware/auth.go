@@ -88,15 +88,38 @@ func Auth(
 		}
 
 		authHeader := c.GetHeader("Authorization")
-		if !strings.HasPrefix(authHeader, "Bearer ") && len(integrationServices) > 0 && integrationServices[0] != nil {
-			if cookie, err := c.Cookie(integrationauth.BrowserCookieName); err == nil && cookie != "" {
-				service := integrationServices[0]
-				principal, user, tenant, authErr := service.Authenticate(c.Request.Context(), cookie, "browser")
+		bearer := ""
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			bearer = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+		}
+
+		// Integration browser sessions authenticate /api/v1 and /files for embedded hosts.
+		// Prefer an explicit Bearer browser session when present so cross-site embeds still
+		// work after browsers block third-party cookies.
+		if len(integrationServices) > 0 && integrationServices[0] != nil {
+			service := integrationServices[0]
+			var (
+				sessionToken string
+				principal    *integrationauth.Principal
+				user         *types.User
+				tenant       *types.Tenant
+				authErr      error
+			)
+			if bearer != "" {
+				principal, user, tenant, authErr = service.Authenticate(c.Request.Context(), bearer, "browser")
+				if authErr == nil && user != nil {
+					sessionToken = bearer
+				}
+			} else if cookie, err := c.Cookie(integrationauth.BrowserCookieName); err == nil && cookie != "" {
+				principal, user, tenant, authErr = service.Authenticate(c.Request.Context(), cookie, "browser")
 				if authErr != nil || user == nil {
 					c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: invalid integration session"})
 					c.Abort()
 					return
 				}
+				sessionToken = cookie
+			}
+			if sessionToken != "" {
 				if c.GetHeader("X-Tenant-ID") != "" {
 					c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: integration tenant is server-bound"})
 					c.Abort()
@@ -118,12 +141,12 @@ func Auth(
 					c.Abort()
 					return
 				}
-				if !isSafeMethod(c.Request.Method) && service.ValidateCSRF(c.Request.Context(), cookie, c.GetHeader("X-CSRF-Token")) != nil {
+				if !isSafeMethod(c.Request.Method) && service.ValidateCSRF(c.Request.Context(), sessionToken, c.GetHeader("X-CSRF-Token")) != nil {
 					c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: CSRF validation failed"})
 					c.Abort()
 					return
 				}
-				if !isSafeMethod(c.Request.Method) && service.ValidateBrowserOrigin(c.Request.Context(), cookie, c.GetHeader("Origin")) != nil {
+				if !isSafeMethod(c.Request.Method) && service.ValidateBrowserOrigin(c.Request.Context(), sessionToken, c.GetHeader("Origin")) != nil {
 					c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: integration origin is invalid"})
 					c.Abort()
 					return

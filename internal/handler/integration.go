@@ -267,24 +267,31 @@ func (h *IntegrationHandler) Exchange(c *gin.Context) {
 	c.Header("Referrer-Policy", "strict-origin")
 	c.SetSameSite(http.SameSiteLaxMode)
 	setIntegrationBrowserCookie(c, token, int(integrationauth.SessionMaxTTL.Seconds()))
-	integrationData(c, http.StatusOK, gin.H{"csrf_token": csrf, "user": user, "knowledge_base_ids": principal.KnowledgeBaseIDs, "scopes": principal.Scopes})
+	// session_token is required for cross-site embeds where browsers block third-party cookies.
+	integrationData(c, http.StatusOK, gin.H{
+		"csrf_token":         csrf,
+		"session_token":      token,
+		"user":               user,
+		"knowledge_base_ids": principal.KnowledgeBaseIDs,
+		"scopes":             principal.Scopes,
+	})
 }
 
 func (h *IntegrationHandler) Refresh(c *gin.Context) {
 	if !h.enforceRate(c, "refresh", 120) {
 		return
 	}
-	token, err := c.Cookie(integrationauth.BrowserCookieName)
-	if err != nil {
-		integrationError(c, http.StatusUnauthorized, "missing_session", "session cookie is required")
+	token := integrationBrowserSessionToken(c)
+	if token == "" {
+		integrationError(c, http.StatusUnauthorized, "missing_session", "session cookie or bearer token is required")
 		return
 	}
-	if err = h.service.ValidateBrowserOrigin(c.Request.Context(), token, c.GetHeader("Origin")); err != nil {
+	if err := h.service.ValidateBrowserOrigin(c.Request.Context(), token, c.GetHeader("Origin")); err != nil {
 		h.service.Audit(c.Request.Context(), nil, "auth.refresh", "denied", "origin_denied")
 		integrationError(c, http.StatusForbidden, "origin_denied", "browser origin denied")
 		return
 	}
-	if err = h.service.ValidateCSRF(c.Request.Context(), token, c.GetHeader("X-CSRF-Token")); err != nil {
+	if err := h.service.ValidateCSRF(c.Request.Context(), token, c.GetHeader("X-CSRF-Token")); err != nil {
 		h.service.Audit(c.Request.Context(), nil, "auth.refresh", "denied", "csrf_failed")
 		integrationError(c, http.StatusForbidden, "csrf_failed", "CSRF validation failed")
 		return
@@ -299,7 +306,7 @@ func (h *IntegrationHandler) Refresh(c *gin.Context) {
 }
 
 func (h *IntegrationHandler) Logout(c *gin.Context) {
-	token, _ := c.Cookie(integrationauth.BrowserCookieName)
+	token := integrationBrowserSessionToken(c)
 	if token != "" {
 		if h.service.ValidateBrowserOrigin(c.Request.Context(), token, c.GetHeader("Origin")) != nil || h.service.ValidateCSRF(c.Request.Context(), token, c.GetHeader("X-CSRF-Token")) != nil {
 			integrationError(c, http.StatusForbidden, "logout_denied", "origin or CSRF validation failed")
@@ -312,17 +319,50 @@ func (h *IntegrationHandler) Logout(c *gin.Context) {
 	integrationData(c, http.StatusOK, gin.H{"logged_out": true})
 }
 
+func integrationCookieSecure(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+	if c.Request.TLS != nil {
+		return true
+	}
+	proto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto"))
+	if proto == "" {
+		proto = strings.TrimSpace(c.GetHeader("X-Forwarded-Protocol"))
+	}
+	if proto == "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(strings.Split(proto, ",")[0]), "https")
+}
+
 func setIntegrationBrowserCookie(c *gin.Context, value string, maxAge int) {
-	c.SetCookie(integrationauth.BrowserCookieName, value, maxAge, integrationBrowserCookiePath, "", true, true)
+	// HTTP LAN / reverse-proxy deployments must not force Secure, or browsers discard the session cookie.
+	c.SetCookie(integrationauth.BrowserCookieName, value, maxAge, integrationBrowserCookiePath, "", integrationCookieSecure(c), true)
+}
+
+func integrationBrowserSessionToken(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	// Prefer explicit Bearer session_token from embedded hosts; cookies may be stale
+	// or blocked in third-party iframe contexts.
+	if bearer := bearerToken(c); bearer != "" {
+		return bearer
+	}
+	if cookie, err := c.Cookie(integrationauth.BrowserCookieName); err == nil && strings.TrimSpace(cookie) != "" {
+		return cookie
+	}
+	return ""
 }
 
 func (h *IntegrationHandler) Authenticate() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token, cookieErr := c.Cookie(integrationauth.BrowserCookieName)
-		kind := "browser"
-		if cookieErr != nil {
-			token = bearerToken(c)
-			kind = "service"
+		token, kind, ok := resolveIntegrationCredential(c, h.service)
+		if !ok {
+			integrationError(c, http.StatusUnauthorized, "unauthorized", "integration authentication required")
+			c.Abort()
+			return
 		}
 		principal, user, tenant, err := h.service.Authenticate(c.Request.Context(), token, kind)
 		if err != nil {
@@ -353,6 +393,50 @@ func (h *IntegrationHandler) Authenticate() gin.HandlerFunc {
 		setIntegrationContext(c, principal, user, tenant)
 		c.Next()
 	}
+}
+
+func resolveIntegrationCredential(c *gin.Context, service *integrationauth.Service) (token string, kind string, ok bool) {
+	if c == nil || service == nil {
+		return "", "", false
+	}
+	cookie, cookieErr := c.Cookie(integrationauth.BrowserCookieName)
+	bearer := bearerToken(c)
+	candidates := make([]struct {
+		token string
+		kind  string
+	}, 0, 3)
+	// Bearer browser sessions win over cookies so CSRF and session stay aligned
+	// after embedded hosts exchange a fresh session_token.
+	if bearer != "" {
+		candidates = append(candidates, struct {
+			token string
+			kind  string
+		}{token: bearer, kind: "browser"})
+	}
+	if cookieErr == nil && strings.TrimSpace(cookie) != "" {
+		candidates = append(candidates, struct {
+			token string
+			kind  string
+		}{token: cookie, kind: "browser"})
+	}
+	if bearer != "" {
+		candidates = append(candidates, struct {
+			token string
+			kind  string
+		}{token: bearer, kind: "service"})
+	}
+	seen := map[string]struct{}{}
+	for _, candidate := range candidates {
+		key := candidate.kind + "\x00" + candidate.token
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		if _, _, _, err := service.Authenticate(c.Request.Context(), candidate.token, candidate.kind); err == nil {
+			return candidate.token, candidate.kind, true
+		}
+	}
+	return "", "", false
 }
 
 func isReadMethod(method string) bool {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getRuntimeMode, parseEmbeddedMessage, resolveEmbeddedParentOrigin } from '../src/utils/embedded-runtime'
+import { getEmbeddedAuthHeaders, getRuntimeMode, parseEmbeddedMessage, resolveEmbeddedParentOrigin, setEmbeddedCSRFToken, setEmbeddedSessionToken } from '../src/utils/embedded-runtime'
 
 describe('embedded runtime', () => {
   it('defaults to standalone and accepts explicit modes', () => {
@@ -7,6 +7,16 @@ describe('embedded runtime', () => {
     expect(getRuntimeMode({ pathname: '/', search: '?mode=embedded-page' } as Location)).toBe('embedded-page')
     expect(getRuntimeMode({ pathname: '/embed/widget', search: '' } as Location)).toBe('embedded-widget')
     expect(getRuntimeMode({ pathname: '/knowledge/embed/platform/knowledge-bases', search: '' } as Location)).toBe('embedded-page')
+  })
+
+  it('exposes bearer session headers for cross-site embeds', () => {
+    setEmbeddedSessionToken('session-token')
+    setEmbeddedCSRFToken('csrf-token')
+    expect(getEmbeddedAuthHeaders({ csrf: true, json: true })).toEqual({
+      Authorization: 'Bearer session-token',
+      'X-CSRF-Token': 'csrf-token',
+      'Content-Type': 'application/json',
+    })
   })
 
   it('parses only versioned known messages', () => {

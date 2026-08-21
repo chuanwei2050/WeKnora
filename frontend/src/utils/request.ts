@@ -3,7 +3,7 @@ import axios, { type AxiosResponse } from "axios";
 import { generateRandomString } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
-import { getEmbeddedCSRFToken, isCookieEmbeddedMode, notifyEmbeddedHost } from './embedded-runtime';
+import { getEmbeddedCSRFToken, getEmbeddedSessionToken, isCookieEmbeddedMode, notifyEmbeddedHost } from './embedded-runtime';
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -31,8 +31,8 @@ instance.interceptors.request.use(
   (config) => {
     const embedded = isCookieEmbeddedMode();
     config.withCredentials = embedded;
-    // 添加JWT token认证
-    const token = embedded ? null : localStorage.getItem('weknora_token');
+    // Embedded hosts may block third-party cookies; prefer in-memory session_token.
+    const token = embedded ? getEmbeddedSessionToken() : localStorage.getItem('weknora_token');
     if (token) {
       config.headers["Authorization"] = `Bearer ${token}`;
     }

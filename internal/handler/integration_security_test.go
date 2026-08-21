@@ -95,6 +95,9 @@ func TestIntegrationKnowledgeIDsAreBoundedAndValidated(t *testing.T) {
 func TestIntegrationBrowserCookieCoversAPIAndFilesOnWeKnoraOrigin(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
+	request := httptest.NewRequest(http.MethodPost, "https://weknora.example/api/integration/v1/auth/exchange", nil)
+	request.Header.Set("X-Forwarded-Proto", "https")
+	context.Request = request
 
 	setIntegrationBrowserCookie(context, "session", 60)
 
@@ -118,6 +121,35 @@ func TestIntegrationBrowserCookieCoversAPIAndFilesOnWeKnoraOrigin(t *testing.T) 
 	otherOrigin, err := url.Parse("https://host.example/api/v1/knowledge-bases")
 	require.NoError(t, err)
 	require.Empty(t, jar.Cookies(otherOrigin))
+}
+
+func TestIntegrationBrowserCookieAllowsHTTPWhenNotSecureContext(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "http://192.168.10.232:8089/api/integration/v1/auth/exchange", nil)
+
+	setIntegrationBrowserCookie(context, "session", 60)
+
+	cookie := recorder.Result().Cookies()[0]
+	require.Equal(t, integrationBrowserCookiePath, cookie.Path)
+	require.True(t, cookie.HttpOnly)
+	require.False(t, cookie.Secure)
+}
+
+func TestIntegrationBrowserSessionTokenPrefersBearerThenCookie(t *testing.T) {
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodGet, "http://weknora.example/api/integration/v1/knowledge-bases", nil)
+	context.Request.AddCookie(&http.Cookie{Name: integrationauth.BrowserCookieName, Value: "cookie-session"})
+	context.Request.Header.Set("Authorization", "Bearer bearer-session")
+	require.Equal(t, "bearer-session", integrationBrowserSessionToken(context))
+
+	context.Request = httptest.NewRequest(http.MethodGet, "http://weknora.example/api/integration/v1/knowledge-bases", nil)
+	context.Request.AddCookie(&http.Cookie{Name: integrationauth.BrowserCookieName, Value: "cookie-only"})
+	require.Equal(t, "cookie-only", integrationBrowserSessionToken(context))
+
+	context.Request = httptest.NewRequest(http.MethodGet, "http://weknora.example/api/integration/v1/knowledge-bases", nil)
+	context.Request.Header.Set("Authorization", "Bearer bearer-only")
+	require.Equal(t, "bearer-only", integrationBrowserSessionToken(context))
 }
 
 func TestIntegrationChatSessionResponseKeepsPublicModeAndScope(t *testing.T) {

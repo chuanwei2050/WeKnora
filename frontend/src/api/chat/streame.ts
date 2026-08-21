@@ -1,9 +1,10 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { ref, onUnmounted } from 'vue';
 import { generateRandomString } from '@/utils/index';
+import { createIdempotencyKey } from '@/utils/idempotency-key';
 import i18n from '@/i18n';
 import { getApiBaseUrl } from '@/utils/api-base';
-import { getEmbeddedCSRFToken, getRuntimeMode } from '@/utils/embedded-runtime';
+import { getEmbeddedCSRFToken, getEmbeddedSessionToken, getRuntimeMode } from '@/utils/embedded-runtime';
 
 
 
@@ -43,11 +44,11 @@ export function useStream() {
     
     // 获取JWT Token
     const isIntegrationWidget = getRuntimeMode() === 'embedded-widget';
-    const idempotencyKey = crypto.randomUUID();
+    const idempotencyKey = createIdempotencyKey();
     let lastEventId = '';
     const seenEventIds = new Set<string>();
-    const token = isIntegrationWidget ? null : localStorage.getItem('weknora_token');
-    if (!token && !isIntegrationWidget) {
+    const token = isIntegrationWidget ? getEmbeddedSessionToken() : localStorage.getItem('weknora_token');
+    if (!token) {
       error.value = i18n.global.t('error.tokenNotFound');
       stopStream();
       return;
@@ -138,7 +139,10 @@ export function useStream() {
             const payload = await res.json();
             const snapshotUrl = payload?.error?.message_snapshot_url;
             if (!snapshotUrl) throw new Error('SSE cursor expired without snapshot URL');
-            const snapshot = await fetch(`${apiUrl}${snapshotUrl}`, { credentials: 'include' });
+            const snapshot = await fetch(`${apiUrl}${snapshotUrl}`, {
+              credentials: 'include',
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
             if (!snapshot.ok) throw new Error(`snapshot recovery failed: ${snapshot.status}`);
             const body = await snapshot.json();
             chunkHandler?.({ response_type: body.data?.status === 'completed' ? 'complete' : 'error', id: body.data?.message?.id, content: body.data?.message?.content || '', done: true, data: { status: body.data?.status } });

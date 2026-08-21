@@ -2,6 +2,7 @@ export type RuntimeMode = 'standalone' | 'embedded-page' | 'embedded-widget'
 
 const ALLOWED_MODES = new Set<RuntimeMode>(['standalone', 'embedded-page', 'embedded-widget'])
 let csrfToken = ''
+let sessionToken = ''
 let embeddedScopes = new Set<string>()
 
 export function getRuntimeMode(location: Pick<Location, 'pathname' | 'search'> = window.location): RuntimeMode {
@@ -27,6 +28,25 @@ export function setEmbeddedCSRFToken(value: string): void {
 
 export function getEmbeddedCSRFToken(): string {
   return csrfToken
+}
+
+export function setEmbeddedSessionToken(value: string): void {
+  sessionToken = value
+}
+
+export function getEmbeddedSessionToken(): string {
+  return sessionToken
+}
+
+export function getEmbeddedAuthHeaders(options: { csrf?: boolean; json?: boolean } = {}): Record<string, string> {
+  const headers: Record<string, string> = {}
+  if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`
+  if (options.csrf) {
+    const csrf = getEmbeddedCSRFToken()
+    if (csrf) headers['X-CSRF-Token'] = csrf
+  }
+  if (options.json) headers['Content-Type'] = 'application/json'
+  return headers
 }
 
 export function setEmbeddedScopes(scopes: string[]): void {
@@ -103,6 +123,12 @@ export function parseEmbeddedMessage(value: unknown): EmbeddedInboundMessage | n
     return { version: 1, type: 'configure', selection: { mode: 'all-allowed' }, theme }
   }
   return null
+}
+
+export function isIntegrationAuthFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  if (/\b(401|403)\b/.test(message)) return true
+  return /unauthorized|forbidden|csrf|pleaseRelogin/i.test(message)
 }
 
 export function notifyEmbeddedHost(type: 'ready' | 'unauthorized' | 'answer-completed' | 'route-change' | 'document-published' | 'open-document', data: Record<string, unknown> = {}): void {

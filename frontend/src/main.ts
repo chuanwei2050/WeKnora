@@ -12,7 +12,7 @@ import i18n from "./i18n";
 import { initTheme } from "@/composables/useTheme";
 import { installTDesignIconOfflineGuard } from "@/utils/tdesign-icon-offline";
 import { ensureBidReviewSession } from "@/utils/bidreview-sso";
-import { getEmbeddedParentOrigin, getRuntimeMode, notifyEmbeddedHost, parseEmbeddedMessage } from '@/utils/embedded-runtime';
+import { getEmbeddedParentOrigin, getRuntimeMode, isIntegrationAuthFailure, notifyEmbeddedHost, parseEmbeddedMessage } from '@/utils/embedded-runtime';
 import { exchangeBootstrapTicket, refreshIntegrationSession } from '@/api/integration';
 import { useAuthStore } from '@/stores/auth';
 
@@ -75,7 +75,9 @@ async function prepareEmbeddedPageSession() {
     updated_at: new Date().toISOString(),
   })
   window.setInterval(() => {
-    refreshIntegrationSession().catch(() => notifyEmbeddedHost('unauthorized'))
+    refreshIntegrationSession().catch((error) => {
+      if (isIntegrationAuthFailure(error)) notifyEmbeddedHost('unauthorized')
+    })
   }, 10 * 60 * 1000)
 }
 
