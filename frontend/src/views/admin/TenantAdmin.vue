@@ -18,10 +18,11 @@
       <div v-else class="table-scroll">
         <table>
           <thead>
-            <tr><th>租户名称</th><th>用户名</th><th>存储配额</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+            <tr><th>租户 ID</th><th>租户名称</th><th>用户名</th><th>存储配额</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
           </thead>
           <tbody>
             <tr v-for="tenant in tenants" :key="tenant.id">
+              <td>{{ tenant.id }}</td>
               <td><strong>{{ tenant.name }}</strong></td>
               <td>{{ tenant.admin_username || '—' }}</td>
               <td>{{ formatBytes(tenant.storage_used) }} / {{ formatBytes(tenant.storage_quota) }}</td>
@@ -30,6 +31,7 @@
               <td><div class="actions">
                 <t-link theme="primary" @click="manageUsers(tenant)">用户</t-link>
                 <t-link theme="primary" @click="openEdit(tenant)">编辑</t-link>
+                <t-link theme="primary" @click="openIntegration(tenant)">创建接入</t-link>
                 <t-link :disabled="isHomeTenant(tenant)" :theme="tenant.status === 'active' ? 'warning' : 'success'" @click="toggleStatus(tenant)">{{ tenant.status === 'active' ? '停用' : '启用' }}</t-link>
                 <t-tooltip :content="tenant.can_delete ? '删除未使用租户' : '租户已投入使用，请改为停用'">
                   <t-link :disabled="!tenant.can_delete" theme="danger" @click="removeTenant(tenant)">删除</t-link>
@@ -68,6 +70,25 @@
       </t-form>
     </t-dialog>
 
+    <t-dialog v-model:visible="integrationVisible" header="创建第三方项目接入" :confirm-btn="{ content: '创建并生成密钥', loading: integrationSaving }" @confirm="createIntegration">
+      <t-form label-align="top">
+        <t-form-item label="接入项目名称" required><t-input v-model="integrationForm.projectName" /></t-form-item>
+        <t-form-item label="身份提供方 ID" required><t-input v-model="integrationForm.providerId" /></t-form-item>
+        <t-form-item label="绑定租户管理员" required><t-select v-model="integrationForm.administratorUserId" :options="integrationAdministratorOptions" :loading="integrationAdministratorsLoading" /></t-form-item>
+        <t-form-item label="第三方项目 Origin" required>
+          <div class="field-control"><t-input v-model="integrationForm.allowedOrigin" placeholder="例如：https://bidder.example.com" /><div class="field-hint">只填写协议、域名和端口，不要包含路径。</div></div>
+        </t-form-item>
+        <div class="field-hint">将绑定租户 {{ integrationTenant?.id }}，并授权该租户当前及未来创建的全部知识库。</div>
+        <t-alert v-if="isInsecureDeployment" theme="warning" message="当前知识库使用 HTTP。Integration 浏览器会话使用 Secure Cookie，正式外挂接入前请先配置 HTTPS。" />
+      </t-form>
+    </t-dialog>
+
+    <t-dialog v-model:visible="integrationCredentialVisible" header="第三方接入信息（仅显示一次）" :footer="false">
+      <p class="credential-note">请立即复制并安全交给第三方项目。Client Secret 关闭后无法再次查看。</p>
+      <pre class="integration-package">{{ integrationPackageText }}</pre>
+      <t-button theme="primary" @click="copyIntegrationPackage">复制接入信息</t-button>
+    </t-dialog>
+
     <t-dialog v-model:visible="credentialVisible" header="租户创建成功" :footer="false">
       <p class="credential-note">请将以下初始凭据交给租户管理员，首次登录后应立即重置密码。</p>
       <dl class="credentials">
@@ -79,10 +100,10 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
-import { createAdminTenant, deleteAdminTenant, listAdminTenants, updateAdminTenant, updateAdminTenantStatus, type AdminTenant } from '@/api/admin'
+import { createAdminTenant, createIntegrationClient, createIntegrationIdentityProvider, deleteAdminTenant, listAdminTenants, listIntegrationIdentityProviders, listTenantUsers, updateAdminTenant, updateAdminTenantStatus, type AdminTenant } from '@/api/admin'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
@@ -98,6 +119,15 @@ const editorVisible = ref(false)
 const credentialVisible = ref(false)
 const createdCredential = reactive({ username: '', password: '' })
 const editingId = ref<number | null>(null)
+const integrationVisible = ref(false)
+const integrationCredentialVisible = ref(false)
+const integrationSaving = ref(false)
+const integrationTenant = ref<AdminTenant | null>(null)
+const integrationForm = reactive({ projectName: 'Bidder Agent', providerId: 'bidder-agent', administratorUserId: '', allowedOrigin: '' })
+const integrationAdministratorsLoading = ref(false)
+const integrationAdministratorOptions = ref<Array<{ label: string; value: string }>>([])
+const integrationPackageText = ref('')
+const isInsecureDeployment = computed(() => window.location.protocol !== 'https:')
 const form = reactive({ name: '', business: '', description: '', storageQuotaGb: 10, adminUsername: '', adminPassword: 'Admin@123456' })
 
 const formatBytes = (value: number) => value > 0 ? `${(value / 1024 / 1024 / 1024).toFixed(value >= 10 * 1024 ** 3 ? 0 : 1)} GB` : '0 GB'
@@ -129,6 +159,70 @@ function openEdit(tenant: AdminTenant) {
   form.adminUsername = tenant.admin_username || `tenant_admin_${tenant.id}`
   form.adminPassword = ''
   editorVisible.value = true
+}
+
+async function openIntegration(tenant: AdminTenant) {
+  integrationTenant.value = tenant
+  integrationForm.projectName = 'Bidder Agent'
+  integrationForm.providerId = 'bidder-agent'
+  integrationForm.administratorUserId = ''
+  integrationForm.allowedOrigin = ''
+  integrationAdministratorOptions.value = []
+  integrationVisible.value = true
+  integrationAdministratorsLoading.value = true
+  try {
+    const administrators: Array<{ label: string; value: string }> = []
+    let currentPage = 1
+    let total = 0
+    do {
+      const users = await listTenantUsers(tenant.id, { page: currentPage, pageSize: 100 })
+      total = users.total
+      administrators.push(...users.items.filter(user => user.role === 'tenant_admin' && user.is_active).map(user => ({ label: user.username, value: user.id })))
+      currentPage += 1
+    } while ((currentPage - 1) * 100 < total)
+    integrationAdministratorOptions.value = administrators
+    if (administrators.length === 1) integrationForm.administratorUserId = administrators[0].value
+    if (administrators.length === 0) MessagePlugin.warning('该租户没有可用的租户管理员')
+  } catch (error) { MessagePlugin.error((error as { message?: string }).message || '租户管理员加载失败') }
+  finally { integrationAdministratorsLoading.value = false }
+}
+
+async function createIntegration() {
+  const tenant = integrationTenant.value
+  if (!tenant || !integrationForm.projectName.trim() || !integrationForm.providerId.trim() || !integrationForm.administratorUserId || !integrationForm.allowedOrigin.trim()) { MessagePlugin.warning('请填写完整接入信息'); return }
+  if (integrationForm.projectName.trim().length > 128 || integrationForm.providerId.trim().length > 64) { MessagePlugin.warning('项目名称或身份提供方 ID 过长'); return }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(integrationForm.providerId.trim())) { MessagePlugin.warning('身份提供方 ID 仅支持英文字母、数字、点、下划线和短横线'); return }
+  let origin: URL
+  try { origin = new URL(integrationForm.allowedOrigin.trim()) } catch { MessagePlugin.warning('第三方项目 Origin 格式不正确'); return }
+  if (!['http:', 'https:'].includes(origin.protocol) || origin.pathname !== '/' || origin.search || origin.hash || origin.username || origin.password) { MessagePlugin.warning('Origin 只能包含协议、域名和端口'); return }
+  integrationSaving.value = true
+  try {
+    const providerId = integrationForm.providerId.trim()
+    const providers = await listIntegrationIdentityProviders()
+    if (!providers.some(provider => provider.id === providerId)) await createIntegrationIdentityProvider({ id: providerId, name: `${integrationForm.projectName.trim()} 用户中心` })
+    const created = await createIntegrationClient({ name: integrationForm.projectName.trim(), tenant_id: tenant.id, identity_provider_id: providerId, administrator_user_id: integrationForm.administratorUserId, scopes: ['kb:list', 'rag:search', 'table:analyze', 'chat:read', 'chat:write', 'knowledge:read', 'knowledge:write', 'file:read'], knowledge_base_access_mode: 'all', knowledge_base_ids: [], allowed_origins: [window.location.origin], role_mappings: { tenant_admin: 'tenant_admin', member: 'member' }, max_role: 'tenant_admin' })
+    integrationPackageText.value = [`WEKNORA_ENABLED=true`, `WEKNORA_INTEGRATION_BASE_URL=${window.location.origin}/api/integration/v1`, `WEKNORA_FRONTEND_URL=${window.location.origin}`, `WEKNORA_FRONTEND_ORIGIN=${window.location.origin}`, `WEKNORA_INTEGRATION_ORIGIN=${origin.origin}`, `WEKNORA_INTEGRATION_TENANT_ID=<第三方项目内部租户ID>`, `WEKNORA_INTEGRATION_CLIENT_ID=${created.client_id}`, `WEKNORA_INTEGRATION_CLIENT_SECRET=${created.client_secret}`, `WEKNORA_TIMEOUT_SECONDS=60`].join('\n')
+    integrationVisible.value = false
+    integrationCredentialVisible.value = true
+  } catch (error) { MessagePlugin.error((error as { message?: string }).message || '接入创建失败') }
+  finally { integrationSaving.value = false }
+}
+
+async function copyIntegrationPackage() {
+  try {
+    if (navigator.clipboard) await navigator.clipboard.writeText(integrationPackageText.value)
+    else {
+      const textarea = document.createElement('textarea')
+      textarea.value = integrationPackageText.value
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      textarea.remove()
+    }
+    MessagePlugin.success('接入信息已复制')
+  } catch { MessagePlugin.error('复制失败，请手动选择接入信息复制') }
 }
 
 async function saveTenant() {
@@ -198,6 +292,7 @@ table { width: 100%; min-width: 1120px; border-collapse: collapse; th, td { padd
 .field-hint { margin-top: 6px; color: #7b879b; font-size: 12px; line-height: 1.5; }
 .credentials { margin: 16px 0 0; border: 1px solid #e1e6ef; border-radius: 8px; overflow: hidden; > div { display: grid; grid-template-columns: 100px 1fr; padding: 14px 16px; &:not(:last-child) { border-bottom: 1px solid #edf0f5; } } dt { color: #65728a; } dd { margin: 0; } code { color: #174a7c; font-size: 14px; } }
 .actions { display: flex; gap: 14px; white-space: nowrap; }
+.integration-package { padding: 14px; overflow: auto; border-radius: 6px; background: #f5f7fb; white-space: pre-wrap; word-break: break-all; }
 .state { padding: 64px; text-align: center; color: #7b879b; }
 .pagination { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; color: #7b879b; }
 @media (max-width: 900px) { .admin-page { padding: 24px; } .page-header { align-items: flex-start; } }

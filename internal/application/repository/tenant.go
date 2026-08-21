@@ -153,6 +153,10 @@ func (r *tenantRepository) UpdateTenant(ctx context.Context, tenant *types.Tenan
 	return err
 }
 
+func (r *tenantRepository) UpdateStorageQuota(ctx context.Context, tenantID uint64, storageQuota int64) error {
+	return r.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", tenantID).Update("storage_quota", storageQuota).Error
+}
+
 // DeleteTenant deletes tenant
 func (r *tenantRepository) DeleteTenant(ctx context.Context, id uint64) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&types.Tenant{}).Error

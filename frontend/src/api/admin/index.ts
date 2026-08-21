@@ -85,6 +85,21 @@ export interface CreatedTenant {
   initial_admin: { username: string; password: string }
 }
 
+export interface IntegrationIdentityProvider { id: string; name: string }
+export interface CreatedIntegrationClient { client_id: string; client_secret: string }
+export interface IntegrationClientInput {
+  name: string
+  tenant_id: number
+  identity_provider_id: string
+  administrator_user_id: string
+  scopes: string[]
+  knowledge_base_access_mode: 'all' | 'selected'
+  knowledge_base_ids: string[]
+  allowed_origins: string[]
+  role_mappings: Record<string, TenantUserRole>
+  max_role: TenantUserRole
+}
+
 function pageQuery(params: { keyword?: string; page: number; pageSize: number }): string {
   const query = new URLSearchParams({ page: String(params.page), page_size: String(params.pageSize) })
   if (params.keyword?.trim()) query.set('keyword', params.keyword.trim())
@@ -141,4 +156,16 @@ export async function updateTenantUserRole(tenantId: number, userId: string, rol
 
 export async function updateTenantUserStatus(tenantId: number, userId: string, isActive: boolean): Promise<AdminUser> {
   return (await patch<ApiResponse<AdminUser>>(`/api/v1/admin/tenants/${tenantId}/users/${userId}/status`, { is_active: isActive })).data
+}
+
+export async function listIntegrationIdentityProviders(): Promise<IntegrationIdentityProvider[]> {
+  return (await get<ApiResponse<IntegrationIdentityProvider[]>>('/api/v1/admin/integration-identity-providers')).data
+}
+
+export async function createIntegrationIdentityProvider(input: IntegrationIdentityProvider): Promise<IntegrationIdentityProvider> {
+  return (await post<ApiResponse<IntegrationIdentityProvider>>('/api/v1/admin/integration-identity-providers', input)).data
+}
+
+export async function createIntegrationClient(input: IntegrationClientInput): Promise<CreatedIntegrationClient> {
+  return (await post<ApiResponse<CreatedIntegrationClient>>('/api/v1/admin/integration-clients', input)).data
 }

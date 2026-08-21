@@ -184,6 +184,16 @@ func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) 
 	return tenant, nil
 }
 
+func (s *tenantService) UpdateStorageQuota(ctx context.Context, tenantID uint64, storageQuota int64) (*types.Tenant, error) {
+	if tenantID == 0 || storageQuota < 0 {
+		return nil, errors.New("invalid tenant storage quota")
+	}
+	if err := s.repo.UpdateStorageQuota(ctx, tenantID, storageQuota); err != nil {
+		return nil, err
+	}
+	return s.repo.GetTenantByID(ctx, tenantID)
+}
+
 // DeleteTenant removes a tenant by their ID
 func (s *tenantService) DeleteTenant(ctx context.Context, id uint64) error {
 	logger.Info(ctx, "Start deleting tenant")

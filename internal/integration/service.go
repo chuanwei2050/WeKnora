@@ -127,6 +127,11 @@ func validClient(client *Client, now time.Time) bool {
 
 var allowedClientScopes = []string{"kb:list", "rag:search", "table:analyze", "chat:read", "chat:write", "knowledge:read", "knowledge:write", "file:read"}
 
+const (
+	KnowledgeBaseAccessSelected = "selected"
+	KnowledgeBaseAccessAll      = "all"
+)
+
 func validateClientScopes(scopes []string) error {
 	for _, scope := range scopes {
 		if !slices.Contains(allowedClientScopes, scope) {
@@ -158,6 +163,12 @@ func (s *Service) CreateClient(ctx context.Context, actor *types.User, client *C
 	if client.KnowledgeBaseIDsJSON == "" {
 		client.KnowledgeBaseIDsJSON = "[]"
 	}
+	if client.KnowledgeBaseAccessMode == "" {
+		client.KnowledgeBaseAccessMode = KnowledgeBaseAccessSelected
+	}
+	if client.KnowledgeBaseAccessMode != KnowledgeBaseAccessSelected && client.KnowledgeBaseAccessMode != KnowledgeBaseAccessAll {
+		return "", ErrInvalid
+	}
 	scopes, err := parseStringArray(client.ScopesJSON)
 	if err != nil {
 		return "", err
@@ -168,6 +179,9 @@ func (s *Service) CreateClient(ctx context.Context, actor *types.User, client *C
 	knowledgeBaseIDs, err := parseStringArray(client.KnowledgeBaseIDsJSON)
 	if err != nil {
 		return "", err
+	}
+	if client.KnowledgeBaseAccessMode == KnowledgeBaseAccessAll && len(knowledgeBaseIDs) > 0 {
+		return "", ErrInvalid
 	}
 	if len(knowledgeBaseIDs) > 0 {
 		var count int64
@@ -221,6 +235,15 @@ func (s *Service) CreateClient(ctx context.Context, actor *types.User, client *C
 	client.SecretHash = digest(secret)
 	client.Enabled = true
 	return secret, s.db.WithContext(ctx).Create(client).Error
+}
+
+func (s *Service) resolveClientKnowledgeBaseIDs(ctx context.Context, client *Client) ([]string, error) {
+	if client.KnowledgeBaseAccessMode != KnowledgeBaseAccessAll {
+		return decodeStrings(client.KnowledgeBaseIDsJSON), nil
+	}
+	var ids []string
+	err := s.db.WithContext(ctx).Table("knowledge_bases").Where("tenant_id = ? AND deleted_at IS NULL", client.TenantID).Order("id ASC").Pluck("id", &ids).Error
+	return ids, err
 }
 
 func (s *Service) UpdateClientScopes(ctx context.Context, actor *types.User, clientID string, scopes []string) error {
@@ -388,7 +411,11 @@ func (s *Service) IssueServiceToken(ctx context.Context, clientID, secret string
 		return "", time.Time{}, err
 	}
 	expires := s.now().Add(ServiceTokenTTL)
-	session := Session{ID: uuid.NewString(), Digest: digest(token), Kind: "service", ClientID: client.ID, TenantID: client.TenantID, ScopesJSON: client.ScopesJSON, KnowledgeBaseIDsJSON: client.KnowledgeBaseIDsJSON, ExpiresAt: expires, AbsoluteExpiresAt: expires}
+	knowledgeBaseIDs, err := s.resolveClientKnowledgeBaseIDs(ctx, &client)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	session := Session{ID: uuid.NewString(), Digest: digest(token), Kind: "service", ClientID: client.ID, TenantID: client.TenantID, ScopesJSON: client.ScopesJSON, KnowledgeBaseIDsJSON: encodeStrings(knowledgeBaseIDs), ExpiresAt: expires, AbsoluteExpiresAt: expires}
 	err = s.db.WithContext(ctx).Create(&session).Error
 	if err == nil {
 		s.Audit(ctx, auditPrincipal, "auth.token", "allowed", "")
@@ -425,8 +452,12 @@ func (s *Service) CreateBootstrap(ctx context.Context, serviceToken string, req 
 	if err != nil {
 		return "", err
 	}
+	clientKnowledgeBaseIDs, err := s.resolveClientKnowledgeBaseIDs(ctx, &client)
+	if err != nil {
+		return "", err
+	}
 	allowed := make([]string, 0)
-	for _, knowledgeBaseID := range decodeStrings(client.KnowledgeBaseIDsJSON) {
+	for _, knowledgeBaseID := range clientKnowledgeBaseIDs {
 		if user.CanAccessKnowledgeBase(knowledgeBaseID) {
 			allowed = append(allowed, knowledgeBaseID)
 		}
@@ -515,7 +546,13 @@ func (s *Service) resolveExternalUser(ctx context.Context, client *Client, req B
 	if err != nil {
 		return nil, err
 	}
-	user := &types.User{ID: userID, Username: "integration-" + nameDigest, Email: "integration-" + nameDigest + "@external.local", PasswordHash: string(passwordHash), TenantID: client.TenantID, IsActive: true, Role: role, KnowledgeBaseAccessMode: types.KnowledgeBaseAccessSelected, KnowledgeBaseIDs: decodeStrings(client.KnowledgeBaseIDsJSON)}
+	knowledgeBaseAccessMode := types.KnowledgeBaseAccessSelected
+	knowledgeBaseIDs := decodeStrings(client.KnowledgeBaseIDsJSON)
+	if client.KnowledgeBaseAccessMode == KnowledgeBaseAccessAll {
+		knowledgeBaseAccessMode = types.KnowledgeBaseAccessAll
+		knowledgeBaseIDs = nil
+	}
+	user := &types.User{ID: userID, Username: "integration-" + nameDigest, Email: "integration-" + nameDigest + "@external.local", PasswordHash: string(passwordHash), TenantID: client.TenantID, IsActive: true, Role: role, KnowledgeBaseAccessMode: knowledgeBaseAccessMode, KnowledgeBaseIDs: knowledgeBaseIDs}
 	return user, s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(user).Error; err != nil {
 			return err
@@ -672,7 +709,15 @@ func (s *Service) Authenticate(ctx context.Context, token, kind string) (*Princi
 	}
 	principal := principalFromSession(&session)
 	principal.Scopes = intersectStrings(principal.Scopes, decodeStrings(client.ScopesJSON))
-	principal.KnowledgeBaseIDs = intersectStrings(principal.KnowledgeBaseIDs, decodeStrings(client.KnowledgeBaseIDsJSON))
+	clientKnowledgeBaseIDs, err := s.resolveClientKnowledgeBaseIDs(ctx, &client)
+	if err != nil {
+		return nil, nil, nil, ErrUnauthorized
+	}
+	if client.KnowledgeBaseAccessMode == KnowledgeBaseAccessAll {
+		principal.KnowledgeBaseIDs = clientKnowledgeBaseIDs
+	} else {
+		principal.KnowledgeBaseIDs = intersectStrings(principal.KnowledgeBaseIDs, clientKnowledgeBaseIDs)
+	}
 	if user != nil {
 		filtered := principal.KnowledgeBaseIDs[:0]
 		for _, knowledgeBaseID := range principal.KnowledgeBaseIDs {

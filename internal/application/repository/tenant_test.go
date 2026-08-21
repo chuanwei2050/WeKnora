@@ -163,6 +163,23 @@ func TestUpdateTenant_NoEncryptionWithoutAESKey(t *testing.T) {
 	assert.Equal(t, "sk-no-encryption", rawAfter)
 }
 
+func TestUpdateTenant_PersistsUnlimitedStorageQuota(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", "")
+
+	db := setupTestDB(t)
+	insertTenantRaw(t, db, 5, "sk-storage-quota")
+	require.NoError(t, db.Model(&types.Tenant{}).Where("id = ?", 5).Update("storage_quota", int64(10*1024*1024*1024)).Error)
+
+	var tenant types.Tenant
+	require.NoError(t, db.First(&tenant, 5).Error)
+	repo := NewTenantRepository(db)
+	require.NoError(t, repo.UpdateStorageQuota(context.Background(), tenant.ID, 0))
+
+	var storageQuota int64
+	require.NoError(t, db.Raw("SELECT storage_quota FROM tenants WHERE id = ?", 5).Scan(&storageQuota).Error)
+	assert.Zero(t, storageQuota)
+}
+
 func isEncrypted(s string) bool {
 	return len(s) > len(utils.EncPrefix) && s[:len(utils.EncPrefix)] == utils.EncPrefix
 }

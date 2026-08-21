@@ -1283,23 +1283,24 @@ func (h *IntegrationHandler) CreateClient(c *gin.Context) {
 	actor, _ := c.Get(types.UserContextKey.String())
 	user, _ := actor.(*types.User)
 	var req struct {
-		ID                  string            `json:"id"`
-		Name                string            `json:"name" binding:"required"`
-		TenantID            uint64            `json:"tenant_id" binding:"required"`
-		IdentityProviderID  string            `json:"identity_provider_id" binding:"required"`
-		AdministratorUserID string            `json:"administrator_user_id"`
-		Scopes              []string          `json:"scopes"`
-		KnowledgeBaseIDs    []string          `json:"knowledge_base_ids"`
-		AllowedOrigins      []string          `json:"allowed_origins" binding:"required"`
-		RoleMappings        map[string]string `json:"role_mappings"`
-		MaxRole             string            `json:"max_role"`
+		ID                      string            `json:"id"`
+		Name                    string            `json:"name" binding:"required"`
+		TenantID                uint64            `json:"tenant_id" binding:"required"`
+		IdentityProviderID      string            `json:"identity_provider_id" binding:"required"`
+		AdministratorUserID     string            `json:"administrator_user_id"`
+		Scopes                  []string          `json:"scopes"`
+		KnowledgeBaseAccessMode string            `json:"knowledge_base_access_mode"`
+		KnowledgeBaseIDs        []string          `json:"knowledge_base_ids"`
+		AllowedOrigins          []string          `json:"allowed_origins" binding:"required"`
+		RoleMappings            map[string]string `json:"role_mappings"`
+		MaxRole                 string            `json:"max_role"`
 	}
 	if c.ShouldBindJSON(&req) != nil || len(req.AllowedOrigins) == 0 {
 		integrationError(c, http.StatusBadRequest, "invalid_client", "invalid integration client")
 		return
 	}
 	encode := func(value any) string { data, _ := jsonMarshal(value); return data }
-	client := &integrationauth.Client{ID: req.ID, Name: req.Name, TenantID: req.TenantID, IdentityProviderID: req.IdentityProviderID, AdministratorUserID: req.AdministratorUserID, ScopesJSON: encode(req.Scopes), KnowledgeBaseIDsJSON: encode(req.KnowledgeBaseIDs), AllowedOriginsJSON: encode(req.AllowedOrigins), RoleMappingsJSON: encode(req.RoleMappings), MaxRole: req.MaxRole}
+	client := &integrationauth.Client{ID: req.ID, Name: req.Name, TenantID: req.TenantID, IdentityProviderID: req.IdentityProviderID, AdministratorUserID: req.AdministratorUserID, ScopesJSON: encode(req.Scopes), KnowledgeBaseAccessMode: req.KnowledgeBaseAccessMode, KnowledgeBaseIDsJSON: encode(req.KnowledgeBaseIDs), AllowedOriginsJSON: encode(req.AllowedOrigins), RoleMappingsJSON: encode(req.RoleMappings), MaxRole: req.MaxRole}
 	secret, err := h.service.CreateClient(c.Request.Context(), user, client, "")
 	if err != nil {
 		status := http.StatusForbidden
@@ -1322,7 +1323,7 @@ func (h *IntegrationHandler) ListClients(c *gin.Context) {
 	}
 	result := make([]gin.H, 0, len(clients))
 	for _, client := range clients {
-		result = append(result, gin.H{"id": client.ID, "name": client.Name, "tenant_id": client.TenantID, "identity_provider_id": client.IdentityProviderID, "administrator_user_id": client.AdministratorUserID, "scopes": client.Scopes(), "knowledge_base_ids": client.KnowledgeBaseIDs(), "enabled": client.Enabled, "expires_at": client.ExpiresAt})
+		result = append(result, gin.H{"id": client.ID, "name": client.Name, "tenant_id": client.TenantID, "identity_provider_id": client.IdentityProviderID, "administrator_user_id": client.AdministratorUserID, "scopes": client.Scopes(), "knowledge_base_access_mode": client.KnowledgeBaseAccessMode, "knowledge_base_ids": client.KnowledgeBaseIDs(), "enabled": client.Enabled, "expires_at": client.ExpiresAt})
 	}
 	integrationData(c, http.StatusOK, result)
 }

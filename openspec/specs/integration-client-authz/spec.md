@@ -4,7 +4,7 @@
 TBD - created by archiving change add-integration-client-authz. Update Purpose after archive.
 ## Requirements
 ### Requirement: Integration client 必须绑定租户和授权范围
-系统 MUST 为每个 integration client 在服务端绑定唯一租户、`identity_provider_id`、角色映射、最高可授予角色、scopes、知识库 allowlist、允许浏览器来源、状态和有效期，并且 MUST NOT 使用客户端传入的租户标识覆盖该绑定。
+系统 MUST 为每个 integration client 在服务端绑定唯一租户、`identity_provider_id`、角色映射、最高可授予角色、scopes、知识库访问模式、允许浏览器来源、状态和有效期，并且 MUST NOT 使用客户端传入的租户标识覆盖该绑定。知识库访问模式 MUST 为 `selected` 或 `all`；`selected` 使用固定 allowlist，`all` 在认证边界实时解析 Client 绑定租户当前的全部知识库。
 
 #### Scenario: 客户端访问绑定租户内的允许知识库
 - **WHEN** 有效 client 请求其 scopes 和 allowlist 内的知识库资源
@@ -13,6 +13,10 @@ TBD - created by archiving change add-integration-client-authz. Update Purpose a
 #### Scenario: 客户端尝试切换租户
 - **WHEN** client 在 header、query 或 body 中提交与服务端绑定不一致的租户标识
 - **THEN** 系统拒绝请求并记录 client、绑定租户、请求租户和拒绝原因
+
+#### Scenario: 租户级 Client 新建知识库
+- **WHEN** `all` 模式 Client 的租户管理员在有效嵌入会话中创建知识库
+- **THEN** 系统在后续认证边界将该知识库加入当前有效范围，并继续限制为 Client 绑定租户
 
 ### Requirement: 外部角色必须由服务端映射并受 client 上限约束
 系统 MUST 只接受 client 配置中声明的外部角色值，MUST 使用 WeKnora 服务端维护的映射生成内部角色，并 MUST 将结果限制在 client 最高可授予角色、scopes、知识库 allowlist 和当前用户权限范围内；系统 MUST NOT 接受宿主直接提交内部角色、`is_admin` 或权限列表。
@@ -137,7 +141,7 @@ TBD - created by archiving change add-integration-client-authz. Update Purpose a
 - **THEN** 系统拒绝请求，不签发或刷新会话，也不返回通配凭证 CORS 响应
 
 ### Requirement: 有效知识库范围必须在服务端求交
-系统 MUST 将请求选择、client allowlist、当前用户权限和租户或显式共享关系求交；请求包含任一越权知识库时 MUST 整次返回 `403`，不得静默忽略或返回部分结果。
+系统 MUST 将请求选择、client 知识库访问模式解析结果、当前用户权限和租户或显式共享关系求交；请求包含任一越权知识库时 MUST 整次返回 `403`，不得静默忽略或返回部分结果。
 
 #### Scenario: 请求全部位于有效范围
 - **WHEN** 请求中的所有知识库均处于最终有效范围
@@ -157,4 +161,3 @@ TBD - created by archiving change add-integration-client-authz. Update Purpose a
 #### Scenario: 超过认证限流
 - **WHEN** 主体超过对应认证端点的速率限制
 - **THEN** 系统拒绝请求并返回稳定的限流错误，不执行凭证签发或兑换
-

@@ -202,6 +202,35 @@ func TestClientRejectsCrossTenantKnowledgeBase(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+func TestAllKnowledgeBaseModeResolvesCurrentTenantKnowledgeBases(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	actor := &types.User{Role: types.UserRolePlatformAdmin, IsActive: true}
+	require.NoError(t, svc.CreateIdentityProvider(ctx, actor, &IdentityProvider{ID: "idp-all", Name: "All KB IdP"}))
+	require.NoError(t, svc.db.Exec(`INSERT INTO knowledge_bases (id, tenant_id) VALUES (?, ?), (?, ?)`, "tenant-kb", 1, "foreign-kb", 2).Error)
+	client := &Client{TenantID: 1, IdentityProviderID: "idp-all", Name: "all-kb-client", AllowedOriginsJSON: `["https://host.example"]`, KnowledgeBaseAccessMode: KnowledgeBaseAccessAll, KnowledgeBaseIDsJSON: `[]`, ScopesJSON: `["kb:list"]`}
+	secret, err := svc.CreateClient(ctx, actor, client, "long-enough-secret")
+	require.NoError(t, err)
+	svc.tenants = staticTenantService{tenant: &types.Tenant{ID: 1, Status: string(types.TenantStatusActive)}}
+
+	token, _, err := svc.IssueServiceToken(ctx, client.ID, secret)
+	require.NoError(t, err)
+	principal, _, _, err := svc.Authenticate(ctx, token, "service")
+	require.NoError(t, err)
+	require.Equal(t, []string{"tenant-kb"}, principal.KnowledgeBaseIDs)
+
+	require.NoError(t, svc.db.Exec(`INSERT INTO knowledge_bases (id, tenant_id) VALUES (?, ?)`, "later-kb", 1).Error)
+	refreshedPrincipal, _, _, err := svc.Authenticate(ctx, token, "service")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"tenant-kb", "later-kb"}, refreshedPrincipal.KnowledgeBaseIDs)
+
+	newToken, _, err := svc.IssueServiceToken(ctx, client.ID, secret)
+	require.NoError(t, err)
+	newPrincipal, _, _, err := svc.Authenticate(ctx, newToken, "service")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"tenant-kb", "later-kb"}, newPrincipal.KnowledgeBaseIDs)
+}
+
 func TestConsumeTicketIsSingleUseAndOriginBound(t *testing.T) {
 	svc := testService(t)
 	token := "one-time-ticket"

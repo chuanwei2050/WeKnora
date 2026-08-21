@@ -1,0 +1,2 @@
+ALTER TABLE integration_clients DROP CONSTRAINT IF EXISTS chk_integration_clients_kb_access_mode;
+ALTER TABLE integration_clients DROP COLUMN IF EXISTS knowledge_base_access_mode;

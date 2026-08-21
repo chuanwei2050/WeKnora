@@ -28,7 +28,7 @@ type adminTenantRequest struct {
 	Name          string `json:"name" binding:"required,max=255"`
 	Description   string `json:"description" binding:"max=1000"`
 	Business      string `json:"business" binding:"max=255"`
-	StorageQuota  int64  `json:"storage_quota" binding:"omitempty,min=0"`
+	StorageQuota  *int64 `json:"storage_quota" binding:"omitempty,min=0"`
 	AdminUsername string `json:"admin_username" binding:"omitempty,min=2,max=100"`
 	AdminPassword string `json:"admin_password" binding:"omitempty,min=8,max=72"`
 }
@@ -204,13 +204,25 @@ func (h *AdminHandler) CreateTenant(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	requestedStorageQuota := int64(0)
+	if request.StorageQuota != nil {
+		requestedStorageQuota = *request.StorageQuota
+	}
 	tenant, err := h.tenantService.CreateTenant(c.Request.Context(), &types.Tenant{
 		Name: strings.TrimSpace(request.Name), Description: strings.TrimSpace(request.Description),
-		Business: strings.TrimSpace(request.Business), StorageQuota: request.StorageQuota,
+		Business: strings.TrimSpace(request.Business), StorageQuota: requestedStorageQuota,
 	})
 	if err != nil {
 		c.Error(werrors.NewInternalServerError("Failed to create tenant").WithDetails(err.Error()))
 		return
+	}
+	if request.StorageQuota != nil {
+		tenant, err = h.tenantService.UpdateStorageQuota(c.Request.Context(), tenant.ID, requestedStorageQuota)
+		if err != nil {
+			_ = h.tenantService.DeleteTenant(c.Request.Context(), tenant.ID)
+			c.Error(werrors.NewInternalServerError("Failed to set tenant storage quota").WithDetails(err.Error()))
+			return
+		}
 	}
 	password := request.AdminPassword
 	if password == "" {
@@ -257,11 +269,20 @@ func (h *AdminHandler) UpdateTenant(c *gin.Context) {
 	tenant.Name = strings.TrimSpace(request.Name)
 	tenant.Description = strings.TrimSpace(request.Description)
 	tenant.Business = strings.TrimSpace(request.Business)
-	tenant.StorageQuota = request.StorageQuota
+	if request.StorageQuota != nil {
+		tenant.StorageQuota = *request.StorageQuota
+	}
 	tenant, err = h.tenantService.UpdateTenant(c.Request.Context(), tenant)
 	if err != nil {
 		c.Error(werrors.NewInternalServerError("Failed to update tenant").WithDetails(err.Error()))
 		return
+	}
+	if request.StorageQuota != nil {
+		tenant, err = h.tenantService.UpdateStorageQuota(c.Request.Context(), tenant.ID, *request.StorageQuota)
+		if err != nil {
+			c.Error(werrors.NewInternalServerError("Failed to update tenant storage quota").WithDetails(err.Error()))
+			return
+		}
 	}
 	admin, err := h.userService.SetTenantAdminCredentials(c.Request.Context(), actor, tenantID, request.AdminUsername, request.AdminPassword)
 	if err != nil {

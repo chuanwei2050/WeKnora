@@ -15,22 +15,23 @@ type IdentityProvider struct {
 func (IdentityProvider) TableName() string { return "integration_identity_providers" }
 
 type Client struct {
-	ID                   string     `gorm:"type:varchar(64);primaryKey"`
-	TenantID             uint64     `gorm:"not null;index"`
-	IdentityProviderID   string     `gorm:"type:varchar(64);not null;index"`
-	AdministratorUserID  string     `gorm:"type:varchar(36);not null;default:''"`
-	Name                 string     `gorm:"type:varchar(128);not null"`
-	SecretHash           string     `gorm:"type:varchar(64);not null"`
-	PreviousSecretHash   string     `gorm:"type:varchar(64)"`
-	ScopesJSON           string     `gorm:"type:text;not null"`
-	KnowledgeBaseIDsJSON string     `gorm:"type:text;not null"`
-	AllowedOriginsJSON   string     `gorm:"type:text;not null"`
-	RoleMappingsJSON     string     `gorm:"type:text;not null"`
-	MaxRole              string     `gorm:"type:varchar(32);not null"`
-	Enabled              bool       `gorm:"not null;default:true;index"`
-	ExpiresAt            *time.Time `gorm:"index"`
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	ID                      string     `gorm:"type:varchar(64);primaryKey"`
+	TenantID                uint64     `gorm:"not null;index"`
+	IdentityProviderID      string     `gorm:"type:varchar(64);not null;index"`
+	AdministratorUserID     string     `gorm:"type:varchar(36);not null;default:''"`
+	Name                    string     `gorm:"type:varchar(128);not null"`
+	SecretHash              string     `gorm:"type:varchar(64);not null"`
+	PreviousSecretHash      string     `gorm:"type:varchar(64)"`
+	ScopesJSON              string     `gorm:"type:text;not null"`
+	KnowledgeBaseAccessMode string     `gorm:"type:varchar(16);not null;default:'selected'"`
+	KnowledgeBaseIDsJSON    string     `gorm:"type:text;not null"`
+	AllowedOriginsJSON      string     `gorm:"type:text;not null"`
+	RoleMappingsJSON        string     `gorm:"type:text;not null"`
+	MaxRole                 string     `gorm:"type:varchar(32);not null"`
+	Enabled                 bool       `gorm:"not null;default:true;index"`
+	ExpiresAt               *time.Time `gorm:"index"`
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
 }
 
 func (Client) TableName() string { return "integration_clients" }
