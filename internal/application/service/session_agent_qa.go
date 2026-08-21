@@ -483,6 +483,7 @@ func (s *sessionService) buildAgentConfig(
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
+		RerankTopK:                  customAgent.Config.RerankTopK,
 		ComplexityRouting:           customAgent.Config.ComplexityRouting,
 	}
 	agentConfig.VerifiedAnswer = customAgent.Config.VerifiedAnswer

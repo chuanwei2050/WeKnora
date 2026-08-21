@@ -130,6 +130,7 @@ type KnowledgeSearchTool struct {
 	rerankModel          rerank.Reranker
 	chatModel            chat.Chat      // Optional chat model for LLM-based reranking
 	config               *config.Config // Global config for fallback values
+	rerankTopK           int
 
 	seenMu     sync.Mutex
 	seenChunks map[string]bool
@@ -144,7 +145,11 @@ func NewKnowledgeSearchTool(
 	rerankModel rerank.Reranker,
 	chatModel chat.Chat,
 	cfg *config.Config,
+	rerankTopK int,
 ) *KnowledgeSearchTool {
+	if rerankTopK <= 0 {
+		rerankTopK = 5
+	}
 	return &KnowledgeSearchTool{
 		BaseTool:             knowledgeSearchTool,
 		knowledgeBaseService: knowledgeBaseService,
@@ -154,6 +159,7 @@ func NewKnowledgeSearchTool(
 		rerankModel:          rerankModel,
 		chatModel:            chatModel,
 		config:               cfg,
+		rerankTopK:           rerankTopK,
 		seenChunks:           make(map[string]bool),
 	}
 }
@@ -332,14 +338,8 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	// Apply MMR (Maximal Marginal Relevance) to reduce redundancy and improve diversity
 	// Note: composite scoring is already applied inside rerankResults
 	if len(filteredResults) > 0 {
-		// Calculate k for MMR: use min(len(results), max(1, topK))
-		mmrK := len(filteredResults)
-		if topK > 0 && mmrK > topK {
-			mmrK = topK
-		}
-		if mmrK < 1 {
-			mmrK = 1
-		}
+		// Calculate k for MMR using the configured post-rerank result limit.
+		mmrK := t.rerankResultLimit(len(filteredResults))
 		// Apply MMR with lambda=0.7 (balance between relevance and diversity)
 		logger.Debugf(
 			ctx,
@@ -1338,6 +1338,10 @@ func (t *KnowledgeSearchTool) formatOutput(
 		Output:  output,
 		Data:    data,
 	}, nil
+}
+
+func (t *KnowledgeSearchTool) rerankResultLimit(resultCount int) int {
+	return min(resultCount, max(1, t.rerankTopK))
 }
 
 // searchResultsForAgent keeps the typed retrieval results available to the
