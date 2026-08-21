@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"regexp"
@@ -266,7 +267,7 @@ func (h *IntegrationHandler) Exchange(c *gin.Context) {
 	c.Header("Referrer-Policy", "strict-origin")
 	c.SetSameSite(http.SameSiteLaxMode)
 	setIntegrationBrowserCookie(c, token, int(integrationauth.SessionMaxTTL.Seconds()))
-	integrationData(c, http.StatusOK, gin.H{"csrf_token": csrf, "user": user, "knowledge_base_ids": principal.KnowledgeBaseIDs})
+	integrationData(c, http.StatusOK, gin.H{"csrf_token": csrf, "user": user, "knowledge_base_ids": principal.KnowledgeBaseIDs, "scopes": principal.Scopes})
 }
 
 func (h *IntegrationHandler) Refresh(c *gin.Context) {
@@ -424,6 +425,11 @@ func (h *IntegrationHandler) ListKnowledge(c *gin.Context) {
 		integrationError(c, http.StatusInternalServerError, "list_failed", "failed to list knowledge")
 		return
 	}
+	tagNames, err := h.service.KnowledgeTagNames(c.Request.Context(), integrationPrincipal(c), kbID)
+	if err != nil {
+		integrationError(c, http.StatusInternalServerError, "list_failed", "failed to list knowledge metadata")
+		return
+	}
 	result := make([]gin.H, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
@@ -433,7 +439,7 @@ func (h *IntegrationHandler) ListKnowledge(c *gin.Context) {
 			"id": row.ID, "knowledge_base_id": row.KnowledgeBaseID,
 			"title": row.Title, "description": row.Description,
 			"file_name": row.FileName, "file_type": row.FileType,
-			"tag_id": row.TagID, "parse_status": row.ParseStatus,
+			"tag_id": row.TagID, "tag_name": tagNames[row.TagID], "parse_status": row.ParseStatus,
 			"enable_status": row.EnableStatus, "updated_at": row.UpdatedAt,
 		})
 	}
@@ -884,6 +890,48 @@ func (h *IntegrationHandler) SynthesizeVoice(c *gin.Context) {
 	session.SynthesizeVoiceMessage(c, h.models, message, request)
 }
 
+func (h *IntegrationHandler) TranscribeVoice(c *gin.Context) {
+	if !h.requireScope(c, "chat:write") {
+		return
+	}
+	if _, err := h.service.GetChatBinding(c.Request.Context(), integrationPrincipal(c), c.Param("session_id")); err != nil {
+		integrationError(c, http.StatusForbidden, "session_denied", "session access denied")
+		return
+	}
+	modelID := strings.TrimSpace(c.PostForm("model_id"))
+	if modelID == "" {
+		integrationError(c, http.StatusBadRequest, "invalid_request", "model_id is required")
+		return
+	}
+	header, err := c.FormFile("audio")
+	if err != nil || header == nil || header.Size <= 0 || header.Size > 25<<20 {
+		integrationError(c, http.StatusBadRequest, "invalid_audio", "audio file must be between 1 byte and 25 MiB")
+		return
+	}
+	file, err := header.Open()
+	if err != nil {
+		integrationError(c, http.StatusBadRequest, "invalid_audio", "audio file cannot be opened")
+		return
+	}
+	defer file.Close()
+	audio, err := io.ReadAll(io.LimitReader(file, (25<<20)+1))
+	if err != nil || len(audio) > 25<<20 {
+		integrationError(c, http.StatusBadRequest, "invalid_audio", "audio file is too large")
+		return
+	}
+	model, err := h.models.GetASRModel(c.Request.Context(), modelID)
+	if err != nil {
+		integrationError(c, http.StatusBadRequest, "invalid_model", err.Error())
+		return
+	}
+	result, err := model.Transcribe(c.Request.Context(), audio, header.Filename)
+	if err != nil {
+		integrationError(c, http.StatusInternalServerError, "transcription_failed", err.Error())
+		return
+	}
+	integrationData(c, http.StatusOK, gin.H{"text": result.Text, "segments": result.Segments})
+}
+
 func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	if !h.enforceRate(c, "api.chat.message.create", 60) {
 		return
@@ -1274,7 +1322,7 @@ func (h *IntegrationHandler) ListClients(c *gin.Context) {
 	}
 	result := make([]gin.H, 0, len(clients))
 	for _, client := range clients {
-		result = append(result, gin.H{"id": client.ID, "name": client.Name, "tenant_id": client.TenantID, "identity_provider_id": client.IdentityProviderID, "administrator_user_id": client.AdministratorUserID, "scopes": client.Scopes(), "enabled": client.Enabled, "expires_at": client.ExpiresAt})
+		result = append(result, gin.H{"id": client.ID, "name": client.Name, "tenant_id": client.TenantID, "identity_provider_id": client.IdentityProviderID, "administrator_user_id": client.AdministratorUserID, "scopes": client.Scopes(), "knowledge_base_ids": client.KnowledgeBaseIDs(), "enabled": client.Enabled, "expires_at": client.ExpiresAt})
 	}
 	integrationData(c, http.StatusOK, result)
 }
@@ -1294,6 +1342,23 @@ func (h *IntegrationHandler) UpdateClientScopes(c *gin.Context) {
 		return
 	}
 	integrationData(c, http.StatusOK, gin.H{"scopes": req.Scopes, "reauthentication_required": true})
+}
+
+func (h *IntegrationHandler) UpdateClientKnowledgeBases(c *gin.Context) {
+	actor, _ := c.Get(types.UserContextKey.String())
+	user, _ := actor.(*types.User)
+	var req struct {
+		KnowledgeBaseIDs []string `json:"knowledge_base_ids" binding:"required"`
+	}
+	if c.ShouldBindJSON(&req) != nil {
+		integrationError(c, http.StatusBadRequest, "invalid_knowledge_base_ids", "knowledge_base_ids are required")
+		return
+	}
+	if err := h.service.UpdateClientKnowledgeBases(c.Request.Context(), user, c.Param("client_id"), req.KnowledgeBaseIDs); err != nil {
+		integrationError(c, http.StatusForbidden, "client_knowledge_bases_update_failed", "integration client knowledge base update denied")
+		return
+	}
+	integrationData(c, http.StatusOK, gin.H{"knowledge_base_ids": req.KnowledgeBaseIDs, "reauthentication_required": true})
 }
 
 func (h *IntegrationHandler) CreateIdentityProvider(c *gin.Context) {

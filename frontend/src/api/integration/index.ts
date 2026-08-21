@@ -1,10 +1,11 @@
 import { getApiBaseUrl } from '@/utils/api-base'
-import { getEmbeddedCSRFToken, setEmbeddedCSRFToken } from '@/utils/embedded-runtime'
+import { getEmbeddedCSRFToken, setEmbeddedCSRFToken, setEmbeddedScopes } from '@/utils/embedded-runtime'
 
 export interface ExchangeResponse {
   csrf_token: string
   user: { id: string; username: string; role: string; tenant_id: number }
   knowledge_base_ids: string[]
+  scopes: string[]
 }
 
 export async function exchangeBootstrapTicket(ticket: string): Promise<ExchangeResponse> {
@@ -19,6 +20,7 @@ export async function exchangeBootstrapTicket(ticket: string): Promise<ExchangeR
   const data = payload.data ?? payload
   if (!data.csrf_token || !data.user) throw new Error('invalid ticket exchange response')
   setEmbeddedCSRFToken(data.csrf_token)
+  setEmbeddedScopes(Array.isArray(data.scopes) ? data.scopes : [])
   return data
 }
 

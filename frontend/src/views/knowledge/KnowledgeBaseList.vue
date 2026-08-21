@@ -615,6 +615,7 @@ import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import { useI18n } from 'vue-i18n'
 import { isCookieEmbeddedMode } from '@/utils/embedded-runtime'
+import { canManageBidReviewKnowledge } from '@/utils/bidreview-sso'
 
 const router = useRouter()
 const route = useRoute()
@@ -622,7 +623,7 @@ const uiStore = useUIStore()
 const authStore = useAuthStore()
 const orgStore = useOrganizationStore()
 const { t } = useI18n()
-const canManageWorkspaceKnowledge = computed(() => authStore.canManageTenant)
+const canManageWorkspaceKnowledge = computed(() => authStore.canManageTenant && canManageBidReviewKnowledge())
 
 // 左侧空间选择：我的 / 空间 ID（已去掉「全部」）
 const spaceSelection = ref<'all' | 'mine' | 'shared' | string>('mine')

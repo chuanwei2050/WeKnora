@@ -486,6 +486,25 @@ func TestUpdateClientScopesRevokesExistingSessions(t *testing.T) {
 	require.ErrorIs(t, svc.UpdateClientScopes(context.Background(), actor, "client", []string{"unknown"}), ErrForbidden)
 }
 
+func TestUpdateClientKnowledgeBasesValidatesTenantAndRevokesSessions(t *testing.T) {
+	svc := testService(t)
+	actor := &types.User{Role: types.UserRolePlatformAdmin, IsActive: true}
+	require.NoError(t, svc.db.Exec("INSERT INTO knowledge_bases (id, tenant_id) VALUES (?, ?), (?, ?)", "kb-1", 1, "foreign-kb", 2).Error)
+	require.NoError(t, svc.db.Create(&Client{ID: "client", TenantID: 1, Enabled: true, ScopesJSON: `[]`, KnowledgeBaseIDsJSON: `[]`, AllowedOriginsJSON: `[]`, RoleMappingsJSON: `{}`}).Error)
+	require.NoError(t, svc.db.Create(&Session{ID: "session", ClientID: "client", TenantID: 1, Kind: "service", Digest: digest("token"), ScopesJSON: `[]`, KnowledgeBaseIDsJSON: `[]`, ExpiresAt: time.Now().Add(time.Hour), AbsoluteExpiresAt: time.Now().Add(time.Hour)}).Error)
+
+	require.NoError(t, svc.UpdateClientKnowledgeBases(context.Background(), actor, "client", []string{"kb-1", "kb-1"}))
+	var client Client
+	require.NoError(t, svc.db.First(&client, "id = ?", "client").Error)
+	require.Equal(t, []string{"kb-1"}, client.KnowledgeBaseIDs())
+	var session Session
+	require.NoError(t, svc.db.First(&session, "id = ?", "session").Error)
+	require.NotNil(t, session.RevokedAt)
+
+	require.ErrorIs(t, svc.UpdateClientKnowledgeBases(context.Background(), actor, "client", []string{"foreign-kb"}), ErrForbidden)
+	require.ErrorIs(t, svc.UpdateClientKnowledgeBases(context.Background(), &types.User{Role: types.UserRoleTenantAdmin}, "client", []string{"kb-1"}), ErrForbidden)
+}
+
 func TestPrincipalFromBidReviewUsesUnifiedShape(t *testing.T) {
 	user := &types.User{ID: "legacy-user", TenantID: 7, BidReviewRole: string(types.UserRoleMember), KnowledgeBaseIDs: types.StringArray{"kb-1"}}
 	principal := PrincipalFromBidReview(user)

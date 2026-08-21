@@ -266,7 +266,7 @@ async function testConnection() {
       } as any)
       await validateConnection(tempDsId.value)
     } else {
-      await validateCredentials(form.value.type, form.value.config.credentials)
+      await validateCredentials(props.kbId, form.value.type, form.value.config.credentials)
     }
     testResult.value = 'success'
     MessagePlugin.success(t('datasource.testSuccess'))

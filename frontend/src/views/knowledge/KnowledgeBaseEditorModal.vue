@@ -411,7 +411,15 @@ const reviewerOptions = computed(() => tenantUsers.value.filter(user => user.is_
 const loadTenantUsers = async (tenantId: number) => {
   if (!tenantId) return
   try {
-    tenantUsers.value = (await listTenantUsers(tenantId, { page: 1, pageSize: 500 })).items
+    const users: AdminUser[] = []
+    let page = 1
+    while (true) {
+      const result = await listTenantUsers(tenantId, { page, pageSize: 100 })
+      users.push(...result.items)
+      if (users.length >= result.total || result.items.length === 0) break
+      page += 1
+    }
+    tenantUsers.value = users
   } catch {
     tenantUsers.value = []
   }

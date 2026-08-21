@@ -20,7 +20,10 @@ export function transcribeVoice(sessionId: string, modelId: string, audio: Blob,
   const form = new FormData();
   form.append('model_id', modelId);
   form.append('audio', audio, fileName);
-	return post(`/api/v1/sessions/${sessionId}/voice/asr`, form, { headers: { 'Content-Type': 'multipart/form-data' }, signal }).then((response: any) => response?.data ?? response) as Promise<VoiceTranscription>;
+	const path = getRuntimeMode() !== 'standalone'
+		? `/api/integration/v1/chat/sessions/${sessionId}/voice/asr`
+		: `/api/v1/sessions/${sessionId}/voice/asr`;
+	return post(path, form, { headers: { 'Content-Type': 'multipart/form-data' }, signal }).then((response: any) => response?.data ?? response) as Promise<VoiceTranscription>;
 }
 
 export function synthesizeVoice(sessionId: string, messageId: string, modelId: string, options: { language?: string; voice?: string; speed?: number; format?: string } = {}, signal?: AbortSignal) {

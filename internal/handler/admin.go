@@ -106,6 +106,18 @@ func adminActor(c *gin.Context) (*types.User, bool) {
 	return actor, true
 }
 
+func tenantUserListActor(c *gin.Context) (*types.User, bool) {
+	if principal := integrationPrincipal(c); principal != nil {
+		actor, ok := types.UserFromContext(c.Request.Context())
+		if !ok || actor == nil || actor.TenantID != principal.TenantID || !actor.CanManageTenant() {
+			c.Error(werrors.NewForbiddenError("Tenant administrator permission required"))
+			return nil, false
+		}
+		return actor, true
+	}
+	return adminActor(c)
+}
+
 func platformActor(c *gin.Context) (*types.User, bool) {
 	actor, ok := adminActor(c)
 	if !ok {
@@ -334,7 +346,7 @@ func (h *AdminHandler) DeleteTenant(c *gin.Context) {
 }
 
 func (h *AdminHandler) ListTenantUsers(c *gin.Context) {
-	actor, ok := adminActor(c)
+	actor, ok := tenantUserListActor(c)
 	if !ok {
 		return
 	}

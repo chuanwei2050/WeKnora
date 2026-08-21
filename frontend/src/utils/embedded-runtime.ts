@@ -2,6 +2,7 @@ export type RuntimeMode = 'standalone' | 'embedded-page' | 'embedded-widget'
 
 const ALLOWED_MODES = new Set<RuntimeMode>(['standalone', 'embedded-page', 'embedded-widget'])
 let csrfToken = ''
+let embeddedScopes = new Set<string>()
 
 export function getRuntimeMode(location: Pick<Location, 'pathname' | 'search'> = window.location): RuntimeMode {
   const requested = new URLSearchParams(location.search).get('mode') as RuntimeMode | null
@@ -26,6 +27,14 @@ export function setEmbeddedCSRFToken(value: string): void {
 
 export function getEmbeddedCSRFToken(): string {
   return csrfToken
+}
+
+export function setEmbeddedScopes(scopes: string[]): void {
+  embeddedScopes = new Set(scopes)
+}
+
+export function hasEmbeddedScope(scope: string): boolean {
+  return embeddedScopes.has(scope)
 }
 
 export function resolveEmbeddedParentOrigin(configured: string | null, referrer: string, currentOrigin: string): string {

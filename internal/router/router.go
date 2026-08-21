@@ -223,6 +223,7 @@ func RegisterIntegrationPublicRoutes(r *gin.Engine, h *handler.IntegrationHandle
 	integration.GET("/chat/sessions/:session_id/messages/:message_id/events", h.GetMessageEvents)
 	integration.POST("/chat/sessions/:session_id/messages/:message_id/cancel", h.CancelMessage)
 	integration.POST("/chat/sessions/:session_id/voice/tts", h.SynthesizeVoice)
+	integration.POST("/chat/sessions/:session_id/voice/asr", h.TranscribeVoice)
 }
 
 func RegisterIntegrationAdminRoutes(r *gin.RouterGroup, h *handler.IntegrationHandler) {
@@ -236,6 +237,7 @@ func RegisterIntegrationAdminRoutes(r *gin.RouterGroup, h *handler.IntegrationHa
 	clients.POST("/:client_id/revoke-previous-secret", h.RevokePreviousClientSecret)
 	clients.POST("/:client_id/disable", h.DisableClient)
 	clients.PUT("/:client_id/scopes", h.UpdateClientScopes)
+	clients.PUT("/:client_id/knowledge-bases", h.UpdateClientKnowledgeBases)
 	clients.PUT("/:client_id/administrator", h.BindClientAdministrator)
 	providers := r.Group("/admin/integration-identity-providers")
 	providers.GET("", h.ListIdentityProviders)

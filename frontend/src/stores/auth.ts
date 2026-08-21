@@ -47,8 +47,10 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
   const effectiveTenantId = computed(() => {
-    // 如果选择了其他租户，使用选择的租户ID，否则使用用户默认租户ID
-    return selectedTenantId.value || (tenant.value?.id ? Number(tenant.value.id) : null)
+    // Integration 嵌入会话只返回 user.tenant_id，不返回完整 tenant 对象。
+    return selectedTenantId.value
+      || (tenant.value?.id ? Number(tenant.value.id) : null)
+      || (user.value?.tenant_id ? Number(user.value.tenant_id) : null)
   })
 
   // 操作方法

@@ -242,6 +242,66 @@ func (s *Service) UpdateClientScopes(ctx context.Context, actor *types.User, cli
 	})
 }
 
+func (s *Service) UpdateClientKnowledgeBases(ctx context.Context, actor *types.User, clientID string, knowledgeBaseIDs []string) error {
+	if actor == nil || !actor.IsPlatformAdmin() || strings.TrimSpace(clientID) == "" {
+		return ErrForbidden
+	}
+	knowledgeBaseIDs = uniqueStrings(knowledgeBaseIDs)
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var client Client
+		if err := tx.First(&client, "id = ?", clientID).Error; err != nil {
+			return ErrForbidden
+		}
+		if len(knowledgeBaseIDs) > 0 {
+			var count int64
+			if err := tx.Table("knowledge_bases").Where("id IN ? AND tenant_id = ? AND deleted_at IS NULL", knowledgeBaseIDs, client.TenantID).Count(&count).Error; err != nil || count != int64(len(knowledgeBaseIDs)) {
+				return ErrForbidden
+			}
+		}
+		if err := tx.Model(&client).Update("knowledge_base_ids_json", encodeStrings(knowledgeBaseIDs)).Error; err != nil {
+			return err
+		}
+		var userIDs []string
+		if err := tx.Model(&ExternalIdentity{}).Where("client_id = ?", clientID).Distinct("user_id").Pluck("user_id", &userIDs).Error; err != nil {
+			return err
+		}
+		if len(userIDs) > 0 {
+			if err := tx.Model(&types.User{}).Where("id IN ?", userIDs).Update("knowledge_base_ids", types.StringArray(knowledgeBaseIDs)).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Model(&Session{}).Where("client_id = ? AND revoked_at IS NULL", clientID).Update("revoked_at", s.now()).Error
+	})
+}
+
+func uniqueStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" && !slices.Contains(result, value) {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func (s *Service) KnowledgeTagNames(ctx context.Context, principal *Principal, knowledgeBaseID string) (map[string]string, error) {
+	if principal == nil || principal.TenantID == 0 || strings.TrimSpace(knowledgeBaseID) == "" {
+		return nil, ErrForbidden
+	}
+	var tags []types.KnowledgeTag
+	if err := s.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ?", principal.TenantID, knowledgeBaseID).
+		Find(&tags).Error; err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(tags))
+	for _, tag := range tags {
+		result[tag.ID] = tag.Name
+	}
+	return result, nil
+}
+
 func (s *Service) RotateSecret(ctx context.Context, actor *types.User, clientID string) (string, error) {
 	if actor == nil || !actor.IsPlatformAdmin() {
 		return "", ErrForbidden

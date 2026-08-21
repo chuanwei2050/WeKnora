@@ -124,6 +124,9 @@ func TestAllowedIntegrationInternalPathLimitsWidgetCapabilities(t *testing.T) {
 		{name: "list agents", method: http.MethodGet, path: "/api/v1/agents", allowed: true},
 		{name: "list models", method: http.MethodGet, path: "/api/v1/models", allowed: true},
 		{name: "read conversation config", method: http.MethodGet, path: "/api/v1/tenants/kv/conversation-config", allowed: true},
+		{name: "read parser engines", method: http.MethodGet, path: "/api/v1/system/parser-engines", allowed: true},
+		{name: "read tenant users for knowledge settings", method: http.MethodGet, path: "/api/v1/admin/tenants/10000/users", allowed: true},
+		{name: "manage knowledge data source", method: http.MethodPost, path: "/api/v1/datasource", allowed: true},
 		{name: "transcribe voice", method: http.MethodPost, path: "/api/v1/sessions/session-1/voice/transcribe", allowed: true},
 		{name: "cannot create agent", method: http.MethodPost, path: "/api/v1/agents", allowed: false},
 		{name: "cannot update config", method: http.MethodPut, path: "/api/v1/tenants/kv/conversation-config", allowed: false},
@@ -136,5 +139,17 @@ func TestAllowedIntegrationInternalPathLimitsWidgetCapabilities(t *testing.T) {
 				t.Fatalf("allowedIntegrationInternalPath(%q, %q) = %v, want %v", test.method, test.path, got, test.allowed)
 			}
 		})
+	}
+}
+
+func TestRequiredIntegrationInternalScopeProtectsManagementReads(t *testing.T) {
+	if got := requiredIntegrationInternalScope(http.MethodGet, "/api/v1/datasource?kb_id=kb-1"); got != "knowledge:write" {
+		t.Fatalf("datasource scope = %q, want knowledge:write", got)
+	}
+	if got := requiredIntegrationInternalScope(http.MethodGet, "/api/v1/admin/tenants/7/users"); got != "knowledge:write" {
+		t.Fatalf("tenant users scope = %q, want knowledge:write", got)
+	}
+	if got := requiredIntegrationInternalScope(http.MethodGet, "/api/v1/knowledge-bases/kb-1"); got != "knowledge:read" {
+		t.Fatalf("knowledge read scope = %q, want knowledge:read", got)
 	}
 }

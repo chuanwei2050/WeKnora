@@ -37,6 +37,8 @@ func (Client) TableName() string { return "integration_clients" }
 
 func (c Client) Scopes() []string { return decodeStrings(c.ScopesJSON) }
 
+func (c Client) KnowledgeBaseIDs() []string { return decodeStrings(c.KnowledgeBaseIDsJSON) }
+
 type ExternalIdentity struct {
 	ID                 uint64 `gorm:"primaryKey"`
 	ClientID           string `gorm:"type:varchar(64);not null;uniqueIndex:idx_integration_identity"`

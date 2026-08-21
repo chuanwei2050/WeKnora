@@ -107,16 +107,7 @@ func Auth(
 					c.Abort()
 					return
 				}
-				requiredScope := "knowledge:read"
-				if !isSafeMethod(c.Request.Method) {
-					requiredScope = "knowledge:write"
-				}
-				if isIntegrationVoiceTranscriptionPath(c.Request.Method, c.Request.URL.Path) {
-					requiredScope = "chat:write"
-				}
-				if c.Request.URL.Path == "/files" {
-					requiredScope = "file:read"
-				}
+				requiredScope := requiredIntegrationInternalScope(c.Request.Method, c.Request.URL.Path)
 				if !principal.HasScope(requiredScope) {
 					c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: integration scope is missing"})
 					c.Abort()
@@ -321,6 +312,22 @@ func isSafeMethod(method string) bool {
 	return method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions
 }
 
+func requiredIntegrationInternalScope(method, path string) string {
+	if path == "/files" {
+		return "file:read"
+	}
+	if isIntegrationVoiceTranscriptionPath(method, path) {
+		return "chat:write"
+	}
+	if strings.HasPrefix(path, "/api/v1/datasource") || strings.HasPrefix(path, "/api/v1/admin/tenants/") {
+		return "knowledge:write"
+	}
+	if !isSafeMethod(method) {
+		return "knowledge:write"
+	}
+	return "knowledge:read"
+}
+
 func allowedIntegrationInternalPath(method, path string) bool {
 	if path == "/files" {
 		return true
@@ -336,11 +343,22 @@ func allowedIntegrationInternalPath(method, path string) bool {
 				return true
 			}
 		}
+		for _, prefix := range []string{
+			"/api/v1/shared-knowledge-bases",
+			"/api/v1/system/parser-engines",
+			"/api/v1/system/info",
+			"/api/v1/datasource",
+			"/api/v1/admin/tenants/",
+		} {
+			if path == prefix || strings.HasPrefix(path, prefix) {
+				return true
+			}
+		}
 	}
 	if isIntegrationVoiceTranscriptionPath(method, path) {
 		return true
 	}
-	for _, prefix := range []string{"/api/v1/knowledge-bases", "/api/v1/knowledge", "/api/v1/chunks", "/api/v1/tags", "/api/v1/faq"} {
+	for _, prefix := range []string{"/api/v1/knowledge-bases", "/api/v1/knowledge", "/api/v1/chunks", "/api/v1/tags", "/api/v1/faq", "/api/v1/datasource"} {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
 		}
