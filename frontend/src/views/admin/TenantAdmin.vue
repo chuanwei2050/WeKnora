@@ -79,7 +79,7 @@
           <div class="field-control"><t-input v-model="integrationForm.allowedOrigin" placeholder="例如：https://bidder.example.com" /><div class="field-hint">只填写协议、域名和端口，不要包含路径。</div></div>
         </t-form-item>
         <div class="field-hint">将绑定租户 {{ integrationTenant?.id }}，并授权该租户当前及未来创建的全部知识库。</div>
-        <t-alert v-if="isInsecureDeployment" theme="warning" message="当前知识库使用 HTTP。Integration 浏览器会话使用 Secure Cookie，正式外挂接入前请先配置 HTTPS。" />
+        <t-alert v-if="isInsecureDeployment" theme="warning" message="当前知识库使用 HTTP。跨站 iframe 可能拦截第三方 Cookie；请优先配置 HTTPS，或确认嵌入端已改用 Bearer session_token。" />
       </t-form>
     </t-dialog>
 

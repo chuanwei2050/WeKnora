@@ -275,6 +275,10 @@ func (s *Service) UpdateClientKnowledgeBases(ctx context.Context, actor *types.U
 		if err := tx.First(&client, "id = ?", clientID).Error; err != nil {
 			return ErrForbidden
 		}
+		// Keep CreateClient invariant: access mode "all" must not carry a selected ID list.
+		if client.KnowledgeBaseAccessMode == KnowledgeBaseAccessAll && len(knowledgeBaseIDs) > 0 {
+			return ErrInvalid
+		}
 		if len(knowledgeBaseIDs) > 0 {
 			var count int64
 			if err := tx.Table("knowledge_bases").Where("id IN ? AND tenant_id = ? AND deleted_at IS NULL", knowledgeBaseIDs, client.TenantID).Count(&count).Error; err != nil || count != int64(len(knowledgeBaseIDs)) {
@@ -288,8 +292,11 @@ func (s *Service) UpdateClientKnowledgeBases(ctx context.Context, actor *types.U
 		if err := tx.Model(&ExternalIdentity{}).Where("client_id = ?", clientID).Distinct("user_id").Pluck("user_id", &userIDs).Error; err != nil {
 			return err
 		}
-		if len(userIDs) > 0 {
-			if err := tx.Model(&types.User{}).Where("id IN ?", userIDs).Update("knowledge_base_ids", types.StringArray(knowledgeBaseIDs)).Error; err != nil {
+		// Only selected-scope members mirror client KB IDs; access-mode "all" users ignore the list.
+		if len(userIDs) > 0 && client.KnowledgeBaseAccessMode != KnowledgeBaseAccessAll {
+			if err := tx.Model(&types.User{}).
+				Where("id IN ? AND knowledge_base_access_mode = ?", userIDs, types.KnowledgeBaseAccessSelected).
+				Update("knowledge_base_ids", types.StringArray(knowledgeBaseIDs)).Error; err != nil {
 				return err
 			}
 		}

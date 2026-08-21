@@ -534,6 +534,19 @@ func TestUpdateClientKnowledgeBasesValidatesTenantAndRevokesSessions(t *testing.
 	require.ErrorIs(t, svc.UpdateClientKnowledgeBases(context.Background(), &types.User{Role: types.UserRoleTenantAdmin}, "client", []string{"kb-1"}), ErrForbidden)
 }
 
+func TestUpdateClientKnowledgeBasesRejectsSelectedIDsWhenAccessModeAll(t *testing.T) {
+	svc := testService(t)
+	actor := &types.User{Role: types.UserRolePlatformAdmin, IsActive: true}
+	require.NoError(t, svc.db.Exec("INSERT INTO knowledge_bases (id, tenant_id) VALUES (?, ?)", "kb-1", 1).Error)
+	require.NoError(t, svc.db.Create(&Client{
+		ID: "all-client", TenantID: 1, Enabled: true, KnowledgeBaseAccessMode: KnowledgeBaseAccessAll,
+		ScopesJSON: `[]`, KnowledgeBaseIDsJSON: `[]`, AllowedOriginsJSON: `[]`, RoleMappingsJSON: `{}`,
+	}).Error)
+
+	require.ErrorIs(t, svc.UpdateClientKnowledgeBases(context.Background(), actor, "all-client", []string{"kb-1"}), ErrInvalid)
+	require.NoError(t, svc.UpdateClientKnowledgeBases(context.Background(), actor, "all-client", nil))
+}
+
 func TestPrincipalFromBidReviewUsesUnifiedShape(t *testing.T) {
 	user := &types.User{ID: "legacy-user", TenantID: 7, BidReviewRole: string(types.UserRoleMember), KnowledgeBaseIDs: types.StringArray{"kb-1"}}
 	principal := PrincipalFromBidReview(user)

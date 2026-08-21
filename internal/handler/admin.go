@@ -375,6 +375,10 @@ func (h *AdminHandler) ListTenantUsers(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if principal := integrationPrincipal(c); principal != nil && principal.TenantID != tenantID {
+		c.Error(werrors.NewForbiddenError("Cross-tenant user management is forbidden"))
+		return
+	}
 	page, pageSize := parseAdminPagination(c)
 	users, total, err := h.userService.ListTenantUsers(c.Request.Context(), actor, tenantID, c.Query("keyword"), (page-1)*pageSize, pageSize)
 	if err != nil {

@@ -126,6 +126,8 @@ func TestAllowedIntegrationInternalPathLimitsWidgetCapabilities(t *testing.T) {
 		{name: "read conversation config", method: http.MethodGet, path: "/api/v1/tenants/kv/conversation-config", allowed: true},
 		{name: "read parser engines", method: http.MethodGet, path: "/api/v1/system/parser-engines", allowed: true},
 		{name: "read tenant users for knowledge settings", method: http.MethodGet, path: "/api/v1/admin/tenants/10000/users", allowed: true},
+		{name: "cannot list tenant knowledge bases via admin", method: http.MethodGet, path: "/api/v1/admin/tenants/10000/knowledge-bases", allowed: false},
+		{name: "cannot list all tenants", method: http.MethodGet, path: "/api/v1/admin/tenants", allowed: false},
 		{name: "manage knowledge data source", method: http.MethodPost, path: "/api/v1/datasource", allowed: true},
 		{name: "transcribe voice", method: http.MethodPost, path: "/api/v1/sessions/session-1/voice/transcribe", allowed: true},
 		{name: "cannot create agent", method: http.MethodPost, path: "/api/v1/agents", allowed: false},

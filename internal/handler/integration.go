@@ -593,7 +593,7 @@ func (h *IntegrationHandler) AnalyzeKnowledgeTable(c *gin.Context) {
 		integrationError(c, http.StatusInternalServerError, "knowledge_lookup_failed", "failed to load knowledge")
 		return
 	}
-	if knowledge == nil || knowledge.KnowledgeBaseID != req.KnowledgeBaseID {
+	if knowledge == nil || knowledge.KnowledgeBaseID != req.KnowledgeBaseID || knowledge.TenantID != principal.TenantID {
 		integrationError(c, http.StatusNotFound, "knowledge_not_found", "knowledge was not found in the requested knowledge base")
 		return
 	}
@@ -963,7 +963,7 @@ func (h *IntegrationHandler) SynthesizeVoice(c *gin.Context) {
 	}
 	var request session.VoiceSynthesisRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		integrationError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		integrationError(c, http.StatusBadRequest, "invalid_request", "invalid voice synthesis request")
 		return
 	}
 	message, err := h.messages.GetMessage(c.Request.Context(), binding.SessionID, request.MessageID)
@@ -1005,12 +1005,12 @@ func (h *IntegrationHandler) TranscribeVoice(c *gin.Context) {
 	}
 	model, err := h.models.GetASRModel(c.Request.Context(), modelID)
 	if err != nil {
-		integrationError(c, http.StatusBadRequest, "invalid_model", err.Error())
+		integrationError(c, http.StatusBadRequest, "invalid_model", "asr model is unavailable")
 		return
 	}
 	result, err := model.Transcribe(c.Request.Context(), audio, header.Filename)
 	if err != nil {
-		integrationError(c, http.StatusInternalServerError, "transcription_failed", err.Error())
+		integrationError(c, http.StatusInternalServerError, "transcription_failed", "audio transcription failed")
 		return
 	}
 	integrationData(c, http.StatusOK, gin.H{"text": result.Text, "segments": result.Segments})
@@ -1440,7 +1440,11 @@ func (h *IntegrationHandler) UpdateClientKnowledgeBases(c *gin.Context) {
 		return
 	}
 	if err := h.service.UpdateClientKnowledgeBases(c.Request.Context(), user, c.Param("client_id"), req.KnowledgeBaseIDs); err != nil {
-		integrationError(c, http.StatusForbidden, "client_knowledge_bases_update_failed", "integration client knowledge base update denied")
+		status := http.StatusForbidden
+		if errors.Is(err, integrationauth.ErrInvalid) {
+			status = http.StatusBadRequest
+		}
+		integrationError(c, status, "client_knowledge_bases_update_failed", "integration client knowledge base update denied")
 		return
 	}
 	integrationData(c, http.StatusOK, gin.H{"knowledge_base_ids": req.KnowledgeBaseIDs, "reauthentication_required": true})

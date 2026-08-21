@@ -342,7 +342,8 @@ func requiredIntegrationInternalScope(method, path string) string {
 	if isIntegrationVoiceTranscriptionPath(method, path) {
 		return "chat:write"
 	}
-	if strings.HasPrefix(path, "/api/v1/datasource") || strings.HasPrefix(path, "/api/v1/admin/tenants/") {
+	if strings.HasPrefix(path, "/api/v1/datasource") ||
+		(strings.HasPrefix(path, "/api/v1/admin/tenants/") && strings.HasSuffix(path, "/users")) {
 		return "knowledge:write"
 	}
 	if !isSafeMethod(method) {
@@ -371,11 +372,14 @@ func allowedIntegrationInternalPath(method, path string) bool {
 			"/api/v1/system/parser-engines",
 			"/api/v1/system/info",
 			"/api/v1/datasource",
-			"/api/v1/admin/tenants/",
 		} {
 			if path == prefix || strings.HasPrefix(path, prefix) {
 				return true
 			}
+		}
+		// Embedded knowledge settings may list tenant users; do not open other admin tenant routes.
+		if strings.HasPrefix(path, "/api/v1/admin/tenants/") && strings.HasSuffix(path, "/users") {
+			return true
 		}
 	}
 	if isIntegrationVoiceTranscriptionPath(method, path) {

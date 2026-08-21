@@ -48,7 +48,7 @@ func (h *Handler) TranscribeVoiceBatch(c *gin.Context) {
 	}
 	file, err := header.Open()
 	if err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("audio file cannot be opened"))
 		return
 	}
 	defer file.Close()
@@ -59,12 +59,12 @@ func (h *Handler) TranscribeVoiceBatch(c *gin.Context) {
 	}
 	model, err := h.modelService.GetASRModel(ctx, modelID)
 	if err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("asr model is unavailable"))
 		return
 	}
 	result, err := model.Transcribe(ctx, audio, header.Filename)
 	if err != nil {
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("audio transcription failed"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"text": result.Text, "segments": result.Segments})
@@ -100,7 +100,7 @@ func (h *Handler) IssueVoiceWSTicket(c *gin.Context) {
 	var request voiceTicketRequest
 	if c.Request.ContentLength > 0 {
 		if err := c.ShouldBindJSON(&request); err != nil {
-			c.Error(errors.NewBadRequestError(err.Error()))
+			c.Error(errors.NewBadRequestError("invalid voice ticket request"))
 			return
 		}
 	}
@@ -111,7 +111,7 @@ func (h *Handler) IssueVoiceWSTicket(c *gin.Context) {
 	tenantID := types.MustTenantIDFromContext(ctx)
 	ticket, err := h.voiceTickets.Issue(userID, tenantID, sessionID, purpose, h.config.Voice.WSTicketTTL, time.Now())
 	if err != nil {
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("failed to issue voice ticket"))
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"ticket": ticket.Value, "expires_at": ticket.ExpiresAt, "purpose": ticket.Purpose})
@@ -194,7 +194,7 @@ func (h *Handler) VoiceWebSocket(c *gin.Context) {
 			audio = append(audio, payload...)
 			if streamingSession != nil {
 				if writeErr := streamingSession.Write(payload); writeErr != nil {
-					_ = conn.WriteJSON(gin.H{"type": "error", "message": writeErr.Error()})
+					_ = conn.WriteJSON(gin.H{"type": "error", "message": "failed to stream audio"})
 					return
 				}
 				if partial, ok := streamingSession.(asr.PartialStreamingSession); ok {
@@ -226,7 +226,7 @@ func (h *Handler) VoiceWebSocket(c *gin.Context) {
 			}
 			resolved, resolveErr := h.modelService.GetASRModel(c.Request.Context(), message.ModelID)
 			if resolveErr != nil {
-				_ = conn.WriteJSON(gin.H{"type": "error", "message": resolveErr.Error()})
+				_ = conn.WriteJSON(gin.H{"type": "error", "message": "asr model is unavailable"})
 				continue
 			}
 			model, modelID, fileName, audio, started, startedAt = resolved, message.ModelID, message.FileName, audio[:0], true, time.Now()
@@ -251,7 +251,7 @@ func (h *Handler) VoiceWebSocket(c *gin.Context) {
 				result, transcribeErr = model.Transcribe(c.Request.Context(), audio, fileName)
 			}
 			if transcribeErr != nil {
-				_ = conn.WriteJSON(gin.H{"type": "error", "message": transcribeErr.Error()})
+				_ = conn.WriteJSON(gin.H{"type": "error", "message": "audio transcription failed"})
 			} else {
 				_ = conn.WriteJSON(gin.H{"type": "final", "text": result.Text, "segments": result.Segments})
 			}
@@ -281,7 +281,7 @@ func (h *Handler) SynthesizeVoice(c *gin.Context) {
 	sessionID := strings.TrimSpace(c.Param("session_id"))
 	var request VoiceSynthesisRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("invalid voice synthesis request"))
 		return
 	}
 	if _, err := h.sessionService.GetSession(ctx, sessionID); err != nil {
@@ -302,7 +302,7 @@ func SynthesizeVoiceMessage(c *gin.Context, modelService interfaces.ModelService
 	ctx := c.Request.Context()
 	model, err := modelService.GetTTSModel(ctx, request.ModelID)
 	if err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("tts model is unavailable"))
 		return
 	}
 	format := strings.ToLower(strings.TrimSpace(request.Format))
@@ -311,13 +311,13 @@ func SynthesizeVoiceMessage(c *gin.Context, modelService interfaces.ModelService
 	}
 	options := tts.SynthesizeOptions{Language: request.Language, Voice: request.Voice, Speed: request.Speed, Format: format}
 	if err := options.Validate(); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("invalid voice synthesis options"))
 		return
 	}
 	if format != "mp3" {
 		stream, synthesizeErr := model.Synthesize(ctx, message.Content, options)
 		if synthesizeErr != nil {
-			c.Error(errors.NewInternalServerError(synthesizeErr.Error()))
+			c.Error(errors.NewInternalServerError("voice synthesis failed"))
 			return
 		}
 		defer stream.Close()
@@ -336,7 +336,7 @@ func SynthesizeVoiceMessage(c *gin.Context, modelService interfaces.ModelService
 		stream, err = model.Synthesize(ctx, chunk, options)
 		if err != nil {
 			if index == 0 {
-				c.Error(errors.NewInternalServerError(err.Error()))
+				c.Error(errors.NewInternalServerError("voice synthesis failed"))
 			}
 			return
 		}
