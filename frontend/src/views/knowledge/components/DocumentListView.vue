@@ -39,6 +39,7 @@ const props = defineProps<{
   items: KnowledgeItem[];
   selectedIds: Set<string>;
   canEdit: boolean;
+  canManage?: boolean;
   tagList: Tag[];
   loading?: boolean;
   canGenerateSummary?: boolean;
@@ -130,7 +131,8 @@ const statusByRow = computed(() => {
 });
 
 // Show the actions column whenever the user can manage documents or participate in governance.
-const showActions = computed(() => props.canEdit || props.canContribute || props.canReview);
+const showActions = computed(() => props.canEdit || props.canManage || props.canContribute || props.canReview);
+const canManage = computed(() => Boolean(props.canManage));
 const governanceContext = () => ({
   enabled: Boolean(props.governanceEnabled),
   canContribute: Boolean(props.canContribute),
@@ -138,7 +140,7 @@ const governanceContext = () => ({
   currentUserId: props.currentUserId || '',
 });
 const deleteOptions = () => ({
-  canManage: props.canEdit,
+  canManage: Boolean(props.canManage),
   currentUserId: props.currentUserId || '',
 });
 const governanceActions = (item: KnowledgeItem) => getGovernanceRowActions(item, governanceContext());
@@ -297,7 +299,7 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
               </button>
             </t-dropdown>
             <button
-              v-if="canEdit && !hasGovernanceAction(item, 'delete')"
+              v-if="canManage && !hasGovernanceAction(item, 'delete')"
               class="row-action-btn danger"
               type="button"
               :disabled="isKnowledgeDeleteDisabled(item, deleteOptions())"

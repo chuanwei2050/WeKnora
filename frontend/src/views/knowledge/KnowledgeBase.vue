@@ -49,6 +49,7 @@ import {
   listKnowledgeBases,
   reparseKnowledge,
   batchDeleteKnowledge,
+  delKnowledgeDetails,
 } from "@/api/knowledge-base/index";
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
@@ -1754,7 +1755,7 @@ const governanceActionContext = computed(() => ({
 }));
 
 const knowledgeDeleteOptions = computed(() => ({
-  canManage: canEdit.value,
+  canManage: canManage.value,
   currentUserId: authStore.currentUserId,
 }));
 
@@ -1763,7 +1764,7 @@ const canShowCardMenu = (item: KnowledgeCard) => canEdit.value || canOperateGove
 const canSelectCard = (item: KnowledgeCard) => canEdit.value || canOperateGovernanceRow(item, governanceActionContext.value);
 
 const getEligibleBatchItems = (action: GovernanceRowAction): KnowledgeCard[] => {
-  if (action === 'delete' && canEdit.value) {
+  if (action === 'delete' && canManage.value) {
     return selectedKnowledgeItems.value;
   }
   return selectedKnowledgeItems.value.filter((item: KnowledgeCard) => (
@@ -1784,26 +1785,52 @@ const openBatchDeleteDialog = () => {
   batchDeleteDialog.value = true;
 };
 
+const applyBatchDeleteSuccess = (ids: string[], deletedCount: number, options?: { notify?: boolean }) => {
+  const removed = new Set(ids);
+  cardList.value = (cardList.value || []).filter((item: KnowledgeCard) => !removed.has(item.id));
+  ids.forEach(id => selectedIds.value.delete(id));
+  batchDeleteDialog.value = false;
+  if (options?.notify !== false && deletedCount > 0) {
+    MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: deletedCount }));
+  }
+  page = 1;
+  loadKnowledgeFiles(kbId.value);
+  loadTags(kbId.value);
+};
+
 const confirmBatchDelete = async () => {
   if (batchDeleting.value || batchDeleteTargetIds.value.length === 0) return;
   const ids = [...batchDeleteTargetIds.value];
   batchActionLoading.value = 'delete';
   try {
-    const res: any = await batchDeleteKnowledge(kbId.value, ids);
-    if (res?.success) {
-      const removed = new Set(ids);
-      cardList.value = (cardList.value || []).filter((item: KnowledgeCard) => !removed.has(item.id));
-      ids.forEach(id => selectedIds.value.delete(id));
-      batchDeleteDialog.value = false;
-      const deletedCount = res?.data?.deleted_count ?? ids.length;
-      if (deletedCount > 0) {
-        MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: deletedCount }));
+    if (canManage.value) {
+      const res: any = await batchDeleteKnowledge(kbId.value, ids);
+      if (res?.success) {
+        applyBatchDeleteSuccess(ids, res?.data?.deleted_count ?? ids.length);
+      } else {
+        MessagePlugin.error(res?.message || t('knowledgeBase.batchDeleteFailed'));
       }
-      page = 1;
-      loadKnowledgeFiles(kbId.value);
-      loadTags(kbId.value);
+      return;
+    }
+
+    const succeeded: string[] = [];
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        const res: any = await delKnowledgeDetails(id);
+        if (res?.success) succeeded.push(id);
+        else failed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    if (failed === 0) {
+      applyBatchDeleteSuccess(succeeded, succeeded.length);
+    } else if (succeeded.length > 0) {
+      applyBatchDeleteSuccess(succeeded, succeeded.length, { notify: false });
+      MessagePlugin.warning(t('knowledgeBase.batchGovernancePartial', { success: succeeded.length, failed }));
     } else {
-      MessagePlugin.error(res?.message || t('knowledgeBase.batchDeleteFailed'));
+      MessagePlugin.error(t('knowledgeBase.batchDeleteFailed'));
     }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('knowledgeBase.batchDeleteFailed'));
@@ -2413,8 +2440,8 @@ async function createNewSession(value: string): Promise<void> {
                               <div
                                 v-if="governanceActionsForItem(item).includes('delete')"
                                 class="card-menu-item danger"
-                                :class="{ disabled: isGovernanceRowActionDisabled(item, 'delete') }"
-                                :aria-disabled="isGovernanceRowActionDisabled(item, 'delete')"
+                                :class="{ disabled: isGovernanceRowActionDisabled(item, 'delete', knowledgeDeleteOptions) }"
+                                :aria-disabled="isGovernanceRowActionDisabled(item, 'delete', knowledgeDeleteOptions)"
                                 @click.stop="delCard(index, item)"
                               >
                                 <t-icon class="icon" name="delete" />
@@ -2445,7 +2472,7 @@ async function createNewSession(value: string): Promise<void> {
                                 <span>{{ t('knowledgeBase.moveDocument') }}</span>
                               </div>
                               <div
-                                v-if="canEdit && !governanceActionsForItem(item).includes('delete')"
+                                v-if="canManage && !governanceActionsForItem(item).includes('delete')"
                                 class="card-menu-item danger"
                                 :class="{ disabled: isKnowledgeDeleteDisabled(item, knowledgeDeleteOptions) }"
                                 :aria-disabled="isKnowledgeDeleteDisabled(item, knowledgeDeleteOptions)"
@@ -2631,6 +2658,7 @@ async function createNewSession(value: string): Promise<void> {
                   :selected-ids="selectedIds"
                   :tag-list="tagList"
                   :can-edit="canEdit"
+                  :can-manage="canManage"
                   :governance-enabled="Boolean(kbInfo?.governance?.enabled)"
                   :can-contribute="canContribute"
                   :can-review="canReview"
