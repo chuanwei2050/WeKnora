@@ -15,7 +15,7 @@ import MentionSelector from './MentionSelector.vue';
 import AgentSelector from './AgentSelector.vue';
 import { getCaretCoordinates } from '@/utils/caret';
 import { listModels, type ModelConfig } from '@/api/model';
-import { listAgents, type CustomAgent, type CustomAgentConfig, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
+import { listAgents, getAgentById, type CustomAgent, type CustomAgentConfig, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider';
 import { getConversationConfig, updateConversationConfig, type ConversationConfig } from '@/api/system';
 import { listIntegrationKnowledgeBases } from '@/api/integration';
@@ -105,6 +105,8 @@ const props = defineProps({
 
 // 智能体相关状态（完整列表供选中态解析；对话下拉用 enabledAgents）
 const agents = ref<CustomAgent[]>([]);
+/** 嵌入悬浮窗：listAgents 未命中时单独拉取的智能体配置 */
+const embeddedAgentOverride = ref<CustomAgent | null>(null);
 /** 当前租户自有停用项与平台全局停用智能体 ID 的合并结果 */
 const disabledOwnAgentIds = ref<string[]>([]);
 const selectedAgentId = computed({
@@ -116,7 +118,11 @@ const selectedAgentId = computed({
   }
 });
 const selectedAgent = computed(() => {
-  const mine = agents.value.find(a => a.id === selectedAgentId.value);
+  const targetId = selectedAgentId.value;
+  if (embeddedAgentOverride.value?.id === targetId) {
+    return embeddedAgentOverride.value;
+  }
+  const mine = agents.value.find(a => a.id === targetId);
   if (mine) return mine;
   const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
   if (sourceTenantId && orgStore.sharedAgents?.length) {
@@ -134,6 +140,9 @@ const selectedAgent = computed(() => {
       voice_input_enabled: true,
       voice_output_enabled: true,
       audio_upload_enabled: true,
+      image_upload_enabled: true,
+      attachment_upload_enabled: true,
+      kb_mention_enabled: true,
     }
   } as CustomAgent;
 });
@@ -178,7 +187,7 @@ const isVoiceInputEnabledByAgent = computed(() => currentAgentConfig.value?.voic
 const resolvedAsrModelId = computed(() => {
   const cfg = currentAgentConfig.value || {};
   if (cfg.asr_model_id) return String(cfg.asr_model_id);
-  if (isVoiceInputEnabledByAgent.value || cfg.audio_upload_enabled) {
+  if (isVoiceInputEnabledByAgent.value || cfg.audio_upload_enabled !== false) {
     return pickPreferredModelId(availableAsrModels.value);
   }
   return '';
@@ -362,16 +371,16 @@ const mentionEmptyHint = computed(() => {
   return t('mentionDetail.noCompatibleKbForAgent');
 });
 
-// 智能体是否启用了图片上传（多模态）
+// 智能体是否启用了图片上传（多模态）；未配置时默认开启，与编辑器新建默认值一致
 const isImageUploadEnabledByAgent = computed(() => {
   if (!hasAgentConfig.value) return false;
-  return currentAgentConfig.value?.image_upload_enabled === true;
+  return currentAgentConfig.value?.image_upload_enabled !== false;
 });
 
 // 智能体是否启用了附件上传
 const isAttachmentUploadEnabledByAgent = computed(() => {
   if (!hasAgentConfig.value) return false;
-  return currentAgentConfig.value?.attachment_upload_enabled === true;
+  return currentAgentConfig.value?.attachment_upload_enabled !== false;
 });
 
 // 模型选择是否被智能体锁定 - 已移除锁定逻辑，允许用户自由切换模型
@@ -815,6 +824,26 @@ const loadWebSearchConfig = async () => {
 };
 
 // 加载智能体列表（我的 + 共享，供选中态与就绪检查用）
+const loadEmbeddedAgentConfig = async () => {
+  if (!props.embeddedMode) return;
+  const targetId = selectedAgentId.value;
+  if (!targetId) {
+    embeddedAgentOverride.value = null;
+    return;
+  }
+  if (agents.value.some((agent) => agent.id === targetId)) {
+    embeddedAgentOverride.value = null;
+    return;
+  }
+  try {
+    const res = await getAgentById(targetId) as { data?: CustomAgent };
+    embeddedAgentOverride.value = res.data || null;
+  } catch (error) {
+    console.error('Failed to load embedded agent config:', error);
+    embeddedAgentOverride.value = null;
+  }
+};
+
 const loadAgents = async () => {
   try {
     const agentsRes = await listAgents();
@@ -822,11 +851,13 @@ const loadAgents = async () => {
     const res = agentsRes as { data?: CustomAgent[]; disabled_own_agent_ids?: string[] }
     agents.value = res.data || []
     disabledOwnAgentIds.value = res.disabled_own_agent_ids || []
-    if (disabledOwnAgentIds.value.includes(selectedAgentId.value)) {
+    if (!props.embeddedMode && disabledOwnAgentIds.value.includes(selectedAgentId.value)) {
       settingsStore.selectAgent(BUILTIN_QUICK_ANSWER_ID)
     }
+    await loadEmbeddedAgentConfig();
   } catch (error) {
     console.error('Failed to load agents:', error)
+    await loadEmbeddedAgentConfig();
   }
 }
 
@@ -1576,6 +1607,10 @@ let scrollHandler: (() => void) | null = null;
 watch(() => props.kbIds, () => {
   if (props.embeddedMode) loadEmbeddedKnowledgeBases();
 }, { deep: true });
+
+watch(() => props.agentId, () => {
+  if (props.embeddedMode) loadEmbeddedAgentConfig();
+});
 
 onMounted(() => {
   loadConversationConfig();

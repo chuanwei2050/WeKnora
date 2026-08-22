@@ -101,6 +101,9 @@ type CustomAgentRepository interface {
 	//   - Possible errors such as record not existing, database errors, etc.
 	GetAgentByID(ctx context.Context, id string, tenantID uint64) (*types.CustomAgent, error)
 
+	// GetAgentByIDUnscoped queries an agent including soft-deleted rows.
+	GetAgentByIDUnscoped(ctx context.Context, id string, tenantID uint64) (*types.CustomAgent, error)
+
 	// ListAgentsByTenantID lists all agents for a specific tenant
 	// Parameters:
 	//   - ctx: Context information

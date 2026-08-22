@@ -39,6 +39,18 @@ func (r *customAgentRepository) GetAgentByID(ctx context.Context, id string, ten
 	return &agent, nil
 }
 
+// GetAgentByIDUnscoped gets an agent by id and tenant, including soft-deleted rows.
+func (r *customAgentRepository) GetAgentByIDUnscoped(ctx context.Context, id string, tenantID uint64) (*types.CustomAgent, error) {
+	var agent types.CustomAgent
+	if err := r.db.WithContext(ctx).Unscoped().Where("id = ? AND tenant_id = ?", id, tenantID).First(&agent).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrCustomAgentNotFound
+		}
+		return nil, err
+	}
+	return &agent, nil
+}
+
 // ListAgentsByTenantID lists all agents for a specific tenant
 func (r *customAgentRepository) ListAgentsByTenantID(ctx context.Context, tenantID uint64) ([]*types.CustomAgent, error) {
 	var agents []*types.CustomAgent

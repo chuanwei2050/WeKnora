@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // Custom agent related errors
@@ -303,6 +304,32 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 	return existingAgent, nil
 }
 
+func (s *customAgentService) loadPlatformAgentRecord(ctx context.Context, id string, tenantID uint64) (*types.CustomAgent, error) {
+	existingAgent, err := s.repo.GetAgentByID(ctx, id, tenantID)
+	if err == nil {
+		return existingAgent, nil
+	}
+	if !errors.Is(err, repository.ErrCustomAgentNotFound) {
+		return nil, err
+	}
+	existingAgent, err = s.repo.GetAgentByIDUnscoped(ctx, id, tenantID)
+	if err != nil {
+		if errors.Is(err, repository.ErrCustomAgentNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	existingAgent.DeletedAt = gorm.DeletedAt{}
+	return existingAgent, nil
+}
+
+func isDuplicateAgentKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "23505")
+}
+
 // updateBuiltinAgent updates a built-in agent's configuration (but not basic info)
 func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *types.CustomAgent, tenantID uint64) (*types.CustomAgent, error) {
 	// Get the default built-in agent from registry (i18n-aware)
@@ -311,9 +338,8 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 		return nil, ErrAgentNotFound
 	}
 
-	// Try to get existing customized config from database
-	existingAgent, err := s.repo.GetAgentByID(ctx, agent.ID, tenantID)
-	if err != nil && !errors.Is(err, repository.ErrCustomAgentNotFound) {
+	existingAgent, err := s.loadPlatformAgentRecord(ctx, agent.ID, tenantID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -361,11 +387,32 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 	logger.Infof(ctx, "Creating built-in agent config record, ID: %s, tenant ID: %d", agent.ID, tenantID)
 
 	if err := s.repo.CreateAgent(ctx, newAgent); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"agent_id":  agent.ID,
-			"tenant_id": tenantID,
-		})
-		return nil, err
+		if !isDuplicateAgentKeyError(err) {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"agent_id":  agent.ID,
+				"tenant_id": tenantID,
+			})
+			return nil, err
+		}
+		existingAgent, loadErr := s.loadPlatformAgentRecord(ctx, agent.ID, tenantID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if existingAgent == nil {
+			return nil, err
+		}
+		existingAgent.Config = agent.Config
+		existingAgent.UpdatedAt = time.Now()
+		existingAgent.EnsureDefaults()
+		clearPlatformManagedModelIDs(&existingAgent.Config)
+		if err := validatePlatformAgentConfig(existingAgent.Config); err != nil {
+			return nil, err
+		}
+		if err := s.repo.UpdateAgent(ctx, existingAgent); err != nil {
+			return nil, err
+		}
+		logger.Infof(ctx, "Built-in agent config updated after duplicate create, ID: %s", agent.ID)
+		return existingAgent, nil
 	}
 
 	logger.Infof(ctx, "Built-in agent config record created successfully, ID: %s", agent.ID)
