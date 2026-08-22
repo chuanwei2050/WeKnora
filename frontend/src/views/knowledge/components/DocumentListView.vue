@@ -137,6 +137,10 @@ const governanceContext = () => ({
   canReview: Boolean(props.canReview),
   currentUserId: props.currentUserId || '',
 });
+const deleteOptions = () => ({
+  canManage: props.canEdit,
+  currentUserId: props.currentUserId || '',
+});
 const governanceActions = (item: KnowledgeItem) => getGovernanceRowActions(item, governanceContext());
 const hasGovernanceAction = (item: KnowledgeItem, action: GovernanceRowAction) => governanceActions(item).includes(action);
 const canOperateItem = (item: KnowledgeItem) => props.canEdit || canOperateGovernanceRow(item, governanceContext());
@@ -273,7 +277,7 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
             <button v-if="hasGovernanceAction(item, 'reject')" class="row-action-btn danger" type="button" :disabled="governanceBusyId === item.id" @click="handleAction('reject', item)">
               {{ t('knowledgeBase.governanceReject') }}
             </button>
-            <button v-if="hasGovernanceAction(item, 'delete')" class="row-action-btn danger" type="button" :disabled="governanceBusyId === item.id || isGovernanceRowActionDisabled(item, 'delete')" @click="handleAction('delete', item)">
+            <button v-if="hasGovernanceAction(item, 'delete')" class="row-action-btn danger" type="button" :disabled="governanceBusyId === item.id || isGovernanceRowActionDisabled(item, 'delete', deleteOptions())" @click="handleAction('delete', item)">
               {{ t('knowledgeBase.governanceDelete') }}
             </button>
             <button v-if="canEdit && item.type === 'manual'" class="row-action-btn" type="button" @click="handleAction('edit', item)">
@@ -296,7 +300,7 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
               v-if="canEdit && !hasGovernanceAction(item, 'delete')"
               class="row-action-btn danger"
               type="button"
-              :disabled="isKnowledgeDeleteDisabled(item)"
+              :disabled="isKnowledgeDeleteDisabled(item, deleteOptions())"
               @click="handleAction('delete', item)"
             >
               {{ t('knowledgeBase.governanceDelete') }}
