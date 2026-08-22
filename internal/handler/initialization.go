@@ -265,9 +265,17 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 
 	// 获取知识库信息
 	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbIdStr)
-	if err != nil || kb == nil {
+	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kbId": utils.SanitizeForLog(kbIdStr)})
+		c.Error(errors.NewInternalServerError("获取知识库信息失败: " + err.Error()))
+		return
+	}
+	if kb == nil {
 		c.Error(errors.NewNotFoundError("知识库不存在"))
+		return
+	}
+	if !types.CanManageKnowledgeBase(ctx, kb) {
+		c.Error(errors.NewForbiddenError("No permission to update knowledge base config"))
 		return
 	}
 
@@ -1231,6 +1239,10 @@ func (h *InitializationHandler) GetCurrentConfigByKB(c *gin.Context) {
 	if kb == nil {
 		logger.Error(ctx, "Knowledge base not found")
 		c.Error(errors.NewNotFoundError("知识库不存在"))
+		return
+	}
+	if !types.CanReadKnowledgeBase(ctx, kb) {
+		c.Error(errors.NewForbiddenError("No permission to read knowledge base config"))
 		return
 	}
 

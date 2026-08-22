@@ -129,6 +129,10 @@ func TestAllowedIntegrationInternalPathLimitsWidgetCapabilities(t *testing.T) {
 		{name: "cannot list tenant knowledge bases via admin", method: http.MethodGet, path: "/api/v1/admin/tenants/10000/knowledge-bases", allowed: false},
 		{name: "cannot list all tenants", method: http.MethodGet, path: "/api/v1/admin/tenants", allowed: false},
 		{name: "manage knowledge data source", method: http.MethodPost, path: "/api/v1/datasource", allowed: true},
+		{name: "read kb initialization config", method: http.MethodGet, path: "/api/v1/initialization/config/kb-1", allowed: true},
+		{name: "update kb initialization config", method: http.MethodPut, path: "/api/v1/initialization/config/kb-1", allowed: true},
+		{name: "extract graph relations", method: http.MethodPost, path: "/api/v1/initialization/extract/text-relation", allowed: true},
+		{name: "cannot access ollama status", method: http.MethodGet, path: "/api/v1/initialization/ollama/status", allowed: false},
 		{name: "transcribe voice", method: http.MethodPost, path: "/api/v1/sessions/session-1/voice/transcribe", allowed: true},
 		{name: "cannot create agent", method: http.MethodPost, path: "/api/v1/agents", allowed: false},
 		{name: "cannot update config", method: http.MethodPut, path: "/api/v1/tenants/kv/conversation-config", allowed: false},
@@ -153,5 +157,8 @@ func TestRequiredIntegrationInternalScopeProtectsManagementReads(t *testing.T) {
 	}
 	if got := requiredIntegrationInternalScope(http.MethodGet, "/api/v1/knowledge-bases/kb-1"); got != "knowledge:read" {
 		t.Fatalf("knowledge read scope = %q, want knowledge:read", got)
+	}
+	if got := requiredIntegrationInternalScope(http.MethodPut, "/api/v1/initialization/config/kb-1"); got != "knowledge:write" {
+		t.Fatalf("initialization config scope = %q, want knowledge:write", got)
 	}
 }

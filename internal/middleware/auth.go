@@ -385,7 +385,16 @@ func allowedIntegrationInternalPath(method, path string) bool {
 	if isIntegrationVoiceTranscriptionPath(method, path) {
 		return true
 	}
-	for _, prefix := range []string{"/api/v1/knowledge-bases", "/api/v1/knowledge", "/api/v1/chunks", "/api/v1/tags", "/api/v1/faq", "/api/v1/datasource"} {
+	for _, prefix := range []string{
+		"/api/v1/knowledge-bases",
+		"/api/v1/knowledge",
+		"/api/v1/chunks",
+		"/api/v1/tags",
+		"/api/v1/faq",
+		"/api/v1/datasource",
+		"/api/v1/initialization/config",
+		"/api/v1/initialization/extract",
+	} {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
 		}
