@@ -209,6 +209,9 @@ const onVisibleChange = (visible: boolean) => {
 let isCardDetails = ref(false);
 let timeout: ReturnType<typeof setTimeout> | null = null;
 let delDialog = ref(false)
+const tagDeleteDialog = ref(false)
+const tagPendingDelete = ref<any>(null)
+const tagDeleting = ref(false)
 let rebuildDialog = ref(false)
 let rebuildKnowledgeItem = ref<KnowledgeCard>({ id: '', parse_status: '' })
 let knowledge = ref<KnowledgeCard>({ id: '', parse_status: '' })
@@ -536,6 +539,14 @@ const cancelCreateTag = () => {
   newTagName.value = '';
 };
 
+const onCreateTagEnterKey = (e: KeyboardEvent) => {
+  // Ignore Enter that only confirms IME composition (Chinese input, etc.)
+  if (e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  e.stopPropagation();
+  void submitCreateTag();
+};
+
 const submitCreateTag = async () => {
   if (!kbId.value) {
     MessagePlugin.warning(t('knowledgeEditor.messages.missingId'));
@@ -576,6 +587,13 @@ const cancelEditTag = () => {
   editingTagName.value = '';
 };
 
+const onEditTagEnterKey = (e: KeyboardEvent) => {
+  if (e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  e.stopPropagation();
+  void submitEditTag();
+};
+
 const submitEditTag = async () => {
   if (!kbId.value || !editingTagId.value) {
     return;
@@ -602,6 +620,13 @@ const submitEditTag = async () => {
   }
 };
 
+const tagDeleteDesc = computed(() => {
+  const tag = tagPendingDelete.value;
+  if (!tag) return '';
+  const deleteDescKey = isFAQ.value ? 'knowledgeBase.tagDeleteDesc' : 'knowledgeBase.tagDeleteDescDoc';
+  return t(deleteDescKey, { name: tag.name }) as string;
+});
+
 const confirmDeleteTag = (tag: any) => {
   if (isFolderDeleteDisabled(tag)) return;
   if (!kbId.value) {
@@ -614,27 +639,35 @@ const confirmDeleteTag = (tag: any) => {
   if (editingTagId.value) {
     cancelEditTag();
   }
-  const deleteDescKey = isFAQ.value ? 'knowledgeBase.tagDeleteDesc' : 'knowledgeBase.tagDeleteDescDoc';
-  const confirm = window.confirm(
-    t(deleteDescKey, { name: tag.name }) as string,
-  );
-  if (!confirm) return;
-  deleteKnowledgeBaseTag(kbId.value, tag.seq_id, { force: false })
-    .then(() => {
-      MessagePlugin.success(t('knowledgeBase.tagDeleteSuccess'));
-      if (selectedTagId.value === tag.id) {
-        handleTagFilterChange(untaggedTag.value?.id || '__untagged__');
-      }
-      loadTags(kbId.value);
-      // 由于后端是异步删除文档，延迟刷新以确保看到最新数据
-      setTimeout(() => {
-        page = 1; // Reset page counter when reloading files after tag deletion
-        loadKnowledgeFiles(kbId.value);
-      }, 500);
-    })
-    .catch((error: any) => {
-      MessagePlugin.error(error?.message || t('common.operationFailed'));
-    });
+  // Use in-app dialog instead of window.confirm — native confirm is blocked
+  // in sandboxed iframes without allow-modals (common for embedded KB).
+  tagPendingDelete.value = tag;
+  tagDeleteDialog.value = true;
+};
+
+const confirmTagDelete = async () => {
+  const tag = tagPendingDelete.value;
+  if (!kbId.value || !tag || tagDeleting.value) return;
+  tagDeleting.value = true;
+  try {
+    await deleteKnowledgeBaseTag(kbId.value, tag.seq_id, { force: false });
+    MessagePlugin.success(t('knowledgeBase.tagDeleteSuccess'));
+    tagDeleteDialog.value = false;
+    tagPendingDelete.value = null;
+    if (selectedTagId.value === tag.id) {
+      handleTagFilterChange(untaggedTag.value?.id || '__untagged__');
+    }
+    await loadTags(kbId.value);
+    // Backend deletes documents asynchronously; delay refresh for freshest list.
+    setTimeout(() => {
+      page = 1;
+      loadKnowledgeFiles(kbId.value);
+    }, 500);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.operationFailed'));
+  } finally {
+    tagDeleting.value = false;
+  }
 };
 
 const handleKnowledgeTagChange = async (knowledgeId: string, tagValue: string) => {
@@ -1169,6 +1202,30 @@ const resetUploadInput = () => {
   }
 };
 
+const isDuplicateFileError = (error: any) =>
+  error?.code === 'duplicate_file' ||
+  error?.error?.code === 'duplicate_file' ||
+  error?.status === 409;
+
+const showBatchUploadResult = (successCount: number, failCount: number, duplicateCount: number) => {
+  if (duplicateCount > 0) {
+    MessagePlugin.info(t('knowledgeBase.duplicateFilesSkipped', { count: duplicateCount }));
+  }
+  if (failCount === 0) {
+    if (successCount > 0) {
+      MessagePlugin.success(t('knowledgeBase.uploadAllSuccess', { count: successCount }));
+    } else if (duplicateCount === 0) {
+      MessagePlugin.error(t('knowledgeBase.uploadAllFailed'));
+    }
+    return;
+  }
+  if (successCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.uploadPartialSuccess', { success: successCount, fail: failCount }));
+    return;
+  }
+  MessagePlugin.error(t('knowledgeBase.uploadAllFailed'));
+};
+
 const handleDocumentUpload = async (event: Event) => {
   const input = event.target as HTMLInputElement;
   const files = input?.files;
@@ -1243,6 +1300,7 @@ const handleDocumentUpload = async (event: Event) => {
 
   let successCount = 0;
   let failCount = 0;
+  let duplicateCount = 0;
   const totalCount = validFiles.length;
 
   const tagIdToUpload = uploadTargetTagId.value;
@@ -1258,6 +1316,11 @@ const handleDocumentUpload = async (event: Event) => {
       const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
       if (isSuccess) {
         successCount++;
+      } else if (isDuplicateFileError(responseData)) {
+        duplicateCount++;
+        if (totalCount === 1) {
+          MessagePlugin.warning(t('knowledgeBase.fileExists'));
+        }
       } else {
         failCount++;
         let errorMessage = t('knowledgeBase.uploadFailed');
@@ -1266,21 +1329,22 @@ const handleDocumentUpload = async (event: Event) => {
         } else if (responseData?.message) {
           errorMessage = responseData.message;
         }
-        if (responseData?.code === 'duplicate_file' || responseData?.error?.code === 'duplicate_file') {
-          errorMessage = t('knowledgeBase.fileExists');
-        }
         if (totalCount === 1) {
           MessagePlugin.error(errorMessage);
         }
       }
     } catch (error: any) {
-      failCount++;
-      let errorMessage = error?.error?.message || error?.message || t('knowledgeBase.uploadFailed');
-      if (error?.code === 'duplicate_file') {
-        errorMessage = t('knowledgeBase.fileExists');
-      }
-      if (totalCount === 1) {
-        MessagePlugin.error(errorMessage);
+      if (isDuplicateFileError(error)) {
+        duplicateCount++;
+        if (totalCount === 1) {
+          MessagePlugin.warning(t('knowledgeBase.fileExists'));
+        }
+      } else {
+        failCount++;
+        const errorMessage = error?.error?.message || error?.message || t('knowledgeBase.uploadFailed');
+        if (totalCount === 1) {
+          MessagePlugin.error(errorMessage);
+        }
       }
     }
   }
@@ -1297,13 +1361,7 @@ const handleDocumentUpload = async (event: Event) => {
       MessagePlugin.success(t('knowledgeBase.uploadSuccess'));
     }
   } else {
-    if (failCount === 0) {
-      MessagePlugin.success(t('knowledgeBase.allUploadSuccess', { count: successCount }));
-    } else if (successCount > 0) {
-      MessagePlugin.warning(t('knowledgeBase.partialUploadSuccess', { success: successCount, fail: failCount }));
-    } else {
-      MessagePlugin.error(t('knowledgeBase.allUploadFailed', { count: failCount }));
-    }
+    showBatchUploadResult(successCount, failCount, duplicateCount);
   }
 
   resetUploadInput();
@@ -1386,9 +1444,10 @@ const handleFolderUpload = async (event: Event) => {
   }
   MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: validFiles.length }));
 
-  // 批量上传
+  // 批量上传（409/duplicate_file 视为已存在并跳过，不计入失败）
   let successCount = 0;
   let failCount = 0;
+  let duplicateCount = 0;
   const tagIdToUpload = uploadTargetTagId.value;
 
   for (const file of validFiles) {
@@ -1411,7 +1470,11 @@ const handleFolderUpload = async (event: Event) => {
       await uploadKnowledgeFile(kbId.value, { file, fileName, tag_id: tagIdToUpload, metadata });
       successCount++;
     } catch (error: any) {
-      failCount++;
+      if (isDuplicateFileError(error)) {
+        duplicateCount++;
+      } else {
+        failCount++;
+      }
     }
   }
 
@@ -1421,13 +1484,7 @@ const handleFolderUpload = async (event: Event) => {
     }));
   }
 
-  if (failCount === 0) {
-    MessagePlugin.success(t('knowledgeBase.uploadAllSuccess', { count: successCount }));
-  } else if (successCount > 0) {
-    MessagePlugin.warning(t('knowledgeBase.uploadPartialSuccess', { success: successCount, fail: failCount }));
-  } else {
-    MessagePlugin.error(t('knowledgeBase.uploadAllFailed'));
-  }
+  showBatchUploadResult(successCount, failCount, duplicateCount);
 
   if (input) input.value = '';
 };
@@ -2056,15 +2113,17 @@ async function createNewSession(value: string): Promise<void> {
             <div v-if="creatingTag" class="knowledge-tree-row folder-row tree-editing" @click.stop>
               <span class="folder-drag-placeholder" />
               <span class="folder-icon computer-folder-icon" aria-hidden="true" />
-              <div class="tag-edit-input">
+              <div
+                class="tag-edit-input"
+                @keydown.enter="onCreateTagEnterKey"
+                @keydown.esc.prevent.stop="cancelCreateTag"
+              >
                 <t-input
                   ref="newTagInputRef"
                   v-model="newTagName"
                   size="small"
                   :maxlength="40"
                   :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
-                  @keydown.enter.stop.prevent="submitCreateTag"
-                  @keydown.esc.stop.prevent="cancelCreateTag"
                 />
               </div>
               <div class="tag-inline-actions">
@@ -2108,14 +2167,17 @@ async function createNewSession(value: string): Promise<void> {
                 <span v-else class="folder-drag-placeholder" />
                 <span class="folder-icon computer-folder-icon" aria-hidden="true" />
                 <template v-if="editingTagId === tag.id">
-                  <div class="tag-edit-input" @click.stop>
+                  <div
+                    class="tag-edit-input"
+                    @click.stop
+                    @keydown.enter="onEditTagEnterKey"
+                    @keydown.esc.prevent.stop="cancelEditTag"
+                  >
                     <t-input
                       :ref="setEditingTagInputRefByTag(tag.id)"
                       v-model="editingTagName"
                       size="small"
                       :maxlength="40"
-                      @keydown.enter.stop.prevent="submitEditTag"
-                      @keydown.esc.stop.prevent="cancelEditTag"
                     />
                   </div>
                 </template>
@@ -2552,6 +2614,40 @@ async function createNewSession(value: string): Promise<void> {
                 <span class="circle-btn-txt" @click="delDialog = false">{{ t('common.cancel') }}</span>
                 <span class="circle-btn-txt confirm" @click="delCardConfirm">
                   {{ t('knowledgeBase.confirmDelete') }}
+                </span>
+              </div>
+            </div>
+          </t-dialog>
+
+          <!-- 文件夹/标签删除确认弹窗（避免沙箱 iframe 拦截 window.confirm） -->
+          <t-dialog
+            v-model:visible="tagDeleteDialog"
+            dialogClassName="del-knowledge"
+            :closeBtn="false"
+            :cancelBtn="null"
+            :confirmBtn="null"
+            @close="tagPendingDelete = null"
+          >
+            <div class="circle-wrap">
+              <div class="header">
+                <img class="circle-img" src="@/assets/img/circle.png" alt="" />
+                <span class="circle-title">{{ t('knowledgeBase.tagDeleteTitle') }}</span>
+              </div>
+              <span class="del-circle-txt">{{ tagDeleteDesc }}</span>
+              <div class="circle-btn">
+                <span
+                  class="circle-btn-txt"
+                  :class="{ disabled: tagDeleting }"
+                  @click="tagDeleting ? null : (tagDeleteDialog = false)"
+                >
+                  {{ t('common.cancel') }}
+                </span>
+                <span
+                  class="circle-btn-txt confirm"
+                  :class="{ disabled: tagDeleting }"
+                  @click="confirmTagDelete"
+                >
+                  {{ tagDeleting ? '...' : t('knowledgeBase.confirmDelete') }}
                 </span>
               </div>
             </div>

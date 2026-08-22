@@ -181,8 +181,11 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   iframeURL.searchParams.set('parent_origin', window.location.origin)
   iframe.src = iframeURL.href
   iframe.referrerPolicy = 'strict-origin'
-  iframe.allow = 'microphone'
-  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-downloads')
+  iframe.allow = 'microphone; clipboard-write'
+  iframe.setAttribute(
+    'sandbox',
+    'allow-scripts allow-same-origin allow-forms allow-downloads allow-modals allow-popups allow-popups-to-escape-sandbox',
+  )
   applyStyles(iframe, { width: '100%', height: 'calc(100% - 64px)', minWidth: '0', minHeight: '0', border: '0', display: 'block', background: '#f7f9fc' })
 
   const resizeHandle = document.createElement('div')

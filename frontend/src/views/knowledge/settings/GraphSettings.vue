@@ -336,6 +336,7 @@ import { useI18n } from 'vue-i18n'
 import { extractTextRelations, fabriText, type Node, type Relation } from '@/api/initialization'
 import { getSystemInfo } from '@/api/system'
 import { useUIStore } from '@/stores/ui'
+import { openExternalUrl } from '@/utils/open-external-url'
 import {
   applyGraphPreset,
   BASE_ENTITY_TYPES,
@@ -659,7 +660,7 @@ const graphGuideUrl =
 // Open guide documentation to show how to enable graph database
 const handleOpenGraphGuide = () => {
   if (!graphGuideUrl) return
-  window.open(graphGuideUrl, '_blank', 'noopener')
+  openExternalUrl(graphGuideUrl)
 }
 
 // 初始化

@@ -356,7 +356,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
@@ -717,10 +717,18 @@ const handleMenuAction = (data: { value: string }, type: 'chat' | 'embedding' | 
   } else if (value.indexOf('copy-') === 0) {
     copyModel(type, model.id)
   } else if (value.indexOf('delete-') === 0) {
-    // 使用确认对话框进行确认
-    if (confirm(t('modelSettings.confirmDelete'))) {
-      deleteModel(type, model.id)
-    }
+    // Prefer DialogPlugin over window.confirm — native confirm is blocked in sandboxed iframes.
+    const dialog = DialogPlugin.confirm({
+      header: t('common.delete'),
+      body: t('modelSettings.confirmDelete'),
+      confirmBtn: { content: t('common.delete'), theme: 'danger' },
+      cancelBtn: t('common.cancel'),
+      onConfirm: () => {
+        dialog.destroy()
+        deleteModel(type, model.id)
+      },
+      onCancel: () => dialog.destroy(),
+    })
   }
 }
 

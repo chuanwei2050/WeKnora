@@ -385,6 +385,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
 import { hydrateProtectedFileImages } from '@/utils/security';
+import { openExternalUrl } from '@/utils/open-external-url';
 import {
   buildManualMarkdown,
   copyTextToClipboard,
@@ -1160,20 +1161,7 @@ const hasResults = (event: any): boolean => {
 const handleCitationActivate = (el: HTMLElement) => {
   const url = el.getAttribute('data-url');
   if (!url) return;
-  try {
-    // @ts-ignore: Wails runtime check
-    if (window.runtime && window.runtime.BrowserOpenURL) {
-      // @ts-ignore
-      window.runtime.BrowserOpenURL(url);
-    } else {
-      const newWindow = window.open(url, '_blank', 'noopener,noreferrer');
-      if (!newWindow) {
-        window.location.assign(url);
-      }
-    }
-  } catch {
-    window.location.assign(url);
-  }
+  openExternalUrl(url);
 };
 
 // KB citations: 悬停用浮层展示摘要；点击跳转 KB 详情

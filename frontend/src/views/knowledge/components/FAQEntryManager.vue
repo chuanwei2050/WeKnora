@@ -244,15 +244,17 @@
               <div v-if="creatingTag" class="faq-tag-item tag-editing" @click.stop>
               <div class="faq-tag-left">
                 <span class="tag-hash-icon">#</span>
-                <div class="tag-edit-input">
+                <div
+                  class="tag-edit-input"
+                  @keydown.enter="onCreateTagEnterKey"
+                  @keydown.esc.prevent.stop="cancelCreateTag"
+                >
                   <t-input
                       ref="newTagInputRef"
                       v-model="newTagName"
                       size="small"
                       :maxlength="40"
                       :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
-                      @keydown.enter.stop.prevent="submitCreateTag"
-                      @keydown.esc.stop.prevent="cancelCreateTag"
                     />
                   </div>
                 </div>
@@ -290,14 +292,17 @@
               <div class="faq-tag-left">
                 <span class="tag-hash-icon">#</span>
                 <template v-if="editingTagId === tag.id">
-                      <div class="tag-edit-input" @click.stop>
+                      <div
+                        class="tag-edit-input"
+                        @click.stop
+                        @keydown.enter="onEditTagEnterKey"
+                        @keydown.esc.prevent.stop="cancelEditTag"
+                      >
                         <t-input
                           :ref="setEditingTagInputRefByTag(tag.id)"
                           v-model="editingTagName"
                           size="small"
                           :maxlength="40"
-                          @keydown.enter.stop.prevent="submitEditTag"
-                          @keydown.esc.stop.prevent="cancelEditTag"
                         />
                       </div>
                     </template>
@@ -1271,6 +1276,7 @@ import FAQTagTooltip from '@/components/FAQTagTooltip.vue'
 import { useUIStore } from '@/stores/ui'
 import { canManageBidReviewKnowledge } from '@/utils/bidreview-sso'
 import { getRuntimeMode } from '@/utils/embedded-runtime'
+import { openExternalUrl } from '@/utils/open-external-url'
 
 interface FAQEntry {
   id: number
@@ -1720,6 +1726,14 @@ const cancelCreateTag = () => {
   newTagName.value = ''
 }
 
+const onCreateTagEnterKey = (e: KeyboardEvent) => {
+  // Ignore Enter that only confirms IME composition (Chinese input, etc.)
+  if (e.isComposing || e.keyCode === 229) return
+  e.preventDefault()
+  e.stopPropagation()
+  void submitCreateTag()
+}
+
 const submitCreateTag = async () => {
   if (!props.kbId) {
     MessagePlugin.warning(t('knowledgeEditor.messages.missingId'))
@@ -1757,6 +1771,13 @@ const startEditTag = (tag: any) => {
 const cancelEditTag = () => {
   editingTagId.value = null
   editingTagName.value = ''
+}
+
+const onEditTagEnterKey = (e: KeyboardEvent) => {
+  if (e.isComposing || e.keyCode === 229) return
+  e.preventDefault()
+  e.stopPropagation()
+  void submitEditTag()
 }
 
 const submitEditTag = async () => {
@@ -2749,8 +2770,8 @@ const downloadFailedEntries = () => {
     MessagePlugin.warning(t('faqManager.import.noFailedRecords'))
     return
   }
-  // 直接打开下载链接
-  window.open(importResult.value.failed_entries_url, '_blank')
+  // 直接打开下载链接（沙箱下依赖 allow-popups / allow-downloads）
+  openExternalUrl(importResult.value.failed_entries_url, { downloadName: 'faq_import_failed.csv' })
 }
 
 // 格式化导入时间

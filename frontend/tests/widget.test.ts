@@ -158,6 +158,10 @@ describe('floating widget', () => {
     const host = document.querySelector<HTMLElement>('[data-weknora-widget]')
     const iframe = host?.shadowRoot?.querySelector<HTMLIFrameElement>('iframe')
     expect(iframe).not.toBeNull()
+    expect(iframe?.getAttribute('sandbox')).toContain('allow-modals')
+    expect(iframe?.getAttribute('sandbox')).toContain('allow-popups')
+    expect(iframe?.getAttribute('sandbox')).toContain('allow-popups-to-escape-sandbox')
+    expect(iframe?.allow).toContain('clipboard-write')
 
     expect(() => instance.authenticate('ticket')).not.toThrow()
     window.dispatchEvent(new MessageEvent('message', {
