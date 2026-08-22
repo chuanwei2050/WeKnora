@@ -104,6 +104,9 @@ type CustomAgentRepository interface {
 	// GetAgentByIDUnscoped queries an agent including soft-deleted rows.
 	GetAgentByIDUnscoped(ctx context.Context, id string, tenantID uint64) (*types.CustomAgent, error)
 
+	// GetAgentByIDAnyTenantUnscoped finds an agent by id across tenants (prefers platform scope).
+	GetAgentByIDAnyTenantUnscoped(ctx context.Context, id string) (*types.CustomAgent, error)
+
 	// ListAgentsByTenantID lists all agents for a specific tenant
 	// Parameters:
 	//   - ctx: Context information

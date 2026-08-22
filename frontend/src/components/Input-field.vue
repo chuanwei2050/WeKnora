@@ -111,7 +111,7 @@ const embeddedAgentOverride = ref<CustomAgent | null>(null);
 const disabledOwnAgentIds = ref<string[]>([]);
 const selectedAgentId = computed({
   get: () => props.embeddedMode
-    ? (props.agentId || BUILTIN_QUICK_ANSWER_ID)
+    ? BUILTIN_QUICK_ANSWER_ID
     : (settingsStore.selectedAgentId || BUILTIN_QUICK_ANSWER_ID),
   set: (val: string) => {
     if (!props.embeddedMode) settingsStore.selectAgent(val);
@@ -137,12 +137,6 @@ const selectedAgent = computed(() => {
     is_builtin: true,
     config: {
       agent_mode: 'quick-answer' as const,
-      voice_input_enabled: true,
-      voice_output_enabled: true,
-      audio_upload_enabled: true,
-      image_upload_enabled: true,
-      attachment_upload_enabled: true,
-      kb_mention_enabled: true,
     }
   } as CustomAgent;
 });
@@ -174,6 +168,12 @@ const currentAgentConfig = computed(() => {
   return agent?.config || {};
 });
 
+// 各多模态能力独立开关：仅当智能体配置显式为 true 时展示对应按钮
+const isAgentFeatureEnabled = (field: keyof CustomAgentConfig) => {
+  if (!hasAgentConfig.value) return false;
+  return currentAgentConfig.value?.[field] === true;
+};
+
 const availableAsrModels = ref<ModelConfig[]>([]);
 const availableTtsModels = ref<ModelConfig[]>([]);
 const pickPreferredModelId = (models: ModelConfig[]) => {
@@ -181,13 +181,20 @@ const pickPreferredModelId = (models: ModelConfig[]) => {
   const byDefault = models.find((m) => m.is_default);
   return byDefault?.id || models[0]?.id || '';
 };
-// Voice input defaults on unless explicitly disabled (matches builtin agent / platform defaults).
-const isVoiceInputEnabledByAgent = computed(() => currentAgentConfig.value?.voice_input_enabled !== false);
+// 语音输入：仅受 voice_input_enabled 控制
+const isVoiceInputEnabledByAgent = computed(() => isAgentFeatureEnabled('voice_input_enabled'));
+// 语音输出：仅受 voice_output_enabled 控制（由 botmsg 等消费）
+const isVoiceOutputEnabledByAgent = computed(() => isAgentFeatureEnabled('voice_output_enabled'));
+// 语音上传：仅受 audio_upload_enabled 控制
+const isAudioUploadEnabledByAgent = computed(() => isAgentFeatureEnabled('audio_upload_enabled'));
 // Voice defaults: when agent enables voice but leaves ASR/TTS empty, use tenant default/first model.
 const resolvedAsrModelId = computed(() => {
   const cfg = currentAgentConfig.value || {};
   if (cfg.asr_model_id) return String(cfg.asr_model_id);
-  if (isVoiceInputEnabledByAgent.value || cfg.audio_upload_enabled !== false) {
+  if (isVoiceInputEnabledByAgent.value) {
+    return pickPreferredModelId(availableAsrModels.value);
+  }
+  if (isAudioUploadEnabledByAgent.value) {
     return pickPreferredModelId(availableAsrModels.value);
   }
   return '';
@@ -198,7 +205,7 @@ const resolvedAsrModel = computed(() => (
 const resolvedTtsModelId = computed(() => {
   const cfg = currentAgentConfig.value || {};
   if (cfg.tts_model_id) return String(cfg.tts_model_id);
-  if (cfg.voice_output_enabled) {
+  if (isVoiceOutputEnabledByAgent.value) {
     return pickPreferredModelId(availableTtsModels.value);
   }
   return '';
@@ -303,15 +310,14 @@ const isKnowledgeBaseDisabledByAgent = computed(() => {
   return agentKBSelectionMode.value === 'none';
 });
 
-// 智能体是否显示 @ 知识库/文件选择按钮（未配置时默认显示，兼容旧数据）
-const isMentionButtonVisible = computed(() => {
-  if (!hasAgentConfig.value) return true;
-  if (isKnowledgeBaseDisabledByAgent.value) return false;
-  const enabled = currentAgentConfig.value?.kb_mention_enabled;
-  return enabled !== false;
-});
+// 智能体是否显示 @ 知识库/文件选择按钮（仅受 kb_mention_enabled 控制）
+const isMentionButtonVisible = computed(() => isAgentFeatureEnabled('kb_mention_enabled'));
 
-// 智能体配置的模型 ID
+// 智能体是否启用了图片上传（多模态）
+const isImageUploadEnabledByAgent = computed(() => isAgentFeatureEnabled('image_upload_enabled'));
+
+// 智能体是否启用了附件上传
+const isAttachmentUploadEnabledByAgent = computed(() => isAgentFeatureEnabled('attachment_upload_enabled'));
 const agentModelId = computed(() => {
   if (!hasAgentConfig.value) return null;
   return currentAgentConfig.value?.model_id || null;
@@ -371,19 +377,7 @@ const mentionEmptyHint = computed(() => {
   return t('mentionDetail.noCompatibleKbForAgent');
 });
 
-// 智能体是否启用了图片上传（多模态）；未配置时默认开启，与编辑器新建默认值一致
-const isImageUploadEnabledByAgent = computed(() => {
-  if (!hasAgentConfig.value) return false;
-  return currentAgentConfig.value?.image_upload_enabled !== false;
-});
-
-// 智能体是否启用了附件上传
-const isAttachmentUploadEnabledByAgent = computed(() => {
-  if (!hasAgentConfig.value) return false;
-  return currentAgentConfig.value?.attachment_upload_enabled !== false;
-});
-
-// 模型选择是否被智能体锁定 - 已移除锁定逻辑，允许用户自由切换模型
+// 智能体配置的模型 ID
 const isModelLockedByAgent = computed(() => {
   return false;
 });
@@ -826,11 +820,7 @@ const loadWebSearchConfig = async () => {
 // 加载智能体列表（我的 + 共享，供选中态与就绪检查用）
 const loadEmbeddedAgentConfig = async () => {
   if (!props.embeddedMode) return;
-  const targetId = selectedAgentId.value;
-  if (!targetId) {
-    embeddedAgentOverride.value = null;
-    return;
-  }
+  const targetId = BUILTIN_QUICK_ANSWER_ID;
   if (agents.value.some((agent) => agent.id === targetId)) {
     embeddedAgentOverride.value = null;
     return;
@@ -839,7 +829,7 @@ const loadEmbeddedAgentConfig = async () => {
     const res = await getAgentById(targetId) as { data?: CustomAgent };
     embeddedAgentOverride.value = res.data || null;
   } catch (error) {
-    console.error('Failed to load embedded agent config:', error);
+    console.error('Failed to load embedded quick-answer agent config:', error);
     embeddedAgentOverride.value = null;
   }
 };
@@ -1608,10 +1598,6 @@ watch(() => props.kbIds, () => {
   if (props.embeddedMode) loadEmbeddedKnowledgeBases();
 }, { deep: true });
 
-watch(() => props.agentId, () => {
-  if (props.embeddedMode) loadEmbeddedAgentConfig();
-});
-
 onMounted(() => {
   loadConversationConfig();
   loadChatModels();
@@ -2223,7 +2209,7 @@ defineExpose({
       @change="handleImageSelect"
     />
     <input
-      v-if="voiceInputConfigured"
+      v-if="voiceInputConfigured || (isAudioUploadEnabledByAgent && resolvedAsrModelId)"
       ref="voiceFileInputRef"
       type="file"
       accept="audio/*,.webm,.wav,.mp3,.m4a,.ogg,.flac,.aac"

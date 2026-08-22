@@ -142,11 +142,20 @@ func (s *customAgentService) GetAgentByID(ctx context.Context, id string) (*type
 
 	// Check if it's a built-in agent using the registry
 	if types.IsBuiltinAgentID(id) {
-		// Try to get from database first (for customized config)
+		// Try platform scope first, then any tenant customization.
 		agent, err := s.repo.GetAgentByID(ctx, id, tenantID)
 		if err == nil {
-			// Found in database, return with customized config
 			return agent, nil
+		}
+		if !errors.Is(err, repository.ErrCustomAgentNotFound) {
+			return nil, err
+		}
+		agent, err = s.repo.GetAgentByIDAnyTenantUnscoped(ctx, id)
+		if err == nil {
+			return agent, nil
+		}
+		if !errors.Is(err, repository.ErrCustomAgentNotFound) {
+			return nil, err
 		}
 		// Not in database, return default built-in agent from registry (i18n-aware)
 		if builtinAgent := types.GetBuiltinAgentWithContext(ctx, id, tenantID); builtinAgent != nil {
@@ -220,6 +229,8 @@ func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAge
 					break
 				}
 			}
+		} else if customized, err := s.repo.GetAgentByIDAnyTenantUnscoped(ctx, builtinID); err == nil {
+			result = append(result, customized)
 		} else {
 			// Use default built-in agent (i18n-aware)
 			if agent := types.GetBuiltinAgentWithContext(ctx, builtinID, tenantID); agent != nil {
@@ -323,6 +334,13 @@ func (s *customAgentService) loadPlatformAgentRecord(ctx context.Context, id str
 	return existingAgent, nil
 }
 
+func (s *customAgentService) applyBuiltinAgentConfig(existingAgent *types.CustomAgent, agent *types.CustomAgent) {
+	existingAgent.Config = agent.Config
+	existingAgent.UpdatedAt = time.Now()
+	existingAgent.EnsureDefaults()
+	clearPlatformManagedModelIDs(&existingAgent.Config)
+}
+
 func isDuplicateAgentKeyError(err error) bool {
 	if err == nil {
 		return false
@@ -344,16 +362,12 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 	}
 
 	if existingAgent != nil {
-		// Update existing record - only update config, keep basic info unchanged
-		existingAgent.Config = agent.Config
-		existingAgent.UpdatedAt = time.Now()
-		existingAgent.EnsureDefaults()
-		clearPlatformManagedModelIDs(&existingAgent.Config)
+		s.applyBuiltinAgentConfig(existingAgent, agent)
 		if err := validatePlatformAgentConfig(existingAgent.Config); err != nil {
 			return nil, err
 		}
 
-		logger.Infof(ctx, "Updating built-in agent config, ID: %s", agent.ID)
+		logger.Infof(ctx, "Updating built-in agent config, ID: %s, tenant ID: %d", agent.ID, existingAgent.TenantID)
 
 		if err := s.repo.UpdateAgent(ctx, existingAgent); err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -401,10 +415,7 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 		if existingAgent == nil {
 			return nil, err
 		}
-		existingAgent.Config = agent.Config
-		existingAgent.UpdatedAt = time.Now()
-		existingAgent.EnsureDefaults()
-		clearPlatformManagedModelIDs(&existingAgent.Config)
+		s.applyBuiltinAgentConfig(existingAgent, agent)
 		if err := validatePlatformAgentConfig(existingAgent.Config); err != nil {
 			return nil, err
 		}

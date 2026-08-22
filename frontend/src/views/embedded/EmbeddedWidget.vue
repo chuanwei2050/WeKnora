@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import ChatView from '@/views/chat/index.vue'
+import { BUILTIN_QUICK_ANSWER_ID } from '@/api/agent'
 import { createIntegrationChatSession, deleteIntegrationChatSession, exchangeBootstrapTicket, getIntegrationChatSession, listIntegrationChatSessions, listIntegrationKnowledgeBases, refreshIntegrationSession, renameIntegrationChatSession, type IntegrationChatSession } from '@/api/integration'
 import { isIntegrationAuthFailure, notifyEmbeddedHost, parseEmbeddedMessage, resolveEmbeddedParentOrigin } from '@/utils/embedded-runtime'
 
@@ -11,7 +12,8 @@ const noticeMessage = ref('')
 const params = new URLSearchParams(window.location.search)
 const configuredParentOrigin = params.get('parent_origin')
 const allowedParentOrigin = resolveEmbeddedParentOrigin(configuredParentOrigin, document.referrer, window.location.origin)
-const agentId = computed(() => params.get('agent_id') || '')
+// 悬浮窗固定使用「快速问答」智能体，不跟随 URL agent_id 或其他智能体配置
+const widgetAgentId = BUILTIN_QUICK_ANSWER_ID
 const knowledgeBaseIds = ref<string[]>(params.getAll('knowledge_base_id'))
 const selectionMode = ref<'selected' | 'all-allowed'>('selected')
 const widgetMode = ref<'fixed' | 'selectable' | 'all-allowed'>('fixed')
@@ -275,7 +277,7 @@ onBeforeUnmount(() => {
       <span v-else-if="widgetMode === 'all-allowed'" class="embedded-widget__scope-chip">全部授权知识库（{{ availableKnowledgeBases.length }}）</span>
       <span v-for="kb in selectedKnowledgeBases" v-else :key="kb.id" class="embedded-widget__scope-chip" :title="kb.name">{{ kb.name }}</span>
     </section>
-    <ChatView v-if="authenticated && selectionReady" :key="sessionId" :session_id="sessionId" :agentId="agentId" :kbIds="selectionMode === 'all-allowed' ? [] : knowledgeBaseIds" :embeddedMode="true" @answer-completed="refreshConversations" />
+    <ChatView v-if="authenticated && selectionReady" :key="sessionId" :session_id="sessionId" :agentId="widgetAgentId" :kbIds="selectionMode === 'all-allowed' ? [] : knowledgeBaseIds" :embeddedMode="true" @answer-completed="refreshConversations" />
     <div v-else-if="authenticated" class="embedded-widget__status" role="status">请至少选择一个知识库</div>
     <div v-else class="embedded-widget__status" role="status">
       {{ errorMessage || '正在等待宿主认证…' }}

@@ -113,7 +113,7 @@ import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
 import { getMessageList, generateSessionsTitle, getSession } from "@/api/chat/index";
-import { getSuggestedQuestions } from "@/api/agent/index";
+import { getSuggestedQuestions, BUILTIN_QUICK_ANSWER_ID } from "@/api/agent/index";
 import { useStream } from '../../api/chat/streame'
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
@@ -183,7 +183,7 @@ const fetchSuggestedQuestions = async () => {
     suggestedQuestionsLoading.value = true;
     // 加载期间保留旧数据，不清空，避免布局抖动
     try {
-        const agentId = props.embeddedMode ? props.agentId : useSettingsStoreInstance.selectedAgentId;
+        const agentId = props.embeddedMode ? BUILTIN_QUICK_ANSWER_ID : useSettingsStoreInstance.selectedAgentId;
         if (!agentId) return;
         const selectedKBs = props.embeddedMode ? props.kbIds : useSettingsStoreInstance.getSelectedKnowledgeBases();
         const selectedFiles = props.embeddedMode ? [] : useSettingsStoreInstance.getSelectedFiles();
@@ -558,7 +558,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     scrollToBottom(true);
     
     // Get agent mode status from settings store
-    const agentEnabled = props.embeddedMode ? (props.agentId && props.agentId !== 'builtin-quick-answer') : useSettingsStoreInstance.isAgentEnabled;
+    const agentEnabled = props.embeddedMode ? false : useSettingsStoreInstance.isAgentEnabled;
     
     // Get web search status from settings store
     const webSearchEnabled = props.embeddedMode ? false : useSettingsStoreInstance.isWebSearchEnabled;
@@ -584,7 +584,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const knowledgeIds = [...fileIdSet];
 
     // Get selected agent ID (backend resolves shared agent and its tenant from share relation)
-    const selectedAgentId = props.embeddedMode ? props.agentId : (useSettingsStoreInstance.selectedAgentId || '');
+    const selectedAgentId = props.embeddedMode ? BUILTIN_QUICK_ANSWER_ID : (useSettingsStoreInstance.selectedAgentId || '');
 
     // Use agent-chat endpoint when agent is enabled, otherwise use knowledge-chat
     const endpoint = agentEnabled ? '/api/v1/agent-chat' : '/api/v1/knowledge-chat';

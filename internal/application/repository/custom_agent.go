@@ -51,6 +51,21 @@ func (r *customAgentRepository) GetAgentByIDUnscoped(ctx context.Context, id str
 	return &agent, nil
 }
 
+// GetAgentByIDAnyTenantUnscoped finds an agent by id across tenants, preferring platform scope.
+func (r *customAgentRepository) GetAgentByIDAnyTenantUnscoped(ctx context.Context, id string) (*types.CustomAgent, error) {
+	var agent types.CustomAgent
+	if err := r.db.WithContext(ctx).Unscoped().
+		Where("id = ?", id).
+		Order("CASE WHEN tenant_id = 0 THEN 0 ELSE 1 END, updated_at DESC").
+		First(&agent).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrCustomAgentNotFound
+		}
+		return nil, err
+	}
+	return &agent, nil
+}
+
 // ListAgentsByTenantID lists all agents for a specific tenant
 func (r *customAgentRepository) ListAgentsByTenantID(ctx context.Context, tenantID uint64) ([]*types.CustomAgent, error) {
 	var agents []*types.CustomAgent
