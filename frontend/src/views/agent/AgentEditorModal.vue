@@ -421,6 +421,17 @@
                       </div>
                     </div>
 
+                    <!-- 附件上传 -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.attachmentUpload.label') }}</label>
+                        <p class="desc">{{ $t('agentEditor.attachmentUpload.desc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.attachment_upload_enabled" />
+                      </div>
+                    </div>
+
                     <!-- 音频上传开关 -->
                     <div class="setting-row">
                       <div class="setting-info">
@@ -1865,6 +1876,7 @@ const defaultFormData = {
                     image_upload_enabled: true,
                     vlm_model_id: '',
                     image_storage_provider: '',
+                    attachment_upload_enabled: true,
                     audio_upload_enabled: true,
                     asr_model_id: '',
                     voice_input_enabled: true,

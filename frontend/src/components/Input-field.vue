@@ -22,6 +22,7 @@ import { listIntegrationKnowledgeBases } from '@/api/integration';
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
 import { useVoiceConversation } from '@/composables/useVoiceConversation';
+import { transcribeVoice } from '@/api/voice';
 import {
   kbSatisfiesToolRequirements,
   deriveKbFilterFromTools,
@@ -171,11 +172,13 @@ const pickPreferredModelId = (models: ModelConfig[]) => {
   const byDefault = models.find((m) => m.is_default);
   return byDefault?.id || models[0]?.id || '';
 };
+// Voice input defaults on unless explicitly disabled (matches builtin agent / platform defaults).
+const isVoiceInputEnabledByAgent = computed(() => currentAgentConfig.value?.voice_input_enabled !== false);
 // Voice defaults: when agent enables voice but leaves ASR/TTS empty, use tenant default/first model.
 const resolvedAsrModelId = computed(() => {
   const cfg = currentAgentConfig.value || {};
   if (cfg.asr_model_id) return String(cfg.asr_model_id);
-  if (cfg.voice_input_enabled || cfg.audio_upload_enabled) {
+  if (isVoiceInputEnabledByAgent.value || cfg.audio_upload_enabled) {
     return pickPreferredModelId(availableAsrModels.value);
   }
   return '';
@@ -229,6 +232,11 @@ watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId
     if (!isImageUploadEnabledByAgent.value && uploadedImages.value.length > 0) {
       uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
       uploadedImages.value = [];
+    }
+    // Clear attachments when switching to an agent that doesn't support attachment upload
+    if (!isAttachmentUploadEnabledByAgent.value && uploadedAttachments.value.length > 0) {
+      attachmentUploadRef.value?.clear();
+      uploadedAttachments.value = [];
     }
   }
 }, { immediate: true });
@@ -347,9 +355,14 @@ const mentionEmptyHint = computed(() => {
 
 // 智能体是否启用了图片上传（多模态）
 const isImageUploadEnabledByAgent = computed(() => {
-  if (props.embeddedMode) return true;
   if (!hasAgentConfig.value) return false;
   return currentAgentConfig.value?.image_upload_enabled === true;
+});
+
+// 智能体是否启用了附件上传
+const isAttachmentUploadEnabledByAgent = computed(() => {
+  if (!hasAgentConfig.value) return false;
+  return currentAgentConfig.value?.attachment_upload_enabled === true;
 });
 
 // 模型选择是否被智能体锁定 - 已移除锁定逻辑，允许用户自由切换模型
@@ -393,12 +406,15 @@ const voiceConversation = useVoiceConversation({
   asrModelId: () => String(resolvedAsrModelId.value || ''),
   streamingAsrEnabled: () => resolvedAsrModel.value?.parameters?.capabilities?.streaming === true,
 });
-const voiceInputAvailable = computed(() => Boolean(
+const voiceInputConfigured = computed(() => Boolean(
   props.sessionId &&
-  currentAgentConfig.value?.voice_input_enabled &&
-  resolvedAsrModelId.value &&
-  voiceConversation.supported.value
+  isVoiceInputEnabledByAgent.value &&
+  resolvedAsrModelId.value
 ));
+// HTTP 内网等非安全上下文无法使用 getUserMedia，改走音频文件 ASR 识别。
+const voiceInputUsesFileFallback = computed(() => voiceInputConfigured.value && !voiceConversation.supported.value);
+const voiceFileInputRef = ref<HTMLInputElement>();
+const voiceFileTranscribing = ref(false);
 const voiceTranscript = computed(() => voiceConversation.finalText.value);
 const voiceState = computed(() => voiceConversation.state.value);
 const voiceWavePattern = [0.52, 0.78, 1, 0.66, 0.46, 0.84, 0.58, 0.92, 0.62];
@@ -407,14 +423,74 @@ const voiceWaveHeight = (index: number) => {
   return `${Math.round(3 + amplitude * 12 * voiceWavePattern[index - 1])}px`;
 };
 const voiceInputLabel = computed(() => {
+  if (voiceFileTranscribing.value) return '正在识别语音';
   if (voiceState.value === 'recording') return '停止录音';
   if (voiceState.value === 'requesting') return '正在启动语音输入';
   if (voiceState.value === 'finalizing') return '正在识别语音';
+  if (voiceInputUsesFileFallback.value) return '选择音频文件识别';
   return '开始语音输入';
 });
+const voiceProcessing = computed(() => (
+  voiceState.value === 'requesting' ||
+  voiceState.value === 'finalizing' ||
+  voiceFileTranscribing.value
+));
+const voiceInputTooltip = computed(() => {
+  if (voiceInputUsesFileFallback.value) {
+    if (voiceConversation.unsupportedReason.value === 'insecure_context') {
+      return '内网 HTTP 无法直接调用麦克风，请选择音频文件进行语音识别';
+    }
+    return '当前浏览器不支持实时录音，请选择音频文件进行语音识别';
+  }
+  return voiceInputLabel.value;
+});
+
+const triggerVoiceFileSelect = () => {
+  voiceFileInputRef.value?.click();
+};
+
+const handleVoiceFileSelect = async (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file || !props.sessionId || !resolvedAsrModelId.value) return;
+
+  voiceFileTranscribing.value = true;
+  try {
+    const result = await transcribeVoice(props.sessionId, resolvedAsrModelId.value, file, file.name);
+    const text = String(result?.text || '').trim();
+    if (!text) {
+      MessagePlugin.warning('未识别到语音内容');
+      return;
+    }
+    const textarea = getTextareaEl();
+    const selectionStart = textarea?.selectionStart ?? query.value.length;
+    const selectionEnd = textarea?.selectionEnd ?? selectionStart;
+    query.value = `${query.value.slice(0, selectionStart)}${text}${query.value.slice(selectionEnd)}`;
+    pendingVoiceMetadata.value = {
+      source: 'voice',
+      asr_model_id: resolvedAsrModelId.value,
+      confirmed_at: new Date().toISOString(),
+    };
+    await nextTick();
+    const cursor = selectionStart + text.length;
+    const currentTextarea = getTextareaEl();
+    currentTextarea?.focus();
+    currentTextarea?.setSelectionRange(cursor, cursor);
+  } catch (error) {
+    console.error('Voice file transcription failed:', error);
+    MessagePlugin.error('语音识别失败，请检查 ASR 配置或网络连接');
+  } finally {
+    voiceFileTranscribing.value = false;
+  }
+};
 
 const toggleVoiceRecording = async () => {
-  if (props.isReplying) return;
+  if (props.isReplying || voiceFileTranscribing.value) return;
+  if (voiceInputUsesFileFallback.value) {
+    triggerVoiceFileSelect();
+    return;
+  }
   if (voiceConversation.state.value === 'recording') {
     voiceConversation.stop();
     return;
@@ -2071,12 +2147,22 @@ defineExpose({
   <div class="answers-input" :class="{ 'is-embedded': embeddedMode }" @drop="onDrop" @dragover="onDragOver">
     <!-- Hidden file input for image upload -->
     <input
+      v-if="isImageUploadEnabledByAgent"
       ref="imageInputRef"
       type="file"
       accept="image/jpeg,image/png,image/gif,image/webp"
       multiple
       style="display:none"
       @change="handleImageSelect"
+    />
+    <input
+      v-if="voiceInputConfigured"
+      ref="voiceFileInputRef"
+      type="file"
+      accept="audio/*,.webm,.wav,.mp3,.m4a,.ogg,.flac,.aac"
+      capture="user"
+      style="display:none"
+      @change="handleVoiceFileSelect"
     />
     <!-- 富文本输入框容器 -->
     <div class="rich-input-container">
@@ -2090,6 +2176,7 @@ defineExpose({
       
       <!-- 附件列表区域 (由 AttachmentUpload 组件渲染) -->
       <AttachmentUpload
+        v-if="isAttachmentUploadEnabledByAgent"
         ref="attachmentUploadRef"
         :max-files="5"
         :max-size="20"
@@ -2191,23 +2278,14 @@ defineExpose({
         />
 
         <!-- WebSearch 开关按钮 -->
-        <t-tooltip v-if="!embeddedMode && isWebSearchConfigured" placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+        <t-tooltip v-if="!embeddedMode && isWebSearchConfigured && !isWebSearchDisabledByAgent" placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
           <template #content>
-            <div v-if="isWebSearchDisabledByAgent" class="tooltip-with-link">
-              <span>{{ $t('input.webSearchDisabledByAgent') }}</span>
-              <a v-if="canManageAgents" href="#" @click.prevent="handleGoToAgentSettings('websearch')">{{ $t('input.goToAgentSettings') }}</a>
-            </div>
-            <span v-else-if="isWebSearchConfigured">{{ isWebSearchEnabled ? $t('input.webSearch.toggleOff') : $t('input.webSearch.toggleOn') }}</span>
-            <div v-else class="tooltip-with-link">
-              <span>{{ $t('input.webSearch.notConfigured') }}</span>
-              <a href="#" @click.prevent="handleGoToWebSearchSettings">{{ $t('input.goToSettings') }}</a>
-            </div>
+            <span>{{ isWebSearchEnabled ? $t('input.webSearch.toggleOff') : $t('input.webSearch.toggleOn') }}</span>
           </template>
           <div 
             class="control-btn websearch-btn"
             :class="{ 
-              'active': isWebSearchEnabled && isWebSearchConfigured, 
-              'disabled': !isWebSearchConfigured || isWebSearchDisabledByAgent
+              'active': isWebSearchEnabled && isWebSearchConfigured
             }"
             @click.stop="toggleWebSearch"
           >
@@ -2230,23 +2308,16 @@ defineExpose({
         </t-tooltip>
 
         <!-- 图片上传按钮 -->
-        <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+        <t-tooltip v-if="isImageUploadEnabledByAgent" placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
           <template #content>
-            <div v-if="!isImageUploadEnabledByAgent" class="tooltip-with-link">
-              <span>{{ $t('input.imageUploadDisabledByAgent') }}</span>
-              <a v-if="canManageAgents" href="#" @click.prevent="handleGoToAgentSettings('model')">{{ $t('input.goToAgentSettings') }}</a>
-            </div>
-            <span v-else>{{ $t('chat.imageUploadTooltip') }}</span>
+            <span>{{ $t('chat.imageUploadTooltip') }}</span>
           </template>
           <div
             class="control-btn image-upload-btn"
             role="button"
             :aria-label="$t('chat.imageUploadTooltip')"
-            :class="{ 
-              'active': uploadedImages.length > 0,
-              'disabled': !isImageUploadEnabledByAgent
-            }"
-            @click.stop="isImageUploadEnabledByAgent && triggerImageUpload()"
+            :class="{ 'active': uploadedImages.length > 0 }"
+            @click.stop="triggerImageUpload()"
           >
             <svg width="18" height="18" viewBox="0 0 1024 1024" fill="currentColor" class="control-icon">
               <path d="M896 128H128c-35.3 0-64 28.7-64 64v640c0 35.3 28.7 64 64 64h768c35.3 0 64-28.7 64-64V192c0-35.3-28.7-64-64-64zM128 832V192h768l0.1 640H128z"/>
@@ -2258,7 +2329,7 @@ defineExpose({
         </t-tooltip>
 
         <!-- 附件上传按钮 -->
-        <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+        <t-tooltip v-if="isAttachmentUploadEnabledByAgent" placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
           <template #content>
             <span>{{ uploadedAttachments.length > 0 ? $t('chat.attachmentWithCount', { count: uploadedAttachments.length }) : $t('chat.attachmentUploadTooltip') }}</span>
           </template>
@@ -2309,7 +2380,7 @@ defineExpose({
       <!-- 右侧控制按钮组 -->
       <div class="control-right">
         <!-- 语音输入：停止后自动将转写结果写入输入框 -->
-        <t-tooltip v-if="voiceInputAvailable" :content="voiceInputLabel" placement="top">
+        <t-tooltip v-if="voiceInputConfigured" :content="voiceInputTooltip" placement="top">
           <div class="voice-control" :class="{ recording: voiceState === 'recording' }">
             <div v-if="voiceState === 'recording'" class="voice-wave" aria-hidden="true">
               <span v-for="index in 9" :key="index" :style="{ height: voiceWaveHeight(index) }"></span>
@@ -2318,14 +2389,14 @@ defineExpose({
               class="control-btn voice-btn"
               :class="{
                 recording: voiceState === 'recording',
-                processing: voiceState === 'requesting' || voiceState === 'finalizing',
+                processing: voiceProcessing,
                 disabled: isReplying
               }"
               role="button"
               tabindex="0"
               :aria-label="voiceInputLabel"
               :aria-pressed="voiceState === 'recording'"
-              :aria-busy="voiceState === 'requesting' || voiceState === 'finalizing'"
+              :aria-busy="voiceProcessing"
               @click.stop="toggleVoiceRecording"
               @keydown.enter.prevent="toggleVoiceRecording"
               @keydown.space.prevent="toggleVoiceRecording"
@@ -2333,7 +2404,7 @@ defineExpose({
               <svg v-if="voiceState === 'recording'" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                 <rect x="5" y="5" width="6" height="6" rx="1" />
               </svg>
-              <svg v-else-if="voiceState === 'requesting' || voiceState === 'finalizing'" class="voice-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <svg v-else-if="voiceProcessing" class="voice-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" opacity="0.22" />
                 <path d="M20 12a8 8 0 0 0-8-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
               </svg>

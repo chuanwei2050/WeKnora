@@ -3843,6 +3843,10 @@ export default {
       asrModelDesc: "用于音频转录的语音识别模型，未配置时音频文件将以占位符形式传递",
       asrModelPlaceholder: "请选择 ASR 模型",
     },
+    attachmentUpload: {
+      label: "附件上传",
+      desc: "启用后用户可在对话中上传附件（文档、音频等）",
+    },
     faq: {
       title: "FAQ 优先策略",
       tooltip: "当知识库中包含 FAQ（问答对）时，可以启用此策略让 FAQ 答案优先于普通文档",

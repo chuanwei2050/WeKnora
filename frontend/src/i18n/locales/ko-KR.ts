@@ -3819,6 +3819,10 @@ export default {
       asrModelDesc: '음성 인식 모델입니다. 설정하지 않으면 오디오 파일이 플레이스홀더로 전달됩니다',
       asrModelPlaceholder: 'ASR 모델 선택',
     },
+    attachmentUpload: {
+      label: '첨부 파일 업로드',
+      desc: '활성화하면 사용자가 대화에서 첨부 파일(문서, 오디오 등)을 업로드할 수 있습니다',
+    },
     faq: {
       title: 'FAQ 우선 전략',
       tooltip: '지식베이스에 FAQ(질문-답변 쌍)가 포함된 경우, 이 전략을 활성화하면 FAQ 답변이 일반 문서보다 우선됩니다',

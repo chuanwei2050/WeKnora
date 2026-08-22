@@ -150,6 +150,10 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	// Process file attachments: decode and save to storage, extract content
 	var processedAttachments types.MessageAttachments
 	if len(request.AttachmentUploads) > 0 {
+		if customAgent != nil && !customAgent.Config.AttachmentUploadEnabled {
+			logger.Warnf(ctx, "[%s] Attachment upload is not enabled for this agent, rejecting %d attachment(s)", logPrefix, len(request.AttachmentUploads))
+			return nil, nil, errors.NewBadRequestError("Attachment upload is not enabled for this agent")
+		}
 		logger.Infof(ctx, "[%s] processing %d attachment(s)", logPrefix, len(request.AttachmentUploads))
 
 		maxSize := secutils.GetMaxFileSize()

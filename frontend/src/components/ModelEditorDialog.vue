@@ -703,7 +703,7 @@ watch(() => props.visible, (val) => {
     // 从 API 加载 Model Provider 列表
     loadProviders()
 
-    if (props.modelData) {
+    if (props.modelData?.id) {
       formData.value = {
         ...props.modelData,
         defaultVoice: getInitialDefaultVoice(props.modelData.defaultVoice),

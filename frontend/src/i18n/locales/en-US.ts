@@ -3837,6 +3837,10 @@ export default {
       asrModelDesc: 'Speech recognition model for audio transcription. If not configured, audio files will be passed as placeholders.',
       asrModelPlaceholder: 'Select ASR Model',
     },
+    attachmentUpload: {
+      label: 'Attachment Upload',
+      desc: 'When enabled, users can upload attachments (documents, audio, etc.) in conversations',
+    },
     faq: {
       title: 'FAQ Priority Strategy',
       tooltip: 'When the knowledge base contains FAQ (Q&A pairs), enable this strategy to prioritize FAQ answers over regular documents',

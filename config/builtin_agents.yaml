@@ -66,6 +66,7 @@ builtin_agents:
         degradation_strategy: conservative
       voice_input_enabled: true
       voice_output_enabled: true
+      attachment_upload_enabled: true
       audio_upload_enabled: true
 
   - id: "builtin-smart-reasoning"
@@ -125,6 +126,7 @@ builtin_agents:
         degradation_strategy: conservative
       voice_input_enabled: true
       voice_output_enabled: true
+      attachment_upload_enabled: true
       audio_upload_enabled: true
       multi_turn_enabled: true
       history_turns: 5

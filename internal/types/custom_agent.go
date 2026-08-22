@@ -158,6 +158,8 @@ type CustomAgentConfig struct {
 	ImageUploadEnabled bool `yaml:"image_upload_enabled" json:"image_upload_enabled"`
 	// VLM model ID for image analysis (optional, falls back to tenant-level VLM)
 	VLMModelID string `yaml:"vlm_model_id" json:"vlm_model_id"`
+	// Whether file attachment upload is enabled for this agent (documents, etc.; UI default: true for new agents)
+	AttachmentUploadEnabled bool `yaml:"attachment_upload_enabled" json:"attachment_upload_enabled"`
 	// Whether audio upload (ASR transcription) is enabled for this agent (UI default: true for new agents)
 	AudioUploadEnabled bool `yaml:"audio_upload_enabled" json:"audio_upload_enabled"`
 	// ASR model ID for audio transcription (optional)

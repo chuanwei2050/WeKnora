@@ -11,7 +11,7 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock('../src/api/voice', () => apiMocks)
 
-import { useVoiceConversation } from '../src/composables/useVoiceConversation'
+import { useVoiceConversation, getVoiceRecordingUnsupportedReason } from '../src/composables/useVoiceConversation'
 
 class FakeTrack {
   stopped = false
@@ -51,6 +51,7 @@ class FakeRecorder {
 function installMediaRecorder() {
   const tracks = [new FakeTrack()]
   const stream = { getTracks: () => tracks }
+  Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true })
   Object.defineProperty(navigator, 'mediaDevices', {
     configurable: true,
     value: { getUserMedia: vi.fn(async () => stream) },
@@ -256,6 +257,7 @@ describe('useVoiceConversation', () => {
   it('cancels a pending permission request without starting background capture', async () => {
     let resolveStream: (stream: MediaStream) => void = () => undefined
     const getUserMedia = vi.fn(() => new Promise<MediaStream>(resolve => { resolveStream = resolve }))
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true })
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
       value: { getUserMedia },
@@ -437,5 +439,29 @@ describe('useVoiceConversation', () => {
     expect(voice.error.value).toBe('playback_denied')
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:rejected-stream')
     wrapper.unmount()
+  })
+})
+
+describe('getVoiceRecordingUnsupportedReason', () => {
+  it('reports insecure context on HTTP origins', () => {
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: false })
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn() },
+    })
+    Object.defineProperty(globalThis, 'MediaRecorder', { configurable: true, value: FakeRecorder })
+
+    expect(getVoiceRecordingUnsupportedReason()).toBe('insecure_context')
+  })
+
+  it('returns empty on secure contexts with media APIs', () => {
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true })
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn() },
+    })
+    Object.defineProperty(globalThis, 'MediaRecorder', { configurable: true, value: FakeRecorder })
+
+    expect(getVoiceRecordingUnsupportedReason()).toBe('')
   })
 })

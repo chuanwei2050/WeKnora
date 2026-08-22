@@ -3,6 +3,20 @@ import { issueVoiceWSTicket, synthesizeVoice, synthesizeVoiceStream, transcribeV
 
 export type VoiceRecorderState = 'idle' | 'requesting' | 'recording' | 'finalizing' | 'error';
 
+export type VoiceRecordingUnsupportedReason =
+  | ''
+  | 'insecure_context'
+  | 'no_media_devices'
+  | 'no_media_recorder';
+
+export function getVoiceRecordingUnsupportedReason(): VoiceRecordingUnsupportedReason {
+  if (typeof window === 'undefined') return 'no_media_devices';
+  if (!window.isSecureContext) return 'insecure_context';
+  if (!navigator.mediaDevices?.getUserMedia) return 'no_media_devices';
+  if (typeof MediaRecorder === 'undefined') return 'no_media_recorder';
+  return '';
+}
+
 function isAbortError(cause: unknown): boolean {
   return typeof cause === 'object' && cause !== null && 'name' in cause && cause.name === 'AbortError';
 }
@@ -31,7 +45,8 @@ export function useVoiceConversation({ sessionId, asrModelId, streamingAsrEnable
   const batchFallback = ref(false);
   const volumeLevel = ref(0);
   const playbackState = ref<'idle' | 'loading' | 'playing' | 'paused'>('idle');
-  const supported = computed(() => typeof window !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined');
+  const unsupportedReason = computed(() => getVoiceRecordingUnsupportedReason());
+  const supported = computed(() => !unsupportedReason.value);
   let recorder: MediaRecorder | null = null;
   let stream: MediaStream | null = null;
   let chunks: Blob[] = [];
@@ -394,7 +409,7 @@ export function useVoiceConversation({ sessionId, asrModelId, streamingAsrEnable
     finalVoiceMetadata.value = null;
   }
 
-  return { state, partialText, finalText, finalVoiceMetadata, error, batchFallback, volumeLevel, supported, playbackState, start, stop, cancel, confirmFinalText, cancelFinalText, playAnswerTTS, pausePlayback, resumePlayback, stopPlayback };
+  return { state, partialText, finalText, finalVoiceMetadata, error, batchFallback, volumeLevel, supported, unsupportedReason, playbackState, start, stop, cancel, confirmFinalText, cancelFinalText, playAnswerTTS, pausePlayback, resumePlayback, stopPlayback };
 }
 
 function waitForMediaSourceOpen(source: MediaSource, signal: AbortSignal): Promise<void> {

@@ -366,9 +366,12 @@ import { isVLLMSettingsModel } from '@/utils/model-profile'
 
 const { t } = useI18n()
 
+type VerifierRole = 'verifier_1' | 'verifier_2' | 'evaluation_judge'
+
 const showDialog = ref(false)
 const currentModelType = ref<'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts'>('chat')
 const editingModel = ref<any>(null)
+const pendingVerifierMeta = ref<{ originType: 'Verifier' | 'EvaluationJudge'; profileRole: VerifierRole } | null>(null)
 const loading = ref(true)
 const preflightResults = ref<Record<string, ModelPreflightResult>>({})
 const selectedProfile = ref<ModelProfile>('online')
@@ -392,8 +395,6 @@ const verifierModels = computed(() =>
     .filter(m => m.type === 'Verifier' || m.type === 'EvaluationJudge')
     .map(convertToLegacyFormat)
 )
-
-type VerifierRole = 'verifier_1' | 'verifier_2' | 'evaluation_judge'
 
 const verifierRoles: Array<{ value: VerifierRole; label: string; description: string }> = [
   { value: 'verifier_1', label: '校验 1', description: '第一路答案校验' },
@@ -510,6 +511,7 @@ const switchProfile = async (profile: ModelProfile) => {
 
 // 打开添加对话框
 const openAddDialog = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts') => {
+  pendingVerifierMeta.value = null
   currentModelType.value = type
   editingModel.value = null
   showDialog.value = true
@@ -517,11 +519,11 @@ const openAddDialog = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 
 
 const openAddVerifierDialog = (role: VerifierRole) => {
   currentModelType.value = 'chat'
-  editingModel.value = {
+  pendingVerifierMeta.value = {
     originType: role === 'evaluation_judge' ? 'EvaluationJudge' : 'Verifier',
-    profile: selectedProfile.value,
-    profileRole: role
+    profileRole: role,
   }
+  editingModel.value = null
   showDialog.value = true
 }
 
@@ -532,6 +534,7 @@ const editModel = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts
     MessagePlugin.warning(t('modelSettings.toasts.builtinCannotEdit'))
     return
   }
+  pendingVerifierMeta.value = null
   currentModelType.value = type
   editingModel.value = { ...model }
   showDialog.value = true
@@ -595,9 +598,9 @@ const handleModelSave = async (modelData: any) => {
     // 将前端格式转换为后端格式
     const apiModelData: ModelConfig = {
       name: modelData.modelName.trim(), // 使用 modelName 作为 name，并去除首尾空格
-      type: editingModel.value?.originType || getModelType(currentModelType.value),
+      type: editingModel.value?.originType || pendingVerifierMeta.value?.originType || getModelType(currentModelType.value),
       profile: selectedProfile.value,
-      profile_role: editingModel.value?.profileRole || getProfileRole(currentModelType.value),
+      profile_role: editingModel.value?.profileRole || pendingVerifierMeta.value?.profileRole || getProfileRole(currentModelType.value),
       source: modelData.source,
       description: '',
       parameters: {
@@ -632,6 +635,8 @@ const handleModelSave = async (modelData: any) => {
       await createModel(apiModelData)
       MessagePlugin.success(t('modelSettings.toasts.added'))
     }
+
+    pendingVerifierMeta.value = null
     
     // 重新加载模型列表
     await loadModels()
