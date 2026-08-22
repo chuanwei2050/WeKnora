@@ -179,7 +179,8 @@ func (r *knowledgeTagRepository) CountReferences(
 ) (knowledgeCount int64, chunkCount int64, err error) {
 	if err = r.db.WithContext(ctx).
 		Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id = ?", tenantID, kbID, tagID).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id = ? AND parse_status <> ?",
+			tenantID, kbID, tagID, types.ParseStatusDeleting).
 		Count(&knowledgeCount).Error; err != nil {
 		return
 	}
@@ -220,7 +221,8 @@ func (r *knowledgeTagRepository) BatchCountReferences(
 	if err := r.db.WithContext(ctx).
 		Model(&types.Knowledge{}).
 		Select("tag_id, COUNT(*) as count").
-		Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id IN (?)", tenantID, kbID, tagIDs).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id IN (?) AND parse_status <> ?",
+			tenantID, kbID, tagIDs, types.ParseStatusDeleting).
 		Group("tag_id").
 		Find(&knowledgeCounts).Error; err != nil {
 		return nil, err
