@@ -300,8 +300,17 @@
 
         <div v-if="modelType === 'tts'" class="form-item">
           <label class="form-label required">默认音色</label>
-          <t-input v-model="formData.defaultVoice" placeholder="例如：alloy 或 模型名:alex" />
-          <p class="form-desc">调用方未指定音色时使用该值。</p>
+          <t-select
+            v-model="formData.defaultVoice"
+            :options="ttsVoiceOptions"
+            :loading="loadingTTSVoices"
+            creatable
+            filterable
+            clearable
+            placeholder="选择或输入音色"
+            @focus="loadTTSVoiceOptions"
+          />
+          <p class="form-desc">按服务商/模型加载预设；自部署 TTS 会尝试读取 /v1/audio/voices。</p>
         </div>
 
       </t-form>
@@ -325,7 +334,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, onUnmounted, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, checkTTSModel, listOllamaModels, downloadOllamaModel, getDownloadProgress, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
+import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, checkTTSModel, listTTSVoices, listOllamaModels, downloadOllamaModel, getDownloadProgress, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
 import { getWeKnoraCloudStatus } from '@/api/model'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
@@ -443,10 +452,12 @@ const fallbackProviderOptions = computed(() => [
     defaultUrls: {
       chat: 'https://api.siliconflow.cn/v1',
       embedding: 'https://api.siliconflow.cn/v1',
-      rerank: 'https://api.siliconflow.cn/v1'
+      rerank: 'https://api.siliconflow.cn/v1',
+      asr: 'https://api.siliconflow.cn/v1',
+      tts: 'https://api.siliconflow.cn/v1'
     },
     description: t('model.editor.providers.siliconflow.description'),
-    modelTypes: ['chat', 'embedding', 'rerank']
+    modelTypes: ['chat', 'embedding', 'rerank', 'asr', 'tts']
   },
   { 
     value: 'jina', 
@@ -545,14 +556,10 @@ const dimensionChecked = ref(false)
 const dimensionSuccess = ref(false)
 const dimensionMessage = ref('')
 
-const DEFAULT_TTS_VOICE = 'default'
+const ttsVoiceOptions = ref<Array<{ label: string; value: string }>>([])
+const loadingTTSVoices = ref(false)
 
-const getInitialDefaultVoice = (voice?: string) => {
-  if (props.modelType === 'tts' && !voice?.trim()) {
-    return DEFAULT_TTS_VOICE
-  }
-  return voice || ''
-}
+const getInitialDefaultVoice = (voice?: string) => voice?.trim() || ''
 
 // Ollama 模型状态
 const ollamaModelList = ref<OllamaModelInfo[]>([])
@@ -717,6 +724,9 @@ watch(() => props.visible, (val) => {
     if (formData.value.provider === 'weknoracloud') {
       checkWkcCredentialStatus()
     }
+    if (props.modelType === 'tts') {
+      loadTTSVoiceOptions()
+    }
   } else {
     // 恢复背景滚动
     document.body.style.overflow = ''
@@ -764,9 +774,62 @@ const handleProviderChange = (value: string) => {
     remoteAvailable.value = false
     remoteMessage.value = ''
   }
+  if (props.modelType === 'tts') {
+    loadTTSVoiceOptions()
+  }
   // WeKnoraCloud: 检查凭证状态
   if (value === 'weknoracloud') {
     checkWkcCredentialStatus()
+  }
+}
+
+const buildCustomHeaderPayload = () => {
+  const customHeaders: Record<string, string> = {}
+  if (Array.isArray(formData.value.customHeaders)) {
+    for (const item of formData.value.customHeaders) {
+      const key = (item?.key ?? '').trim()
+      const value = (item?.value ?? '').trim()
+      if (key && value) customHeaders[key] = value
+    }
+  }
+  return Object.keys(customHeaders).length > 0 ? { customHeaders } : {}
+}
+
+const isPresetTTSProvider = (provider?: string) => {
+  const normalized = provider?.trim().toLowerCase()
+  return normalized === 'siliconflow' || normalized === 'openai'
+}
+
+const loadTTSVoiceOptions = async () => {
+  if (props.modelType !== 'tts') return
+  const modelName = formData.value.modelName?.trim()
+  const baseUrl = formData.value.baseUrl?.trim()
+  if (!modelName || (!baseUrl && !isPresetTTSProvider(formData.value.provider))) {
+    ttsVoiceOptions.value = []
+    return
+  }
+  loadingTTSVoices.value = true
+  try {
+    const result = await listTTSVoices({
+      modelName,
+      baseUrl,
+      apiKey: formData.value.apiKey || '',
+      provider: formData.value.provider || '',
+      ...buildCustomHeaderPayload(),
+    })
+    ttsVoiceOptions.value = (result.voices || []).map((voice) => ({
+      label: voice.label || voice.value,
+      value: voice.value,
+    }))
+    const current = formData.value.defaultVoice?.trim()
+    const hasCurrent = current && ttsVoiceOptions.value.some((item) => item.value === current)
+    if (!hasCurrent && ttsVoiceOptions.value.length > 0 && !current) {
+      formData.value.defaultVoice = ttsVoiceOptions.value[0].value
+    }
+  } catch {
+    ttsVoiceOptions.value = []
+  } finally {
+    loadingTTSVoices.value = false
   }
 }
 
@@ -1008,12 +1071,16 @@ const checkRemoteAPI = async () => {
         break
 
       case 'tts':
+        if (!formData.value.defaultVoice?.trim()) {
+          MessagePlugin.warning('请选择或输入默认音色')
+          return
+        }
         result = await checkTTSModel({
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider || '',
-          extraConfig: { voice: formData.value.defaultVoice || DEFAULT_TTS_VOICE },
+          extraConfig: { voice: formData.value.defaultVoice.trim() },
           ...headerPayload,
         })
         break
@@ -1220,6 +1287,15 @@ watch(() => formData.value.modelName, () => {
   dimensionChecked.value = false
   dimensionSuccess.value = false
   dimensionMessage.value = ''
+  if (props.modelType === 'tts' && props.visible) {
+    loadTTSVoiceOptions()
+  }
+})
+
+watch([() => formData.value.baseUrl, () => formData.value.provider], () => {
+  if (props.modelType === 'tts' && props.visible) {
+    loadTTSVoiceOptions()
+  }
 })
 
 // 取消

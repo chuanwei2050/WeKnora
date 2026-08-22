@@ -1835,6 +1835,50 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 	})
 }
 
+// ListTTSVoices 返回 TTS 模型可用音色列表（预设 + 自部署端点可选动态列表）。
+func (h *InitializationHandler) ListTTSVoices(c *gin.Context) {
+	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
+
+	var req ModelTestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	provider := strings.ToLower(strings.TrimSpace(req.Provider))
+	presetProvider := provider == "siliconflow" || provider == "openai"
+	if req.ModelName == "" {
+		c.Error(errors.NewBadRequestError("模型名称不能为空"))
+		return
+	}
+	if !presetProvider && strings.TrimSpace(req.BaseURL) == "" {
+		c.Error(errors.NewBadRequestError("模型名称和Base URL不能为空"))
+		return
+	}
+	if baseURL := strings.TrimSpace(req.BaseURL); baseURL != "" {
+		if err := utils.ValidateURLForSSRF(baseURL); err != nil {
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+			return
+		}
+	}
+
+	voices := tts.ListVoices(ctx, tts.ListVoicesConfig{
+		Provider:      req.Provider,
+		ModelName:     req.ModelName,
+		BaseURL:       req.BaseURL,
+		APIKey:        req.APIKey,
+		CustomHeaders: req.CustomHeaders,
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"voices": voices,
+		},
+	})
+}
+
 // CheckTTSModel 检查 OpenAI-compatible TTS 模型的语音合成端点。
 func (h *InitializationHandler) CheckTTSModel(c *gin.Context) {
 	ctx := c.Request.Context()

@@ -7,8 +7,8 @@ import (
 )
 
 // EngineRegistration is the interface every locally registered parser engine
-// must implement. Remote-only engines (e.g. markitdown) are discovered via
-// the docreader ListEngines RPC and do not need a local registration.
+// must implement. Additional docreader-only engines may also be discovered via
+// the docreader ListEngines RPC.
 type EngineRegistration interface {
 	Name() string
 	Description() string
@@ -70,6 +70,7 @@ func containsFileType(fileTypes []string, target string) bool {
 
 func init() {
 	RegisterEngine(&builtinEngine{})
+	RegisterEngine(&markitdownEngine{})
 	RegisterEngine(&simpleEngine{})
 	RegisterEngine(&weKnoraCloudEngine{})
 	RegisterEngine(&mineruEngine{})
@@ -90,6 +91,26 @@ func (e *builtinEngine) FileTypes(_ bool) []string {
 	return []string{"docx", "doc", "pdf", "md", "markdown", "xlsx", "xls", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "mp3", "wav", "m4a", "flac", "ogg"}
 }
 func (e *builtinEngine) CheckAvailable(docreaderConnected bool, _ map[string]string) (bool, string) {
+	if docreaderConnected {
+		return true, ""
+	}
+	return false, "DocReader service not connected"
+}
+
+// ---------------------------------------------------------------------------
+// markitdown — DocReader-backed MarkItDown parser (Microsoft MarkItDown lib).
+// ---------------------------------------------------------------------------
+
+type markitdownEngine struct{}
+
+func (e *markitdownEngine) Name() string { return "markitdown" }
+func (e *markitdownEngine) Description() string {
+	return "MarkItDown parser engine (Microsoft MarkItDown library)"
+}
+func (e *markitdownEngine) FileTypes(_ bool) []string {
+	return []string{"md", "markdown", "pdf", "docx", "doc", "pptx", "ppt", "xlsx", "xls", "csv"}
+}
+func (e *markitdownEngine) CheckAvailable(docreaderConnected bool, _ map[string]string) (bool, string) {
 	if docreaderConnected {
 		return true, ""
 	}

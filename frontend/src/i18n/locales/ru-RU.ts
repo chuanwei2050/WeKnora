@@ -3104,6 +3104,10 @@ export default {
           name: 'Simple',
           desc: 'Простой формат и анализ изображений (внешний сервис не требуется)',
         },
+        markitdown: {
+          name: 'MarkItDown',
+          desc: 'Парсер MarkItDown (библиотека Microsoft MarkItDown)',
+        },
         mineru: {
           name: 'MinerU',
           desc: 'Самостоятельно развёрнутый сервис MinerU',

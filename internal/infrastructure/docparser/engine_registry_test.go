@@ -27,3 +27,31 @@ func TestSelectConfiguredEngineUsesPlatformConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func TestListAllEnginesIncludesMarkitdownWhenDocReaderConnected(t *testing.T) {
+	engines := ListAllEngines(true, nil, nil)
+	for _, e := range engines {
+		if e.Name != "markitdown" {
+			continue
+		}
+		if !e.Available {
+			t.Fatalf("markitdown should be available when docreader is connected, reason: %q", e.UnavailableReason)
+		}
+		return
+	}
+	t.Fatal("markitdown engine not found in ListAllEngines output")
+}
+
+func TestListAllEnginesMarkitdownUnavailableWithoutDocReader(t *testing.T) {
+	engines := ListAllEngines(false, nil, nil)
+	for _, e := range engines {
+		if e.Name != "markitdown" {
+			continue
+		}
+		if e.Available {
+			t.Fatal("markitdown should be unavailable when docreader is disconnected")
+		}
+		return
+	}
+	t.Fatal("markitdown engine not found in ListAllEngines output")
+}

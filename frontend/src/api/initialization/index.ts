@@ -387,6 +387,32 @@ export function checkTTSModel(modelConfig: {
     });
 }
 
+export interface TTSVoiceOption {
+    value: string;
+    label: string;
+}
+
+// 获取 TTS 可用音色（预设 + 自部署端点动态列表）
+export function listTTSVoices(modelConfig: {
+    modelName: string;
+    baseUrl: string;
+    apiKey?: string;
+    provider?: string;
+} & BaseModelTestPayload): Promise<{
+    voices: TTSVoiceOption[];
+}> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/tts/voices', modelConfig)
+            .then((response: any) => {
+                resolve(response.data || { voices: [] });
+            })
+            .catch((error: any) => {
+                console.error('Failed to list TTS voices:', error);
+                reject(error);
+            });
+    });
+}
+
 export function testMultimodalFunction(testData: {
     image: File;
     vlm_model: string;

@@ -3510,6 +3510,10 @@ export default {
           name: 'Simple',
           desc: 'Simple format & image parsing (no external service required)',
         },
+        markitdown: {
+          name: 'MarkItDown',
+          desc: 'MarkItDown parser engine (Microsoft MarkItDown library)',
+        },
         mineru: {
           name: 'MinerU',
           desc: 'MinerU self-hosted service',

@@ -629,6 +629,7 @@ func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.Initializ
 	r.POST("/initialization/rerank/check", handler.CheckRerankModel)
 	r.POST("/initialization/asr/check", handler.CheckASRModel)
 	r.POST("/initialization/tts/check", handler.CheckTTSModel)
+	r.POST("/initialization/tts/voices", handler.ListTTSVoices)
 	r.POST("/initialization/multimodal/test", handler.TestMultimodalFunction)
 
 	r.POST("/initialization/extract/text-relation", handler.ExtractTextRelations)

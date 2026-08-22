@@ -3516,6 +3516,10 @@ export default {
           name: "Simple",
           desc: "简单格式 & 图片解析（无需外部服务）",
         },
+        markitdown: {
+          name: "MarkItDown",
+          desc: "MarkItDown 解析引擎（微软 MarkItDown 库）",
+        },
         mineru: {
           name: "MinerU",
           desc: "MinerU 自部署服务",

@@ -3492,6 +3492,10 @@ export default {
           name: 'Simple',
           desc: '간단한 형식 및 이미지 파싱 (외부 서비스 불필요)',
         },
+        markitdown: {
+          name: 'MarkItDown',
+          desc: 'MarkItDown 파서 엔진 (Microsoft MarkItDown 라이브러리)',
+        },
         mineru: {
           name: 'MinerU',
           desc: 'MinerU 자체 호스팅 서비스',

@@ -242,6 +242,28 @@ def list_models() -> Dict[str, Any]:
     }
 
 
+@app.get("/v1/audio/voices", dependencies=[Depends(require_api_key)])
+def list_voices() -> Dict[str, Any]:
+    voices = ["default"]
+    try:
+        _load()
+        spk2info = getattr(getattr(_tts, "frontend", None), "spk2info", {})
+        if isinstance(spk2info, dict):
+            for name, info in spk2info.items():
+                if isinstance(info, dict) and info.get("embedding") is not None:
+                    voices.append(str(name))
+    except Exception:  # noqa: BLE001
+        pass
+    deduped = []
+    seen = set()
+    for voice in voices:
+        if voice in seen:
+            continue
+        seen.add(voice)
+        deduped.append(voice)
+    return {"voices": deduped}
+
+
 @app.post("/v1/audio/speech", dependencies=[Depends(require_api_key)])
 def speech(req: SpeechRequest) -> Response:
     fmt = (req.response_format or "mp3").lower().strip()

@@ -30,7 +30,7 @@ var bootstrapRoles = map[string]bootstrapRole{
 	"tts":              {modelType: types.ModelTypeTTS, modelRole: types.ModelRoleTTS, use: "tts"},
 }
 
-const modelSeedVersion = 7
+const modelSeedVersion = 8
 
 const legacyPrivateOpenAICompatibleProvider = "private-openai-compatible"
 
@@ -95,6 +95,7 @@ func BootstrapPlan(profile types.ModelProfile) []*types.Model {
 			},
 			Capabilities: capabilityFor(role.modelRole, policy, location, dimension),
 		}
+		applyTTSEnvExtras(prefix, role.modelRole, &params)
 		models = append(models, &types.Model{
 			TenantID:    types.PlatformModelTenantID,
 			Name:        name,
@@ -186,6 +187,23 @@ func Bootstrap(
 					compatibilityID := candidate.Parameters.EmbeddingParameters.CompatibilityID
 					if compatibilityID != "" && matched.Parameters.EmbeddingParameters.CompatibilityID != compatibilityID {
 						matched.Parameters.EmbeddingParameters.CompatibilityID = compatibilityID
+						changed = true
+					}
+				}
+				if settings.ModelSeedVersion < 8 && candidate.ProfileRole == "tts" {
+					voice := strings.TrimSpace(candidate.Parameters.ExtraConfig["voice"])
+					current := ""
+					if matched.Parameters.ExtraConfig != nil {
+						current = strings.TrimSpace(matched.Parameters.ExtraConfig["voice"])
+					}
+					if voice != "" && (current == "" || current == "default") {
+						if matched.Parameters.ExtraConfig == nil {
+							matched.Parameters.ExtraConfig = map[string]string{}
+						}
+						matched.Parameters.ExtraConfig["voice"] = voice
+						if format := strings.TrimSpace(candidate.Parameters.ExtraConfig["format"]); format != "" {
+							matched.Parameters.ExtraConfig["format"] = format
+						}
 						changed = true
 					}
 				}
@@ -414,4 +432,24 @@ func capabilityFor(
 		capability.AudioOutput = true
 	}
 	return capability
+}
+
+func applyTTSEnvExtras(prefix string, role types.ModelRole, params *types.ModelParameters) {
+	if role != types.ModelRoleTTS || params == nil {
+		return
+	}
+	voice := expandAllEnvRefs(os.Getenv(prefix + "_TTS_VOICE"))
+	format := expandAllEnvRefs(os.Getenv(prefix + "_TTS_FORMAT"))
+	if voice == "" && format == "" {
+		return
+	}
+	if params.ExtraConfig == nil {
+		params.ExtraConfig = map[string]string{}
+	}
+	if voice != "" {
+		params.ExtraConfig["voice"] = voice
+	}
+	if format != "" {
+		params.ExtraConfig["format"] = format
+	}
 }

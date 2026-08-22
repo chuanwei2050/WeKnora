@@ -149,10 +149,9 @@ def _build_default_registry() -> ParserEngineRegistry:
         description="MarkItDown 解析引擎（微软 MarkItDown 库）",
     )
 
-    # NOTE: Engine listing is managed by Go-side engine registry
-    # (docparser.ListAllEngines). The Python list_engines method is kept for
-    # backward compatibility with the gRPC ListEngines RPC but the Go app
-    # no longer calls it. MinerU engines are handled natively by Go.
+    # NOTE: builtin and markitdown are also registered in Go (docparser.ListAllEngines).
+    # list_engines remains for gRPC ListEngines RPC compatibility. MinerU engines
+    # are handled natively by Go.
 
     return reg
 
