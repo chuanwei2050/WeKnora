@@ -290,68 +290,82 @@
                   </div>
                 </div>
 
-                <!-- 模型配置 -->
-                <div v-show="currentSection === 'model'" class="section">
+                <!-- 复杂度路由与验证式回答 -->
+                <div v-show="currentSection === 'reasoning'" class="section">
                   <div class="section-header">
-                    <h2>{{ $t('agent.editor.modelConfig') }}</h2>
-                    <p class="section-description">{{ $t('agent.editor.modelConfigDesc') }}</p>
+                    <h2>复杂度路由与验证式回答</h2>
+                    <p class="section-description">按问题复杂度选择已有能力；默认关闭，不扩大知识库或工具权限。</p>
                   </div>
-                  
                   <div class="settings-group">
-                    <!-- 模型选择 -->
                     <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.model') }} <span class="required">*</span></label>
-                        <p class="desc">{{ $t('agentEditor.desc.model') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <ModelSelector
-                          model-type="KnowledgeQA"
-                          :selected-model-id="formData.config.model_id"
-                          :all-models="allModels"
-                          @update:selected-model-id="(val: string) => formData.config.model_id = val"
-                          @add-model="handleAddModel('llm')"
-                          :placeholder="$t('agent.editor.modelPlaceholder')"
-                        />
-                      </div>
+                      <div class="setting-info"><label>启用问题复杂度路由</label><p class="desc">低置信度时自动使用保守动作。</p></div>
+                      <div class="setting-control"><t-switch v-model="formData.config.complexity_routing.enabled" /></div>
                     </div>
-
-                    <!-- 温度 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.temperature') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.temperature') }}</p>
+                    <template v-if="formData.config.complexity_routing.enabled">
+                      <div class="setting-row">
+                        <div class="setting-info"><label>置信度阈值</label><p class="desc">范围 0 到 1。</p></div>
+                        <div class="setting-control"><t-input-number v-model="formData.config.complexity_routing.confidence_threshold" :min="0" :max="1" :step="0.05" theme="column" /></div>
                       </div>
-                      <div class="setting-control">
-                        <div class="slider-wrapper">
-                          <t-slider v-model="formData.config.temperature" :min="0" :max="1" :step="0.1" />
-                          <span class="slider-value">{{ formData.config.temperature }}</span>
+                      <div class="setting-row">
+                        <div class="setting-info"><label>保守回退动作</label></div>
+                        <div class="setting-control">
+                          <t-select v-model="formData.config.complexity_routing.fallback_action" style="width: 260px">
+                            <t-option value="quick_rag" label="快速检索" /><t-option value="contextual_rag" label="上下文检索" />
+                          </t-select>
                         </div>
                       </div>
-                    </div>
-
-                    <!-- 最大生成Token数（仅普通模式） -->
-                    <div v-if="!isAgentMode" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.maxCompletionTokens') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.maxTokens') }}</p>
+                      <div v-for="level in ['L1', 'L2', 'L3', 'L4']" :key="level" class="setting-row">
+                        <div class="setting-info"><label>{{ level }} 目标动作</label><p class="desc">只能选择已有能力，服务端会再次校验。</p></div>
+                        <div class="setting-control">
+                          <t-select v-model="formData.config.complexity_routing.level_actions[level]" style="width: 260px">
+                            <t-option value="quick_rag" label="快速检索" /><t-option value="contextual_rag" label="上下文检索" />
+                            <t-option value="graph_reasoning" label="图谱检索" /><t-option value="verified_agent" label="验证式回答" />
+                          </t-select>
+                        </div>
                       </div>
-                      <div class="setting-control">
-                        <t-input-number v-model="formData.config.max_completion_tokens" :min="100" :max="100000" :step="100" theme="column" />
+                      <div class="setting-row setting-row-block">
+                        <div class="setting-info">
+                          <label>复杂度分类 Few-shot</label>
+                          <p class="desc">可选。注入分类 prompt；空则保持现网行为。上限由服务端截断。</p>
+                        </div>
+                        <div class="setting-control few-shot-editor">
+                          <div
+                            v-for="(item, idx) in formData.config.complexity_routing.few_shot"
+                            :key="idx"
+                            class="few-shot-row"
+                          >
+                            <t-input v-model="item.question" placeholder="示例问题" style="flex: 1; min-width: 180px" />
+                            <t-select v-model="item.level" style="width: 100px">
+                              <t-option value="L1" label="L1" />
+                              <t-option value="L2" label="L2" />
+                              <t-option value="L3" label="L3" />
+                              <t-option value="L4" label="L4" />
+                            </t-select>
+                            <t-input v-model="item.subtype" placeholder="subtype（可选）" style="width: 140px" />
+                            <t-button variant="text" theme="danger" @click="formData.config.complexity_routing.few_shot.splice(idx, 1)">删除</t-button>
+                          </div>
+                          <t-button
+                            size="small"
+                            variant="outline"
+                            @click="formData.config.complexity_routing.few_shot.push({ question: '', level: 'L1', subtype: '' })"
+                          >添加示例</t-button>
+                        </div>
                       </div>
-                    </div>
-
-                    <!-- 思考模式 -->
+                    </template>
                     <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.thinking') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.thinking') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="thinkingEnabled" />
-                      </div>
+                      <div class="setting-info"><label>启用验证式回答</label><p class="desc">仅持久化最终回答，草稿和验证正文不对用户展示。</p></div>
+                      <div class="setting-control"><t-switch v-model="formData.config.verified_answer.enabled" /></div>
                     </div>
-
+                    <template v-if="formData.config.verified_answer.enabled">
+                      <div class="setting-row">
+                        <div class="setting-info"><label>严格多模型验证</label><p class="desc">要求至少两个规范化身份不同的验证模型。</p></div>
+                        <div class="setting-control"><t-switch v-model="formData.config.verified_answer.strict_multi_model" /></div>
+                      </div>
+                      <div class="setting-row">
+                        <div class="setting-info"><label>最大反思轮数</label><p class="desc">硬上限为 2，默认 1。</p></div>
+                        <div class="setting-control"><t-input-number v-model="formData.config.verified_answer.max_reflections" :min="0" :max="2" theme="column" /></div>
+                      </div>
+                    </template>
                   </div>
                 </div>
 
@@ -371,24 +385,6 @@
                       </div>
                       <div class="setting-control">
                         <t-switch v-model="formData.config.image_upload_enabled" />
-                      </div>
-                    </div>
-
-                    <!-- VLM模型（图片上传启用时） -->
-                    <div v-if="formData.config.image_upload_enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.imageUpload.vlmModel') }} <span class="required">*</span></label>
-                        <p class="desc">{{ $t('agentEditor.imageUpload.vlmModelDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <ModelSelector
-                          model-type="VLLM"
-                          :selected-model-id="formData.config.vlm_model_id"
-                          :all-models="allModels"
-                          @update:selected-model-id="(val: string) => formData.config.vlm_model_id = val"
-                          @add-model="handleAddModel('vllm')"
-                          :placeholder="$t('agentEditor.imageUpload.vlmModelPlaceholder')"
-                        />
                       </div>
                     </div>
 
@@ -436,23 +432,35 @@
                       </div>
                     </div>
 
-                    <!-- ASR模型（音频上传启用时） -->
-                    <div v-if="formData.config.audio_upload_enabled" class="setting-row">
+                    <div class="setting-row">
                       <div class="setting-info">
-                        <label>{{ $t('agentEditor.audioUpload.asrModel') }}</label>
-                        <p class="desc">{{ $t('agentEditor.audioUpload.asrModelDesc') }}</p>
+                        <label>语音输入</label>
+                        <p class="desc">允许用户主动录音，并将确认后的转写作为普通会话消息发送。</p>
                       </div>
-                      <div class="setting-control">
-                        <ModelSelector
-                          model-type="ASR"
-                          :selected-model-id="formData.config.asr_model_id"
-                          :all-models="allModels"
-                          @update:selected-model-id="(val: string) => formData.config.asr_model_id = val"
-                          @add-model="handleAddModel('asr')"
-                          :placeholder="$t('agentEditor.audioUpload.asrModelPlaceholder')"
-                        />
-                      </div>
+                      <div class="setting-control"><t-switch v-model="formData.config.voice_input_enabled" /></div>
                     </div>
+
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>语音输出</label>
+                        <p class="desc">只对有权访问的最终回答执行 TTS，合成音频默认不持久化。</p>
+                      </div>
+                      <div class="setting-control"><t-switch v-model="formData.config.voice_output_enabled" /></div>
+                    </div>
+
+                    <template v-if="formData.config.voice_output_enabled">
+                      <div class="setting-row">
+                        <div class="setting-info"><label>语言 / 音色</label><p class="desc">留空时使用模型默认值。</p></div>
+                        <div class="setting-control" style="gap: 8px;">
+                          <t-input v-model="formData.config.voice_language" placeholder="zh-CN" style="width: 130px;" />
+                          <t-input v-model="formData.config.voice_name" placeholder="默认音色" style="width: 130px;" />
+                        </div>
+                      </div>
+                      <div class="setting-row">
+                        <div class="setting-info"><label>自动播放</label><p class="desc">默认关闭；浏览器限制自动播放时保留文本和手动播放控件。</p></div>
+                        <div class="setting-control"><t-switch v-model="formData.config.voice_auto_play" /></div>
+                      </div>
+                    </template>
                   </div>
                 </div>
 
@@ -888,14 +896,13 @@
                       <div class="setting-control">
                         <t-radio-group v-model="kbSelectionMode">
                           <t-radio-button value="all">{{ $t('agent.editor.allKnowledgeBases') }}</t-radio-button>
-                          <t-radio-button value="selected">{{ $t('agent.editor.selectedKnowledgeBases') }}</t-radio-button>
                           <t-radio-button value="none">{{ $t('agent.editor.noKnowledgeBase') }}</t-radio-button>
                         </t-radio-group>
                       </div>
                     </div>
 
                     <!-- 选择指定知识库（仅在选择"指定知识库"时显示） -->
-                    <div v-if="kbSelectionMode === 'selected'" class="setting-row">
+                    <div v-if="kbSelectionMode === 'selected' && authStore.workspaceMode !== 'platform'" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.selectKnowledgeBases') }}</label>
                         <p class="desc">{{ $t('agent.editor.selectKnowledgeBasesDesc') }}</p>
@@ -985,24 +992,6 @@
                       </div>
                       <div class="setting-control">
                         <t-switch v-model="formData.config.retrieve_kb_only_when_mentioned" />
-                      </div>
-                    </div>
-
-                    <!-- ReRank 模型（当配置了知识库时显示） -->
-                    <div v-if="needsRerankModel" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.rerankModel') }} <span class="required">*</span></label>
-                        <p class="desc">{{ $t('agent.editor.rerankModelDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <ModelSelector
-                          model-type="Rerank"
-                          :selected-model-id="formData.config.rerank_model_id"
-                          :all-models="allModels"
-                          @update:selected-model-id="(val: string) => formData.config.rerank_model_id = val"
-                          @add-model="handleAddModel('rerank')"
-                          :placeholder="$t('agent.editor.rerankModelPlaceholder')"
-                        />
                       </div>
                     </div>
 
@@ -1334,20 +1323,13 @@
                   </div>
                 </div>
 
-                <!-- 共享管理（仅编辑模式且非内置智能体） -->
-                <div v-if="props.mode === 'edit' && props.agent?.id && !props.agent?.is_builtin" v-show="currentSection === 'share'" class="section">
-                  <AgentShareSettings :agent-id="props.agent.id" :agent="props.agent" />
-                </div>
-
                 <!-- IM集成（仅编辑模式） -->
                 <div v-if="props.mode === 'edit' && props.agent?.id" v-show="currentSection === 'im'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agentEditor.im.title') }}</h2>
                     <p class="section-description">
                       {{ $t('agentEditor.im.description') }}
-                      <a href="https://github.com/Tencent/WeKnora/blob/main/docs/IM%E9%9B%86%E6%88%90%E5%BC%80%E5%8F%91%E6%96%87%E6%A1%A3.md" target="_blank" rel="noopener noreferrer" class="section-doc-link">
-                        <t-icon name="link" class="link-icon" />{{ $t('agentEditor.im.docLink') }}
-                      </a>
+
                     </p>
                   </div>
                   <div class="settings-group">
@@ -1396,8 +1378,6 @@ import { useAuthStore } from '@/stores/auth';
 import { useOrganizationStore } from '@/stores/organization';
 import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
-import ModelSelector from '@/components/ModelSelector.vue';
-import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import IMChannelPanel from '@/components/IMChannelPanel.vue';
 import {
   evaluateToolRequirement,
@@ -1428,6 +1408,33 @@ const currentSection = ref(props.initialSection || 'basic');
 const saving = ref(false);
 const allModels = ref<ModelConfig[]>([]);
 const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq'; count?: number; shared?: boolean; orgName?: string; ragEnabled?: boolean; wikiEnabled?: boolean; capabilities?: KBCapabilities }[]>([]);
+
+const pickDefaultModelId = (
+  type: ModelConfig['type'],
+) => {
+  const candidates = allModels.value.filter((m) => m.type === type)
+  if (!candidates.length) return ''
+  const byDefault = candidates.find((m) => m.is_default)
+  if (byDefault?.id) return byDefault.id
+  return candidates[0]?.id || ''
+}
+const applyDefaultModelSelections = (cfg: Record<string, any>) => {
+  if (!cfg.model_id) {
+    cfg.model_id = pickDefaultModelId('KnowledgeQA')
+  }
+  if (!cfg.vlm_model_id) {
+    cfg.vlm_model_id = pickDefaultModelId('VLLM')
+  }
+  if (!cfg.asr_model_id) {
+    cfg.asr_model_id = pickDefaultModelId('ASR')
+  }
+  if (!cfg.tts_model_id) {
+    cfg.tts_model_id = pickDefaultModelId('TTS')
+  }
+  if (!cfg.rerank_model_id) {
+    cfg.rerank_model_id = pickDefaultModelId('Rerank')
+  }
+}
 
 // 智能体类型预设（仅 smart-reasoning 模式下展示）
 const agentTypePresets = ref<AgentTypePreset[]>([]);
@@ -1763,7 +1770,7 @@ const fallbackPromptTextareaRef = ref<any>(null);
 const navItems = computed(() => {
   const items: { key: string; icon: string; label: string }[] = [
     { key: 'basic', icon: 'info-circle', label: t('agent.editor.basicInfo') },
-    { key: 'model', icon: 'control-platform', label: t('agent.editor.modelConfig') },
+    { key: 'reasoning', icon: 'control-platform', label: '复杂度与验证' },
   ];
   // 知识库配置（放在工具上面）
   items.push({ key: 'knowledge', icon: 'folder', label: t('agent.editor.knowledgeConfig') });
@@ -1786,10 +1793,6 @@ const navItems = computed(() => {
   // 多轮对话（仅普通模式显示，Agent模式内部自动控制）
   if (!isAgentMode.value) {
     items.push({ key: 'conversation', icon: 'chat', label: t('agent.editor.conversationSettings') });
-  }
-  // 共享管理（仅编辑模式且非内置智能体，Lite 模式下隐藏）
-  if (props.mode === 'edit' && props.agent?.id && !props.agent?.is_builtin && !authStore.isLiteMode) {
-    items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') });
   }
   // IM集成（仅编辑模式，创建时Agent还没有ID）
   if (props.mode === 'edit' && props.agent?.id) {
@@ -1818,7 +1821,31 @@ const defaultFormData = {
     max_iterations: 10,
     llm_call_timeout: 120,  // 120 seconds
     allowed_tools: [] as string[],
-    reflection_enabled: false,
+    reflection_enabled: true,
+    complexity_routing: {
+      enabled: true,
+      confidence_threshold: 0.6,
+      fallback_action: 'contextual_rag' as 'quick_rag' | 'contextual_rag' | 'graph_reasoning' | 'verified_agent',
+      level_actions: {
+        L1: 'quick_rag', L2: 'contextual_rag', L3: 'graph_reasoning', L4: 'verified_agent',
+      } as Record<string, 'quick_rag' | 'contextual_rag' | 'graph_reasoning' | 'verified_agent'>,
+      capabilities: {
+        quick_rag: true,
+        contextual_rag: true,
+        graph_reasoning: true,
+        verified_agent: true,
+      },
+      few_shot: [] as Array<{ question: string; level: string; subtype?: string }>,
+    },
+    verified_answer: {
+      enabled: true,
+      strict_multi_model: false,
+      fact_validator_model_id: '',
+      logic_validator_model_id: '',
+      citation_validator_model_id: '',
+      max_reflections: 1,
+      degradation_strategy: 'conservative' as 'conservative' | 'stop',
+    },
     // MCP 服务设置
     mcp_selection_mode: 'none' as 'all' | 'selected' | 'none',
     mcp_services: [] as string[],
@@ -1834,10 +1861,18 @@ const defaultFormData = {
     // 编辑既有 agent 时会被 agent 自己保存的 agent_type 覆盖。
     agent_type: 'rag-qa' as AgentType,
     system_prompt_id: '' as string,
-    // 图片上传/多模态设置
-    image_upload_enabled: false,
-    vlm_model_id: '',
-    image_storage_provider: '',
+    // 图片上传/多模态设置（与语音一样默认开启；模型 ID 在新建时按租户默认/已知 Chat·VLM 名回填）
+                    image_upload_enabled: true,
+                    vlm_model_id: '',
+                    image_storage_provider: '',
+                    audio_upload_enabled: true,
+                    asr_model_id: '',
+                    voice_input_enabled: true,
+                    voice_output_enabled: true,
+                    tts_model_id: '',
+                    voice_language: 'zh-CN',
+                    voice_name: '',
+                    voice_auto_play: false,
     // 文件类型限制
     supported_file_types: [] as string[],
     // FAQ 策略设置
@@ -2160,6 +2195,25 @@ watch(() => props.visible, async (val) => {
       
       // 补全可能缺失的字段
       agentData.config = { ...defaultFormData.config, ...agentData.config };
+      agentData.config.complexity_routing = {
+        ...defaultFormData.config.complexity_routing,
+        ...(agentData.config.complexity_routing || {}),
+        level_actions: {
+          ...defaultFormData.config.complexity_routing.level_actions,
+          ...(agentData.config.complexity_routing?.level_actions || {}),
+        },
+        few_shot: Array.isArray(agentData.config.complexity_routing?.few_shot)
+          ? agentData.config.complexity_routing.few_shot.map((item: any) => ({
+              question: item?.question || '',
+              level: item?.level || 'L1',
+              subtype: item?.subtype || '',
+            }))
+          : [],
+      };
+      agentData.config.verified_answer = {
+        ...defaultFormData.config.verified_answer,
+        ...(agentData.config.verified_answer || {}),
+      };
       
       // 确保数组字段存在
       if (!agentData.config.suggested_prompts) agentData.config.suggested_prompts = [];
@@ -2230,6 +2284,8 @@ watch(() => props.visible, async (val) => {
         }
       }
       formData.value = newFormData;
+      // 新建智能体：按租户已注册模型回填 chat / VLLM / ASR / TTS / Rerank
+      applyDefaultModelSelections(formData.value.config);
       // 新建智能体：知识库默认 "全部"，MCP / Skills 仍默认 "不使用"。
       kbSelectionMode.value = 'all';
       mcpSelectionMode.value = 'none';
@@ -3510,23 +3566,30 @@ const handleSave = async () => {
     }
   }
 
-  if (!formData.value.config.model_id) {
-    MessagePlugin.error(t('agent.editor.modelRequired'));
-    currentSection.value = 'model';
+  const routing = formData.value.config.complexity_routing;
+  if (routing?.enabled && (routing.confidence_threshold < 0 || routing.confidence_threshold > 1)) {
+    MessagePlugin.error('复杂度路由置信度阈值必须在 0 到 1 之间');
+    currentSection.value = 'reasoning';
     return;
   }
-
-  // 校验 VLM 模型（当图片上传启用时必填）
-  if (formData.value.config.image_upload_enabled && !formData.value.config.vlm_model_id) {
-    MessagePlugin.error(t('agentEditor.imageUpload.vlmModelRequired'));
-    currentSection.value = 'multimodal';
+  if (routing?.enabled && ['L1', 'L2', 'L3', 'L4'].some(level => !routing.level_actions?.[level])) {
+    MessagePlugin.error('复杂度路由必须为 L1-L4 配置目标动作');
+    currentSection.value = 'reasoning';
     return;
   }
-
-  // 校验 ReRank 模型（当需要时必填）
-  if (needsRerankModel.value && !formData.value.config.rerank_model_id) {
-    MessagePlugin.error(t('agent.editor.rerankModelRequired'));
-    currentSection.value = 'knowledge';
+  if (Array.isArray(routing?.few_shot)) {
+    routing.few_shot = routing.few_shot
+      .map((item: any) => ({
+        question: String(item?.question || '').trim(),
+        level: item?.level || 'L1',
+        subtype: String(item?.subtype || '').trim(),
+      }))
+      .filter((item: any) => item.question && item.level);
+  }
+  const verified = formData.value.config.verified_answer;
+  if (verified?.enabled && (verified.max_reflections < 0 || verified.max_reflections > 2)) {
+    MessagePlugin.error('验证式回答反思轮数必须在 0 到 2 之间');
+    currentSection.value = 'reasoning';
     return;
   }
 
@@ -3534,6 +3597,15 @@ const handleSave = async () => {
   if (formData.value.config.suggested_prompts) {
     formData.value.config.suggested_prompts = formData.value.config.suggested_prompts.filter((p: string) => p.trim() !== '');
   }
+
+  formData.value.config.model_id = '';
+  formData.value.config.rerank_model_id = '';
+  formData.value.config.vlm_model_id = '';
+  formData.value.config.asr_model_id = '';
+  formData.value.config.tts_model_id = '';
+  formData.value.config.verified_answer.fact_validator_model_id = '';
+  formData.value.config.verified_answer.logic_validator_model_id = '';
+  formData.value.config.verified_answer.citation_validator_model_id = '';
 
   saving.value = true;
   try {
@@ -3850,6 +3922,33 @@ const handleSave = async () => {
   :deep(.t-input-number) {
     width: 120px;
   }
+}
+
+.setting-row-block {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+
+  .setting-control {
+    min-width: 0;
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+.few-shot-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.few-shot-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
 }
 
 .select-option-with-tag {

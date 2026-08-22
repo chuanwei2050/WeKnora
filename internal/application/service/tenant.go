@@ -8,16 +8,17 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
 
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
-	werrors "github.com/Tencent/WeKnora/internal/errors"
 )
 
 var apiKeySecret = func() []byte {
@@ -34,12 +35,13 @@ type ListTenantsParams struct {
 
 // tenantService implements the TenantService interface
 type tenantService struct {
-	repo interfaces.TenantRepository // Repository for tenant data operations
+	repo              interfaces.TenantRepository // Repository for tenant data operations
+	approvedEndpoints interfaces.ApprovedEndpointRepository
 }
 
 // NewTenantService creates a new tenant service instance
-func NewTenantService(repo interfaces.TenantRepository) interfaces.TenantService {
-	return &tenantService{repo: repo}
+func NewTenantService(repo interfaces.TenantRepository, approvedEndpoints interfaces.ApprovedEndpointRepository) interfaces.TenantService {
+	return &tenantService{repo: repo, approvedEndpoints: approvedEndpoints}
 }
 
 // CreateTenant creates a new tenant
@@ -110,6 +112,12 @@ func (s *tenantService) GetTenantByID(ctx context.Context, id uint64) (*types.Te
 		})
 		return nil, err
 	}
+	if err := s.applyPlatformSettings(ctx, tenant); err != nil {
+		return nil, err
+	}
+	if err := s.hydrateStorageEndpointApprovals(ctx, tenant); err != nil {
+		return nil, err
+	}
 
 	return tenant, nil
 }
@@ -120,6 +128,11 @@ func (s *tenantService) ListTenants(ctx context.Context) ([]*types.Tenant, error
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		return nil, err
+	}
+	for _, tenant := range tenants {
+		if err := s.hydrateStorageEndpointApprovals(ctx, tenant); err != nil {
+			return nil, err
+		}
 	}
 
 	logger.Infof(ctx, "Tenant list retrieved successfully, total: %d", len(tenants))
@@ -134,6 +147,15 @@ func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) 
 	}
 
 	logger.Infof(ctx, "Updating tenant, ID: %d, name: %s", tenant.ID, tenant.Name)
+
+	// Platform configuration is stored separately. Preserve the persisted
+	// platform fields when a normal tenant update receives an effective read model;
+	// tenant-owned fields such as chat history remain writable by their own flow.
+	storedTenant, err := s.repo.GetTenantByID(ctx, tenant.ID)
+	if err != nil {
+		return nil, err
+	}
+	copyTenantScopedSettings(storedTenant, tenant)
 
 	if err := s.validateStorageBucketUniqueness(ctx, tenant); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -160,6 +182,16 @@ func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) 
 
 	logger.Infof(ctx, "Tenant updated successfully, ID: %d", tenant.ID)
 	return tenant, nil
+}
+
+func (s *tenantService) UpdateStorageQuota(ctx context.Context, tenantID uint64, storageQuota int64) (*types.Tenant, error) {
+	if tenantID == 0 || storageQuota < 0 {
+		return nil, errors.New("invalid tenant storage quota")
+	}
+	if err := s.repo.UpdateStorageQuota(ctx, tenantID, storageQuota); err != nil {
+		return nil, err
+	}
+	return s.repo.GetTenantByID(ctx, tenantID)
 }
 
 // DeleteTenant removes a tenant by their ID
@@ -320,14 +352,19 @@ func (s *tenantService) ListAllTenants(ctx context.Context) ([]*types.Tenant, er
 		logger.ErrorWithFields(ctx, err, nil)
 		return nil, err
 	}
+	for _, tenant := range tenants {
+		if err := s.hydrateStorageEndpointApprovals(ctx, tenant); err != nil {
+			return nil, err
+		}
+	}
 
 	logger.Infof(ctx, "All tenants list retrieved successfully, total: %d", len(tenants))
 	return tenants, nil
 }
 
 // SearchTenants searches tenants with pagination and filters
-func (s *tenantService) SearchTenants(ctx context.Context, keyword string, tenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error) {
-	tenants, total, err := s.repo.SearchTenants(ctx, keyword, tenantID, page, pageSize)
+func (s *tenantService) SearchTenants(ctx context.Context, keyword string, tenantID, excludeTenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error) {
+	tenants, total, err := s.repo.SearchTenants(ctx, keyword, tenantID, excludeTenantID, page, pageSize)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"keyword":  keyword,
@@ -336,6 +373,11 @@ func (s *tenantService) SearchTenants(ctx context.Context, keyword string, tenan
 			"pageSize": pageSize,
 		})
 		return nil, 0, err
+	}
+	for _, tenant := range tenants {
+		if err := s.hydrateStorageEndpointApprovals(ctx, tenant); err != nil {
+			return nil, 0, err
+		}
 	}
 
 	logger.Infof(ctx, "Tenants search completed, keyword: %s, tenantID: %d, page: %d, pageSize: %d, total: %d, found: %d",
@@ -354,8 +396,85 @@ func (s *tenantService) GetTenantByIDForUser(ctx context.Context, tenantID uint6
 		})
 		return nil, err
 	}
+	if err := s.applyPlatformSettings(ctx, tenant); err != nil {
+		return nil, err
+	}
+	if err := s.hydrateStorageEndpointApprovals(ctx, tenant); err != nil {
+		return nil, err
+	}
 
 	return tenant, nil
+}
+
+// hydrateStorageEndpointApprovals restores the non-persisted endpoint pointers
+// after a tenant is loaded. The storage factory can then revalidate the exact
+// approved destination before constructing an SDK client on every request.
+func (s *tenantService) hydrateStorageEndpointApprovals(ctx context.Context, tenant *types.Tenant) error {
+	if tenant == nil || tenant.StorageEngineConfig == nil {
+		return nil
+	}
+	if s.approvedEndpoints == nil {
+		if storageConfigHasApprovedEndpoint(tenant.StorageEngineConfig) {
+			return fmt.Errorf("approved endpoint registry is unavailable")
+		}
+		return nil
+	}
+
+	load := func(id string) (*types.ApprovedEndpoint, error) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return nil, nil
+		}
+		endpoint, err := s.approvedEndpoints.GetByID(ctx, tenant.ID, id)
+		if err != nil {
+			return nil, fmt.Errorf("load approved storage endpoint %q: %w", id, err)
+		}
+		if endpoint == nil {
+			return nil, fmt.Errorf("approved storage endpoint not found: %s", id)
+		}
+		if err := endpoint.Validate(); err != nil {
+			return nil, err
+		}
+		if err := endpoint.ValidateUse(types.EndpointCategoryObjectStorage, "object-storage"); err != nil {
+			return nil, err
+		}
+		return endpoint, nil
+	}
+
+	cfg := tenant.StorageEngineConfig
+	var err error
+	if cfg.MinIO != nil {
+		cfg.MinIO.ApprovedEndpoint, err = load(cfg.MinIO.ApprovedEndpointID)
+		if err != nil {
+			return err
+		}
+	}
+	if cfg.TOS != nil {
+		cfg.TOS.ApprovedEndpoint, err = load(cfg.TOS.ApprovedEndpointID)
+		if err != nil {
+			return err
+		}
+	}
+	if cfg.S3 != nil {
+		cfg.S3.ApprovedEndpoint, err = load(cfg.S3.ApprovedEndpointID)
+		if err != nil {
+			return err
+		}
+	}
+	if cfg.OSS != nil {
+		cfg.OSS.ApprovedEndpoint, err = load(cfg.OSS.ApprovedEndpointID)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func storageConfigHasApprovedEndpoint(cfg *types.StorageEngineConfig) bool {
+	return cfg != nil && ((cfg.MinIO != nil && strings.TrimSpace(cfg.MinIO.ApprovedEndpointID) != "") ||
+		(cfg.TOS != nil && strings.TrimSpace(cfg.TOS.ApprovedEndpointID) != "") ||
+		(cfg.S3 != nil && strings.TrimSpace(cfg.S3.ApprovedEndpointID) != "") ||
+		(cfg.OSS != nil && strings.TrimSpace(cfg.OSS.ApprovedEndpointID) != ""))
 }
 
 func (s *tenantService) GetWeKnoraCloudCredentials(ctx context.Context) *types.WeKnoraCloudCredentials {
@@ -373,11 +492,50 @@ func (s *tenantService) GetWeKnoraCloudCredentials(ctx context.Context) *types.W
 		return nil
 	}
 
-	tenant, err := s.repo.GetTenantByID(ctx, tenantID)
+	tenant, err := s.GetTenantByID(ctx, tenantID)
 	if err != nil || tenant == nil {
 		return nil
 	}
 	return tenant.Credentials.GetWeKnoraCloud()
+}
+
+func (s *tenantService) GetPlatformSettings(ctx context.Context) (*types.PlatformSettings, error) {
+	return s.repo.GetPlatformSettings(ctx)
+}
+
+func (s *tenantService) UpdatePlatformSettings(ctx context.Context, settings *types.PlatformSettings) (*types.PlatformSettings, error) {
+	user, ok := types.UserFromContext(ctx)
+	if !ok || !user.IsPlatformAdmin() {
+		return nil, werrors.NewForbiddenError("Only platform administrators can update platform settings")
+	}
+	if err := s.repo.UpdatePlatformSettings(ctx, settings); err != nil {
+		return nil, err
+	}
+	return s.repo.GetPlatformSettings(ctx)
+}
+
+func (s *tenantService) applyPlatformSettings(ctx context.Context, tenant *types.Tenant) error {
+	settings, err := s.repo.GetPlatformSettings(ctx)
+	if err != nil {
+		return err
+	}
+	settings.ApplyToTenant(tenant)
+	return nil
+}
+
+func copyTenantScopedSettings(from, to *types.Tenant) {
+	if from == nil || to == nil {
+		return
+	}
+	to.RetrieverEngines = from.RetrieverEngines
+	to.AgentConfig = from.AgentConfig
+	to.ContextConfig = from.ContextConfig
+	to.WebSearchConfig = from.WebSearchConfig
+	to.ConversationConfig = from.ConversationConfig
+	to.ParserEngineConfig = from.ParserEngineConfig
+	to.Credentials = from.Credentials
+	to.StorageEngineConfig = from.StorageEngineConfig
+	to.RetrievalConfig = from.RetrievalConfig
 }
 
 func (s *tenantService) validateStorageBucketUniqueness(ctx context.Context, tenant *types.Tenant) error {

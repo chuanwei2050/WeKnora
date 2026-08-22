@@ -89,6 +89,60 @@ export function getSystemInfo(): Promise<{ data: SystemInfo }> {
   return get('/api/v1/system/info')
 }
 
+export type ModelProfileDialogType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts'
+
+export interface ModelProfileSummary {
+  ok: number
+  missing_env: number
+  missing_registration: number
+  mismatch: number
+}
+
+export interface ModelProfileRoleStatus {
+  role: string
+  expected_name: string
+  expected_source?: string
+  expected_base_url?: string
+  expected_dimension?: number
+  status: 'ok' | 'missing_env' | 'missing_registration' | 'mismatch' | string
+  gap_reason?: string
+  matched_model_id?: string
+  matched_model_name?: string
+  matched_model_type?: string
+}
+
+export interface ModelProfileAction {
+  id: string
+  role: string
+  intent: 'add' | 'edit' | string
+  add_dialog_type: ModelProfileDialogType | string
+  matched_model_id?: string
+}
+
+export interface ModelProfileStatus {
+  profile: string
+  profile_raw: string
+  profile_valid: boolean
+  air_gapped: boolean
+  summary: ModelProfileSummary
+  roles: ModelProfileRoleStatus[]
+  actions: ModelProfileAction[]
+}
+
+export function getModelProfileStatus(): Promise<{ data: ModelProfileStatus }> {
+  return get('/api/v1/system/model-profile-status')
+}
+
+export type ModelProfile = 'online' | 'offline'
+
+export function getModelProfile(): Promise<{ data: { profile: ModelProfile } }> {
+  return get('/api/v1/system/model-profile')
+}
+
+export function updateModelProfile(profile: ModelProfile): Promise<{ data: { profile: ModelProfile } }> {
+  return put('/api/v1/system/model-profile', { profile })
+}
+
 export function getAgentConfig(): Promise<{ data: AgentConfig }> {
   return get('/api/v1/tenants/kv/agent-config')
 }
@@ -171,7 +225,7 @@ export function reconnectDocReader(addr: string): Promise<ParserEnginesResponse 
 export interface StorageEngineConfig {
   default_provider: string // "local" | "minio" | "cos" | "tos" | "s3" | "oss"
   local?: { path_prefix: string }
-  minio?: { mode: string; endpoint: string; access_key_id: string; secret_access_key: string; bucket_name: string; use_ssl: boolean; path_prefix: string }
+  minio?: { mode: string; endpoint: string; access_key_id: string; secret_access_key: string; bucket_name: string; use_ssl: boolean; path_prefix: string; approved_endpoint_id?: string }
   cos?: {
     secret_id: string
     secret_key: string
@@ -187,6 +241,7 @@ export interface StorageEngineConfig {
     secret_key: string
     bucket_name: string
     path_prefix: string
+    approved_endpoint_id?: string
   }
   s3?: {
     endpoint: string
@@ -195,6 +250,7 @@ export interface StorageEngineConfig {
     secret_key: string
     bucket_name: string
     path_prefix: string
+    approved_endpoint_id?: string
   }
   oss?: {
     endpoint: string
@@ -206,6 +262,7 @@ export interface StorageEngineConfig {
     use_temp_bucket: boolean
     temp_bucket_name: string
     temp_region: string
+    approved_endpoint_id?: string
   }
 }
 

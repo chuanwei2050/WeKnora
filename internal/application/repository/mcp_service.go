@@ -30,7 +30,7 @@ func (r *mcpServiceRepository) GetByID(ctx context.Context, tenantID uint64, id 
 	var service types.MCPService
 	err := r.db.WithContext(ctx).
 		Where("id = ?", id).
-		Where("tenant_id = ? OR is_builtin = true", tenantID).
+		Where("tenant_id = ? OR is_builtin = true", types.PlatformScopeTenantID).
 		First(&service).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -47,7 +47,7 @@ func (r *mcpServiceRepository) GetByID(ctx context.Context, tenantID uint64, id 
 func (r *mcpServiceRepository) List(ctx context.Context, tenantID uint64) ([]*types.MCPService, error) {
 	var services []*types.MCPService
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? OR is_builtin = true", tenantID).
+		Where("tenant_id = ? OR is_builtin = true", types.PlatformScopeTenantID).
 		Order("created_at DESC").
 		Find(&services).Error
 	if err != nil {
@@ -62,7 +62,7 @@ func (r *mcpServiceRepository) List(ctx context.Context, tenantID uint64) ([]*ty
 func (r *mcpServiceRepository) ListEnabled(ctx context.Context, tenantID uint64) ([]*types.MCPService, error) {
 	var services []*types.MCPService
 	err := r.db.WithContext(ctx).
-		Where("(tenant_id = ? OR is_builtin = true) AND enabled = ?", tenantID, true).
+		Where("(tenant_id = ? OR is_builtin = true) AND enabled = ?", types.PlatformScopeTenantID, true).
 		Order("created_at DESC").
 		Find(&services).Error
 	if err != nil {
@@ -85,7 +85,7 @@ func (r *mcpServiceRepository) ListByIDs(
 
 	var services []*types.MCPService
 	err := r.db.WithContext(ctx).
-		Where("(tenant_id = ? OR is_builtin = true) AND id IN ?", tenantID, ids).
+		Where("(tenant_id = ? OR is_builtin = true) AND id IN ?", types.PlatformScopeTenantID, ids).
 		Find(&services).Error
 	if err != nil {
 		return nil, err
@@ -134,13 +134,13 @@ func (r *mcpServiceRepository) Update(ctx context.Context, service *types.MCPSer
 
 	return r.db.WithContext(ctx).
 		Model(&types.MCPService{}).
-		Where("id = ? AND tenant_id = ?", service.ID, service.TenantID).
+		Where("id = ? AND tenant_id = ?", service.ID, types.PlatformScopeTenantID).
 		Updates(updateMap).Error
 }
 
 // Delete deletes an MCP service (soft delete)
 func (r *mcpServiceRepository) Delete(ctx context.Context, tenantID uint64, id string) error {
 	return r.db.WithContext(ctx).
-		Where("id = ? AND tenant_id = ?", id, tenantID).
+		Where("id = ? AND tenant_id = ?", id, types.PlatformScopeTenantID).
 		Delete(&types.MCPService{}).Error
 }

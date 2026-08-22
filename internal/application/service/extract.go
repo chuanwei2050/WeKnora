@@ -150,6 +150,7 @@ type ChunkExtractService struct {
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	tripleReviewRepo  interfaces.GraphTripleReviewRepository
 }
 
 // NewChunkExtractService creates a new chunk extract service
@@ -159,17 +160,15 @@ func NewChunkExtractService(
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
+	tripleReviewRepo interfaces.GraphTripleReviewRepository,
 ) interfaces.TaskHandler {
-	// generator := chatpipeline.NewQAPromptGenerator(chatpipeline.NewFormater(), config.ExtractManager.ExtractGraph)
-	// ctx := context.Background()
-	// logger.Debugf(ctx, "chunk extract system prompt: %s", generator.System(ctx))
-	// logger.Debugf(ctx, "chunk extract user prompt: %s", generator.User(ctx, "demo"))
 	return &ChunkExtractService{
 		template:          config.ExtractManager.ExtractGraph,
 		modelService:      modelService,
 		knowledgeBaseRepo: knowledgeBaseRepo,
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
+		tripleReviewRepo:  tripleReviewRepo,
 	}
 }
 
@@ -194,32 +193,49 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		logger.Errorf(ctx, "failed to get knowledge base: %v", err)
 		return err
 	}
-	if kb.ExtractConfig == nil {
-		logger.Warnf(ctx, "failed to get extract config")
-		return err
+	if !kb.IsGraphEnabled() {
+		logger.Infof(ctx, "skip graph extraction for chunk %s: graph indexing is disabled", p.ChunkID)
+		return nil
+	}
+	extractConfig := kb.ExtractConfig
+	if extractConfig == nil {
+		extractConfig = &types.ExtractConfig{Enabled: true, Mode: types.GraphExtractionGeneral}
 	}
 
-	chatModel, err := s.modelService.GetChatModel(ctx, p.ModelID)
+	// Graph extraction models are platform-managed; task payload IDs are legacy compatibility fields.
+	chatModel, err := s.modelService.GetChatModel(ctx, "")
 	if err != nil {
 		logger.Errorf(ctx, "failed to get chat model: %v", err)
 		return err
 	}
 
 	template := &types.PromptTemplateStructured{
-		Description: s.template.Description,
-		Tags:        kb.ExtractConfig.Tags,
-		Examples: []types.GraphData{
-			{
-				Text:     kb.ExtractConfig.Text,
-				Node:     kb.ExtractConfig.Nodes,
-				Relation: kb.ExtractConfig.Relations,
-			},
-		},
+		Description:    s.template.Description,
+		Tags:           extractConfig.Tags,
+		EntityTypes:    extractConfig.EntityTypes,
+		EntitySchema:   extractConfig.EntitySchema,
+		RelationSchema: extractConfig.RelationSchema,
+		StrictSchema:   extractConfig.StrictSchema,
+		MaxEntities:    extractConfig.MaxEntities,
+		MaxRelations:   extractConfig.MaxRelations,
+		MinConfidence:  extractConfig.MinConfidence,
+		Examples:       buildGraphFewShotExamples(extractConfig),
 	}
 	extractor := chatpipeline.NewExtractor(chatModel, template)
 	graph, err := extractor.Extract(ctx, chunk.Content)
 	if err != nil {
 		return err
+	}
+	if graph == nil {
+		return fmt.Errorf("graph extractor returned nil graph")
+	}
+	if len(graph.Relation) == 0 {
+		if kb.ExtractConfig != nil && kb.ExtractConfig.RequireTripleReview {
+			logger.Infof(ctx, "skip empty graph extraction for chunk %s: triple review is required", p.ChunkID)
+			return nil
+		}
+		logger.Infof(ctx, "replace prior canonical graph source for chunk %s with empty extraction", p.ChunkID)
+		graph = &types.GraphData{}
 	}
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
@@ -231,14 +247,138 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	for _, node := range graph.Node {
 		node.Chunks = []string{chunk.ID}
 	}
-	if err = s.graphEngine.AddGraph(ctx,
-		types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID},
-		[]*types.GraphData{graph},
-	); err != nil {
-		logger.Errorf(ctx, "failed to add graph: %v", err)
+	if kb.ExtractConfig != nil && kb.ExtractConfig.RequireTripleReview && len(graph.Relation) > 0 {
+		if s.tripleReviewRepo == nil {
+			return fmt.Errorf("triple review required but repository is unavailable")
+		}
+		candidate := &types.GraphTripleCandidate{
+			TenantID:           chunk.TenantID,
+			KnowledgeBaseID:    chunk.KnowledgeBaseID,
+			KnowledgeID:        chunk.KnowledgeID,
+			KnowledgeVersionID: chunk.KnowledgeVersionID,
+			ChunkID:            chunk.ID,
+			ModelID:            p.ModelID,
+			ConfigFingerprint:  kb.ExtractConfig.GraphConfigFingerprint(),
+			GraphData:          types.GraphDataPayload(*graph),
+			Status:             types.GraphTriplePending,
+		}
+		if err := s.tripleReviewRepo.Enqueue(ctx, candidate); err != nil {
+			logger.Errorf(ctx, "failed to enqueue graph triple for review: %v", err)
+			return err
+		}
+		logger.Infof(ctx, "queued graph triple candidate %s for chunk %s (require_triple_review)", candidate.ID, chunk.ID)
+		return nil
+	}
+	if err = WriteExtractedGraph(ctx, s.graphEngine, chunk, graph, p.ModelID); err != nil {
+		logger.Errorf(ctx, "failed to write extracted graph: %v", err)
 		return err
 	}
 	return nil
+}
+
+func buildGraphFewShotExamples(config *types.ExtractConfig) []types.GraphData {
+	if config == nil || strings.TrimSpace(config.Text) == "" || len(config.Nodes) == 0 {
+		return nil
+	}
+	entityNames := make(map[string]struct{}, len(config.Nodes))
+	for _, node := range config.Nodes {
+		if node == nil || strings.TrimSpace(node.Name) == "" || strings.TrimSpace(node.EntityType) == "" {
+			return nil
+		}
+		entityNames[node.Name] = struct{}{}
+	}
+	for _, relation := range config.Relations {
+		if relation == nil || strings.TrimSpace(relation.Type) == "" {
+			return nil
+		}
+		if _, ok := entityNames[relation.Node1]; !ok {
+			return nil
+		}
+		if _, ok := entityNames[relation.Node2]; !ok {
+			return nil
+		}
+	}
+	return []types.GraphData{{
+		Text:     config.Text,
+		Node:     config.Nodes,
+		Relation: config.Relations,
+	}}
+}
+
+// WriteExtractedGraph persists filtered extraction results via the existing graph engine.
+func WriteExtractedGraph(
+	ctx context.Context,
+	graphEngine interfaces.RetrieveGraphRepository,
+	chunk *types.Chunk,
+	graph *types.GraphData,
+	modelID string,
+) error {
+	if graphEngine == nil || chunk == nil || graph == nil {
+		return fmt.Errorf("graph write requires engine, chunk and graph")
+	}
+	if err := graphEngine.AddGraph(ctx,
+		types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID, KnowledgeVersionID: chunk.KnowledgeVersionID},
+		[]*types.GraphData{graph},
+	); err != nil {
+		return err
+	}
+	canonicalRecords := canonicalRecordsFromExtractedGraph(chunk, graph, modelID)
+	return graphEngine.ReplaceCanonicalSourceRecords(
+		ctx,
+		chunk.TenantID,
+		chunk.KnowledgeBaseID,
+		types.GraphNamespaceForVersion(chunk.KnowledgeVersionID, chunk.KnowledgeVersionID != ""),
+		types.GraphSource{KnowledgeID: chunk.KnowledgeID, KnowledgeVersionID: chunk.KnowledgeVersionID, ChunkID: chunk.ID},
+		canonicalRecords,
+	)
+}
+
+func canonicalRecordsFromExtractedGraph(chunk *types.Chunk, graph *types.GraphData, modelID string) []types.GraphRebuildRecord {
+	if chunk == nil || graph == nil {
+		return nil
+	}
+	extractorID := "chunk-extract"
+	if strings.TrimSpace(modelID) != "" {
+		extractorID += ":" + strings.TrimSpace(modelID)
+	}
+	source := types.GraphSource{KnowledgeID: chunk.KnowledgeID, KnowledgeVersionID: chunk.KnowledgeVersionID, ChunkID: chunk.ID, ExtractorID: extractorID}
+	typeByName := make(map[string]string)
+	records := make([]types.GraphRebuildRecord, 0, len(graph.Node)*2+len(graph.Relation))
+	for _, node := range graph.Node {
+		if node == nil || strings.TrimSpace(node.Name) == "" {
+			continue
+		}
+		entityType := strings.TrimSpace(node.EntityType)
+		if entityType == "" {
+			entityType = "entity"
+		}
+		typeByName[node.Name] = entityType
+		records = append(records,
+			types.GraphRebuildRecord{Entity: &types.CanonicalEntity{Name: node.Name, EntityType: entityType, Aliases: append([]string(nil), node.Aliases...)}, Source: source},
+			types.GraphRebuildRecord{Instance: &types.DocumentEntityInstance{Name: node.Name, EntityType: entityType, KnowledgeID: chunk.KnowledgeID, ChunkIDs: []string{chunk.ID}}, Source: source},
+		)
+	}
+	for _, relation := range graph.Relation {
+		if relation == nil || strings.TrimSpace(relation.Node1) == "" || strings.TrimSpace(relation.Node2) == "" || strings.TrimSpace(relation.Type) == "" {
+			continue
+		}
+		sourceType := typeByName[relation.Node1]
+		if sourceType == "" {
+			sourceType = "entity"
+		}
+		targetType := typeByName[relation.Node2]
+		if targetType == "" {
+			targetType = "entity"
+		}
+		records = append(records, types.GraphRebuildRecord{Edge: &types.GraphEdge{
+			Source:       types.CanonicalEntityKey(chunk.TenantID, chunk.KnowledgeBaseID, sourceType, relation.Node1),
+			Target:       types.CanonicalEntityKey(chunk.TenantID, chunk.KnowledgeBaseID, targetType, relation.Node2),
+			RelationType: relation.Type,
+			Direction:    types.GraphDirectionOutgoing,
+			Weight:       relation.Confidence,
+		}, Source: source})
+	}
+	return records
 }
 
 // DataTableExtractPayload represents the table extract task payload

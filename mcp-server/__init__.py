@@ -9,6 +9,9 @@ __version__ = "1.0.0"
 __author__ = "WeKnora Team"
 __description__ = "WeKnora MCP Server - Model Context Protocol server for WeKnora API"
 
-from .weknora_mcp_server import WeKnoraClient, run
+if __package__:
+    from .weknora_mcp_server import WeKnoraClient, run
+else:
+    from weknora_mcp_server import WeKnoraClient, run
 
 __all__ = ["WeKnoraClient", "run"]

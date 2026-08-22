@@ -22,386 +22,362 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="Version" src="https://img.shields.io/badge/version-0.5.0-2e6cc4?labelColor=d4eaf7">
+        <img alt="版本" src="https://img.shields.io/badge/version-0.5.0-2e6cc4?labelColor=d4eaf7">
     </a>
-</p>
-
-<p align="center">
-| <b>English</b> | <a href="./README_CN.md"><b>简体中文</b></a> | <a href="./README_JA.md"><b>日本語</b></a> | <a href="./README_KO.md"><b>한국어</b></a> |
 </p>
 
 <p align="center">
   <h4 align="center">
 
-  [Overview](#-overview) • [Architecture](#-architecture) • [Key Features](#-key-features) • [Getting Started](#-getting-started) • [API Reference](#-api-reference) • [Developer Guide](#-developer-guide)
-  
-  </h4>
-</p>
+  [项目介绍](#-项目介绍) • [功能概览](#-功能概览) • [快速开始](#-快速开始) • [集成方式](#-集成方式) • [开发指南](#-开发指南) • [文档](#-文档)
 
-# 💡 WeKnora — Turn Documents into Living Knowledge with RAG, Agents and Auto-Wiki
+# 💡 WeKnora — 让文档活起来：RAG、Agent 推理与自动 Wiki 一体化的知识框架
 
-## 📌 Overview
+## 📌 项目介绍
 
-[**WeKnora**](https://weknora.weixin.qq.com) is an open-source, LLM-powered knowledge framework built for enterprise-grade document understanding, semantic retrieval, and autonomous reasoning.
+**[WeKnora（维娜拉）](https://weknora.weixin.qq.com)** 是一款开源的、基于大语言模型（LLM）的知识管理框架，专为企业级文档理解、语义检索与智能推理场景打造。
 
-It is organized around three core capabilities: **RAG-based Quick Q&A** for everyday lookups, a **ReAct Agent** that autonomously orchestrates retrieval, MCP tools and web search to handle complex multi-step tasks, and a brand-new **Wiki Mode** in which agents distill raw documents into a self-maintaining, interlinked markdown knowledge base with an interactive knowledge graph. Combined with multi-source ingestion (Feishu / Notion / Yuque, and growing), 20+ LLM provider integrations, full Langfuse observability, and a fully self-hostable modular architecture, WeKnora turns scattered documents into a queryable, reasoning-capable, continuously evolving knowledge asset.
-
-The framework supports auto-syncing knowledge from Feishu, Notion, and Yuque (more data sources coming soon), handles 10+ document formats including PDF, Word, images, and Excel, and can serve Q&A directly through IM channels like WeCom, Feishu, Slack, and Telegram. It is compatible with major LLM providers including OpenAI, DeepSeek, Qwen (Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, and Ollama. Its fully modular design allows swapping LLMs, vector databases, and storage backends, with support for local and private cloud deployment ensuring complete data sovereignty. WeKnora also integrates with **Langfuse** for comprehensive observability into agent reasoning, token usage, and pipeline tracing.
+WeKnora 将 **RAG 快速问答、ReAct Agent 推理和自动 Wiki** 统一在一套知识工作流中：导入 PDF、Word、图片、网页或外部知识库后，系统完成解析、索引、检索和回答；Agent 可继续调用 MCP 工具与网络搜索处理多步任务。模型、向量数据库、对象存储和部署方式均可替换，支持本地及私有云部署。
 
 
-## ✨ Latest Updates
-
-**v0.5.0 Highlights:**
-
-- **Wiki Mode**: A brand-new agent-driven Wiki knowledge system that automatically distills raw documents into interlinked markdown pages. It ships with a dedicated WikiBrowser and an interactive knowledge graph that visualizes references and relationships between pages, helping teams grow a structured, continuously evolving knowledge base from their own materials.
-- **Observability**: Integrated Langfuse for agent ReAct loop, LLM token tracking, tool calls, and asynq pipeline tracing, providing deep visibility into agent reasoning and system performance.
-- **Customizable Indexing Strategy**: Users can now independently configure and toggle Vector Search, Keyword Search (Hybrid), Wiki, and Knowledge Graph indexing per knowledge base.
-- **Vector Store UI & Per-KB Binding**: Full frontend management for Vector Stores with connectivity testing, plus the ability to bind distinct vector databases to specific knowledge bases.
-- **Yuque Connector**: Yuque data source integration with API client, full and incremental fetch, enabling seamless synchronization of Yuque documents.
-- **Agent Capabilities**: Added `json_repair` tool for automatic JSON fixing, preloaded `OpenMAIC Classroom` skill, and DuckDB multi-sheet Excel data analysis.
-- **Frontend & Debugging**: Added copy action for model cards in settings, and enhanced LLM request debugging and logging across all model providers.
-- **Bug Fixes**: Fixed DuckDB access issues by materializing knowledge files to temp path, removed rerank model requirement for wiki-only agents, and whitelisted offline protoc zip packages in dockerignore.
-
-<details>
-<summary><b>Earlier Releases</b></summary>
-
-**v0.4.0 Highlights:**
-
-- **[Knowledge Assistant](https://weknora.weixin.qq.com/platform)**: Cloud-hosted knowledge assistant service for quick onboarding without local deployment
-- **WeKnora Cloud**: WeKnora Cloud provider with hosted LLM models and document parsing service, credential management and status checks
-- **[Chrome Extension](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd)**: Browser extension for web page knowledge capture
-- **[ClawHub Skill](https://clawhub.ai/lyingbug/weknora)**: ClawHub Skill marketplace integration for one-click agent skill installation
-- **WeChat IM Integration**: WeChat channel adapter with QR code login and long-polling message support
-- **Attachment Processing**: File attachment support in chat pipeline with content formatting and metadata injection
-- **Azure OpenAI Provider**: Full Azure OpenAI support for chat, VLM, and embedding models with deployment name preservation and dimensions parameter
-- **Alibaba Cloud OSS Storage**: Object storage support via S3-compatible mode with configuration UI, connectivity test, and multi-language i18n
-- **Notion Connector**: Notion data source integration with API client, markdown renderer, and Connector interface
-- **Baidu & Ollama Web Search**: Added Baidu and Ollama as web search providers
-- **VectorStore Management**: Full VectorStore CRUD with entity, repository, service layer, connection testing, and API endpoints
-- **Bug Fixes**: Fixed Azure OpenAI endpoint handling, embedding truncation, IM citation tag stripping, neo4j Go 1.24 Windows compatibility, and OSS signature issues
-
-
-**v0.3.6 Highlights:**
-
-- **ASR (Automatic Speech Recognition)**: Integrated ASR model support with audio file upload, in-document audio preview, and transcription capabilities
-- **Data Source Auto-Sync (Feishu)**: Complete data source management with Feishu Wiki/Drive auto-sync, incremental and full sync, sync logs, and tenant isolation
-- **OIDC Authentication**: OpenID Connect login support with auto-discovery, custom endpoints, and user info mapping
-- **IM Quote/Reply Context**: Quoted messages extracted in IM channels and injected into LLM prompts for contextual replies; anti-hallucination for non-text quotes
-- **Thread-Based IM Sessions**: Per-thread session mode for IM channels (Slack, Mattermost, Feishu, Telegram), enabling multi-user collaboration within threads
-- **Document Summarization**: AI-generated document summaries with configurable input limits and a dedicated summary section in document detail view
-- **Tavily Web Search**: Added Tavily as a web search provider; refactored web search provider architecture for extensibility
-- **MCP Auto-Reconnection**: Automatic reconnection for MCP tool calls when server connection is lost
-- **Parallel Tool Calling**: Concurrent execution of multiple agent tool calls via errgroup for faster complex task handling
-- **Agent @Mention Scope Restriction**: User @mentions restricted to agent's allowed knowledge base scope, preventing unauthorized access
-- **Login Page Performance**: Removed all backdrop-filter blur effects, reduced animations, added GPU compositing hints for faster page load
-
-**v0.3.5 Highlights:**
-
-- **Telegram, DingTalk & Mattermost IM Integration**: Added Telegram bot (webhook/long-polling, streaming via editMessageText), DingTalk bot (webhook/Stream mode, AI Card streaming), and Mattermost adapter; IM channel coverage now includes WeCom, Feishu, Slack, Telegram, DingTalk, and Mattermost
-- **IM Slash Commands & QA Queue**: Pluggable slash-command system (/help, /info, /search, /stop, /clear) with a bounded QA worker pool, per-user rate limiting, and Redis-based multi-instance coordination
-- **Suggested Questions**: Agents surface context-aware suggested questions based on configured knowledge bases; image knowledge automatically enqueues question generation
-- **VLM Auto-Describe MCP Tool Images**: When MCP tools return images, the agent generates text descriptions via the configured VLM model, enabling image content to be used by text-only LLMs
-- **Novita AI Provider**: New LLM provider with OpenAI-compatible API supporting chat, embedding, and VLLM model types
-- **MCP Tool Name Stability**: Tool names now based on service name (stable across reconnections) instead of UUID; unique name constraint added; frontend formats names into human-readable form
-- **Channel Tracking**: Knowledge entries and messages record source channel (web/api/im/browser_extension) for traceability
-- **Bug Fixes**: Fixed agent empty response when no knowledge base is configured, UTF-8 truncation in summaries for Chinese/emoji documents, API key encryption loss on tenant settings update, vLLM streaming reasoning content propagation, and rerank empty passage errors
-
-
-**v0.3.4 Highlights:**
-
-- **IM Bot Integration**: WeCom, Feishu, and Slack IM channel support with WebSocket/Webhook modes, streaming, and knowledge base integration
-- **Multimodal Image Support**: Image upload and multimodal image processing with enhanced session management
-- **Manual Knowledge Download**: Download manual knowledge content as files with proper filename sanitization
-- **NVIDIA Model API**: Support NVIDIA chat model API with custom endpoint and VLM model configuration
-- **Weaviate Vector DB**: Added Weaviate as a new vector database backend for knowledge retrieval
-- **AWS S3 Storage**: Integrated AWS S3 storage adapter with configuration UI and database migrations
-- **AES-256-GCM Encryption**: API keys encrypted at rest with AES-256-GCM for enhanced security
-- **Built-in MCP Service**: Built-in MCP service support for extending agent capabilities
-- **Hybrid Search Optimization**: Grouped targets and reused query embeddings for better retrieval performance
-- **Final Answer Tool**: New final_answer tool with agent duration tracking for improved agent workflows
-
-**v0.3.3 Highlights:**
-
-- **Parent-Child Chunking**: Hierarchical parent-child chunking strategy for enhanced context management and more accurate retrieval
-- **Knowledge Base Pinning**: Pin frequently-used knowledge bases for quick access
-- **Fallback Response**: Fallback response handling with UI indicators when no relevant results are found
-- **Passage Cleaning for Rerank**: Passage cleaning for rerank model to improve relevance scoring accuracy
-- **Storage Auto-Creation**: Storage engine connectivity check with auto-creation of buckets
-- **Milvus Vector DB**: Added Milvus as a new vector database backend for knowledge retrieval
-
-**v0.3.2 Highlights:**
-
-- 🔍 **Knowledge Search**: New "Knowledge Search" entry point with semantic retrieval, supporting bringing search results directly into the conversation window
-- ⚙️ **Parser & Storage Engine Configuration**: Configure document parser engines and storage engines for different sources in settings, with per-file-type parser selection in knowledge base
-- 🖼️ **Image Rendering in Local Storage**: Support image rendering during conversations in local storage mode, with optimized streaming image placeholders
-- 📄 **Document Preview**: Embedded document preview component for previewing user-uploaded original files
-- 🎨 **UI Optimization**: Knowledge base, agent, and shared space list page interaction redesign
-- 🗄️ **Milvus Support**: Added Milvus as a new vector database backend for knowledge retrieval
-- 🌋 **Volcengine TOS**: Added Volcengine TOS object storage support
-- 📊 **Mermaid Rendering**: Support mermaid diagram rendering in chat with fullscreen viewer, zoom, pan, toolbar and export
-- 💬 **Batch Conversation Management**: Batch management and delete all sessions functionality
-- 🔗 **Remote URL Knowledge**: Support creating knowledge entries from remote file URLs
-- 🧠 **Memory Graph Preview**: Preview of user-level memory graph visualization
-- 🔄 **Async Re-parse**: Async API for re-processing existing knowledge documents
-
-**v0.3.0 Highlights:**
-
-- 🏢 **Shared Space**: Shared space with member invitations, shared knowledge bases and agents across members, tenant-isolated retrieval
-- 🧩 **Agent Skills**: Agent skills system with preloaded skills for smart-reasoning agent, sandboxed execution environment for security isolation
-- 🤖 **Custom Agents**: Support for creating, configuring, and selecting custom agents with knowledge base selection modes (all/specified/disabled)
-- 📊 **Data Analyst Agent**: Built-in Data Analyst agent with DataSchema tool for CSV/Excel analysis
-- 🧠 **Thinking Mode**: Support thinking mode for LLM and agents, intelligent filtering of thinking content
-- 🔍 **Web Search Providers**: Added Bing and Google search providers alongside DuckDuckGo
-- 📋 **Enhanced FAQ**: Batch import dry run, similar questions, matched question in search results, large imports offloaded to object storage
-- 🔑 **API Key Auth**: API Key authentication mechanism with Swagger documentation security
-- 📎 **In-Input Selection**: Select knowledge bases and files directly in the input box with @mention display
-- ☸️ **Helm Chart**: Complete Helm chart for Kubernetes deployment with Neo4j GraphRAG support
-- 🌍 **i18n**: Added Korean (한국어) language support
-- 🔒 **Security Hardening**: SSRF-safe HTTP client, enhanced SQL validation, MCP stdio transport security, sandbox-based execution
-- ⚡ **Infrastructure**: Qdrant vector DB support, Redis ACL, configurable log level, Ollama embedding optimization, `DISABLE_REGISTRATION` control
-
-**v0.2.0 Highlights:**
-
-- 🤖 **Agent Mode**: New ReACT Agent mode that can call built-in tools, MCP tools, and web search, providing comprehensive summary reports through multiple iterations and reflection
-- 📚 **Multi-Type Knowledge Bases**: Support for FAQ and document knowledge base types, with new features including folder import, URL import, tag management, and online entry
-- ⚙️ **Conversation Strategy**: Support for configuring Agent models, normal mode models, retrieval thresholds, and Prompts, with precise control over multi-turn conversation behavior
-- 🌐 **Web Search**: Support for extensible web search engines with built-in DuckDuckGo search engine
-- 🔌 **MCP Tool Integration**: Support for extending Agent capabilities through MCP, with built-in uvx and npx launchers, supporting multiple transport methods
-- 🎨 **New UI**: Optimized conversation interface with Agent mode/normal mode switching, tool call process display, and comprehensive knowledge base management interface upgrade
-- ⚡ **Infrastructure Upgrade**: Introduced MQ async task management, support for automatic database migration, and fast development mode
-
-</details>
-
-
-## 📱 Interface Showcase
+## 📱 功能展示
 
 <table>
   <tr>
-    <td colspan="2" align="center"><b>💬 Intelligent Q&A Conversation</b><br/><img src="./docs/images/qa.png" alt="Intelligent Q&A Conversation" width="100%"></td>
+    <td colspan="2" align="center"><b>💬 智能问答对话</b><br/><img src="./docs/images/qa.png" alt="智能问答对话" width="100%"></td>
   </tr>
   <tr>
-    <td width="50%" align="center"><b>📖 Wiki Browser</b><br/><img src="./docs/images/wiki-browser.png" alt="Wiki Browser" width="100%"></td>
-    <td width="50%" align="center"><b>🕸️ Wiki Knowledge Graph</b><br/><img src="./docs/images/wiki-graph.png" alt="Wiki Knowledge Graph" width="100%"></td>
+    <td width="50%" align="center"><b>📖 Wiki 浏览器</b><br/><img src="./docs/images/wiki-browser.png" alt="Wiki 浏览器" width="100%"></td>
+    <td width="50%" align="center"><b>🕸️ Wiki 知识图谱</b><br/><img src="./docs/images/wiki-graph.png" alt="Wiki 知识图谱" width="100%"></td>
   </tr>
   <tr>
-    <td width="50%" align="center"><b>🤖 Agent Mode · Tool Call Process</b><br/><img src="./docs/images/agent-qa.png" alt="Agent Mode Tool Call Process" width="100%"></td>
-    <td width="50%" align="center"><b>⚙️ Conversation Settings</b><br/><img src="./docs/images/settings.png" alt="Conversation Settings" width="100%"></td>
+    <td width="50%" align="center"><b>🤖 Agent 模式 · 工具调用过程</b><br/><img src="./docs/images/agent-qa.png" alt="Agent 模式工具调用过程" width="100%"></td>
+    <td width="50%" align="center"><b>⚙️ 对话设置</b><br/><img src="./docs/images/settings.png" alt="对话设置" width="100%"></td>
   </tr>
   <tr>
-    <td colspan="2" align="center"><b>🔭 Observability · Langfuse Tracing</b><br/><img src="./docs/images/langfuse.png" alt="Observability Langfuse Tracing" width="100%"></td>
+    <td colspan="2" align="center"><b>🔭 监控可观测性 · Langfuse Tracing</b><br/><img src="./docs/images/langfuse.png" alt="Langfuse Tracing" width="100%"></td>
   </tr>
 </table>
 
-## 🏗️ Architecture
+## 🏗️ 架构设计
 
 ![weknora-architecture.png](./docs/images/architecture.png)
 
-Fully modular pipeline from document parsing, vectorization, and retrieval to LLM inference — every component is swappable and extensible. Supports local / private cloud deployment with full data sovereignty and a zero-barrier Web UI for quick onboarding.
+从文档解析、向量化、检索到大模型推理，全流程模块化解耦，组件可灵活替换与扩展。支持本地 / 私有云部署，数据完全自主可控，零门槛 Web UI 快速上手。
 
-## 🧩 Feature Overview
+## 🧩 功能概览
 
-**Intelligent Conversation**
+**智能对话**
 
-| Capability | Details |
-|------------|---------|
-| Intelligent Reasoning | ReACT progressive multi-step reasoning, autonomously orchestrating knowledge retrieval, MCP tools, and web search; custom agent support |
-| Quick Q&A | RAG-based Q&A over knowledge bases for fast and accurate answers |
-| Wiki Mode | Agent-driven auto-generation of structured, interlinked markdown Wiki pages from raw documents |
-| Tool Calling | Built-in tools, MCP tools, web search |
-| Conversation Strategy | Online Prompt editing, retrieval threshold tuning, multi-turn context awareness |
-| Suggested Questions | Auto-generated question suggestions based on knowledge base content |
+| 能力 | 详情 |
+|------|------|
+| 智能推理 | ReACT 渐进式多步推理，自主编排知识检索、MCP 工具与网络搜索，支持自定义智能体 |
+| 快速问答 | 基于知识库的 RAG 问答，快速准确地回答问题 |
+| Wiki 模式 | Agent 驱动从原始文档中自动生成并维护结构化、相互链接的 Markdown Wiki 知识页面 |
+| 工具调用 | 内置工具、MCP 工具、网络搜索 |
+| 对话策略 | 在线 Prompt 编辑、检索阈值调节、多轮上下文感知 |
+| 推荐问题 | 基于知识库内容自动生成推荐问题 |
 
-**Knowledge Management**
+**知识管理**
 
-| Capability | Details |
-|------------|---------|
-| Knowledge Base Types | FAQ / Document / Wiki with folder import, URL import, tag management, and online entry |
-| Data Source Import | Auto-sync from Feishu / Notion / Yuque (more data sources coming soon); incremental and full sync |
-| Document Formats | PDF / Word / Txt / Markdown / HTML / Images / CSV / Excel / PPT / JSON |
-| Retrieval Strategies | BM25 sparse / Dense retrieval / GraphRAG / parent-child chunking / multi-dimensional indexing |
-| E2E Testing | Full-pipeline visualization with recall hit rate, BLEU / ROUGE metric evaluation |
+| 能力 | 详情 |
+|------|------|
+| 知识库类型 | FAQ / 文档 / Wiki，支持文件夹导入、URL 导入、标签管理、在线录入 |
+| 数据源导入 | 飞书 / Notion / 语雀 知识库自动同步（更多数据源开发中），支持增量与全量同步 |
+| 文档格式 | PDF / Word / Txt / Markdown / HTML / 图片 / CSV / Excel / PPT / JSON |
+| 检索策略 | BM25 稀疏召回 / Dense 稠密召回 / GraphRAG 图谱增强 / 父子分块 / 多维度索引 |
+| 端到端测试 | 检索+生成全链路可视化，评估召回命中率、BLEU / ROUGE 等指标 |
 
-**Integrations & Extensions**
+**集成与扩展**
 
-| Capability | Details |
-|------------|---------|
-| LLMs | OpenAI / Azure OpenAI / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
-| Embeddings | Ollama / BGE / GTE / OpenAI-compatible APIs |
-| Vector DBs | PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant |
-| Object Storage | Local / MinIO / AWS S3 / Volcengine TOS / Alibaba Cloud OSS |
-| IM Channels | WeCom / Feishu / Slack / Telegram / DingTalk / Mattermost / WeChat |
-| Web Search | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama |
-
-**Platform**
-
-| Capability | Details |
-|------------|---------|
-| Deployment | Local / Docker / Kubernetes (Helm) with private and offline support |
-| UI | Web UI / RESTful API / Chrome Extension / WeChat Mini Program |
-| Observability | Integrated Langfuse for ReAct loops, token tracking, tool calls, and pipeline tracing |
-| Task Management | MQ async tasks, automatic database migration on version upgrade |
-| Model Management | Centralized config, per-knowledge-base model selection, multi-tenant built-in model sharing, WeKnora Cloud hosted models and parsing |
-
-## 🧩 Chrome Extension
-
-[**WeKnora Chrome Extension**](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd) lets you capture web content directly into your WeKnora knowledge base. Select text, images, or entire pages in the browser and save them as knowledge entries with one click — no copy-paste or file upload needed.
+| 能力 | 详情 |
+|------|------|
+| 模型厂商 | OpenAI / Azure OpenAI / DeepSeek / Qwen（阿里云）/ 智谱 / 混元 / 豆包（火山引擎）/ Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
+| 向量数据库 | PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant |
+| 对象存储 | 本地 / 腾讯云COS / 火山引擎 TOS / MinIO / AWS S3 / 阿里云 OSS |
+| IM 集成 | 企业微信 / 飞书 / Slack / Telegram / 钉钉 / Mattermost / 微信 |
+| 网络搜索 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama |
 
 
-## 📱 WeChat Mini Program
+**平台能力**
 
-The [WeKnora Mini Program](./miniprogram/README.md) provides a lightweight mobile client for configuring WeKnora API access, selecting knowledge bases, importing URLs, and asking knowledge chat from WeChat.
+| 能力 | 详情 |
+|------|------|
+| 部署 | 本地 / Docker / Kubernetes (Helm)，支持私有化离线部署 |
+| 界面 | Web UI / RESTful API / Chrome Extension / 微信小程序 / 可嵌入聊天 Widget |
+| 可观测性 | 集成 Langfuse 以追踪 ReAct 循环、Token 消耗、工具调用和任务流水线 |
+| 任务管理 | MQ 异步任务，版本升级自动数据库迁移 |
+| 模型管理 | 集中配置，知识库级别模型选择，多租户共享内置模型，WeKnora Cloud 托管模型与文档解析 |
+
+## 🔗 集成方式
+
+### Chrome 插件
+
+[**WeKnora Chrome 插件**](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd)支持在浏览器中直接将网页内容采集到 WeKnora 知识库。选中文本、图片或整个页面，一键保存为知识条目，无需复制粘贴或手动上传文件。
 
 
-## 🦞 ClawHub Skill
+### 微信小程序
 
-[**WeKnora ClawHub Skill**](https://clawhub.ai/lyingbug/weknora) is a WeKnora skill published on the ClawHub platform. Once installed, it enables document import (file / URL / Markdown), hybrid search (vector + keyword) across knowledge bases, and knowledge entry management — all through the WeKnora REST API.
+[**WeKnora 微信小程序**](./miniprogram/README.md) 提供轻量移动端客户端，支持配置 WeKnora API、选择知识库、导入 URL，并在微信内向知识库提问。
 
-- **Document Import** — Upload files, import web pages, or write Markdown knowledge via the agent
-- **Hybrid Search** — Search within or across knowledge bases with vector + keyword retrieval
-- **Knowledge Management** — List, browse, edit, and delete knowledge entries programmatically
 
-## 🚀 Getting Started
+### ClawHub Skill
 
-### 🛠 Prerequisites
+[**WeKnora ClawHub Skill**](https://clawhub.ai/lyingbug/weknora) 是 WeKnora 发布在 ClawHub 平台上的技能。安装后，可通过 WeKnora REST API 上传文档（文件 / URL / Markdown）、执行混合检索（向量 + 关键词）以及管理知识条目。
+
+- **文档导入** — 通过 Agent 上传文件、导入网页或写入 Markdown 知识
+- **混合检索** — 在单个或多个知识库中进行向量 + 关键词混合搜索
+- **知识管理** — 以编程方式浏览、编辑和删除知识条目
+
+### 可嵌入聊天 Widget
+
+Widget 用于把 WeKnora 知识问答嵌入已有业务系统。宿主页面加载 `weknora-widget.iife.js` 后会显示悬浮入口，打开后通过隔离的 iframe 展示对话；支持固定知识库、用户可选知识库和全部授权知识库三种范围，并提供移动、缩放、最大化、会话切换及事件回调。
+
+```bash
+cd frontend
+npm run build:widget
+```
+
+构建结果位于 `frontend/dist-widget/`。接入方需要由自己的后端申请短期 bootstrap ticket，浏览器不应持有 integration client secret。完整认证流程、初始化示例和 API 边界参见[外挂知识库对接指南](./docs/外挂知识库指南.md)。
+
+## 🚀 快速开始
+
+### 🛠 环境要求
 
 - [Docker](https://www.docker.com/) & [Docker Compose](https://docs.docker.com/compose/)
 - [Git](https://git-scm.com/)
 
-### 📦 Installation & Launch
+### 📦 安装与启动
 
 ```bash
 git clone https://github.com/Tencent/WeKnora.git
 cd WeKnora
-cp .env.example .env   # Edit .env as needed, see comments in the file
-docker compose up -d   # Start core services
+cp .env.example .env   # 按需编辑 .env，详见文件内注释
+docker compose up -d   # 启动核心服务
 ```
 
-Once started, visit **http://localhost** to get started.
+启动成功后访问 **http://localhost** 即可使用。
 
-> To use a local Ollama model, run `ollama serve > /dev/null 2>&1 &` first.
+如需部署到远程 Linux 服务器、从源码构建完整镜像、启用 `full` 服务集或规划升级回滚，请使用[生产环境 Docker Compose 部署指南](./docs/production-deployment.md)。
 
-### 🔧 Optional Services (Docker Compose Profiles)
+### 默认平台管理员
 
-Add `--profile` flags to enable additional components. Multiple profiles can be combined:
+启动时若不存在配置的默认管理员账号，系统会自动创建平台管理员：
 
-| Profile | Description | Command |
-|---------|-------------|---------|
-| _(default)_ | Core services | `docker compose up -d` |
-| `full` | All features | `docker compose --profile full up -d` |
-| `neo4j` | Knowledge Graph (Neo4j) | `docker compose --profile neo4j up -d` |
-| `minio` | Object Storage (MinIO) | `docker compose --profile minio up -d` |
-| `langfuse` | Tracing (Langfuse) | `docker compose --profile langfuse up -d` |
+| 项目 | 默认值 |
+|------|--------|
+| 登录用户名 | `admin` |
+| 登录密码 | `Admin@123456` |
+| 账号邮箱 | `admin@weknora.local` |
+| 角色 | 平台管理员（可管理和切换全部租户） |
 
-Combine profiles: `docker compose --profile neo4j --profile minio up -d`
+请在首次登录后立即修改默认密码。生产部署应在 `.env` 中设置
+`DEFAULT_ADMIN_EMAIL`、`DEFAULT_ADMIN_USERNAME` 和 `DEFAULT_ADMIN_PASSWORD`；已存在同名默认管理员时不会重置其密码。公开注册入口已关闭。
 
-Stop services: `docker compose down`
+系统角色分为平台管理员、租户管理员和普通成员。平台管理员管理全部租户；租户管理员仅管理所属租户的配置、知识库与图谱；普通成员仅使用被授权的知识和问答能力。
 
-### 🌐 Service URLs
+> 如需使用本地 Ollama 模型，请先运行 `ollama serve > /dev/null 2>&1 &`
 
-| Service | URL |
-|---------|-----|
+### Lite 与标准版
+
+| 维度 | Lite | 标准版 |
+|------|------|--------|
+| 使用场景 | 个人或小团队本机使用 | 多团队协作与企业部署 |
+| 账号与协作 | 单租户、无需注册，不提供共享空间 | 多租户、账号与组织管理、共享空间 |
+| 依赖 | 单应用，本地存储 | Docker Compose 多服务架构 |
+| 文档解析 | 内置 Simple，可接入 Cloud 等外部能力 | 完整文档处理与解析引擎配置 |
+
+两种版本均可本地保存数据；是否对公网开放取决于实际监听地址、网关和网络策略。
+
+### 🔧 可选服务（Docker Compose Profile）
+
+按需添加 `--profile` 启动额外组件，多个 profile 可叠加使用：
+
+| Profile | 说明 | 启动命令 |
+|---------|------|----------|
+| _(默认)_ | 核心服务 | `docker compose up -d` |
+| `full` | 大部分可选功能（不含 Weaviate） | `docker compose --profile full up -d` |
+| `neo4j` | 知识图谱 (Neo4j) | `docker compose --profile neo4j up -d` |
+| `minio` | 对象存储 (MinIO) | `docker compose --profile minio up -d` |
+| `jaeger` | OpenTelemetry 链路查看 (Jaeger) | `docker compose --profile jaeger up -d` |
+| `qdrant` | 向量数据库 (Qdrant) | `docker compose --profile qdrant up -d` |
+| `weaviate` | 向量数据库 (Weaviate) | `docker compose --profile weaviate up -d` |
+| `dex` | 本地 OIDC 联调 (Dex) | `docker compose --profile dex up -d` |
+| `langfuse` | 链路追踪 (Langfuse) | `docker compose --profile langfuse up -d` |
+
+组合示例：`docker compose --profile neo4j --profile minio up -d`
+
+停止服务：`docker compose down`
+
+#### 本地 Langfuse 接入
+
+1. 执行 `docker compose --profile langfuse up -d` 启动 Langfuse，首次启动需等待 ClickHouse 完成迁移。
+2. 打开 `http://localhost:3000`，注册 Langfuse 管理员，并创建组织和项目。
+3. 在项目的 `Settings → API Keys` 中生成 Public Key 和 Secret Key。
+4. 将以下配置写入 `.env`，然后执行 `docker compose up -d app` 使配置生效：
+
+```env
+LANGFUSE_HOST=http://langfuse-web:3000
+LANGFUSE_PUBLIC_KEY=pk-lf-xxxxxxxx
+LANGFUSE_SECRET_KEY=sk-lf-xxxxxxxx
+```
+
+> 浏览器通过 `http://localhost:3000` 访问 Langfuse；Docker 中的 WeKnora 应用通过服务名 `http://langfuse-web:3000` 访问。如果后端使用宿主机上的 `go run` 启动，则将 `LANGFUSE_HOST` 改为 `http://localhost:3000`。请勿将真实密码或 API Key 提交到版本库。
+
+发起一次知识问答或 Agent 对话后，可在 Langfuse 的 **Tracing** 页面查看模型调用、ReAct 轮次、工具调用、Token 使用量和异步任务链路。完整配置及故障排查参见 [Langfuse 集成说明](./docs/Langfuse集成.md)。
+
+#### 其他可选能力接入索引
+
+以下能力还需要启动额外服务或提供外部凭证。修改 `.env` 后需重启 `app`；使用外部服务时，还应确认容器网络、TLS 和防火墙允许访问对应地址。
+
+| 能力 | 启动或接入方式 | `.env` 关键配置 | 验证方式 |
+|------|----------------|-----------------|----------|
+| 知识图谱 | 启动 `neo4j` profile | `ENABLE_GRAPH_RAG=true`、`NEO4J_ENABLE=true`、`NEO4J_*` | 打开 `http://localhost:7474`，并按[知识图谱指南](./docs/开启知识图谱功能.md)验证节点 |
+| MinIO 对象存储 | 启动 `minio` profile | `STORAGE_TYPE=minio`、`MINIO_ENDPOINT`、`MINIO_ACCESS_KEY_ID`、`MINIO_SECRET_ACCESS_KEY`、`MINIO_BUCKET_NAME` | 打开 `http://localhost:9001`，上传文档后确认对象写入 |
+| Qdrant 向量库 | 启动 `qdrant` profile | 在 `RETRIEVE_DRIVER` 中加入 `qdrant`，设置 `VECTOR_RETRIEVE_DRIVER=qdrant`；认证场景再填 `QDRANT_API_KEY` | 后端日志出现 `Register qdrant retrieve engine success` |
+| Weaviate 向量库 | 启动 `weaviate` profile | 在 `RETRIEVE_DRIVER` 中加入 `weaviate`，设置 `VECTOR_RETRIEVE_DRIVER=weaviate`；认证场景再填 `WEAVIATE_*` | 后端日志出现 `Register weaviate retrieve engine success` |
+| Jaeger 链路查看 | 启动 `jaeger` profile | Compose 部署已预设 `OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317` | 打开 `http://localhost:16686` 查询 `WeKnora` 服务 |
+| OIDC 单点登录 | 接入现有 OIDC Provider，或启动 `dex` profile 本地联调 | `OIDC_AUTH_ENABLE=true`、`OIDC_AUTH_CLIENT_ID`、`OIDC_AUTH_CLIENT_SECRET`、Discovery/Issuer 地址 | 登录页出现 OIDC 按钮；配置与回调要求见 [OIDC 认证流程](./docs/OIDC认证调用流程.md) |
+| 外部对象存储 | 无需 Compose profile，在云平台创建 Bucket 和访问凭证 | `STORAGE_TYPE=cos` / `tos` / `s3`，并填写对应的 `COS_*` / `TOS_*` / `S3_*` | 上传文档后确认目标 Bucket 中出现对象 |
+| 在线或内网模型 | 在「设置 → 模型设置」配置服务地址、模型名和 API Key；`MODEL_PROFILE` 与 `ONLINE_*` / `OFFLINE_*` 用于首次启动初始化 | 模型名必须与服务端公开的 model ID 一致，内网端点按需加入 `SSRF_WHITELIST` | 在模型设置中执行连接测试并切换在线/离线档位 |
+| 网页搜索 | 在「设置 → 网页搜索」添加 Provider；Tavily、Google、Bing 等凭证保存在租户配置中 | 不依赖全局 `TAVILY_API_KEY`；按界面填写所选 Provider 的 API Key/Engine ID | 在设置页测试连接，再在 Agent 中启用网页搜索 |
+
+> `full` profile 不包含 Weaviate；如需 Weaviate，请显式添加 `--profile weaviate`。标准 Docker Compose 只会把 `docker-compose.yml` 中 `app.environment` 列出的变量传入后端；使用 OIDC、TOS、S3 或 `ONLINE_*` / `OFFLINE_*` 等变量时，应确认它们已注入 `app` 容器。生产环境请使用 Secret 管理，不要提交真实凭证。
+
+### 🌐 服务地址
+
+| 服务 | 地址 |
+|------|------|
 | Web UI | `http://localhost` |
-| Backend API | `http://localhost:8080` |
-| Langfuse Tracing | `http://localhost:3000` |
+| 后端 API | `http://localhost:8080` |
+| 链路追踪 (Langfuse) | `http://localhost:3000` |
+| Neo4j Browser | `http://localhost:7474` |
+| MinIO Console | `http://localhost:9001` |
+| Jaeger UI | `http://localhost:16686` |
 
-## MCP Server
+## 知识图谱
 
-Please refer to the [MCP Configuration Guide](./mcp-server/MCP_CONFIG.md) for the necessary setup.
+启用 `neo4j` profile 并在知识库设置中开启实体/关系抽取后，WeKnora 会从文档块提取实体和关系，并在检索时使用图谱补充上下文。抽取结果受实体数、关系数、置信度和 Schema 限制；同一文本块重新抽取时会替换旧的规范化图谱记录，避免保留过期关系。
 
-## 🔌 Using WeChat Dialog Open Platform
+配置与验证步骤参见[开启知识图谱功能](./docs/开启知识图谱功能.md)。
 
-WeKnora serves as the core technology framework for the [WeChat Dialog Open Platform](https://chatbot.weixin.qq.com), providing a more convenient usage approach:
+## MCP 工具
 
-- **Zero-code Deployment**: Simply upload knowledge to quickly deploy intelligent Q&A services within the WeChat ecosystem, achieving an "ask and answer" experience
-- **Efficient Question Management**: Support for categorized management of high-frequency questions, with rich data tools to ensure accurate, reliable, and easily maintainable answers
-- **WeChat Ecosystem Integration**: Through the WeChat Dialog Open Platform, WeKnora's intelligent Q&A capabilities can be seamlessly integrated into WeChat Official Accounts, Mini Programs, and other WeChat scenarios, enhancing user interaction experiences
+MCP（Model Context Protocol）用于向 Agent 接入外部工具和数据源。在「设置 → MCP 服务」中可添加 SSE、HTTP Streamable 或 Stdio 服务，配置认证、超时和重试策略，并执行连接测试、查看工具清单及启停服务。生产环境应使用最小权限凭证并定期轮换。
+
+如果需要运行仓库自带的独立 MCP Server，请参考 [MCP Server 配置](./mcp-server/MCP_CONFIG.md)。
+
+## 🔌 使用微信对话开放平台
+
+WeKnora 作为[微信对话开放平台](https://chatbot.weixin.qq.com)的核心技术框架，提供更简便的使用方式：
+
+- **零代码部署**：只需上传知识，即可在微信生态中快速部署智能问答服务，实现"即问即答"的体验
+- **高效问题管理**：支持高频问题的独立分类管理，提供丰富的数据工具，确保回答精准可靠且易于维护
+- **微信生态覆盖**：通过微信对话开放平台，WeKnora 的智能问答能力可无缝集成到公众号、小程序等微信场景中，提升用户交互体验
 
 
+## 📘 文档
 
-## 📘 API Reference
+README 保留安装、配置和日常开发所需信息；以下专题内容篇幅较大或面向特定角色，保留为独立文档：
 
-Troubleshooting FAQ: [Troubleshooting FAQ](./docs/QA.md)
+| 分类 | 文档 |
+|------|------|
+| 使用与运维 | [常见问题](./docs/QA.md) · [Langfuse 集成](./docs/Langfuse集成.md) · [共享空间](./docs/共享空间说明.md) |
+| API 与嵌入 | [API 文档](./docs/api/README.md) · [外挂知识库](./docs/外挂知识库指南.md) · [OIDC 认证](./docs/OIDC认证调用流程.md) |
+| 扩展开发 | [数据源导入](./docs/数据源导入开发文档.md) · [IM 集成](./docs/IM集成开发文档.md) · [向量数据库](./docs/使用其他向量数据库.md) · [网络搜索引擎](./docs/添加新的网络搜索引擎.md) |
+| Agent 与平台配置 | [Agent Skills](./docs/agent-skills.md) |
+| 离线与私有化 | [严格离线运行](./docs/airgap-operations.md) |
+| 维护者文档 | [内置模型](./docs/maintainers/BUILTIN_MODELS.md) · [内置 MCP 服务](./docs/maintainers/BUILTIN_MCP_SERVICES.md) · [ASR/TTS 能力契约](./docs/voice-capabilities.md) |
 
-Detailed API documentation is available at: [API Docs](./docs/api/README.md)
+## 🧭 开发指南
 
-Product plans and upcoming features: [Roadmap](./docs/ROADMAP.md)
+### ⚡ 快速开发模式（推荐）
 
-## 🧭 Developer Guide
+如果你需要频繁修改代码，**不需要每次重新构建 Docker 镜像**！使用快速开发模式：
 
-### ⚡ Fast Development Mode (Recommended)
-
-If you need to frequently modify code, **you don't need to rebuild Docker images every time**! Use fast development mode:
+**macOS / Linux：**
 
 ```bash
-# Start infrastructure
+# 启动基础设施
 make dev-start
 
-# Start backend (new terminal)
+# 启动后端（新终端）
 make dev-app
 
-# Start frontend (new terminal)
+# 启动前端（新终端）
 make dev-frontend
 ```
 
-**Development Advantages:**
-- ✅ Frontend modifications auto hot-reload (no restart needed)
-- ✅ Backend modifications quick restart (5-10 seconds, supports Air hot-reload)
-- ✅ No need to rebuild Docker images
-- ✅ Support IDE breakpoint debugging
+**Windows：** PowerShell 默认没有 `make`，且 Makefile 依赖 bash。请优先使用 **Git Bash**；只有在 Docker Desktop 已开启当前发行版 WSL Integration 时才直接使用 WSL：
 
-**Detailed Documentation:** [Development Environment Quick Start](./docs/开发指南.md)
+```bash
+# 启动基础设施
+./scripts/dev.sh start
 
-### 📁 Directory Structure
+# 启动后端（新终端）
+./scripts/dev.sh app
+
+# 启动前端（新终端）
+./scripts/dev.sh frontend
+```
+
+在 PowerShell 中不建议直接调用 `bash`，因为它可能被解析为 WSL；如果该 WSL 发行版没有 Docker Desktop 集成，依赖服务会启动失败。
+
+如果希望一条命令启动完整开发环境，可使用一键脚本。
+
+在 Windows PowerShell 中运行：
+
+```powershell
+.\scripts\quick-dev.ps1
+```
+
+该入口会自动调用 Git Bash，不依赖 PowerShell 中的 `bash` 是否指向 WSL。在 Windows/WSL 中，脚本会自动在 Docker 内运行 Linux Go + Air，规避 DuckDB/SQLite 的 Windows CGO 链接问题；代码仍挂载自本地目录，后端修改会自动重启。首次启动会构建一次开发镜像，后续会复用。
+
+在 Git Bash 中也可以直接运行：
+
+```bash
+bash ./scripts/quick-dev.sh
+```
+
+如果从 WSL 直接运行，需要先在 Docker Desktop 的 Settings → Resources → WSL Integration 中开启当前发行版；否则 WSL 可能找不到可用的 Docker Compose。
+
+脚本会先停止上一次由它启动的后端和前端进程，再启动新的进程；已经运行的 Docker 依赖服务会复用，不会重复重启。日志和 PID 文件分别位于：
+
+```text
+logs/backend.log
+logs/frontend.log
+logs/backend.pid
+logs/frontend.pid
+```
+
+停止本地后端、前端和 Docker 依赖：
+
+```bash
+bash ./scripts/quick-dev.sh stop
+```
+
+**开发优势：**
+
+- ✅ 前端修改自动热重载（无需重启）
+- ✅ 后端修改快速重启（5-10秒，支持 Air 热重载）
+- ✅ 一键模式首次构建后复用开发镜像
+- ✅ 支持 IDE 断点调试
+
+**详细文档：** [开发环境快速入门](./docs/开发指南.md)
+
+### 📁 项目目录结构
 
 ```
 WeKnora/
-├── client/      # go client
-├── cmd/         # Main entry point
-├── config/      # Configuration files
-├── docker/      # docker images files
-├── docreader/   # Document parsing app
-├── docs/        # Project documentation
-├── frontend/    # Frontend app
-├── internal/    # Core business logic
-├── mcp-server/  # MCP server
-├── migrations/  # DB migration scripts
-└── scripts/     # Shell scripts
+├── client/      # go客户端
+├── cmd/         # 应用入口
+├── config/      # 配置文件
+├── docker/      # docker 镜像文件
+├── docreader/   # 文档解析项目
+├── docs/        # 项目文档
+├── frontend/    # 前端项目
+├── internal/    # 核心业务逻辑
+├── mcp-server/  # MCP服务器
+├── migrations/  # 数据库迁移脚本
+└── scripts/     # 启动与工具脚本
 ```
-
-## 🤝 Contributing
-
-Welcome to submit [Issues](https://github.com/Tencent/WeKnora/issues) or Pull Requests.
-
-**Process:** Fork → Create branch → Commit changes → Open PR
-
-**Standards:** Format code with `gofmt`, follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:` / `fix:` / `docs:` / `test:` / `refactor:`)
-
-## 🔒 Security Notice
-
-**Important:** Starting from v0.1.3, WeKnora includes login authentication functionality to enhance system security. For production deployments, we strongly recommend:
-
-- Deploy WeKnora services in internal/private network environments rather than public internet
-- Avoid exposing the service directly to public networks to prevent potential information leakage
-- Configure proper firewall rules and access controls for your deployment environment
-- Regularly update to the latest version for security patches and improvements
-
-## 👥 Contributors
-
-Thanks to these excellent contributors:
-
-[![Contributors](https://contrib.rocks/image?repo=Tencent/WeKnora)](https://github.com/Tencent/WeKnora/graphs/contributors)
-
-## 📄 License
-
-This project is licensed under the [MIT License](./LICENSE).
-You are free to use, modify, and distribute the code with proper attribution.
-
-## 📈 Project Statistics
-
-<a href="https://www.star-history.com/#Tencent/WeKnora&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
- </picture>
-</a>

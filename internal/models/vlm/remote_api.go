@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
+	"github.com/Tencent/WeKnora/internal/models/transport"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -54,7 +55,14 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 			apiCfg.BaseURL = config.BaseURL
 		}
 	}
-	httpClient := &http.Client{Timeout: defaultTimeout}
+	endpoint := config.BaseURL
+	if endpoint == "" {
+		endpoint = apiCfg.BaseURL
+	}
+	httpClient, err := transport.NewEndpointHTTPClientWithValidation(endpoint, defaultTimeout, config.ValidateIP)
+	if err != nil {
+		return nil, fmt.Errorf("invalid VLM endpoint: %w", err)
+	}
 
 	// 注入用户自定义 HTTP header（类似 OpenAI Python SDK 的 extra_headers）
 	if len(config.CustomHeaders) > 0 {
@@ -74,7 +82,7 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 // Predict sends an image with a text prompt to the OpenAI-compatible API.
 func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt string) (string, error) {
 	var parts []openai.ChatMessagePart
-	
+
 	// Add text prompt first
 	parts = append(parts, openai.ChatMessagePart{
 		Type: openai.ChatMessagePartTypeText,

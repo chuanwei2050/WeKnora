@@ -1,14 +1,19 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
@@ -16,20 +21,23 @@ import (
 
 // Config 应用程序总配置
 type Config struct {
-	Conversation    *ConversationConfig    `yaml:"conversation"     json:"conversation"`
-	Server          *ServerConfig          `yaml:"server"           json:"server"`
-	KnowledgeBase   *KnowledgeBaseConfig   `yaml:"knowledge_base"   json:"knowledge_base"`
-	Tenant          *TenantConfig          `yaml:"tenant"           json:"tenant"`
-	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
-	Models          []ModelConfig          `yaml:"models"           json:"models"`
-	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
-	DocReader       *DocReaderConfig       `yaml:"docreader"        json:"docreader"`
-	StreamManager   *StreamManagerConfig   `yaml:"stream_manager"   json:"stream_manager"`
-	ExtractManager  *ExtractManagerConfig  `yaml:"extract"          json:"extract"`
-	WebSearch       *WebSearchConfig       `yaml:"web_search"       json:"web_search"`
-	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
-	IM              *IMConfig              `yaml:"im"               json:"im"`
-	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	Conversation       *ConversationConfig      `yaml:"conversation"     json:"conversation"`
+	Server             *ServerConfig            `yaml:"server"           json:"server"`
+	KnowledgeBase      *KnowledgeBaseConfig     `yaml:"knowledge_base"   json:"knowledge_base"`
+	Tenant             *TenantConfig            `yaml:"tenant"           json:"tenant"`
+	OIDCAuth           *OIDCAuthConfig          `yaml:"oidc_auth"        json:"oidc_auth"`
+	Models             []ModelConfig            `yaml:"models"           json:"models"`
+	VectorDatabase     *VectorDatabaseConfig    `yaml:"vector_database"  json:"vector_database"`
+	DocReader          *DocReaderConfig         `yaml:"docreader"        json:"docreader"`
+	StreamManager      *StreamManagerConfig     `yaml:"stream_manager"   json:"stream_manager"`
+	ExtractManager     *ExtractManagerConfig    `yaml:"extract"          json:"extract"`
+	WebSearch          *WebSearchConfig         `yaml:"web_search"       json:"web_search"`
+	PromptTemplates    *PromptTemplatesConfig   `yaml:"prompt_templates" json:"prompt_templates"`
+	IM                 *IMConfig                `yaml:"im"               json:"im"`
+	Agent              *AgentConfig             `yaml:"agent"            json:"agent"`
+	AirGapped          bool                     `yaml:"air_gapped_mode"   json:"air_gapped_mode"`
+	AirGapDependencies []types.AirGapDependency `yaml:"air_gapped_dependencies" json:"air_gapped_dependencies"`
+	Voice              types.VoiceConfig        `yaml:"voice"            json:"voice"`
 }
 
 // AgentConfig represents the global agent settings.
@@ -269,7 +277,9 @@ func DefaultTemplateByMode(templates []PromptTemplate, mode string) *PromptTempl
 
 // LocalizeTemplates returns a deep copy of the template list with Name and
 // Description replaced according to the given locale.  Fallback chain:
-//   locale → primary language (e.g. "zh" from "zh-CN") → original Name/Description.
+//
+//	locale → primary language (e.g. "zh" from "zh-CN") → original Name/Description.
+//
 // The returned slice is safe to serialise directly; it never mutates the original.
 func LocalizeTemplates(templates []PromptTemplate, locale string) []PromptTemplate {
 	if len(templates) == 0 {
@@ -429,6 +439,7 @@ func LoadConfig() (*Config, error) {
 	// Validate configuration values
 	applyOIDCEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
+	applyAirGapEnvOverrides(&cfg)
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
@@ -441,6 +452,13 @@ func LoadConfig() (*Config, error) {
 // It checks for obviously invalid or missing values that would cause runtime failures.
 func ValidateConfig(cfg *Config) error {
 	var errs []string
+	if cfg == nil {
+		return fmt.Errorf("config is required")
+	}
+	cfg.Voice.EnsureDefaults()
+	if err := cfg.Voice.Validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
 
 	if cfg.OIDCAuth != nil && cfg.OIDCAuth.Enable {
 		if strings.TrimSpace(cfg.OIDCAuth.ClientID) == "" {
@@ -487,11 +505,132 @@ func ValidateConfig(cfg *Config) error {
 			errs = append(errs, "server.port must be between 1 and 65535")
 		}
 	}
+	if cfg.AirGapped {
+		if err := validateAirGappedModels(cfg.Models); err != nil {
+			errs = append(errs, err.Error())
+		}
+		if err := types.ValidateAirGappedDependenciesWithAllowlist(cfg.AirGapDependencies, utils.IsSSRFWhitelisted); err != nil {
+			errs = append(errs, err.Error())
+		}
+		if err := validateAirGappedConfiguredDependencies(cfg); err != nil {
+			errs = append(errs, err.Error())
+		}
+		if cfg.OIDCAuth != nil && cfg.OIDCAuth.Enable {
+			errs = append(errs, "air-gapped mode does not permit public OIDC; configure a registered private identity endpoint")
+		}
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation errors: %s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func validateAirGappedConfiguredDependencies(cfg *Config) error {
+	configured := []struct {
+		name     string
+		raw      string
+		category types.ApprovedEndpointCategory
+		use      string
+	}{
+		{name: "LANGFUSE_HOST", raw: os.Getenv("LANGFUSE_HOST"), category: types.EndpointCategoryTelemetry, use: "telemetry"},
+		{name: "OTEL_EXPORTER_OTLP_ENDPOINT", raw: os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"), category: types.EndpointCategoryTelemetry, use: "telemetry"},
+		{name: "S3_ENDPOINT", raw: os.Getenv("S3_ENDPOINT"), category: types.EndpointCategoryObjectStorage, use: "object-storage"},
+		{name: "MINIO_ENDPOINT", raw: os.Getenv("MINIO_ENDPOINT"), category: types.EndpointCategoryObjectStorage, use: "object-storage"},
+		{name: "QDRANT_URL", raw: os.Getenv("QDRANT_URL"), category: types.EndpointCategoryDataConnector, use: "vector-store"},
+		{name: "DOCREADER_ADDR", raw: os.Getenv("DOCREADER_ADDR"), category: types.EndpointCategoryDataConnector, use: "document-reader"},
+	}
+	for _, item := range configured {
+		raw := strings.TrimSpace(item.raw)
+		if raw == "" {
+			continue
+		}
+		normalized := raw
+		if !strings.Contains(normalized, "://") {
+			normalized = "https://" + normalized
+		}
+		parsed, err := url.Parse(normalized)
+		if err != nil || parsed.Hostname() == "" {
+			return fmt.Errorf("air-gapped dependency %s has an invalid endpoint", item.name)
+		}
+		ips, lookupErr := net.LookupIP(parsed.Hostname())
+		location := types.DeriveEndpointLocation(normalized, ips)
+		if lookupErr != nil || location == types.EndpointPublic || location == types.EndpointUnknown {
+			return fmt.Errorf("air-gapped dependency %s resolves outside the private network", item.name)
+		}
+		if location == types.EndpointSameHost {
+			continue
+		}
+		matched := false
+		for _, dependency := range cfg.AirGapDependencies {
+			_, host, port, depErr := types.NormalizeEndpoint(dependency.Endpoint)
+			if depErr == nil && strings.EqualFold(host, parsed.Hostname()) && portForURL(parsed) == port && dependency.Category == item.category && dependency.Use == item.use && dependency.Approved {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return fmt.Errorf("air-gapped dependency %s must reference an approved private endpoint with use %q", item.name, item.use)
+		}
+	}
+	return nil
+}
+
+func portForURL(value *url.URL) int {
+	if port := value.Port(); port != "" {
+		parsed, _ := strconv.Atoi(port)
+		return parsed
+	}
+	if strings.EqualFold(value.Scheme, "https") {
+		return 443
+	}
+	return 80
+}
+
+func validateAirGappedModels(models []ModelConfig) error {
+	for _, model := range models {
+		if strings.EqualFold(model.Source, string(types.ModelSourceLocal)) {
+			continue
+		}
+		if model.Parameters == nil {
+			return fmt.Errorf("air-gapped model %q has no endpoint parameters", model.ModelName)
+		}
+		data, err := json.Marshal(model.Parameters)
+		if err != nil {
+			return fmt.Errorf("air-gapped model %q parameters: %w", model.ModelName, err)
+		}
+		var params types.ModelParameters
+		if err := json.Unmarshal(data, &params); err != nil {
+			return fmt.Errorf("air-gapped model %q parameters: %w", model.ModelName, err)
+		}
+		if params.BaseURL == "" {
+			return fmt.Errorf("air-gapped model %q must declare a private endpoint", model.ModelName)
+		}
+		if strings.TrimSpace(params.ApprovedEndpointID) == "" {
+			return fmt.Errorf("air-gapped model %q must reference an approved endpoint", model.ModelName)
+		}
+		_, host, _, err := types.NormalizeEndpoint(params.BaseURL)
+		if err != nil {
+			return fmt.Errorf("air-gapped model %q endpoint: %w", model.ModelName, err)
+		}
+		ips, lookupErr := net.LookupIP(host)
+		location := types.DeriveEndpointLocation(params.BaseURL, ips)
+		if lookupErr != nil || location == types.EndpointPublic || location == types.EndpointUnknown {
+			return fmt.Errorf("air-gapped model %q resolves outside private network", model.ModelName)
+		}
+	}
+	return nil
+}
+
+func applyAirGapEnvOverrides(cfg *Config) {
+	if value := strings.TrimSpace(os.Getenv("AIR_GAPPED_MODE")); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			fmt.Printf("Warning: invalid AIR_GAPPED_MODE %q, keeping configured value\n", value)
+			return
+		}
+		cfg.AirGapped = parsed
+	}
 }
 
 func applyOIDCEnvOverrides(cfg *Config) {

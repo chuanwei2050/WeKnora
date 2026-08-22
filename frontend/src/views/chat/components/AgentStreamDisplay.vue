@@ -385,6 +385,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
 import { hydrateProtectedFileImages } from '@/utils/security';
+import { openExternalUrl } from '@/utils/open-external-url';
 import {
   buildManualMarkdown,
   copyTextToClipboard,
@@ -512,7 +513,7 @@ const sanitizeForDisplay = (text: string): string => {
   if (!text) return text;
   let result = text;
   for (const [name, i18nKey] of Object.entries(TOOL_NAME_KEYS)) {
-    result = result.replaceAll(name, i18n.global.t(i18nKey));
+    result = result.split(name).join(String(i18n.global.t(i18nKey)));
   }
   // Format any remaining mcp_ tool names inline
   result = result.replace(/\bmcp_([a-z0-9_]+)/g, (_match, rest) => {
@@ -725,6 +726,7 @@ import webSearchGlobeGreenIcon from '@/assets/img/websearch-globe-green.svg';
 
 interface SessionData {
   isAgentMode?: boolean;
+  is_completed?: boolean;
   agentEventStream?: any[];
   knowledge_references?: any[];
 }
@@ -1159,20 +1161,7 @@ const hasResults = (event: any): boolean => {
 const handleCitationActivate = (el: HTMLElement) => {
   const url = el.getAttribute('data-url');
   if (!url) return;
-  try {
-    // @ts-ignore: Wails runtime check
-    if (window.runtime && window.runtime.BrowserOpenURL) {
-      // @ts-ignore
-      window.runtime.BrowserOpenURL(url);
-    } else {
-      const newWindow = window.open(url, '_blank', 'noopener,noreferrer');
-      if (!newWindow) {
-        window.location.assign(url);
-      }
-    }
-  } catch {
-    window.location.assign(url);
-  }
+  openExternalUrl(url);
 };
 
 // KB citations: 悬停用浮层展示摘要；点击跳转 KB 详情
@@ -1437,7 +1426,7 @@ const onRootClick = (e: Event) => {
   if (wikiEl && wikiEl.getAttribute('data-slug')) {
     e.preventDefault();
     e.stopPropagation();
-    const slug = wikiEl.getAttribute('data-slug');
+    const slug = wikiEl.getAttribute('data-slug') || '';
     
     // Determine the relevant KB ID
     const kbId = getKbIdForWiki(slug);

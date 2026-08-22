@@ -125,6 +125,39 @@ func TestHandleFinalAnswerDoesNotInventOutputContract(t *testing.T) {
 	}
 }
 
+func TestHandleReflectionForwardsVerificationStage(t *testing.T) {
+	streamManager := &recordingStreamManager{}
+	handler := &AgentStreamHandler{
+		ctx:                context.Background(),
+		sessionID:          "session-1",
+		assistantMessageID: "message-1",
+		streamManager:      streamManager,
+	}
+
+	err := handler.handleReflection(context.Background(), event.Event{
+		ID: "verification-1",
+		Data: types.VerificationStageEvent{
+			Stage:     "verification",
+			Status:    "completed",
+			Decision:  types.VerificationPassed,
+			ModelKeys: []string{"27b", "9b"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("handleReflection() error = %v", err)
+	}
+	if len(streamManager.events) != 1 {
+		t.Fatalf("events = %d, want 1", len(streamManager.events))
+	}
+	got := streamManager.events[0]
+	if got.Type != types.ResponseTypeReflection || !got.Done {
+		t.Fatalf("event = %#v, want completed reflection", got)
+	}
+	if got.Data["stage"] != "verification" || got.Data["status"] != "completed" || got.Data["decision"] != string(types.VerificationPassed) {
+		t.Fatalf("event data = %#v", got.Data)
+	}
+}
+
 func TestHandleErrorRemainsFatal(t *testing.T) {
 	streamManager := &recordingStreamManager{}
 	handler := &AgentStreamHandler{
@@ -147,5 +180,33 @@ func TestHandleErrorRemainsFatal(t *testing.T) {
 	}
 	if len(streamManager.events) != 1 || streamManager.events[0].Type != types.ResponseTypeError {
 		t.Fatalf("events = %#v, want one fatal error", streamManager.events)
+	}
+}
+
+func TestAgentStreamHandlerPersistsUserVisibleResponseTiming(t *testing.T) {
+	streamManager := &recordingStreamManager{}
+	acceptedAt := time.Now().UTC().Add(-time.Second)
+	message := &types.Message{ID: "message-1"}
+	handler := &AgentStreamHandler{
+		ctx:                context.Background(),
+		sessionID:          "session-1",
+		assistantMessageID: "message-1",
+		assistantMessage:   message,
+		streamManager:      streamManager,
+		eventStartTimes:    map[string]time.Time{},
+		acceptedAt:         acceptedAt,
+	}
+	if err := handler.handleFinalAnswer(context.Background(), event.Event{ID: "answer-1", Data: event.AgentFinalAnswerData{Content: "visible", Done: false}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.handleComplete(context.Background(), event.Event{ID: "complete-1", Data: event.AgentCompleteData{MessageID: "message-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	timing, err := message.ResponseTiming.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if timing["accepted_at"] == nil || timing["first_visible_at"] == nil || timing["completed_at"] == nil {
+		t.Fatalf("response timing missing lifecycle timestamps: %#v", timing)
 	}
 }

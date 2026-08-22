@@ -1,0 +1,101 @@
+## Context
+
+现有图谱抽取会把实体与关系写入 Neo4j，节点按 `{name, kg: knowledge_id}` 合并，关系只保存类型且没有关系级 chunk/knowledge 证据；因此同名实体在不同文档中仍是隔离节点，现有数据本身不能形成可靠的跨文档路径。普通 chat pipeline 的 entity search 使用 `MATCH (n)-[r]-(m)` 返回一跳邻居。Agent 的 `query_knowledge_graph` 没有调用该 repository，而是调用 `HybridSearch` 返回 chunk 列表；其 `graph_data.edges` 始终为空。真正的多跳能力必须同时修正图写入模型、证据来源和查询服务，不能只增加一个 variable-length 查询。
+
+## Goals / Non-Goals
+
+**Goals:**
+
+- 在受控预算内完成跨实体、跨文档的 1–N 跳路径查询。
+- 建立知识库级规范实体或显式跨文档对齐，并保留节点与关系的文档证据。
+- 返回可解释路径及对应原始 chunk 引用，并与文本检索融合。
+- 保持租户隔离、参数化查询、超时和无图环境降级。
+- 让普通 RAG 与 Agent 工具复用同一图检索服务。
+
+**Non-Goals:**
+
+- 不向终端用户开放任意 Cypher 执行。
+- 不在本变更中自动设计软件测评 ontology；它由知识库 `ExtractConfig` 或领域 profile 提供。
+- 不实现全图算法平台、图训练或图神经网络。
+
+## Decisions
+
+### 1. 在 repository 上增加类型化路径查询
+
+新增 `SearchPaths(ctx, scope, GraphQuery) (*GraphSearchResult, error)`。调用方从鉴权上下文构造 `scope`，其中包含 tenant、单一 knowledge base 和允许的 knowledge IDs；客户端不能直接声明授权范围。`GraphQuery` 包含规范化种子实体、关系白名单、方向、最大深度、每层分支上限、结果上限和时间预算；返回节点、边、路径、关联 chunk 与分数组成的类型化结果。
+
+相较让 Agent 生成 Cypher，类型化接口更容易校验权限、控制资源并跨实现测试。
+
+### 2. 图写入采用知识库级规范实体和证据集合
+
+图谱写入使用 `(tenant_id, knowledge_base_id, normalized_entity_type, normalized_name)` 组成规范实体唯一键，`canonical_key` 是该类型化元组的稳定编码而不是只取名称的字符串哈希。实体类型从启用的领域 profile/`ExtractConfig` 枚举解析，未知类型在写入边界被拒绝；同名但类型不同的实体不得自动合并。系统保留各文档实体实例、带实体类型的别名、knowledge ID、chunk IDs 和可选 knowledge version ID；同一别名在同一类型内指向多个候选时进入冲突记录，不在查询时静默合并。
+
+关系身份由知识库、起点规范实体、关系类型、方向和终点规范实体共同确定，并把抽取该关系的 chunk/knowledge/version 作为只追加证据集合；同一关系被多文档支持时合并证据而不是覆盖。删除或重建单个文档时只移除该文档贡献，证据集合为空时才删除共享关系或规范实体。
+
+首版规范化采用文本归一化、领域 profile 中的类型约束和明确别名，不让查询时的任意模糊匹配自动合并实体。既有按 `kg` 隔离的图必须按知识库重建；无法无损推导关系证据时不得伪造回填。
+
+### 3. 使用校验后的有界遍历
+
+Neo4j 实现以知识库级 label/property 和允许的 knowledge IDs 限定范围，先通过规范名与明确别名解析种子节点，再由 repository 执行逐层前沿扩展：每一跳批量查询当前前沿的一跳关系，先过滤关系类型和至少一条属于允许 knowledge IDs 的关系证据，再按确定性顺序对每个父节点应用分支上限；服务层累计节点/路径预算并重建有序路径。首版不依赖一条普通 variable-length path 查询实现分支限制，因为结果末尾的 `LIMIT` 无法阻止中间层爆炸。
+
+Cypher 的 label 和关系类型不能作为普通值参数化，因此只允许从服务端枚举生成经过转义的查询片段；实体文本、knowledge IDs、阈值、每父节点结果数等值使用参数绑定。任何客户端字符串都不得直接拼接到 Cypher。若后续改用 APOC 或其他遍历器，必须用同一 fixture 证明逐层分支、总展开节点和授权证据约束在扩展期间而不是只在结果阶段生效。
+
+默认深度为 2，上限为 4，并同时设置 query timeout、路径数和展开节点数上限，防止稠密图爆炸。
+
+### 4. 路径采用可解释的确定性评分
+
+路径分数由种子匹配、关系置信/权重、路径长度衰减、证据覆盖和可选文本相关性组成。缺少旧关系权重时使用中性默认值。循环路径被拒绝，节点序列相同的路径去重，并保留最高分证据。
+
+### 5. 图结果与文本结果并行融合
+
+chat pipeline 保留当前向量/关键词检索，同时并行执行图路径查询。图路径携带的 chunk 转换为 `MatchTypeGraph`，再通过归一化分数和去重进入现有 rerank/merge；图失败不取消文本检索。
+
+Agent 工具直接调用同一服务，并返回真实 `nodes`、`edges`、`paths` 与 citations，移除“用 HybridSearch 模拟图查询”的路径。
+
+### 6. 证据链是结构化数据而非生成文本
+
+每条路径保存有序规范节点、关系、每段关系的证据集合、chunk IDs、knowledge IDs 和版本信息。展示层可生成自然语言摘要，但验证与引用使用结构化路径；某段关系没有可用证据时必须标记为不可引用，不得由模型补写一个无法核验的“推理链”。
+
+## 集成边界
+
+- 本变更可以独立于复杂度路由运行；`add-question-complexity-routing` 仅提供是否调用图检索及预算建议。
+- `add-software-testing-knowledge-governance` 启用时提供 `knowledge_version_id` 和发布可见性；未启用时仍使用 knowledge/chunk 来源，不伪造版本。
+- `add-verified-multi-agent-answering` 只消费结构化路径和证据，不重新执行图数据库查询规则。
+- `add-research-acceptance-benchmarks` 负责评估路径正确性和引用质量，本变更负责保存可复现的路径输入与输出。
+
+## Risks / Trade-offs
+
+- [稠密图路径数量指数增长] → 严格深度、分支、结果和时间预算，并记录截断标志。
+- [LLM 抽取的实体名称不一致] → 种子解析支持规范化和别名候选；本变更不做不受控模糊扩图。
+- [旧图关系缺少权重或证据属性] → 权重可采用中性默认值，但缺少关系级证据的旧边不得作为可引用路径；按知识库重新抽取并重建，只有权威抽取产物可以用于可验证回填。
+- [既有图无法可靠恢复跨文档身份和关系证据] → 按知识库重建而不是猜测回填，并在切换前对节点、关系和证据数量做一致性检查。
+- [共享规范关系混有未授权来源] → 扩展前要求关系至少有一条处于允许 knowledge IDs 集合内的证据，并只返回这些授权证据；仅由越权文档支撑的边不得参与路径。
+- [图和文本分数不可直接比较] → 在融合前分别归一化，保留 match type 供 rerank 和评测分析。
+
+## Migration Plan
+
+1. 增加规范实体、文档实体实例、关系证据、类型化查询与必要索引，旧 `SearchNode` 暂时保留。
+2. 更新图谱写入和单文档删除逻辑，在新命名空间中构建知识库级图。
+3. 按知识库重建既有图并核对节点、关系、knowledge、chunk 和版本证据，不对缺失证据做猜测回填。
+4. 接入 graph service、chat pipeline 和 Agent tool，以知识库开关灰度。
+5. 验证跨文档路径、引用、权限和预算后，把旧工具路径切换为新服务。
+6. 回滚时切回旧命名空间的一跳/文本检索；新图保留用于诊断，确认后再清理。
+
+## Open Questions
+
+- 默认最大深度和融合权重需在软件测评多跳问题集上校准，设计上先采用深度 2、硬上限 4。
+- 是否允许跨知识库路径连接取决于后续是否建立受治理的共享实体层；首版仅允许单一知识库命名空间内跨文档。
+
+## 补充设计决策
+
+### 1. 治理版本使用隔离图谱 namespace
+
+启用知识治理时，图谱 namespace 必须至少包含 `(tenant_id, knowledge_base_id, knowledge_version_id)`。`draft`、`pending_review` 和未进入生产的 `indexing` 版本只能写入 staging namespace，不得写入当前生产 namespace；未启用治理时继续使用兼容的 knowledge 级 namespace。
+
+### 2. 图谱切换与知识版本发布绑定
+
+版本发布任务必须在图谱、向量和关键词索引全部构建成功后，执行一次原子可见性切换：先校验新 namespace 的证据版本集合，再切换图谱 active namespace 和 `current_version_id`。任一索引失败时保留旧 active namespace，禁止只切换图谱或只切换文本索引。回滚复用同一流程。
+
+### 3. 查询层在 GraphContext 之前做版本过滤
+
+图仓储返回的节点、边、路径和证据必须按当前有效版本过滤后，才能转换成 `GraphData`、`GraphContext` 或回答引用。不能只在图结果关联 chunk 后过滤，因为未经授权或未发布的边可能已经影响路径和上下文排序。

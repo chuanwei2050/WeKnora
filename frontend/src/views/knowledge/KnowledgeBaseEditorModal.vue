@@ -138,20 +138,6 @@
                   </div>
                 </div>
 
-                <!-- 模型配置 -->
-                <div v-show="currentSection === 'models'" class="section">
-                  <KBModelConfig
-                    ref="modelConfigRef"
-                    v-if="formData"
-                    :config="formData.modelConfig"
-                    :has-files="hasFiles"
-                    :wiki-enabled="formData.indexingStrategy?.wikiEnabled"
-                    :rag-enabled="formData.indexingStrategy?.vectorEnabled || formData.indexingStrategy?.keywordEnabled"
-                    :all-models="allModels"
-                    @update:config="handleModelConfigUpdate"
-                  />
-                </div>
-
                 <!-- FAQ 配置 -->
                 <div v-if="isFAQ && formData" v-show="currentSection === 'faq'" class="section">
                   <div class="section-content">
@@ -187,23 +173,6 @@
                   </div>
                 </div>
 
-                <!-- 解析引擎 -->
-                <div v-if="!isFAQ && formData" v-show="currentSection === 'parser'" class="section">
-                  <KBParserSettings
-                    :parser-engine-rules="formData.chunkingConfig.parserEngineRules"
-                    @update:parser-engine-rules="handleParserEngineRulesUpdate"
-                  />
-                </div>
-
-                <!-- 存储引擎 -->
-                <div v-if="!isFAQ && formData" v-show="currentSection === 'storage'" class="section">
-                  <KBStorageSettings
-                    :storage-provider="formData.storageProvider"
-                    :has-files="mode === 'edit' && hasFiles"
-                    @update:storage-provider="handleStorageProviderUpdate"
-                  />
-                </div>
-
                 <!-- 分块设置 -->
                 <div v-if="!isFAQ" v-show="currentSection === 'chunking'" class="section">
                   <KBChunkingSettings
@@ -237,23 +206,6 @@
                         </div>
                       </div>
 
-                      <!-- VLLM 模型选择（多模态启用时） -->
-                      <div v-if="formData.multimodalConfig.enabled" class="setting-row">
-                        <div class="setting-info">
-                          <label>{{ $t('knowledgeEditor.advanced.multimodal.vllmLabel') }} <span class="required">*</span></label>
-                          <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.vllmDescription') }}</p>
-                        </div>
-                        <div class="setting-control">
-                          <ModelSelector
-                            model-type="VLLM"
-                            :selected-model-id="formData.multimodalConfig.vllmModelId"
-                            :all-models="allModels"
-                            @update:selected-model-id="handleMultimodalVLLMChange"
-                            @add-model="handleAddVLLMModel"
-                            :placeholder="$t('knowledgeEditor.advanced.multimodal.vllmPlaceholder')"
-                          />
-                        </div>
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -281,23 +233,6 @@
                         </div>
                       </div>
 
-                      <!-- ASR 模型选择 -->
-                      <div v-if="formData.asrConfig.enabled" class="setting-row">
-                        <div class="setting-info">
-                          <label>{{ $t('knowledgeEditor.asr.modelLabel') }} <span class="required">*</span></label>
-                          <p class="desc">{{ $t('knowledgeEditor.asr.modelDescription') }}</p>
-                        </div>
-                        <div class="setting-control">
-                          <ModelSelector
-                            model-type="ASR"
-                            :selected-model-id="formData.asrConfig.modelId"
-                            :all-models="allModels"
-                            @update:selected-model-id="(val: string) => { if (formData) formData.asrConfig.modelId = val }"
-                            @add-model="handleAddASRModel"
-                            :placeholder="$t('knowledgeEditor.asr.modelPlaceholder')"
-                          />
-                        </div>
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -307,10 +242,40 @@
                   <GraphSettings
                     v-if="formData"
                     :graph-extract="formData.nodeExtractConfig"
-                    :model-id="formData.modelConfig.llmModelId"
-                    :all-models="allModels"
                     @update:graphExtract="handleNodeExtractUpdate"
                   />
+                </div>
+
+                <div v-if="!isFAQ && formData" v-show="currentSection === 'governance'" class="section">
+                  <div class="section-content">
+                    <div class="section-header">
+                      <h3 class="section-title">投稿与审核</h3>
+                      <p class="section-desc">普通用户只能提交待审稿，审核通过后才开始解析、索引和图谱构建。</p>
+                    </div>
+                    <div class="section-body">
+                      <div class="form-item">
+                        <label class="form-label">知识版本治理</label>
+                        <t-switch v-model="formData.governance.enabled" />
+                        <p class="form-tip">开放投稿时必须启用；已发布内容在新版本审核期间保持可用。</p>
+                      </div>
+                      <div class="form-item">
+                        <label class="form-label">投稿范围</label>
+                        <t-radio-group v-model="formData.contributionMode">
+                          <t-radio-button value="closed">仅管理员</t-radio-button>
+                          <t-radio-button value="members">全部普通用户</t-radio-button>
+                          <t-radio-button value="allowlist">指定贡献者</t-radio-button>
+                        </t-radio-group>
+                      </div>
+                      <div v-if="formData.contributionMode === 'allowlist'" class="form-item">
+                        <label class="form-label">知识贡献者</label>
+                        <t-select v-model="formData.contributorIds" :options="memberOptions" multiple filterable clearable placeholder="选择可投稿的普通用户" />
+                      </div>
+                      <div class="form-item">
+                        <label class="form-label">指定审核人</label>
+                        <t-select v-model="formData.reviewerIds" :options="reviewerOptions" multiple filterable clearable placeholder="可选；租户管理员默认可以审核" />
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- 高级设置 -->
@@ -320,7 +285,6 @@
                     v-if="formData"
                     :question-generation="formData.questionGenerationConfig"
                     :rag-enabled="formData.indexingStrategy?.vectorEnabled || formData.indexingStrategy?.keywordEnabled"
-                    :all-models="allModels"
                     @update:question-generation="handleQuestionGenerationUpdate"
                   />
                 </div>
@@ -330,10 +294,6 @@
                   <DataSourceSettings :kb-id="kbId" @count="dsCount = $event" />
                 </div>
 
-                <!-- 共享设置（仅编辑模式） -->
-                <div v-if="mode === 'edit' && kbId" v-show="currentSection === 'share'" class="section">
-                  <KBShareSettings :kb-id="kbId" />
-                </div>
               </div>
 
               <!-- 保存按钮 -->
@@ -358,18 +318,14 @@ import { ref, computed, watch } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKnowledgeBase, rebuildKBIndex } from '@/api/knowledge-base'
 import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
-import { listModels } from '@/api/model'
 import { useUIStore } from '@/stores/ui'
-import KBModelConfig from './settings/KBModelConfig.vue'
-import KBParserSettings from './settings/KBParserSettings.vue'
-import KBStorageSettings from './settings/KBStorageSettings.vue'
 import KBChunkingSettings from './settings/KBChunkingSettings.vue'
 import KBAdvancedSettings from './settings/KBAdvancedSettings.vue'
-import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
-import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
+import { createEmptyGraphExtractDefaults, restoreKnownPresetSchema } from '@/constants/software-testing-graph-preset'
 import { useI18n } from 'vue-i18n'
+import { listTenantUsers, type AdminUser } from '@/api/admin'
 
 const uiStore = useUIStore()
 const { t } = useI18n()
@@ -391,10 +347,17 @@ const emit = defineEmits<{
 const currentSection = ref<string>('basic')
 const saving = ref(false)
 const loading = ref(false)
-const allModels = ref<any[]>([])
 const hasFiles = ref(false)
-const initialStorageProvider = ref<string>('')
 const initialIndexingStrategy = ref<any>(null)
+const initialGraphFingerprint = ref('')
+const graphFingerprint = (config: any) => JSON.stringify({
+  mode: config?.mode || 'general', template_key: config?.template_key || '',
+  ingestion_mode: config?.ingestion_mode || 'all', max_entities: config?.max_entities || 12,
+  max_relations: config?.max_relations || 15, min_confidence: config?.min_confidence || 0.5,
+  tags: config?.tags || [], entity_types: config?.entity_types || [],
+  entity_schema: config?.entity_schema || [], relation_schema: config?.relation_schema || [],
+  text: config?.text || '', nodes: config?.nodes || [], relations: config?.relations || [],
+})
 const dsCount = ref(0)
 // 用户是否在分块设置中手动改过任何值。一旦为 true，就不再根据索引策略自动调整默认分块参数。
 const chunkingDirty = ref(false)
@@ -416,38 +379,51 @@ const DEFAULT_CHUNKING_PRESET = {
 
 const navItems = computed(() => {
   const items: { key: string; icon: string; label: string; badge?: number }[] = [
-    { key: 'basic', icon: 'info-circle', label: t('knowledgeEditor.sidebar.basic') },
-    { key: 'models', icon: 'control-platform', label: t('knowledgeEditor.sidebar.models') }
+    { key: 'basic', icon: 'info-circle', label: t('knowledgeEditor.sidebar.basic') }
   ]
   if (formData.value?.type === 'faq') {
     items.push({ key: 'faq', icon: 'help-circle', label: t('knowledgeEditor.sidebar.faq') })
   } else {
     items.push(
-      { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
       { key: 'multimodal', icon: 'image', label: t('knowledgeEditor.sidebar.multimodal') },
       { key: 'asr', icon: 'sound', label: t('knowledgeEditor.sidebar.asr') },
-      { key: 'storage', icon: 'cloud', label: t('knowledgeEditor.sidebar.storage') },
       { key: 'chunking', icon: 'file-copy', label: t('knowledgeEditor.sidebar.chunking') },
       { key: 'graph', icon: 'chart-bubble', label: t('knowledgeEditor.sidebar.graph') },
+      { key: 'governance', icon: 'usergroup', label: '投稿与审核' },
       { key: 'advanced', icon: 'setting', label: t('knowledgeEditor.sidebar.advanced') }
     )
     if (props.mode === 'edit' && props.kbId) {
       items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource'), badge: dsCount.value || undefined })
     }
   }
-  if (props.mode === 'edit' && props.kbId) {
-    items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') })
-  }
   return items
 })
 
-// 模型配置引用
-const modelConfigRef = ref<InstanceType<typeof KBModelConfig>>()
 const advancedSettingsRef = ref<InstanceType<typeof KBAdvancedSettings>>()
 
 // 表单数据
 const formData = ref<any>(null)
 const isFAQ = computed(() => formData.value?.type === 'faq')
+const tenantUsers = ref<AdminUser[]>([])
+const memberOptions = computed(() => tenantUsers.value.filter(user => user.is_active && user.role === 'member').map(user => ({ label: `${user.username}（${user.email}）`, value: user.id })))
+const reviewerOptions = computed(() => tenantUsers.value.filter(user => user.is_active).map(user => ({ label: `${user.username}（${user.role === 'tenant_admin' ? '租户管理员' : '普通用户'}）`, value: user.id })))
+
+const loadTenantUsers = async (tenantId: number) => {
+  if (!tenantId) return
+  try {
+    const users: AdminUser[] = []
+    let page = 1
+    while (true) {
+      const result = await listTenantUsers(tenantId, { page, pageSize: 100 })
+      users.push(...result.items)
+      if (users.length >= result.total || result.items.length === 0) break
+      page += 1
+    }
+    tenantUsers.value = users
+  } catch {
+    tenantUsers.value = []
+  }
+}
 
 watch(
   () => formData.value?.type,
@@ -485,12 +461,10 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       chunkSize: 512,
       chunkOverlap: 100,
       separators: ['\n\n', '\n', '。', '！', '？', ';', '；'],
-      parserEngineRules: undefined as any,
       enableParentChild: true,
       parentChunkSize: 4096,
       childChunkSize: 384
     },
-    storageProvider: '' as string,
     multimodalConfig: {
       enabled: false,
       vllmModelId: ''
@@ -501,18 +475,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       language: ''
     },
     nodeExtractConfig: {
-      enabled: false,
-      text: '',
-      tags: [] as string[],
-      nodes: [] as Array<{
-        name: string
-        attributes: string[]
-      }>,
-      relations: [] as Array<{
-        node1: string
-        node2: string
-        type: string
-      }>
+      ...createEmptyGraphExtractDefaults(),
     },
     questionGenerationConfig: {
       enabled: true,
@@ -529,18 +492,14 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       wikiEnabled: false,
       graphEnabled: false,
     },
-  }
-}
-
-// 加载所有模型
-const loadAllModels = async () => {
-  try {
-    const models = await listModels()
-    allModels.value = models || []
-  } catch (error) {
-    console.error('Failed to load model list:', error)
-    MessagePlugin.error(t('knowledgeEditor.messages.loadModelsFailed'))
-    allModels.value = []
+    governance: {
+      enabled: true,
+      profile_id: 'software-testing',
+      profile_version: '1.0',
+    },
+    contributionMode: 'members' as 'closed' | 'members' | 'allowlist',
+    contributorIds: [] as string[],
+    reviewerIds: [] as string[],
   }
 }
 
@@ -550,9 +509,8 @@ const loadKBData = async () => {
   
   loading.value = true
   try {
-    const [kbInfo, models, filesResult] = await Promise.all([
+    const [kbInfo, filesResult] = await Promise.all([
       getKnowledgeBaseById(props.kbId),
-      loadAllModels(),
       listKnowledgeFiles(props.kbId, { page: 1, page_size: 1 })
     ])
     
@@ -582,12 +540,10 @@ const loadKBData = async () => {
         chunkSize: kb.chunking_config?.chunk_size || 512,
         chunkOverlap: kb.chunking_config?.chunk_overlap || 100,
         separators: kb.chunking_config?.separators || ['\n\n', '\n', '。', '！', '？', ';', '；'],
-        parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined,
         enableParentChild: kb.chunking_config?.enable_parent_child || false,
         parentChunkSize: kb.chunking_config?.parent_chunk_size || 4096,
         childChunkSize: kb.chunking_config?.child_chunk_size || 384
       },
-      storageProvider: (kb.storage_provider_config?.provider || kb.storage_config?.provider || 'local') as string,
       multimodalConfig: {
         enabled: !!kb.vlm_config?.enabled,
         vllmModelId: kb.vlm_config?.model_id || ''
@@ -597,16 +553,30 @@ const loadKBData = async () => {
         modelId: kb.asr_config?.model_id || '',
         language: kb.asr_config?.language || ''
       },
-      nodeExtractConfig: {
+      nodeExtractConfig: restoreKnownPresetSchema({
         enabled: kb.extract_config?.enabled || false,
+        mode: kb.extract_config?.mode || ((kb.extract_config?.tags?.length || kb.extract_config?.entity_types?.length) ? 'custom' : 'general'),
+        template_key: kb.extract_config?.template_key || '',
+        model_id: kb.extract_config?.model_id || '',
+        ingestion_mode: kb.extract_config?.ingestion_mode || 'all',
+        max_entities: kb.extract_config?.max_entities || 12,
+        max_relations: kb.extract_config?.max_relations || 15,
+        min_confidence: kb.extract_config?.min_confidence || 0.5,
         text: kb.extract_config?.text || '',
         tags: kb.extract_config?.tags || [],
+        entity_types: kb.extract_config?.entity_types || [],
+        entity_schema: kb.extract_config?.entity_schema || [],
+        relation_schema: kb.extract_config?.relation_schema || [],
+        strict_schema: !!kb.extract_config?.strict_schema,
+        require_triple_review: !!kb.extract_config?.require_triple_review,
         nodes: (kb.extract_config?.nodes || []).map((node: any) => ({
           name: node.name,
-          attributes: node.attributes || []
+          entity_type: node.entity_type || '',
+          attributes: node.attributes || [],
+          aliases: node.aliases || []
         })),
         relations: kb.extract_config?.relations || []
-      },
+      }),
       questionGenerationConfig: {
         enabled: kb.question_generation_config?.enabled || false,
         questionCount: kb.question_generation_config?.question_count || 3
@@ -625,11 +595,20 @@ const loadKBData = async () => {
         vectorEnabled: kb.indexing_strategy?.vector_enabled ?? true,
         keywordEnabled: kb.indexing_strategy?.keyword_enabled ?? true,
         wikiEnabled: kb.indexing_strategy?.wiki_enabled ?? false,
-        graphEnabled: kb.indexing_strategy?.graph_enabled ?? false,
+        graphEnabled: kb.indexing_strategy?.graph_enabled ?? (!!kb.extract_config?.enabled),
       },
+      governance: {
+        enabled: !!kb.governance?.enabled,
+        profile_id: kb.governance?.profile_id || 'software-testing',
+        profile_version: kb.governance?.profile_version || '1.0',
+      },
+      contributionMode: kb.contribution_mode || 'closed',
+      contributorIds: kb.contributor_ids || [],
+      reviewerIds: kb.reviewer_ids || [],
     }
-    initialStorageProvider.value = formData.value.storageProvider
+    await loadTenantUsers(Number(kb.tenant_id))
     initialIndexingStrategy.value = { ...formData.value.indexingStrategy }
+    initialGraphFingerprint.value = graphFingerprint(kb.extract_config)
   } catch (error) {
     console.error('Failed to load knowledge base data:', error)
     MessagePlugin.error(t('knowledgeEditor.messages.loadDataFailed'))
@@ -640,12 +619,6 @@ const loadKBData = async () => {
 }
 
 // 处理配置更新
-const handleModelConfigUpdate = (config: any) => {
-  if (formData.value) {
-    formData.value.modelConfig = { ...config }
-  }
-}
-
 // 粒度选择器：从 formData.wikiConfig 读出并规范化，未知值回退到 'standard'，
 // 与后端 WikiExtractionGranularity.Normalize() 的契约保持一致。
 const resolvedGranularity = computed<'focused' | 'standard' | 'exhaustive'>(() => {
@@ -723,39 +696,9 @@ watch(isWikiOnlyStrategy, (wikiOnly) => {
   }
 })
 
-const handleParserEngineRulesUpdate = (rules: any[]) => {
-  if (formData.value) {
-    formData.value.chunkingConfig.parserEngineRules = rules?.length ? rules : undefined
-  }
-}
-
 const handleMultimodalToggle = () => {
   if (formData.value && !formData.value.multimodalConfig.enabled) {
     formData.value.multimodalConfig.vllmModelId = ''
-  }
-}
-
-const handleMultimodalVLLMChange = (modelId: string) => {
-  if (formData.value) {
-    formData.value.multimodalConfig.vllmModelId = modelId
-  }
-}
-
-const handleAddVLLMModel = () => {
-  uiStore.openSettings('models', 'vllm')
-}
-
-const handleAddASRModel = () => {
-  uiStore.openSettings('models', 'asr')
-}
-
-const handleAddWikiModel = () => {
-  uiStore.openSettings('models', 'knowledgeqa')
-}
-
-const handleStorageProviderUpdate = (value: string) => {
-  if (formData.value) {
-    formData.value.storageProvider = value || 'local'
   }
 }
 
@@ -768,6 +711,8 @@ const handleQuestionGenerationUpdate = (config: any) => {
 const handleNodeExtractUpdate = (config: any) => {
   if (formData.value) {
     formData.value.nodeExtractConfig = { ...config }
+    // Keep indexing strategy in sync with GraphSettings enable switch
+    formData.value.indexingStrategy.graphEnabled = !!config?.enabled
   }
 }
 
@@ -792,31 +737,23 @@ const validateForm = (): boolean => {
     }
   }
 
-  // 验证模型配置 - embedding 模型仅在向量索引启用时必须
-  const needsEmbedding = formData.value.indexingStrategy?.vectorEnabled
-  if (needsEmbedding && !formData.value.modelConfig.embeddingModelId) {
-    MessagePlugin.warning(t('knowledgeEditor.indexing.embeddingRequired'))
-    currentSection.value = 'models'
-    return false
-  }
-
-  if (!formData.value.modelConfig.llmModelId) {
-    MessagePlugin.warning(t('knowledgeEditor.messages.summaryRequired'))
-    currentSection.value = 'models'
-    return false
-  }
-
-  // 验证多模态配置（如果启用）
-  if (formData.value.multimodalConfig.enabled && !formData.value.multimodalConfig.vllmModelId) {
-    MessagePlugin.warning(t('knowledgeEditor.messages.multimodalInvalid'))
-    currentSection.value = 'multimodal'
-    return false
-  }
-
   if (formData.value.type === 'faq' && !formData.value.faqConfig?.indexMode) {
     MessagePlugin.warning(t('knowledgeEditor.messages.indexModeRequired'))
     currentSection.value = 'faq'
     return false
+  }
+
+  if (formData.value.type !== 'faq' && formData.value.contributionMode !== 'closed') {
+    if (!formData.value.governance?.enabled) {
+      MessagePlugin.warning('开放投稿必须启用知识版本治理')
+      currentSection.value = 'governance'
+      return false
+    }
+    if (formData.value.contributionMode === 'allowlist' && !formData.value.contributorIds?.length) {
+      MessagePlugin.warning('请至少选择一名知识贡献者')
+      currentSection.value = 'governance'
+      return false
+    }
   }
 
   return true
@@ -837,20 +774,17 @@ const buildSubmitData = () => {
       enable_multimodal: formData.value.multimodalConfig.enabled,
       enable_parent_child: formData.value.chunkingConfig.enableParentChild,
       parent_chunk_size: formData.value.chunkingConfig.parentChunkSize,
-      child_chunk_size: formData.value.chunkingConfig.childChunkSize,
-      ...(formData.value.chunkingConfig.parserEngineRules?.length
-        ? { parser_engine_rules: formData.value.chunkingConfig.parserEngineRules }
-        : {})
+      child_chunk_size: formData.value.chunkingConfig.childChunkSize
     },
-    embedding_model_id: formData.value.modelConfig.embeddingModelId,
-    summary_model_id: formData.value.modelConfig.llmModelId
+    embedding_model_id: '',
+    summary_model_id: ''
   }
 
   // 添加多模态配置
   data.vlm_config = {
     enabled: formData.value.multimodalConfig.enabled,
     model_id: formData.value.multimodalConfig.enabled
-      ? (formData.value.multimodalConfig.vllmModelId || '')
+      ? ''
       : ''
   }
 
@@ -858,18 +792,9 @@ const buildSubmitData = () => {
   data.asr_config = {
     enabled: formData.value.asrConfig?.enabled || false,
     model_id: formData.value.asrConfig?.enabled
-      ? (formData.value.asrConfig?.modelId || '')
+      ? ''
       : '',
     language: formData.value.asrConfig?.language || ''
-  }
-
-  // 存储引擎：仅传 provider，参数从全局设置读取
-  // Write to storage_provider_config (authoritative) + storage_config (legacy dual-write)
-  data.storage_provider_config = {
-    provider: formData.value.storageProvider || 'local'
-  }
-  data.storage_config = {
-    provider: formData.value.storageProvider || 'local'
   }
 
   // 添加知识图谱配置 — now synced via indexingStrategy.graphEnabled
@@ -894,7 +819,7 @@ const buildSubmitData = () => {
   // wiki_config only holds wiki-specific tunables.
   if (formData.value.type !== 'faq') {
     data.wiki_config = {
-      synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
+      synthesis_model_id: '',
       max_pages_per_ingest: formData.value.wikiConfig?.maxPagesPerIngest || 0,
       extraction_granularity: formData.value.wikiConfig?.extractionGranularity || 'standard',
     }
@@ -914,12 +839,36 @@ const buildSubmitData = () => {
   if (formData.value.indexingStrategy?.graphEnabled && formData.value.nodeExtractConfig?.enabled) {
     data.extract_config = {
       enabled: true,
+      mode: formData.value.nodeExtractConfig.mode || 'general',
+      template_key: formData.value.nodeExtractConfig.template_key || '',
+      model_id: formData.value.nodeExtractConfig.model_id || '',
+      ingestion_mode: formData.value.nodeExtractConfig.ingestion_mode || 'all',
+      max_entities: formData.value.nodeExtractConfig.max_entities || 12,
+      max_relations: formData.value.nodeExtractConfig.max_relations || 15,
+      min_confidence: formData.value.nodeExtractConfig.min_confidence || 0.5,
       text: formData.value.nodeExtractConfig.text,
       tags: formData.value.nodeExtractConfig.tags,
+      entity_types: formData.value.nodeExtractConfig.entity_types || [],
+      entity_schema: formData.value.nodeExtractConfig.entity_schema || [],
+      relation_schema: formData.value.nodeExtractConfig.relation_schema || [],
+      strict_schema: !!formData.value.nodeExtractConfig.strict_schema,
+      require_triple_review: !!formData.value.nodeExtractConfig.require_triple_review,
       nodes: formData.value.nodeExtractConfig.nodes,
       relations: formData.value.nodeExtractConfig.relations
     }
   }
+
+  // OpenSpec research defaults: software-testing knowledge governance on for new/edited KBs
+  if (formData.value.governance) {
+    data.governance = {
+      enabled: !!formData.value.governance.enabled,
+      profile_id: formData.value.governance.profile_id || 'software-testing',
+      profile_version: formData.value.governance.profile_version || '1.0',
+    }
+  }
+  data.contribution_mode = formData.value.contributionMode || 'closed'
+  data.contributor_ids = formData.value.contributorIds || []
+  data.reviewer_ids = formData.value.reviewerIds || []
 
   return data
 }
@@ -930,32 +879,11 @@ const handleSubmit = async () => {
     return
   }
 
-  // 编辑模式下，若已有文件且存储引擎发生了变化，弹窗确认
-  if (
-    props.mode === 'edit' &&
-    hasFiles.value &&
-    formData.value &&
-    initialStorageProvider.value &&
-    formData.value.storageProvider !== initialStorageProvider.value
-  ) {
-    const dialog = DialogPlugin.confirm({
-      header: t('common.confirm'),
-      body: t('knowledgeEditor.messages.storageChangeConfirm'),
-      confirmBtn: t('common.confirm'),
-      cancelBtn: t('common.cancel'),
-      onConfirm: () => {
-        dialog.destroy()
-        doSubmit()
-      },
-      onCancel: () => {
-        dialog.destroy()
-      },
-    })
-    return
-  }
-
   doSubmit()
 }
+
+const resolveOperationError = (error: any) =>
+  error?.message || error?.error?.message || error?.details || '';
 
 const doSubmit = async () => {
   saving.value = true
@@ -989,7 +917,7 @@ const doSubmit = async () => {
       }
       if (formData.value.wikiConfig && formData.value.type !== 'faq') {
         updateConfig.wiki_config = {
-          synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
+          synthesis_model_id: '',
           max_pages_per_ingest: formData.value.wikiConfig.maxPagesPerIngest || 0,
           extraction_granularity: formData.value.wikiConfig.extractionGranularity || 'standard',
         }
@@ -1001,6 +929,16 @@ const doSubmit = async () => {
           wiki_enabled: formData.value.indexingStrategy?.wikiEnabled ?? false,
           graph_enabled: formData.value.indexingStrategy?.graphEnabled ?? false,
         }
+        if (formData.value.governance) {
+          updateConfig.governance = {
+            enabled: !!formData.value.governance.enabled,
+            profile_id: formData.value.governance.profile_id || 'software-testing',
+            profile_version: formData.value.governance.profile_version || '1.0',
+          }
+          updateConfig.contribution_mode = formData.value.contributionMode || 'closed'
+          updateConfig.contributor_ids = formData.value.contributorIds || []
+          updateConfig.reviewer_ids = formData.value.reviewerIds || []
+        }
       }
       await updateKnowledgeBase(props.kbId, {
         name: data.name,
@@ -1008,7 +946,7 @@ const doSubmit = async () => {
         config: updateConfig
       })
 
-      // 2. 更新完整配置（模型、分块、多模态、存储引擎、知识图谱等）
+      // 2. 更新知识库功能配置；模型与存储引擎由平台统一管理
       const config: KBModelConfigRequest = {
         llmModelId: data.summary_model_id,
         embeddingModelId: data.embedding_model_id,
@@ -1018,7 +956,6 @@ const doSubmit = async () => {
           chunkSize: data.chunking_config.chunk_size,
           chunkOverlap: data.chunking_config.chunk_overlap,
           separators: data.chunking_config.separators,
-          parserEngineRules: data.chunking_config.parser_engine_rules || undefined,
           enableParentChild: data.chunking_config.enable_parent_child || false,
           parentChunkSize: data.chunking_config.parent_chunk_size || 4096,
           childChunkSize: data.chunking_config.child_chunk_size || 384
@@ -1026,11 +963,22 @@ const doSubmit = async () => {
         multimodal: {
           enabled: !!data.vlm_config?.enabled
         },
-        storageProvider: data.storage_provider_config?.provider || data.storage_config?.provider || 'local',
         nodeExtract: {
           enabled: data.extract_config?.enabled || false,
+          mode: data.extract_config?.mode || 'general',
+          template_key: data.extract_config?.template_key || '',
+          model_id: data.extract_config?.model_id || '',
+          ingestion_mode: data.extract_config?.ingestion_mode || 'all',
+          max_entities: data.extract_config?.max_entities || 12,
+          max_relations: data.extract_config?.max_relations || 15,
+          min_confidence: data.extract_config?.min_confidence || 0.5,
           text: data.extract_config?.text || '',
           tags: data.extract_config?.tags || [],
+          entity_types: data.extract_config?.entity_types || [],
+          entity_schema: data.extract_config?.entity_schema || [],
+          relation_schema: data.extract_config?.relation_schema || [],
+          strict_schema: !!data.extract_config?.strict_schema,
+          require_triple_review: !!data.extract_config?.require_triple_review,
           nodes: data.extract_config?.nodes || [],
           relations: data.extract_config?.relations || []
         },
@@ -1053,7 +1001,8 @@ const doSubmit = async () => {
           curr.wikiEnabled !== prev.wikiEnabled ||
           curr.graphEnabled !== prev.graphEnabled
         )
-        if (strategyChanged) {
+        const graphConfigChanged = initialGraphFingerprint.value !== graphFingerprint(formData.value.nodeExtractConfig)
+        if (strategyChanged || graphConfigChanged) {
           const dialog = DialogPlugin.confirm({
             header: t('knowledgeEditor.indexing.rebuildConfirmTitle'),
             body: t('knowledgeEditor.indexing.rebuildConfirmBody', { count: '...' }),
@@ -1083,7 +1032,8 @@ const doSubmit = async () => {
     handleClose()
   } catch (error: any) {
     console.error('Knowledge base operation failed:', error)
-    MessagePlugin.error(error?.message || t('common.operationFailed'))
+    const message = resolveOperationError(error)
+    MessagePlugin.error(message || t('common.operationFailed'))
   } finally {
     saving.value = false
   }
@@ -1094,8 +1044,8 @@ const resetState = () => {
   currentSection.value = 'basic'
   formData.value = null
   hasFiles.value = false
-  initialStorageProvider.value = ''
   initialIndexingStrategy.value = null
+  initialGraphFingerprint.value = ''
   saving.value = false
   loading.value = false
   chunkingDirty.value = false
@@ -1120,9 +1070,6 @@ watch(() => props.visible, async (newVal) => {
       currentSection.value = uiStore.kbEditorInitialSection
     }
     
-    // 加载模型列表
-    await loadAllModels()
-    
     // 根据模式加载数据
     if (props.mode === 'edit' && props.kbId) {
       await loadKBData()
@@ -1140,15 +1087,6 @@ watch(() => props.visible, async (newVal) => {
   }
 })
 
-// 监听全局设置弹窗关闭后刷新模型列表
-watch(
-  () => uiStore.showSettingsModal,
-  async (visible, previous) => {
-    if (!visible && previous && props.visible) {
-      await loadAllModels()
-    }
-  }
-)
 </script>
 
 <style scoped lang="less">
@@ -1546,7 +1484,7 @@ watch(
   }
 }
 
-// 多模态配置内联样式（与子组件 KBStorageSettings/KBAdvancedSettings 一致）
+// 多模态配置内联样式（与 KBAdvancedSettings 一致）
 .kb-multimodal-settings {
   width: 100%;
 

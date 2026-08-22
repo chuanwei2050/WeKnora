@@ -43,7 +43,11 @@ func Init(cfg Config) (*Manager, error) {
 	}
 	m := &Manager{cfg: cfg}
 	if cfg.Enabled {
-		m.client = newClient(cfg)
+		client, err := newClient(cfg)
+		if err != nil {
+			return nil, err
+		}
+		m.client = client
 		m.queue = make(chan ingestionEvent, cfg.QueueSize)
 		m.done = make(chan struct{})
 		m.rng = rand.New(rand.NewSource(time.Now().UnixNano()))

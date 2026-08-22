@@ -1,0 +1,47 @@
+{
+  "schema_version": "verified-answer-online-baseline/v1",
+  "profile": "online-app",
+  "status": "passed",
+  "started_at": "2026-08-12T16:38:19.8610149+00:00",
+  "completed_at": "2026-08-12T16:38:48.0701752+00:00",
+  "model_contract_smoke": {
+    "status": "passed",
+    "main_model": "Qwen/Qwen3.6-27B",
+    "verifier_1": "deepseek-ai/DeepSeek-V3.1-Terminus",
+    "verifier_2": "Qwen/Qwen2.5-14B-Instruct",
+    "distinct_model_count": 3,
+    "endpoint": "https://api.siliconflow.cn/v1"
+  },
+  "application_pipeline": {
+    "status": "passed",
+    "live_attempt": {
+      "status": "passed",
+      "session_id": "fb1b4b53-c3ce-45c9-87b6-0690c62b3350",
+      "agent_id": "bf4fe98f-cc35-4aaa-9b1c-4919245c2f50",
+      "knowledge_base_id": "2fb51638-3691-435d-8fb0-ab6a71985f27",
+      "knowledge_id": "3d67e83c-bbbb-4902-ae5b-997cc478cc79",
+      "question": "根据知识库，验证式回答必须先完成哪一步才能生成草稿？未经验证的草稿能否发送给用户？请引用知识库证据回答。",
+      "execution_path": "verified_agent",
+      "completed": true,
+      "retrieval_count": 1,
+      "validator_model_count": 0,
+      "validator_models": [
+        "deepseek-ai/DeepSeek-V3.1-Terminus",
+        "Qwen/Qwen2.5-14B-Instruct"
+      ],
+      "verification_decision": "passed",
+      "verification_degraded": false,
+      "reflection_actions": [],
+      "first_visible_ms": 24929,
+      "answer_chars": 314,
+      "answer_preview": "根据知识库中的《OpenSpec 验收规则 retry》文档，验证式回答的流程要求如下：\n\n1. **生成草稿前必须先完成的步骤**：**检索**。验证式回答必须先进行检索，然后才能生成草稿。\n\n2. **未经验证的草稿能否发送给用户**：**不能**。未经验证的草稿不能发送给用户。\n\n**完整流程**：\n> 验证式回答必须先检索，再生成草稿，再由两个独立模型验证事实、逻辑和引用；证据不足时才能补充检索并重新验证。未经验证的草稿不能发送给用户。\n\n**引用来源**：知识库文档《OpenSpec 验收规则 retry》（knowledge_id: 43d582fc-c2cc-465f-83bd-",
+      "event_count": 8,
+      "notes": [
+        "Agent budget raised to 180s / 16 calls for dual online validators and reflection.",
+        "Pass requires verified_agent path plus either decision=passed or non-empty reflection_actions."
+      ]
+    }
+  },
+  "gate": "passed",
+  "integrity_sha256": "d100d17bbf0ef9d992b6cfbec338fc2e3fc57aec4d75c699f3466751ae20b3dd"
+}

@@ -22,6 +22,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/models/tts"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -55,6 +56,7 @@ type InitializationHandler struct {
 	modelService     interfaces.ModelService
 	kbService        interfaces.KnowledgeBaseService
 	kbRepository     interfaces.KnowledgeBaseRepository
+	tripleReviewRepo interfaces.GraphTripleReviewRepository
 	knowledgeService interfaces.KnowledgeService
 	ollamaService    *ollama.OllamaService
 	documentReader   interfaces.DocumentReader
@@ -68,6 +70,7 @@ func NewInitializationHandler(
 	modelService interfaces.ModelService,
 	kbService interfaces.KnowledgeBaseService,
 	kbRepository interfaces.KnowledgeBaseRepository,
+	tripleReviewRepo interfaces.GraphTripleReviewRepository,
 	knowledgeService interfaces.KnowledgeService,
 	ollamaService *ollama.OllamaService,
 	documentReader interfaces.DocumentReader,
@@ -79,6 +82,7 @@ func NewInitializationHandler(
 		modelService:     modelService,
 		kbService:        kbService,
 		kbRepository:     kbRepository,
+		tripleReviewRepo: tripleReviewRepo,
 		knowledgeService: knowledgeService,
 		ollamaService:    ollamaService,
 		documentReader:   documentReader,
@@ -88,38 +92,28 @@ func NewInitializationHandler(
 
 // KBModelConfigRequest 知识库模型配置请求（简化版，只传模型ID）
 type KBModelConfigRequest struct {
-	LLMModelID       string           `json:"llmModelId"       binding:"required"`
+	LLMModelID       string           `json:"llmModelId"`
 	EmbeddingModelID string           `json:"embeddingModelId"` // optional when RAG indexing is disabled
 	VLMConfig        *types.VLMConfig `json:"vlm_config"`
 	ASRConfig        *types.ASRConfig `json:"asr_config"`
 
 	// 文档分块配置
 	DocumentSplitting struct {
-		ChunkSize         int                      `json:"chunkSize"`
-		ChunkOverlap      int                      `json:"chunkOverlap"`
-		Separators        []string                 `json:"separators"`
-		ParserEngineRules []types.ParserEngineRule `json:"parserEngineRules,omitempty"`
-		EnableParentChild bool                     `json:"enableParentChild"`
-		ParentChunkSize   int                      `json:"parentChunkSize,omitempty"`
-		ChildChunkSize    int                      `json:"childChunkSize,omitempty"`
+		ChunkSize         int      `json:"chunkSize"`
+		ChunkOverlap      int      `json:"chunkOverlap"`
+		Separators        []string `json:"separators"`
+		EnableParentChild bool     `json:"enableParentChild"`
+		ParentChunkSize   int      `json:"parentChunkSize,omitempty"`
+		ChildChunkSize    int      `json:"childChunkSize,omitempty"`
 	} `json:"documentSplitting"`
 
-	// 多模态配置（仅模型相关；存储引擎在 storageProvider 中配置）
+	// 多模态配置（仅模型相关；存储引擎沿用平台设置）
 	Multimodal struct {
 		Enabled bool `json:"enabled"`
 	} `json:"multimodal"`
 
-	// 存储引擎选择（"local" | "minio" | "cos"），影响文档上传与文档内图片存储，参数从全局设置读取
-	StorageProvider string `json:"storageProvider"`
-
 	// 知识图谱配置
-	NodeExtract struct {
-		Enabled   bool                  `json:"enabled"`
-		Text      string                `json:"text"`
-		Tags      []string              `json:"tags"`
-		Nodes     []types.GraphNode     `json:"nodes"`
-		Relations []types.GraphRelation `json:"relations"`
-	} `json:"nodeExtract"`
+	NodeExtract graphExtractConfigRequest `json:"nodeExtract"`
 
 	// 问题生成配置
 	QuestionGeneration struct {
@@ -181,25 +175,67 @@ type InitializationRequest struct {
 		Separators   []string `json:"separators" binding:"required,min=1"`
 	} `json:"documentSplitting" binding:"required"`
 
-	NodeExtract struct {
-		Enabled bool     `json:"enabled"`
-		Text    string   `json:"text"`
-		Tags    []string `json:"tags"`
-		Nodes   []struct {
-			Name       string   `json:"name"`
-			Attributes []string `json:"attributes"`
-		} `json:"nodes"`
-		Relations []struct {
-			Node1 string `json:"node1"`
-			Node2 string `json:"node2"`
-			Type  string `json:"type"`
-		} `json:"relations"`
-	} `json:"nodeExtract"`
+	NodeExtract graphExtractConfigRequest `json:"nodeExtract"`
 
 	QuestionGeneration struct {
 		Enabled       bool `json:"enabled"`
 		QuestionCount int  `json:"questionCount"`
 	} `json:"questionGeneration"`
+}
+
+type graphExtractConfigRequest struct {
+	Enabled             bool                                `json:"enabled"`
+	Mode                types.GraphExtractionMode           `json:"mode"`
+	TemplateKey         string                              `json:"template_key"`
+	ModelID             string                              `json:"model_id"`
+	IngestionMode       types.GraphIngestionMode            `json:"ingestion_mode"`
+	MaxEntities         int                                 `json:"max_entities"`
+	MaxRelations        int                                 `json:"max_relations"`
+	MinConfidence       float64                             `json:"min_confidence"`
+	Text                string                              `json:"text"`
+	Tags                []string                            `json:"tags"`
+	EntityTypes         []string                            `json:"entity_types"`
+	EntitySchema        []types.GraphEntityTypeDefinition   `json:"entity_schema"`
+	RelationSchema      []types.GraphRelationTypeDefinition `json:"relation_schema"`
+	StrictSchema        bool                                `json:"strict_schema"`
+	RequireTripleReview bool                                `json:"require_triple_review"`
+	Nodes               []types.GraphNode                   `json:"nodes"`
+	Relations           []types.GraphRelation               `json:"relations"`
+}
+
+func (r graphExtractConfigRequest) extractConfig() *types.ExtractConfig {
+	if !r.Enabled {
+		return &types.ExtractConfig{Enabled: false}
+	}
+	nodes := make([]*types.GraphNode, len(r.Nodes))
+	for i := range r.Nodes {
+		node := r.Nodes[i]
+		nodes[i] = &node
+	}
+	relations := make([]*types.GraphRelation, len(r.Relations))
+	for i := range r.Relations {
+		relation := r.Relations[i]
+		relations[i] = &relation
+	}
+	return &types.ExtractConfig{
+		Enabled:             true,
+		Mode:                r.Mode,
+		TemplateKey:         r.TemplateKey,
+		ModelID:             r.ModelID,
+		IngestionMode:       r.IngestionMode,
+		MaxEntities:         r.MaxEntities,
+		MaxRelations:        r.MaxRelations,
+		MinConfidence:       r.MinConfidence,
+		Text:                r.Text,
+		Tags:                append([]string(nil), r.Tags...),
+		EntityTypes:         append([]string(nil), r.EntityTypes...),
+		EntitySchema:        append([]types.GraphEntityTypeDefinition(nil), r.EntitySchema...),
+		RelationSchema:      append([]types.GraphRelationTypeDefinition(nil), r.RelationSchema...),
+		StrictSchema:        r.StrictSchema,
+		RequireTripleReview: r.RequireTripleReview,
+		Nodes:               nodes,
+		Relations:           relations,
+	}
 }
 
 // UpdateKBConfig godoc
@@ -229,61 +265,49 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 
 	// 获取知识库信息
 	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbIdStr)
-	if err != nil || kb == nil {
+	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kbId": utils.SanitizeForLog(kbIdStr)})
+		c.Error(errors.NewInternalServerError("获取知识库信息失败: " + err.Error()))
+		return
+	}
+	if kb == nil {
 		c.Error(errors.NewNotFoundError("知识库不存在"))
 		return
 	}
-
-	// 检查Embedding模型是否可以修改
-	if kb.EmbeddingModelID != "" && req.EmbeddingModelID != "" && kb.EmbeddingModelID != req.EmbeddingModelID {
-		// 检查是否已有文件
-		knowledgeList, err := h.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx,
-			kbIdStr, &types.Pagination{
-				Page:     1,
-				PageSize: 1,
-			}, "", "", "")
-		if err == nil && knowledgeList != nil && knowledgeList.Total > 0 {
-			logger.Error(ctx, "Cannot change embedding model when files exist")
-			c.Error(errors.NewBadRequestError("知识库中已有文件，无法修改Embedding模型"))
-			return
-		}
-	}
-
-	// 从数据库获取模型详情并验证
-	llmModel, err := h.modelService.GetModelByID(ctx, req.LLMModelID)
-	if err != nil || llmModel == nil {
-		logger.Error(ctx, "LLM model not found")
-		c.Error(errors.NewBadRequestError("LLM模型不存在"))
+	if !types.CanManageKnowledgeBase(ctx, kb) {
+		c.Error(errors.NewForbiddenError("No permission to update knowledge base config"))
 		return
 	}
 
-	// Embedding模型仅在需要时验证（RAG检索启用时）
-	if req.EmbeddingModelID != "" {
-		embeddingModel, err := h.modelService.GetModelByID(ctx, req.EmbeddingModelID)
-		if err != nil || embeddingModel == nil {
-			logger.Error(ctx, "Embedding model not found")
-			c.Error(errors.NewBadRequestError("Embedding模型不存在"))
+	// 模型由平台模型管理统一决定。Embedding 一旦写入知识库即固定，
+	// 避免平台切换到不同维度后使既有向量索引失效。
+	if strings.TrimSpace(kb.SummaryModelID) == "" {
+		llmModel, err := h.modelService.GetDefaultModel(ctx, types.ModelTypeKnowledgeQA, "chat")
+		if err != nil {
+			c.Error(errors.NewBadRequestError("平台默认对话模型未配置"))
 			return
 		}
+		kb.SummaryModelID = llmModel.ID
 	}
-
-	// 更新知识库的模型ID
-	kb.SummaryModelID = req.LLMModelID
-	if req.EmbeddingModelID != "" {
-		kb.EmbeddingModelID = req.EmbeddingModelID
+	if kb.IsVectorEnabled() && kb.EmbeddingModelID == "" {
+		embeddingModel, err := h.modelService.GetDefaultModel(ctx, types.ModelTypeEmbedding, "embedding")
+		if err != nil {
+			c.Error(errors.NewBadRequestError("平台默认Embedding模型未配置"))
+			return
+		}
+		kb.EmbeddingModelID = embeddingModel.ID
 	}
 
 	// 处理多模态模型配置
 	kb.VLMConfig = types.VLMConfig{}
-	if req.VLMConfig != nil && req.Multimodal.Enabled && req.VLMConfig.ModelID != "" {
-		vllmModel, err := h.modelService.GetModelByID(ctx, req.VLMConfig.ModelID)
-		if err != nil || vllmModel == nil {
-			logger.Warn(ctx, "VLM model not found")
-		} else {
-			kb.VLMConfig.Enabled = req.VLMConfig.Enabled
-			kb.VLMConfig.ModelID = req.VLMConfig.ModelID
+	if req.Multimodal.Enabled {
+		vllmModel, err := h.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm")
+		if err != nil {
+			c.Error(errors.NewBadRequestError("平台默认视觉模型未配置"))
+			return
 		}
+		kb.VLMConfig.Enabled = true
+		kb.VLMConfig.ModelID = vllmModel.ID
 	}
 	if !kb.VLMConfig.Enabled {
 		kb.VLMConfig.ModelID = ""
@@ -291,15 +315,15 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 
 	// 处理ASR语音识别配置
 	kb.ASRConfig = types.ASRConfig{}
-	if req.ASRConfig != nil && req.ASRConfig.Enabled && req.ASRConfig.ModelID != "" {
-		asrModel, err := h.modelService.GetModelByID(ctx, req.ASRConfig.ModelID)
-		if err != nil || asrModel == nil {
-			logger.Warn(ctx, "ASR model not found")
-		} else {
-			kb.ASRConfig.Enabled = true
-			kb.ASRConfig.ModelID = req.ASRConfig.ModelID
-			kb.ASRConfig.Language = req.ASRConfig.Language
+	if req.ASRConfig != nil && req.ASRConfig.Enabled {
+		asrModel, err := h.modelService.GetDefaultModel(ctx, types.ModelTypeASR, "asr")
+		if err != nil {
+			c.Error(errors.NewBadRequestError("平台默认ASR模型未配置"))
+			return
 		}
+		kb.ASRConfig.Enabled = true
+		kb.ASRConfig.ModelID = asrModel.ID
+		kb.ASRConfig.Language = req.ASRConfig.Language
 	}
 
 	// 更新文档分块配置
@@ -312,7 +336,8 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	if len(req.DocumentSplitting.Separators) > 0 {
 		kb.ChunkingConfig.Separators = req.DocumentSplitting.Separators
 	}
-	kb.ChunkingConfig.ParserEngineRules = req.DocumentSplitting.ParserEngineRules
+	// Parser selection is platform-managed; clear any legacy KB-level override.
+	kb.ChunkingConfig.ParserEngineRules = nil
 	kb.ChunkingConfig.EnableParentChild = req.DocumentSplitting.EnableParentChild
 	if req.DocumentSplitting.ParentChunkSize > 0 {
 		kb.ChunkingConfig.ParentChunkSize = req.DocumentSplitting.ParentChunkSize
@@ -328,46 +353,12 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		kb.VLMConfig.ModelID = ""
 	}
 
-	// 存储引擎：仅写入 provider 到新字段，参数从租户全局 StorageEngineConfig 读取
-	provider := strings.ToLower(strings.TrimSpace(req.StorageProvider))
-	if provider == "" {
-		provider = "local"
-	}
-	oldProvider := kb.GetStorageProvider()
-	if oldProvider == "" {
-		oldProvider = "local"
-	}
-	if oldProvider != provider {
-		knowledgeList, err := h.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx,
-			kbIdStr, &types.Pagination{Page: 1, PageSize: 1}, "", "", "")
-		if err == nil && knowledgeList != nil && knowledgeList.Total > 0 {
-			logger.Warn(ctx, "Storage engine changed with existing files, old files may become inaccessible")
-		}
-	}
-	kb.SetStorageProvider(provider)
-
 	// 更新知识图谱配置
-	if req.NodeExtract.Enabled {
-		// 转换 Nodes 和 Relations 为指针类型
-		nodes := make([]*types.GraphNode, len(req.NodeExtract.Nodes))
-		for i := range req.NodeExtract.Nodes {
-			nodes[i] = &req.NodeExtract.Nodes[i]
-		}
-		relations := make([]*types.GraphRelation, len(req.NodeExtract.Relations))
-		for i := range req.NodeExtract.Relations {
-			relations[i] = &req.NodeExtract.Relations[i]
-		}
-
-		kb.ExtractConfig = &types.ExtractConfig{
-			Enabled:   req.NodeExtract.Enabled,
-			Text:      req.NodeExtract.Text,
-			Tags:      req.NodeExtract.Tags,
-			Nodes:     nodes,
-			Relations: relations,
-		}
-	} else {
-		kb.ExtractConfig = &types.ExtractConfig{Enabled: false}
+	previousFingerprint := ""
+	if kb.ExtractConfig != nil {
+		previousFingerprint = kb.ExtractConfig.GraphConfigFingerprint()
 	}
+	kb.ExtractConfig = req.NodeExtract.extractConfig()
 	if err := validateExtractConfig(kb.ExtractConfig); err != nil {
 		logger.Error(ctx, "Invalid extract configuration", err)
 		c.Error(err)
@@ -397,6 +388,9 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		c.Error(errors.NewInternalServerError("更新知识库失败: " + err.Error()))
 		return
 	}
+	if h.tripleReviewRepo != nil && previousFingerprint != kb.ExtractConfig.GraphConfigFingerprint() {
+		_ = h.tripleReviewRepo.SupersedePendingByKnowledgeBase(ctx, kb.TenantID, kb.ID)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -419,6 +413,9 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 // @Router       /initialization/kb/{kbId} [post]
 func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
 	kbIdStr := utils.SanitizeForLog(c.Param("kbId"))
 
 	req, err := h.bindInitializationRequest(ctx, c)
@@ -467,6 +464,15 @@ func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 			"knowledge_base": kb,
 		},
 	})
+}
+
+func requirePlatformAdminForInitialization(c *gin.Context) bool {
+	user, ok := types.UserFromContext(c.Request.Context())
+	if ok && user.IsPlatformAdmin() {
+		return true
+	}
+	c.Error(errors.NewForbiddenError("Only platform administrators can manage model configurations"))
+	return false
 }
 
 func (h *InitializationHandler) bindInitializationRequest(ctx context.Context, c *gin.Context) (*InitializationRequest, error) {
@@ -580,15 +586,7 @@ func validateNodeExtractConfig(ctx context.Context, req *InitializationRequest) 
 		logger.Error(ctx, "Node Extractor configuration incomplete")
 		return errors.NewBadRequestError("请正确配置环境变量NEO4J_ENABLE")
 	}
-	if req.NodeExtract.Text == "" || len(req.NodeExtract.Tags) == 0 {
-		logger.Error(ctx, "Node Extractor configuration incomplete")
-		return errors.NewBadRequestError("Node Extractor配置不完整")
-	}
-	if len(req.NodeExtract.Nodes) == 0 || len(req.NodeExtract.Relations) == 0 {
-		logger.Error(ctx, "Node Extractor configuration incomplete")
-		return errors.NewBadRequestError("请先提取实体和关系")
-	}
-	return nil
+	return validateExtractConfig(req.NodeExtract.extractConfig())
 }
 
 type modelDescriptor struct {
@@ -761,61 +759,12 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 			Enabled: req.Multimodal.Enabled,
 			ModelID: vlmModelID,
 		}
-		switch req.Multimodal.StorageType {
-		case "cos":
-			if req.Multimodal.COS != nil {
-				kb.SetStorageProvider("cos")
-				// Legacy: also write to cos_config for backward compat with old code paths
-				kb.StorageConfig = types.StorageConfig{
-					Provider:   req.Multimodal.StorageType,
-					BucketName: req.Multimodal.COS.BucketName,
-					AppID:      req.Multimodal.COS.AppID,
-					PathPrefix: req.Multimodal.COS.PathPrefix,
-					SecretID:   req.Multimodal.COS.SecretID,
-					SecretKey:  req.Multimodal.COS.SecretKey,
-					Region:     req.Multimodal.COS.Region,
-				}
-			}
-		case "minio":
-			if req.Multimodal.Minio != nil {
-				kb.SetStorageProvider("minio")
-				// Legacy: also write to cos_config for backward compat with old code paths
-				kb.StorageConfig = types.StorageConfig{
-					Provider:   req.Multimodal.StorageType,
-					BucketName: req.Multimodal.Minio.BucketName,
-					PathPrefix: req.Multimodal.Minio.PathPrefix,
-					SecretID:   os.Getenv("MINIO_ACCESS_KEY_ID"),
-					SecretKey:  os.Getenv("MINIO_SECRET_ACCESS_KEY"),
-				}
-			}
-		}
 	} else {
 		kb.VLMConfig = types.VLMConfig{}
-		kb.SetStorageProvider("")
-		kb.StorageConfig = types.StorageConfig{}
 	}
 
 	if req.NodeExtract.Enabled {
-		kb.ExtractConfig = &types.ExtractConfig{
-			Text:      req.NodeExtract.Text,
-			Tags:      req.NodeExtract.Tags,
-			Nodes:     make([]*types.GraphNode, 0),
-			Relations: make([]*types.GraphRelation, 0),
-		}
-		for _, rnode := range req.NodeExtract.Nodes {
-			node := &types.GraphNode{
-				Name:       rnode.Name,
-				Attributes: rnode.Attributes,
-			}
-			kb.ExtractConfig.Nodes = append(kb.ExtractConfig.Nodes, node)
-		}
-		for _, relation := range req.NodeExtract.Relations {
-			kb.ExtractConfig.Relations = append(kb.ExtractConfig.Relations, &types.GraphRelation{
-				Node1: relation.Node1,
-				Node2: relation.Node2,
-				Type:  relation.Type,
-			})
-		}
+		kb.ExtractConfig = req.NodeExtract.extractConfig()
 	}
 }
 
@@ -963,6 +912,9 @@ func (h *InitializationHandler) CheckOllamaModels(c *gin.Context) {
 // @Router       /initialization/ollama/models/download [post]
 func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
 
 	logger.Info(ctx, "Starting async Ollama model download")
 
@@ -1289,6 +1241,10 @@ func (h *InitializationHandler) GetCurrentConfigByKB(c *gin.Context) {
 		c.Error(errors.NewNotFoundError("知识库不存在"))
 		return
 	}
+	if !types.CanReadKnowledgeBase(ctx, kb) {
+		c.Error(errors.NewForbiddenError("No permission to read knowledge base config"))
+		return
+	}
 
 	// 根据知识库的模型ID获取特定模型
 	var models []*types.Model
@@ -1391,11 +1347,8 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 		}
 	}
 
-	// 判断多模态是否启用：有VLM模型ID或有存储配置（兼容新旧字段）
-	storageProvider := kb.GetStorageProvider()
-	hasMultimodal := (kb.VLMConfig.IsEnabled() ||
-		kb.StorageConfig.SecretID != "" || kb.StorageConfig.BucketName != "" ||
-		(storageProvider != "" && storageProvider != "local"))
+	// 存储由平台统一管理，不再作为知识库多模态开关的判断条件。
+	hasMultimodal := kb.VLMConfig.IsEnabled()
 	if config["multimodal"] == nil {
 		config["multimodal"] = map[string]interface{}{
 			"enabled": hasMultimodal,
@@ -1422,42 +1375,27 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 			"separators":   kb.ChunkingConfig.Separators,
 		}
 
-		// 添加多模态的存储配置信息（优先读新字段，兼容旧 cos_config）
-		effectiveProvider := kb.GetStorageProvider()
-		if kb.StorageConfig.SecretID != "" || (effectiveProvider != "" && effectiveProvider != "local") {
-			if config["multimodal"] == nil {
-				config["multimodal"] = map[string]interface{}{
-					"enabled": true,
-				}
-			}
-			multimodal := config["multimodal"].(map[string]interface{})
-			multimodal["storageType"] = effectiveProvider
-			switch effectiveProvider {
-			case "cos":
-				multimodal["cos"] = map[string]interface{}{
-					"secretId":   kb.StorageConfig.SecretID,
-					"secretKey":  kb.StorageConfig.SecretKey,
-					"region":     kb.StorageConfig.Region,
-					"bucketName": kb.StorageConfig.BucketName,
-					"appId":      kb.StorageConfig.AppID,
-					"pathPrefix": kb.StorageConfig.PathPrefix,
-				}
-			case "minio":
-				multimodal["minio"] = map[string]interface{}{
-					"bucketName": kb.StorageConfig.BucketName,
-					"pathPrefix": kb.StorageConfig.PathPrefix,
-				}
-			}
-		}
 	}
 
 	if kb.ExtractConfig != nil {
 		config["nodeExtract"] = map[string]interface{}{
-			"enabled":   kb.ExtractConfig.Enabled,
-			"text":      kb.ExtractConfig.Text,
-			"tags":      kb.ExtractConfig.Tags,
-			"nodes":     kb.ExtractConfig.Nodes,
-			"relations": kb.ExtractConfig.Relations,
+			"enabled":               kb.ExtractConfig.Enabled,
+			"mode":                  kb.ExtractConfig.Mode,
+			"template_key":          kb.ExtractConfig.TemplateKey,
+			"model_id":              kb.ExtractConfig.ModelID,
+			"ingestion_mode":        kb.ExtractConfig.IngestionMode.Normalize(),
+			"max_entities":          kb.ExtractConfig.MaxEntities,
+			"max_relations":         kb.ExtractConfig.MaxRelations,
+			"min_confidence":        kb.ExtractConfig.MinConfidence,
+			"text":                  kb.ExtractConfig.Text,
+			"tags":                  kb.ExtractConfig.Tags,
+			"entity_types":          kb.ExtractConfig.EntityTypes,
+			"entity_schema":         kb.ExtractConfig.EntitySchema,
+			"relation_schema":       kb.ExtractConfig.RelationSchema,
+			"strict_schema":         kb.ExtractConfig.StrictSchema,
+			"require_triple_review": kb.ExtractConfig.RequireTripleReview,
+			"nodes":                 kb.ExtractConfig.Nodes,
+			"relations":             kb.ExtractConfig.Relations,
 		}
 	} else {
 		config["nodeExtract"] = map[string]interface{}{
@@ -1470,7 +1408,7 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 
 // ModelTestRequest 统一的"测试连接"请求体。
 //
-// 四种模型（chat/embedding/rerank/asr）的测试接口共享同一份结构，以便：
+// 五种模型（chat/embedding/rerank/asr/tts）的测试接口共享同一份结构，以便：
 //   - 前端只需维护一份表单 → 后端映射。
 //   - 后端可以直接把请求转成 *types.Model，再调用各包的 ConfigFromModel，
 //     与生产路径（service.modelService.GetXxxModel）走完全相同的装配流程，
@@ -1496,7 +1434,7 @@ type ModelTestRequest struct {
 type RemoteModelCheckRequest = ModelTestRequest
 
 // buildTestModel 把测试连接请求转成一个临时的 *types.Model（不落库），
-// 供 ConfigFromModel 使用。source 为空时按 defaultSource 兜底（chat/rerank/asr
+// 供 ConfigFromModel 使用。source 为空时按 defaultSource 兜底（chat/rerank/asr/tts
 // 默认 remote，embedding 会根据前端传入的 source 决定）。
 func (h *InitializationHandler) buildTestModel(
 	req *ModelTestRequest, modelType types.ModelType, defaultSource types.ModelSource,
@@ -1554,6 +1492,9 @@ func (h *InitializationHandler) resolveTenantWeKnoraCloudCreds(ctx context.Conte
 // @Router       /initialization/models/remote/check [post]
 func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
 
 	logger.Info(ctx, "Checking remote model connection")
 
@@ -1610,6 +1551,9 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 // @Router       /initialization/models/embedding/test [post]
 func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
 
 	logger.Info(ctx, "Testing embedding model connectivity and functionality")
 
@@ -1759,6 +1703,9 @@ func (h *InitializationHandler) checkRerankModelConnection(
 // @Router       /initialization/models/rerank/check [post]
 func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
 
 	logger.Info(ctx, "Checking rerank model connection and functionality")
 
@@ -1816,6 +1763,9 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 // @Router       /initialization/models/asr/check [post]
 func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
 
 	logger.Info(ctx, "Checking ASR model connection")
 
@@ -1897,6 +1847,104 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 	})
 }
 
+// ListTTSVoices 返回 TTS 模型可用音色列表（预设 + 自部署端点可选动态列表）。
+func (h *InitializationHandler) ListTTSVoices(c *gin.Context) {
+	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
+
+	var req ModelTestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	provider := strings.ToLower(strings.TrimSpace(req.Provider))
+	presetProvider := provider == "siliconflow" || provider == "openai"
+	if req.ModelName == "" {
+		c.Error(errors.NewBadRequestError("模型名称不能为空"))
+		return
+	}
+	if !presetProvider && strings.TrimSpace(req.BaseURL) == "" {
+		c.Error(errors.NewBadRequestError("模型名称和Base URL不能为空"))
+		return
+	}
+	if baseURL := strings.TrimSpace(req.BaseURL); baseURL != "" {
+		if err := utils.ValidateURLForSSRF(baseURL); err != nil {
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+			return
+		}
+	}
+
+	voices := tts.ListVoices(ctx, tts.ListVoicesConfig{
+		Provider:      req.Provider,
+		ModelName:     req.ModelName,
+		BaseURL:       req.BaseURL,
+		APIKey:        req.APIKey,
+		CustomHeaders: req.CustomHeaders,
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"voices": voices,
+		},
+	})
+}
+
+// CheckTTSModel 检查 OpenAI-compatible TTS 模型的语音合成端点。
+func (h *InitializationHandler) CheckTTSModel(c *gin.Context) {
+	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
+
+	var req ModelTestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	if req.ModelName == "" || req.BaseURL == "" {
+		c.Error(errors.NewBadRequestError("模型名称和Base URL不能为空"))
+		return
+	}
+	if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+		return
+	}
+
+	model := h.buildTestModel(&req, types.ModelTypeTTS, types.ModelSourceRemote)
+	ttsInstance, err := tts.NewOpenAITTS(tts.Config{
+		BaseURL:       model.Parameters.BaseURL,
+		APIKey:        model.Parameters.APIKey,
+		ModelName:     model.Name,
+		Voice:         strings.TrimSpace(model.Parameters.ExtraConfig["voice"]),
+		CustomHeaders: model.Parameters.CustomHeaders,
+	})
+	if err == nil {
+		var audio io.ReadCloser
+		audio, err = ttsInstance.Synthesize(ctx, "test", tts.SynthesizeOptions{Format: "wav"})
+		if audio != nil {
+			defer audio.Close()
+			if err == nil {
+				_, err = io.CopyN(io.Discard, audio, 1)
+			}
+		}
+	}
+
+	available := err == nil
+	message := "TTS连接成功"
+	if err != nil {
+		message = fmt.Sprintf("TTS测试失败: %v", err)
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"available": available,
+			"message":   message,
+		},
+	})
+}
+
 // 使用结构体解析表单数据
 type testMultimodalForm struct {
 	VLMModel         string `form:"vlm_model"`
@@ -1943,6 +1991,9 @@ type testMultimodalForm struct {
 // @Router       /initialization/multimodal/test [post]
 func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
 
 	logger.Info(ctx, "Testing multimodal functionality")
 
@@ -2010,9 +2061,9 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 		return
 	}
 
-	// 验证文件大小 (default 50MB, configurable via MAX_FILE_SIZE_MB)
+	// 验证文件大小 (configurable via MAX_FILE_SIZE_MB, default 2047 MB)
 	maxSize := utils.GetMaxFileSize()
-	if header.Size > maxSize {
+	if maxSize > 0 && header.Size > maxSize {
 		logger.Error(ctx, "File size too large")
 		c.Error(errors.NewBadRequestError(fmt.Sprintf("图片文件大小不能超过%dMB", utils.GetMaxFileSizeMB())))
 		return
@@ -2136,9 +2187,14 @@ func (h *InitializationHandler) testMultimodalWithDocReader(
 
 // TextRelationExtractionRequest 文本关系提取请求结构
 type TextRelationExtractionRequest struct {
-	Text    string   `json:"text"     binding:"required"`
-	Tags    []string `json:"tags"     binding:"required"`
-	ModelID string   `json:"model_id" binding:"required"`
+	Text          string   `json:"text"           binding:"required"`
+	Tags          []string `json:"tags"`
+	EntityTypes   []string `json:"entity_types"`
+	StrictSchema  bool     `json:"strict_schema"`
+	MaxEntities   int      `json:"max_entities"`
+	MaxRelations  int      `json:"max_relations"`
+	MinConfidence float64  `json:"min_confidence"`
+	ModelID       string   `json:"model_id"`
 }
 
 // TextRelationExtractionResponse 文本关系提取响应结构
@@ -2180,14 +2236,23 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 		return
 	}
 
-	// 验证标签
-	if len(req.Tags) == 0 {
-		c.Error(errors.NewBadRequestError("至少需要选择一个关系标签"))
+	policy := &types.ExtractConfig{
+		Enabled:       true,
+		IngestionMode: types.GraphIngestionAll,
+		MaxEntities:   req.MaxEntities,
+		MaxRelations:  req.MaxRelations,
+		MinConfidence: req.MinConfidence,
+	}
+	if err := validateGraphExtractionPolicy(policy); err != nil {
+		c.Error(err)
 		return
 	}
+	req.MaxEntities = policy.MaxEntities
+	req.MaxRelations = policy.MaxRelations
+	req.MinConfidence = policy.MinConfidence
 
 	// 根据模型ID获取chat模型
-	chatModel, err := h.modelService.GetChatModel(ctx, req.ModelID)
+	chatModel, err := h.modelService.GetChatModel(ctx, "")
 	if err != nil {
 		logger.Error(ctx, "获取模型失败", err)
 		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
@@ -2195,7 +2260,7 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 	}
 
 	// 调用模型服务进行文本关系提取
-	result, err := h.extractRelationsFromText(ctx, req.Text, req.Tags, chatModel)
+	result, err := h.extractRelationsFromText(ctx, req, chatModel)
 	if err != nil {
 		logger.Error(ctx, "文本关系提取失败", err)
 		c.Error(errors.NewInternalServerError("文本关系提取失败: " + err.Error()))
@@ -2211,23 +2276,26 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 // extractRelationsFromText 从文本中提取关系
 func (h *InitializationHandler) extractRelationsFromText(
 	ctx context.Context,
-	text string,
-	tags []string,
+	req TextRelationExtractionRequest,
 	chatModel chat.Chat,
 ) (*TextRelationExtractionResponse, error) {
 	template := &types.PromptTemplateStructured{
-		Description: h.config.ExtractManager.ExtractGraph.Description,
-		Tags:        tags,
-		Examples:    h.config.ExtractManager.ExtractGraph.Examples,
+		Description:   h.config.ExtractManager.ExtractGraph.Description,
+		Tags:          req.Tags,
+		EntityTypes:   req.EntityTypes,
+		StrictSchema:  req.StrictSchema,
+		MaxEntities:   req.MaxEntities,
+		MaxRelations:  req.MaxRelations,
+		MinConfidence: req.MinConfidence,
+		Examples:      h.config.ExtractManager.ExtractGraph.Examples,
 	}
 
 	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, text)
+	graph, err := extractor.Extract(ctx, req.Text)
 	if err != nil {
 		logger.Error(ctx, "文本关系提取失败", err)
 		return nil, err
 	}
-	extractor.RemoveUnknownRelation(ctx, graph)
 
 	result := &TextRelationExtractionResponse{
 		Nodes:     graph.Node,
@@ -2240,7 +2308,7 @@ func (h *InitializationHandler) extractRelationsFromText(
 // FabriTextRequest is a request for generating example text
 type FabriTextRequest struct {
 	Tags    []string `json:"tags"`
-	ModelID string   `json:"model_id" binding:"required"`
+	ModelID string   `json:"model_id"`
 }
 
 // FabriTextResponse is a response for generating example text
@@ -2270,7 +2338,7 @@ func (h *InitializationHandler) FabriText(c *gin.Context) {
 		return
 	}
 
-	chatModel, err := h.modelService.GetChatModel(ctx, req.ModelID)
+	chatModel, err := h.modelService.GetChatModel(ctx, "")
 	if err != nil {
 		logger.Error(ctx, "获取模型失败", err)
 		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))

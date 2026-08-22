@@ -32,19 +32,103 @@ log_warning() {
 # 选择可用的 Docker Compose 命令
 DOCKER_COMPOSE_BIN=""
 DOCKER_COMPOSE_SUBCMD=""
+DOCKER_COMPOSE_FILE="docker-compose.dev.yml"
+DOCKER_CLI_BIN=""
+DEV_APP_CONTAINER="WeKnora-app-dev"
+DEV_APP_IMAGE="weknora-dev-go:1.24"
 
-detect_compose_cmd() {
-    if docker compose version &> /dev/null; then
-        DOCKER_COMPOSE_BIN="docker"
-        DOCKER_COMPOSE_SUBCMD="compose"
+set_compose_file_path() {
+    if [[ "$DOCKER_COMPOSE_BIN" != "docker.exe" && "$DOCKER_COMPOSE_BIN" != "docker-compose.exe" ]]; then
         return 0
     fi
-    if command -v docker-compose &> /dev/null; then
-        if docker-compose version &> /dev/null; then
-            DOCKER_COMPOSE_BIN="docker-compose"
-            DOCKER_COMPOSE_SUBCMD=""
+
+    local compose_src="$PROJECT_ROOT/docker-compose.dev.yml"
+    local converted=""
+
+    # Git Bash / MSYS 优先 cygpath，避免误走 wslpath。
+    if [[ -n "${MSYSTEM:-}" || "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]] && command -v cygpath &> /dev/null; then
+        converted="$(cygpath -w "$compose_src" 2>/dev/null || true)"
+    elif command -v wslpath &> /dev/null; then
+        converted="$(wslpath -w "$compose_src" 2>/dev/null || true)"
+    elif command -v cygpath &> /dev/null; then
+        converted="$(cygpath -w "$compose_src" 2>/dev/null || true)"
+    fi
+
+    if [[ -n "$converted" ]]; then
+        DOCKER_COMPOSE_FILE="$converted"
+    fi
+}
+
+# 尝试一组 compose/cli；version 必须可用。daemon 可用则优先采用。
+# 返回：0=可用且 daemon 通；1=compose 可用但 daemon 不通；2=完全不可用
+try_compose_candidate() {
+    local bin="$1"
+    local subcmd="$2"
+    local cli="$3"
+
+    if [ -n "$subcmd" ]; then
+        "$bin" $subcmd version &> /dev/null || return 2
+    else
+        "$bin" version &> /dev/null || return 2
+    fi
+
+    DOCKER_COMPOSE_BIN="$bin"
+    DOCKER_COMPOSE_SUBCMD="$subcmd"
+    DOCKER_CLI_BIN="$cli"
+    DOCKER_COMPOSE_FILE="docker-compose.dev.yml"
+    set_compose_file_path
+
+    if [ -z "$cli" ]; then
+        return 0
+    fi
+    if "$cli" info &> /dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+detect_compose_cmd() {
+    local fallback_bin="" fallback_subcmd="" fallback_cli=""
+    local status
+
+    # 候选顺序：原生 docker → docker-compose → Windows .exe（Git Bash / 未集成 WSL）
+    local candidates=(
+        "docker|compose|docker"
+        "docker-compose||"
+        "docker.exe|compose|docker.exe"
+        "docker-compose.exe||docker.exe"
+    )
+
+    local item bin subcmd cli
+    for item in "${candidates[@]}"; do
+        IFS='|' read -r bin subcmd cli <<< "$item"
+        if ! command -v "$bin" &> /dev/null; then
+            continue
+        fi
+        # docker-compose.exe 场景：info 用 docker.exe，但 docker.exe 可能不存在
+        if [ -n "$cli" ] && ! command -v "$cli" &> /dev/null; then
+            cli=""
+        fi
+
+        try_compose_candidate "$bin" "$subcmd" "$cli"
+        status=$?
+        if [ $status -eq 0 ]; then
             return 0
         fi
+        if [ $status -eq 1 ] && [ -z "$fallback_bin" ]; then
+            fallback_bin="$DOCKER_COMPOSE_BIN"
+            fallback_subcmd="$DOCKER_COMPOSE_SUBCMD"
+            fallback_cli="$DOCKER_CLI_BIN"
+        fi
+    done
+
+    if [ -n "$fallback_bin" ]; then
+        DOCKER_COMPOSE_BIN="$fallback_bin"
+        DOCKER_COMPOSE_SUBCMD="$fallback_subcmd"
+        DOCKER_CLI_BIN="$fallback_cli"
+        DOCKER_COMPOSE_FILE="docker-compose.dev.yml"
+        set_compose_file_path
+        return 0
     fi
     return 1
 }
@@ -61,6 +145,7 @@ show_help() {
     echo "  logs       查看服务日志"
     echo "  status     查看服务状态"
     echo "  app        启动后端应用（本地运行）"
+    echo "  app-container 启动后端应用（Docker 热重载）"
     echo "  frontend   启动前端开发服务器（本地运行）"
     echo "  help       显示此帮助信息"
     echo ""
@@ -84,21 +169,17 @@ show_help() {
 
 # 检查 Docker
 check_docker() {
-    if ! command -v docker &> /dev/null; then
-        log_error "未安装Docker，请先安装Docker"
-        return 1
-    fi
-    
     if ! detect_compose_cmd; then
-        log_error "未检测到 Docker Compose"
+        log_error "未检测到可用的 Docker Compose"
+        log_error "Windows 请使用 Git Bash / .\\scripts\\quick-dev.ps1，或在 Docker Desktop 中开启当前 WSL 发行版的 WSL Integration"
         return 1
     fi
-    
-    if ! docker info &> /dev/null; then
+
+    if [ -n "$DOCKER_CLI_BIN" ] && ! "$DOCKER_CLI_BIN" info &> /dev/null; then
         log_error "Docker服务未运行"
         return 1
     fi
-    
+
     return 0
 }
 
@@ -159,13 +240,14 @@ start_services() {
     done
     
     # 启动服务
-    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml $PROFILES up -d
+    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f "$DOCKER_COMPOSE_FILE" $PROFILES up -d
     
     if [ $? -eq 0 ]; then
         log_success "基础设施服务已启动"
         echo ""
         log_info "服务访问地址:"
         echo "  - PostgreSQL:    localhost:5432"
+        echo "  - Elasticsearch: localhost:9200"
         echo "  - Redis:         localhost:6379"
         echo "  - DocReader:     localhost:50051"
         
@@ -206,8 +288,9 @@ stop_services() {
         return 1
     fi
     
+    stop_app_container
     cd "$PROJECT_ROOT"
-    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml down
+    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f "$DOCKER_COMPOSE_FILE" down
     
     if [ $? -eq 0 ]; then
         log_success "所有服务已停止"
@@ -227,14 +310,16 @@ restart_services() {
 
 # 查看日志
 show_logs() {
+    check_docker || return 1
     cd "$PROJECT_ROOT"
-    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml logs -f
+    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f "$DOCKER_COMPOSE_FILE" logs -f
 }
 
 # 查看状态
 show_status() {
+    check_docker || return 1
     cd "$PROJECT_ROOT"
-    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml ps
+    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f "$DOCKER_COMPOSE_FILE" ps
 }
 
 # 启动后端应用（本地）
@@ -243,8 +328,13 @@ start_app() {
     
     cd "$PROJECT_ROOT"
     
-    # 检查 Go 是否安装
-    if ! command -v go &> /dev/null; then
+    # 兼容 WSL：Windows 安装的 Go 可能只以 go.exe 暴露
+    local go_bin=""
+    if command -v go &> /dev/null; then
+        go_bin="go"
+    elif command -v go.exe &> /dev/null; then
+        go_bin="go.exe"
+    else
         log_error "Go 未安装"
         return 1
     fi
@@ -253,7 +343,9 @@ start_app() {
     if [ -f ".env" ]; then
         log_info "加载 .env 文件..."
         set -a
-        source .env
+        # Windows 编辑器生成的 .env 可能包含 UTF-8 BOM 和 CRLF，先清理后再加载。
+        local env_bom=$'\xef\xbb\xbf'
+        source <(sed -e "1s/^${env_bom}//" -e 's/\r$//' .env)
         set +a
     else
         log_error ".env 文件不存在，请先创建配置文件"
@@ -270,6 +362,7 @@ start_app() {
     export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
     export NEO4J_URI=bolt://localhost:7687
     export QDRANT_HOST=localhost
+    export ELASTICSEARCH_ADDR=http://localhost:9200
     
     # 确保必要的环境变量已设置
     if [ -z "$DB_DRIVER" ]; then
@@ -286,17 +379,120 @@ start_app() {
     fi
 
     # 检查是否安装了 Air（热重载工具）
-    if command -v air &> /dev/null; then
+    local air_bin=""
+    if [ "$go_bin" = "go" ] && command -v air &> /dev/null; then
+        air_bin="air"
+    fi
+    if [ -n "$air_bin" ]; then
         log_success "检测到 Air，使用热重载模式启动..."
         log_info "修改 Go 代码后将自动重新编译和重启"
-        air
+        "$air_bin"
     else
         log_info "未检测到 Air，使用普通模式启动"
         log_warning "提示: 安装 Air 可以实现代码修改后自动重启"
         log_info "安装命令: go install github.com/air-verse/air@latest"
         LDFLAGS="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
-        go run -ldflags="$LDFLAGS" ./cmd/server
+        "$go_bin" run -ldflags="$LDFLAGS" ./cmd/server
     fi
+}
+
+docker_host_path() {
+    local source_path="$1"
+
+    if [[ -n "${MSYSTEM:-}" || "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]] && command -v cygpath &> /dev/null; then
+        cygpath -w "$source_path"
+    elif command -v wslpath &> /dev/null; then
+        wslpath -w "$source_path"
+    else
+        printf '%s\n' "$source_path"
+    fi
+}
+
+resolve_dev_network() {
+    local project_name="${COMPOSE_PROJECT_NAME:-$(basename "$PROJECT_ROOT")}"
+    project_name="$(printf '%s' "$project_name" | tr '[:upper:]' '[:lower:]')"
+    printf '%s_WeKnora-network-dev\n' "$project_name"
+}
+
+stop_app_container() {
+    if ! detect_compose_cmd || [ -z "$DOCKER_CLI_BIN" ]; then
+        return 0
+    fi
+    "$DOCKER_CLI_BIN" rm -f "$DEV_APP_CONTAINER" > /dev/null 2>&1 || true
+}
+
+# 使用 Linux Go 工具链启动后端，规避 Windows CGO 与 DuckDB 静态库的 ABI 问题。
+start_app_container() {
+    log_info "启动后端应用（Docker 热重载模式）..."
+    check_docker || return 1
+    cd "$PROJECT_ROOT"
+
+    if [ ! -f ".env" ]; then
+        log_error ".env 文件不存在，请先创建配置文件"
+        return 1
+    fi
+
+    local network_name
+    local host_project_root
+    network_name="$(resolve_dev_network)"
+    host_project_root="$(docker_host_path "$PROJECT_ROOT")"
+
+    if ! "$DOCKER_CLI_BIN" image inspect "$DEV_APP_IMAGE" > /dev/null 2>&1; then
+        log_info "构建后端开发镜像（首次启动仅需一次）..."
+        MSYS_NO_PATHCONV=1 "$DOCKER_CLI_BIN" build \
+            -t "$DEV_APP_IMAGE" \
+            -f "$host_project_root/docker/Dockerfile.dev" \
+            "$host_project_root" || return 1
+    fi
+
+    if ! "$DOCKER_CLI_BIN" network inspect "$network_name" > /dev/null 2>&1; then
+        log_error "未找到开发网络: $network_name，请先执行 $0 start"
+        return 1
+    fi
+
+    stop_app_container
+    local hot_reload
+    local ssrf_whitelist
+    if [ -n "${WEKNORA_APP_HOT_RELOAD+x}" ]; then
+        hot_reload="$WEKNORA_APP_HOT_RELOAD"
+    else
+        hot_reload="$(
+            env_bom=$'\xef\xbb\xbf'
+            set -a
+            source <(sed -e "1s/^${env_bom}//" -e 's/\r$//' .env)
+            printf '%s' "${WEKNORA_APP_HOT_RELOAD:-true}"
+        )"
+    fi
+    if [ -n "${SSRF_WHITELIST+x}" ]; then
+        ssrf_whitelist="$SSRF_WHITELIST"
+    else
+        ssrf_whitelist="$(
+            env_bom=$'\xef\xbb\xbf'
+            set -a
+            source <(sed -e "1s/^${env_bom}//" -e 's/\r$//' .env)
+            printf '%s' "${SSRF_WHITELIST:-}"
+        )"
+    fi
+    if [ "$hot_reload" = "true" ]; then
+        log_info "使用 $DEV_APP_IMAGE（单线程轮询监听，支持 Windows 文件变更）"
+    else
+        log_info "使用 $DEV_APP_IMAGE（稳定模式，跳过 Air 文件监听）"
+    fi
+    MSYS_NO_PATHCONV=1 exec "$DOCKER_CLI_BIN" run --rm \
+        --name "$DEV_APP_CONTAINER" \
+        --network "$network_name" \
+        --add-host "host.docker.internal:host-gateway" \
+        -e "WEKNORA_APP_HOT_RELOAD=$hot_reload" \
+        -e "SSRF_WHITELIST=$ssrf_whitelist" \
+        -p 8080:8080 \
+        -v "${host_project_root}:/workspace" \
+        -v weknora-go-mod-dev:/go/pkg/mod \
+        -v weknora-go-build-dev:/root/.cache/go-build \
+        -v weknora-go-bin-dev:/go/bin \
+        -v weknora-duckdb-extensions:/root/.duckdb/extensions \
+        -w /workspace \
+        "$DEV_APP_IMAGE" \
+        bash /workspace/scripts/app-container-entrypoint.sh
 }
 
 # 启动前端（本地）
@@ -321,7 +517,7 @@ start_frontend() {
     log_info "前端将运行在 http://localhost:5173"
     
     # 运行开发服务器
-    npm run dev
+    npm run dev -- --strictPort
 }
 
 # 解析命令
@@ -345,6 +541,9 @@ case "$CMD" in
     app)
         start_app
         ;;
+    app-container)
+        start_app_container
+        ;;
     frontend)
         start_frontend
         ;;
@@ -358,4 +557,4 @@ case "$CMD" in
         ;;
 esac
 
-exit 0
+exit $?

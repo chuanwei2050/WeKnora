@@ -1,8 +1,9 @@
 // src/utils/request.js
-import axios from "axios";
+import axios, { type AxiosResponse } from "axios";
 import { generateRandomString } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
+import { getEmbeddedCSRFToken, getEmbeddedSessionToken, isCookieEmbeddedMode, clearEmbeddedAuth, notifyEmbeddedHost } from './embedded-runtime';
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -28,8 +29,10 @@ function getCurrentLanguage(): string {
 
 instance.interceptors.request.use(
   (config) => {
-    // 添加JWT token认证
-    const token = localStorage.getItem('weknora_token');
+    const embedded = isCookieEmbeddedMode();
+    config.withCredentials = embedded;
+    // Embedded hosts may block third-party cookies; prefer in-memory session_token.
+    const token = embedded ? getEmbeddedSessionToken() : localStorage.getItem('weknora_token');
     if (token) {
       config.headers["Authorization"] = `Bearer ${token}`;
     }
@@ -38,9 +41,9 @@ instance.interceptors.request.use(
     config.headers["Accept-Language"] = getCurrentLanguage();
     
     // 添加跨租户访问请求头（如果选择了其他租户）
-    const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
+    const selectedTenantId = embedded ? null : localStorage.getItem('weknora_selected_tenant_id');
     const defaultTenantId = localStorage.getItem('weknora_tenant');
-    if (selectedTenantId) {
+    if (selectedTenantId && !config.url?.includes('/api/v1/admin/')) {
       try {
         const defaultTenant = defaultTenantId ? JSON.parse(defaultTenantId) : null;
         const defaultId = defaultTenant?.id ? String(defaultTenant.id) : null;
@@ -54,6 +57,10 @@ instance.interceptors.request.use(
     }
     
     config.headers["X-Request-ID"] = `${generateRandomString(12)}`;
+    if (embedded && !['get', 'head', 'options'].includes((config.method || 'get').toLowerCase())) {
+      const csrf = getEmbeddedCSRFToken();
+      if (csrf) config.headers['X-CSRF-Token'] = csrf;
+    }
     return config;
   },
   (error) => {
@@ -97,13 +104,18 @@ instance.interceptors.response.use(
     // 根据业务状态码处理逻辑
     const { status, data } = response;
     if (status >= 200 && status < 300) {
-      return data;
+      return response;
     } else {
       return Promise.reject(data);
     }
   },
   async (error: any) => {
     const originalRequest = error.config;
+    if (error.response?.status === 401 && isCookieEmbeddedMode()) {
+      clearEmbeddedAuth();
+      notifyEmbeddedHost('unauthorized');
+      return Promise.reject({ status: 401, message: t('error.pleaseRelogin') });
+    }
     
     if (!error.response) {
       return Promise.reject({ message: t('error.networkError') });
@@ -115,6 +127,21 @@ instance.interceptors.response.use(
       return Promise.reject({ status, message: (typeof data === 'object' ? (data?.error?.message || data?.message) : data) || t('error.invalidCredentials') });
     }
 
+    // A request started before login (or with an older token) may finish after
+    // the new session has already been persisted. It must not refresh or clear
+    // the current session.
+    if (error.response.status === 401) {
+      const requestAuthorization = originalRequest?.headers?.Authorization || originalRequest?.headers?.get?.('Authorization')
+      const currentToken = localStorage.getItem('weknora_token')
+      if (!requestAuthorization || (currentToken && requestAuthorization !== `Bearer ${currentToken}`)) {
+        const data = error.response.data
+        return Promise.reject({
+          status: 401,
+          message: (typeof data === 'object' ? (data?.error?.message || data?.message || data?.error) : data) || t('error.pleaseRelogin')
+        })
+      }
+    }
+
     // 如果是401错误且不是刷新token的请求，尝试刷新token
     if (error.response.status === 401 && !originalRequest._retry && !originalRequest.url?.includes('/auth/refresh')) {
       if (isRefreshing) {
@@ -123,7 +150,7 @@ instance.interceptors.response.use(
           failedQueue.push({ resolve, reject });
         }).then(token => {
           originalRequest.headers['Authorization'] = 'Bearer ' + token;
-          return instance(originalRequest);
+          return instance(originalRequest).then(response => response.data);
         }).catch(err => {
           return Promise.reject(err);
         });
@@ -153,7 +180,7 @@ instance.interceptors.response.use(
             // 处理队列中的请求
             processQueue(null, token);
             
-            return instance(originalRequest);
+            return instance(originalRequest).then(response => response.data);
           } else {
             throw new Error(response.message || t('error.tokenRefreshFailed'));
           }
@@ -217,44 +244,51 @@ instance.interceptors.response.use(
   }
 );
 
-export function get(url: string) {
-  return instance.get(url);
+function unwrapResponse<T>(request: Promise<AxiosResponse<T>>): Promise<T> {
+  return request.then(response => response.data);
 }
 
-export async function getDown(url: string) {
-  let res = await instance.get(url, {
+export function get<T = any>(url: string): Promise<T> {
+  return unwrapResponse(instance.get<T>(url));
+}
+
+export async function getDown<T = Blob>(url: string): Promise<T> {
+  return unwrapResponse(instance.get<T>(url, {
     responseType: "blob",
-  });
-  return res
+  }));
 }
 
-export function postUpload(url: string, data = {}, onUploadProgress?: (progressEvent: any) => void) {
-  return instance.post(url, data, {
+export function postUpload<T = any>(url: string, data = {}, onUploadProgress?: (progressEvent: any) => void): Promise<T> {
+  return unwrapResponse(instance.post<T>(url, data, {
     headers: {
       "Content-Type": "multipart/form-data",
       "X-Request-ID": `${generateRandomString(12)}`,
     },
     onUploadProgress,
-  });
+  }));
 }
 
-export function postChat(url: string, data = {}) {
-  return instance.post(url, data, {
+export function postChat<T = any>(url: string, data = {}): Promise<T> {
+  return unwrapResponse(instance.post<T>(url, data, {
     headers: {
       "Content-Type": "text/event-stream;charset=utf-8",
       "X-Request-ID": `${generateRandomString(12)}`,
     },
-  });
+  }));
 }
 
-export function post(url: string, data = {}, config?: any) {
-  return instance.post(url, data, config);
+export function post<T = any>(url: string, data = {}, config?: any): Promise<T> {
+  return unwrapResponse(instance.post<T>(url, data, config));
 }
 
-export function put(url: string, data = {}) {
-  return instance.put(url, data);
+export function put<T = any>(url: string, data = {}): Promise<T> {
+  return unwrapResponse(instance.put<T>(url, data));
 }
 
-export function del(url: string, data?: any) {
-  return instance.delete(url, { data });
+export function patch<T = any>(url: string, data = {}): Promise<T> {
+  return unwrapResponse(instance.patch<T>(url, data));
+}
+
+export function del<T = any>(url: string, data?: any): Promise<T> {
+  return unwrapResponse(instance.delete<T>(url, { data }));
 }

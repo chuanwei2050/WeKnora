@@ -1,0 +1,26 @@
+id: software-testing
+version: "1.0"
+layers:
+  - standard
+  - foundation
+  - internal
+  - experience
+required_source_fields:
+  standard:
+    - standard_number
+    - version_label
+    - effective_at
+concepts:
+  - assessment_object
+  - quality_characteristic
+  - test_method
+  - tool
+  - metric
+  - defect
+  - conclusion
+relations:
+  - tests
+  - measures
+  - uses
+  - finds
+  - supports

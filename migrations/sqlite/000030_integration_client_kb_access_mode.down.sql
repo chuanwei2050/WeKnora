@@ -1,0 +1,1 @@
+ALTER TABLE integration_clients DROP COLUMN knowledge_base_access_mode;

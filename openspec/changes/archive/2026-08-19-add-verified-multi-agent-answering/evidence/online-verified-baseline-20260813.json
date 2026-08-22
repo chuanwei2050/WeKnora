@@ -1,0 +1,54 @@
+﻿{
+    "schema_version":  "verified-answer-online-baseline/v1",
+    "profile":  "online-app",
+    "status":  "passed",
+    "started_at":  "\/Date(1786602617819)\/",
+    "completed_at":  "\/Date(1786602640427)\/",
+    "model_contract_smoke":  {
+                                 "status":  "passed",
+                                 "main_model":  "Qwen/Qwen3.6-27B",
+                                 "verifier_1":  "deepseek-ai/DeepSeek-V3.1-Terminus",
+                                 "verifier_2":  "Qwen/Qwen2.5-14B-Instruct",
+                                 "distinct_model_count":  3,
+                                 "endpoint":  "https://api.siliconflow.cn/v1"
+                             },
+    "application_pipeline":  {
+                                 "status":  "passed",
+                                 "live_attempt":  {
+                                                      "status":  "passed",
+                                                      "session_id":  "63765861-b6fd-4794-968d-cfcf77f5d2eb",
+                                                      "agent_id":  "bf4fe98f-cc35-4aaa-9b1c-4919245c2f50",
+                                                      "knowledge_base_id":  "2fb51638-3691-435d-8fb0-ab6a71985f27",
+                                                      "knowledge_id":  "d69625b8-7d6b-4638-a909-22da70af285f",
+                                                      "question":  "According to the knowledge base, which step must verified answering finish before generating a draft? Can an unverified draft be sent to users? Cite knowledge-base evidence.",
+                                                      "execution_path":  "verified_agent",
+                                                      "completed":  true,
+                                                      "retrieval_count":  1,
+                                                      "validator_model_count":  3,
+                                                      "validator_models":  [
+                                                                               "deepseek-ai/DeepSeek-V3.1-Terminus",
+                                                                               "Qwen/Qwen2.5-14B-Instruct"
+                                                                           ],
+                                                      "runtime_validator_models":  [
+                                                                                       "Qwen/Qwen3.6-27B",
+                                                                                       "deepseek-ai/DeepSeek-V3.1-Terminus",
+                                                                                       "Qwen/Qwen2.5-14B-Instruct"
+                                                                                   ],
+                                                      "verification_decision":  "passed",
+                                                      "verification_degraded":  false,
+                                                      "reflection_actions":  [
+
+                                                                             ],
+                                                      "first_visible_ms":  19247,
+                                                      "answer_chars":  361,
+                                                      "answer_preview":  "根据知识库中的验收规则，答案如下：\n\n## 验证式回答的流程要求\n\n**在生成草稿之前，验证式回答必须先完成检索步骤。**\n\n完整的验证式回答流程为：\n1. **先检索**（必须先完成）\n2. 再生成草稿\n3. 由两个独立模型验证事实、逻辑和引用\n4. 证据不足时补充检索并重新验证\n\n## 未经验证的草稿能否发送给用户？\n\n**不能。** 未经验证的草稿不能发送给用户。\n\n---\n\n**知识库证据来源：**\n\n\u003e \"验证式回答必须先检索，再生成草稿，再由两个独立模型验证事实、逻辑和引用；证据不足时才能补充检索并重新验证。未经验证的草稿不能发送给用户。\"\n\n—— 来源：*OpenSpec 验收规",
+                                                      "event_count":  47,
+                                                      "notes":  [
+                                                                    "Agent budget raised to 180s / 16 calls for dual online validators and reflection.",
+                                                                    "Pass requires verified_agent path, decision=passed, non-degraded, and runtime validator_model_count\u003e=2."
+                                                                ]
+                                                  }
+                             },
+    "gate":  "passed",
+    "integrity_sha256":  "a6301b09bb76554b7b42b5026fdf461cc0cf0158b66a7997f2fae107640be9ca"
+}

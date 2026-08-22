@@ -207,6 +207,12 @@ type DataSourceConfig struct {
 
 	// Connector-specific configuration
 	Settings map[string]interface{} `json:"settings"`
+
+	// ApprovedEndpointID references the administrator-approved connector
+	// endpoint used by private deployments. The resolved endpoint is runtime
+	// state and is never persisted in the encrypted config JSON.
+	ApprovedEndpointID string            `json:"approved_endpoint_id,omitempty"`
+	ApprovedEndpoint   *ApprovedEndpoint `json:"-"`
 }
 
 // Resource represents a syncable resource (document, folder, space) from external system

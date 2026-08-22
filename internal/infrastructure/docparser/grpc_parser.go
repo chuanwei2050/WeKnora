@@ -3,27 +3,17 @@ package docparser
 import (
 	"context"
 	"fmt"
-	"os"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/docreader/proto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/resolver"
 )
-
-func getMaxMessageSize() int {
-	if sizeStr := os.Getenv("MAX_FILE_SIZE_MB"); sizeStr != "" {
-		if size, err := strconv.Atoi(sizeStr); err == nil && size > 0 {
-			return size * 1024 * 1024
-		}
-	}
-	return 50 * 1024 * 1024
-}
 
 // GRPCDocumentReader implements DocumentReader over gRPC.
 type GRPCDocumentReader struct {
@@ -45,7 +35,7 @@ func NewGRPCDocumentReader(addr string) (*GRPCDocumentReader, error) {
 
 func (p *GRPCDocumentReader) connect(addr string) error {
 
-	maxMsgSize := getMaxMessageSize()
+	maxMsgSize := utils.GetGRPCMaxMessageSize()
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),

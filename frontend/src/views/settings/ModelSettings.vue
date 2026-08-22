@@ -2,19 +2,14 @@
   <div class="model-settings">
     <div class="section-header">
       <h2>{{ $t('modelSettings.title') }}</h2>
-      <p class="section-description">{{ $t('modelSettings.description') }}</p>
-
-      <div class="builtin-models-hint" role="note">
-        <p class="builtin-hint-label">{{ $t('modelSettings.builtinModels.title') }}</p>
-        <p class="builtin-hint-text">{{ $t('modelSettings.builtinModels.description') }}</p>
-        <a
-          class="builtin-hint-link"
-          href="https://github.com/Tencent/WeKnora/blob/main/docs/BUILTIN_MODELS.md"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          {{ $t('modelSettings.builtinModels.viewGuide') }}
-        </a>
+      <div class="model-profile-switch" aria-label="模型运行模式">
+        <span class="profile-switch-label">模型运行模式</span>
+        <t-button size="small" :theme="selectedProfile === 'online' ? 'primary' : 'default'" :disabled="profileSwitching" @click="switchProfile('online')">
+          在线模型
+        </t-button>
+        <t-button size="small" :theme="selectedProfile === 'offline' ? 'primary' : 'default'" :disabled="profileSwitching" @click="switchProfile('offline')">
+          离线模型
+        </t-button>
       </div>
     </div>
 
@@ -39,9 +34,11 @@
             <div class="model-name">
               {{ model.name }}
               <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
+              <t-tag v-if="model.isDefault" theme="success" size="small">默认</t-tag>
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.remote') }}</span>
+              <span class="deployment-tag">{{ deploymentSummary(model) }}</span>
               <!-- <span class="model-id">{{ model.modelName }}</span> -->
             </div>
           </div>
@@ -61,12 +58,59 @@
       </div>
       <div v-else class="empty-models">
         <p>{{ $t('modelSettings.chat.empty') }}</p>
-        <t-button theme="primary" size="small" @click="openAddDialog('chat')">
-          <template #icon>
-            <add-icon />
-          </template>
-          {{ $t('modelSettings.actions.addModel') }}
-        </t-button>
+      </div>
+    </div>
+
+    <!-- 校验模型 -->
+    <div class="settings-group model-type-group" data-model-type="verifier">
+      <div class="section-subheader">
+        <div class="subheader-text">
+          <h3>校验模型</h3>
+          <p class="section-desc">用于答案校验和评测裁判的模型</p>
+        </div>
+        <t-dropdown
+          :options="verifierRoleOptions"
+          @click="(data: any) => openAddVerifierDialog(data.value)"
+          placement="bottom-right"
+          attach="body"
+        >
+          <t-button theme="primary" size="small">
+            <template #icon><add-icon /></template>
+            {{ $t('modelSettings.actions.addModel') }}
+          </t-button>
+        </t-dropdown>
+      </div>
+      <div class="verifier-role-list">
+        <section v-for="role in verifierRoles" :key="role.value" class="verifier-role-group">
+          <div class="verifier-role-header">
+            <div>
+              <h4>{{ role.label }}</h4>
+              <p>{{ role.description }}</p>
+            </div>
+            <t-button v-if="modelsForVerifierRole(role.value).length === 0" variant="text" theme="primary" size="small" @click="openAddVerifierDialog(role.value)">
+              添加模型
+            </t-button>
+          </div>
+          <div v-if="modelsForVerifierRole(role.value).length > 0" class="model-list-container">
+            <div v-for="model in modelsForVerifierRole(role.value)" :key="model.id" class="model-card">
+              <div class="model-info">
+                <div class="model-name">{{ model.name }} <t-tag v-if="model.isDefault" theme="success" size="small">默认</t-tag></div>
+                <div class="model-meta">
+                  <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.remote') }}</span>
+                  <span class="deployment-tag">{{ deploymentSummary(model) }}</span>
+                </div>
+              </div>
+              <div class="model-actions">
+                <t-dropdown :options="getModelOptions('chat', model)" @click="(data: any) => handleMenuAction(data, 'chat', model)" placement="bottom-right" attach="body">
+                  <t-button variant="text" shape="square" size="small" class="more-btn"><t-icon name="more" /></t-button>
+                </t-dropdown>
+              </div>
+            </div>
+          </div>
+          <div v-else class="verifier-role-empty">
+            暂未配置
+          </div>
+        </section>
       </div>
     </div>
 
@@ -91,9 +135,11 @@
             <div class="model-name">
               {{ model.name }}
               <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
+              <t-tag v-if="model.isDefault" theme="success" size="small">默认</t-tag>
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.remote') }}</span>
+              <span class="deployment-tag">{{ deploymentSummary(model) }}</span>
               <!-- <span class="model-id">{{ model.modelName }}</span> -->
               <span v-if="model.dimension" class="dimension">{{ $t('model.editor.dimensionLabel') }}: {{ model.dimension }}</span>
             </div>
@@ -114,12 +160,6 @@
       </div>
       <div v-else class="empty-models">
         <p>{{ $t('modelSettings.embedding.empty') }}</p>
-        <t-button theme="primary" size="small" @click="openAddDialog('embedding')">
-          <template #icon>
-            <add-icon />
-          </template>
-          {{ $t('modelSettings.actions.addModel') }}
-        </t-button>
       </div>
     </div>
 
@@ -144,9 +184,11 @@
             <div class="model-name">
               {{ model.name }}
               <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
+              <t-tag v-if="model.isDefault" theme="success" size="small">默认</t-tag>
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.remote') }}</span>
+              <span class="deployment-tag">{{ deploymentSummary(model) }}</span>
               <!-- <span class="model-id">{{ model.modelName }}</span> -->
             </div>
           </div>
@@ -166,12 +208,6 @@
       </div>
       <div v-else class="empty-models">
         <p>{{ $t('modelSettings.rerank.empty') }}</p>
-        <t-button theme="primary" size="small" @click="openAddDialog('rerank')">
-          <template #icon>
-            <add-icon />
-          </template>
-          {{ $t('modelSettings.actions.addModel') }}
-        </t-button>
       </div>
     </div>
 
@@ -196,16 +232,18 @@
             <div class="model-name">
               {{ model.name }}
               <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
+              <t-tag v-if="model.isDefault" theme="success" size="small">默认</t-tag>
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.openaiCompatible') }}</span>
+              <span class="deployment-tag">{{ deploymentSummary(model) }}</span>
               <!-- <span class="model-id">{{ model.modelName }}</span> -->
             </div>
           </div>
           <div class="model-actions">
             <t-dropdown 
-              :options="getModelOptions('vllm', model)" 
-              @click="(data: any) => handleMenuAction(data, 'vllm', model)"
+              :options="getModelOptions(model.originType === 'KnowledgeQA' ? 'chat' : 'vllm', model)"
+              @click="(data: any) => handleMenuAction(data, model.originType === 'KnowledgeQA' ? 'chat' : 'vllm', model)"
               placement="bottom-right"
               attach="body"
             >
@@ -218,12 +256,6 @@
       </div>
       <div v-else class="empty-models">
         <p>{{ $t('modelSettings.vllm.empty') }}</p>
-        <t-button theme="primary" size="small" @click="openAddDialog('vllm')">
-          <template #icon>
-            <add-icon />
-          </template>
-          {{ $t('modelSettings.actions.addModel') }}
-        </t-button>
       </div>
     </div>
 
@@ -248,9 +280,11 @@
             <div class="model-name">
               {{ model.name }}
               <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
+              <t-tag v-if="model.isDefault" theme="success" size="small">默认</t-tag>
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.openaiCompatible') }}</span>
+              <span class="deployment-tag">{{ deploymentSummary(model) }}</span>
             </div>
           </div>
           <div class="model-actions">
@@ -269,12 +303,43 @@
       </div>
       <div v-else class="empty-models">
         <p>{{ $t('modelSettings.asr.empty') }}</p>
-        <t-button theme="primary" size="small" @click="openAddDialog('asr')">
-          <template #icon>
-            <add-icon />
-          </template>
+      </div>
+    </div>
+
+    <!-- TTS 语音模型 -->
+    <div class="settings-group model-type-group" data-model-type="tts">
+      <div class="section-subheader">
+        <div class="subheader-text">
+          <h3>TTS 语音合成模型</h3>
+          <p class="section-desc">将最终回答转换为临时音频播放，默认不持久化。</p>
+        </div>
+        <t-button theme="primary" size="small" @click="openAddDialog('tts')">
+          <template #icon><add-icon /></template>
           {{ $t('modelSettings.actions.addModel') }}
         </t-button>
+      </div>
+      <div v-if="ttsModels.length > 0" class="model-list-container">
+        <div v-for="model in ttsModels" :key="model.id" class="model-card" :class="{ 'builtin-model': model.isBuiltin }">
+          <div class="model-info">
+            <div class="model-name">
+              {{ model.name }}
+              <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
+              <t-tag v-if="model.isDefault" theme="success" size="small">默认</t-tag>
+            </div>
+            <div class="model-meta">
+              <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.openaiCompatible') }}</span>
+              <span class="deployment-tag">{{ deploymentSummary(model) }}</span>
+            </div>
+          </div>
+          <div class="model-actions">
+            <t-dropdown :options="getModelOptions('tts', model)" @click="(data: any) => handleMenuAction(data, 'tts', model)" placement="bottom-right" attach="body">
+              <t-button variant="text" shape="square" size="small" class="more-btn"><t-icon name="more" /></t-button>
+            </t-dropdown>
+          </div>
+        </div>
+      </div>
+      <div v-else class="empty-models">
+        <p>暂未配置 TTS 模型</p>
       </div>
     </div>
 
@@ -291,50 +356,89 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
-import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
+import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, preflightModel, type ModelConfig, type ModelPreflightResult } from '@/api/model'
+import { getModelProfile, updateModelProfile, type ModelProfile } from '@/api/system'
+import { isVLLMSettingsModel } from '@/utils/model-profile'
 
 const { t } = useI18n()
 
 const showDialog = ref(false)
-const currentModelType = ref<'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'>('chat')
+const currentModelType = ref<'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts'>('chat')
 const editingModel = ref<any>(null)
 const loading = ref(true)
+const preflightResults = ref<Record<string, ModelPreflightResult>>({})
+const selectedProfile = ref<ModelProfile>('online')
+const profileSwitching = ref(false)
 
 // 模型列表数据
 const allModels = ref<ModelConfig[]>([])
+const visibleModels = computed(() =>
+  allModels.value.filter(model => model.profile === selectedProfile.value)
+)
 
 // 根据类型过滤模型
 const chatModels = computed(() => 
-  allModels.value
+  visibleModels.value
     .filter(m => m.type === 'KnowledgeQA')
     .map(convertToLegacyFormat)
 )
 
+const verifierModels = computed(() =>
+  visibleModels.value
+    .filter(m => m.type === 'Verifier' || m.type === 'EvaluationJudge')
+    .map(convertToLegacyFormat)
+)
+
+type VerifierRole = 'verifier_1' | 'verifier_2' | 'evaluation_judge'
+
+const verifierRoles: Array<{ value: VerifierRole; label: string; description: string }> = [
+  { value: 'verifier_1', label: '校验 1', description: '第一路答案校验' },
+  { value: 'verifier_2', label: '校验 2', description: '第二路独立校验' },
+  { value: 'evaluation_judge', label: '裁判', description: '汇总校验结果并作出裁决' }
+]
+
+const verifierRoleOptions = verifierRoles.map(role => ({
+  content: role.label,
+  value: role.value
+}))
+
+const modelsForVerifierRole = (role: VerifierRole) => verifierModels.value.filter(model =>
+  role === 'evaluation_judge'
+    ? model.originType === 'EvaluationJudge' || model.profileRole === role
+    : model.profileRole === role
+)
+
 const embeddingModels = computed(() => 
-  allModels.value
+  visibleModels.value
     .filter(m => m.type === 'Embedding')
     .map(convertToLegacyFormat)
 )
 
 const rerankModels = computed(() => 
-  allModels.value
+  visibleModels.value
     .filter(m => m.type === 'Rerank')
     .map(convertToLegacyFormat)
 )
 
 const vllmModels = computed(() =>
-  allModels.value
-    .filter(m => m.type === 'VLLM')
+  visibleModels.value
+    .filter(isVLLMSettingsModel)
     .map(convertToLegacyFormat)
 )
 
 const asrModels = computed(() =>
-  allModels.value
+  visibleModels.value
     .filter(m => m.type === 'ASR')
+    .map(convertToLegacyFormat)
+)
+
+const ttsModels = computed(() =>
+  visibleModels.value
+    .filter(m => m.type === 'TTS')
     .map(convertToLegacyFormat)
 )
 
@@ -349,8 +453,19 @@ function convertToLegacyFormat(model: ModelConfig) {
     apiKey: model.parameters.api_key || '',
     provider: model.parameters.provider || '', // 添加 provider 字段
     dimension: model.parameters.embedding_parameters?.dimension,
+    compatibilityId: model.parameters.embedding_parameters?.compatibility_id,
     isBuiltin: model.is_builtin || false,
+    isDefault: model.is_default || false,
+    status: model.status || '',
+    originType: model.type,
+    profile: model.profile || '',
+    profileRole: model.profile_role || '',
     supportsVision: model.parameters.supports_vision || false,
+    protocol: model.parameters.protocol,
+    location: model.parameters.location,
+    artifactPolicy: model.parameters.artifact_policy,
+    inferenceEngine: model.parameters.inference_engine || '',
+    defaultVoice: model.parameters.extra_config?.voice || model.parameters.extra_config?.voice_name || '',
     // 将后端 map 形式转换为前端可编辑的数组形式
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
@@ -363,7 +478,7 @@ const loadModels = async () => {
   loading.value = true
   try {
     // 直接获取所有模型，不分类型
-    const models = await listModels()
+    const models = await listModels(undefined, selectedProfile.value)
     allModels.value = models
   } catch (error: any) {
     console.error('加载模型列表失败:', error)
@@ -373,15 +488,45 @@ const loadModels = async () => {
   }
 }
 
+const loadProfile = async () => {
+  const response = await getModelProfile()
+  selectedProfile.value = response.data.profile
+}
+
+const switchProfile = async (profile: ModelProfile) => {
+  if (profile === selectedProfile.value || profileSwitching.value) return
+  profileSwitching.value = true
+  try {
+    const response = await updateModelProfile(profile)
+    selectedProfile.value = response.data.profile
+    await loadModels()
+    MessagePlugin.success(`已切换到${profile === 'online' ? '在线' : '离线'}模型`)
+  } catch (error: any) {
+    MessagePlugin.error(error.message || '模型模式切换失败')
+  } finally {
+    profileSwitching.value = false
+  }
+}
+
 // 打开添加对话框
-const openAddDialog = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr') => {
+const openAddDialog = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts') => {
   currentModelType.value = type
   editingModel.value = null
   showDialog.value = true
 }
 
+const openAddVerifierDialog = (role: VerifierRole) => {
+  currentModelType.value = 'chat'
+  editingModel.value = {
+    originType: role === 'evaluation_judge' ? 'EvaluationJudge' : 'Verifier',
+    profile: selectedProfile.value,
+    profileRole: role
+  }
+  showDialog.value = true
+}
+
 // 编辑模型
-const editModel = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', model: any) => {
+const editModel = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts', model: any) => {
   // 内置模型不能编辑
   if (model.isBuiltin) {
     MessagePlugin.warning(t('modelSettings.toasts.builtinCannotEdit'))
@@ -429,6 +574,11 @@ const handleModelSave = async (modelData: any) => {
         return
       }
     }
+
+    if (currentModelType.value === 'tts' && !modelData.defaultVoice?.trim()) {
+      MessagePlugin.warning('请填写默认音色')
+      return
+    }
     
     // 将前端 Key-Value 数组形式的自定义 Header 转换成后端期望的 map
     const customHeadersMap: Record<string, string> = {}
@@ -445,18 +595,24 @@ const handleModelSave = async (modelData: any) => {
     // 将前端格式转换为后端格式
     const apiModelData: ModelConfig = {
       name: modelData.modelName.trim(), // 使用 modelName 作为 name，并去除首尾空格
-      type: getModelType(currentModelType.value),
+      type: editingModel.value?.originType || getModelType(currentModelType.value),
+      profile: selectedProfile.value,
+      profile_role: editingModel.value?.profileRole || getProfileRole(currentModelType.value),
       source: modelData.source,
       description: '',
       parameters: {
         base_url: modelData.baseUrl?.trim() || '',
         api_key: modelData.apiKey?.trim() || '',
         provider: modelData.provider || '', // 添加 provider 字段
+        ...(currentModelType.value === 'tts' ? {
+          extra_config: { voice: modelData.defaultVoice.trim() }
+        } : {}),
         ...(Object.keys(customHeadersMap).length > 0 ? { custom_headers: customHeadersMap } : {}),
         ...(currentModelType.value === 'embedding' && modelData.dimension ? {
           embedding_parameters: {
             dimension: modelData.dimension,
-            truncate_prompt_tokens: 0
+            truncate_prompt_tokens: 0,
+            ...(modelData.compatibilityId ? { compatibility_id: modelData.compatibilityId } : {})
           }
         } : {}),
         ...(currentModelType.value === 'vllm' ? {
@@ -486,7 +642,7 @@ const handleModelSave = async (modelData: any) => {
 }
 
 // 删除模型
-const deleteModel = async (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', modelId: string) => {
+const deleteModel = async (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts', modelId: string) => {
   // 检查是否是内置模型
   const model = allModels.value.find(m => m.id === modelId)
   if (model?.is_builtin) {
@@ -506,15 +662,27 @@ const deleteModel = async (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr
 }
 
 // 获取模型操作菜单选项
-const getModelOptions = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', model: any) => {
+const getModelOptions = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts', model: any) => {
   const options: any[] = []
-  
+
   // 内置模型不能编辑和删除
   if (model.isBuiltin) {
     return options
   }
+
+  if (!model.isDefault && model.status === 'active') {
+    options.push({
+      content: '设为默认',
+      value: `default-${type}-${model.id}`
+    })
+  }
   
   // 编辑选项
+  options.push({
+    content: '能力预检',
+    value: `preflight-${type}-${model.id}`
+  })
+
   options.push({
     content: t('common.edit'),
     value: `edit-${type}-${model.id}`
@@ -537,18 +705,42 @@ const getModelOptions = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr',
 }
 
 // 处理菜单操作
-const handleMenuAction = (data: { value: string }, type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', model: any) => {
+const handleMenuAction = (data: { value: string }, type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts', model: any) => {
   const value = data.value
   
-  if (value.indexOf('edit-') === 0) {
+  if (value.indexOf('default-') === 0) {
+    setDefaultModel(model.id)
+  } else if (value.indexOf('preflight-') === 0) {
+    runPreflight(model)
+  } else if (value.indexOf('edit-') === 0) {
     editModel(type, model)
   } else if (value.indexOf('copy-') === 0) {
     copyModel(type, model.id)
   } else if (value.indexOf('delete-') === 0) {
-    // 使用确认对话框进行确认
-    if (confirm(t('modelSettings.confirmDelete'))) {
-      deleteModel(type, model.id)
-    }
+    // Prefer DialogPlugin over window.confirm — native confirm is blocked in sandboxed iframes.
+    const dialog = DialogPlugin.confirm({
+      header: t('common.delete'),
+      body: t('modelSettings.confirmDelete'),
+      confirmBtn: { content: t('common.delete'), theme: 'danger' },
+      cancelBtn: t('common.cancel'),
+      onConfirm: () => {
+        dialog.destroy()
+        deleteModel(type, model.id)
+      },
+      onCancel: () => dialog.destroy(),
+    })
+  }
+}
+
+const setDefaultModel = async (modelId: string) => {
+  const model = allModels.value.find(item => item.id === modelId)
+  if (!model) return
+  try {
+    await updateModelAPI(modelId, { ...model, is_default: true })
+    await loadModels()
+    MessagePlugin.success('已设为默认模型')
+  } catch (error: any) {
+    MessagePlugin.error(error.message || '设置默认模型失败')
   }
 }
 
@@ -566,7 +758,7 @@ const generateCopyName = (originalName: string): string => {
 }
 
 // 复制模型
-const copyModel = async (_type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', modelId: string) => {
+const copyModel = async (_type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts', modelId: string) => {
   const source = allModels.value.find(m => m.id === modelId)
   if (!source) {
     return
@@ -580,6 +772,8 @@ const copyModel = async (_type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
     const newModel: ModelConfig = {
       name: generateCopyName(source.name),
       type: source.type,
+      profile: source.profile || selectedProfile.value,
+      profile_role: source.profile_role || '',
       source: source.source,
       description: source.description || '',
       parameters: JSON.parse(JSON.stringify(source.parameters || {}))
@@ -595,20 +789,52 @@ const copyModel = async (_type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
 }
 
 // 获取后端模型类型
-function getModelType(type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'): 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR' {
+function getModelType(type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts'): 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR' | 'TTS' {
   const typeMap = {
     chat: 'KnowledgeQA' as const,
     embedding: 'Embedding' as const,
     rerank: 'Rerank' as const,
     vllm: 'VLLM' as const,
-    asr: 'ASR' as const
+    asr: 'ASR' as const,
+    tts: 'TTS' as const
   }
   return typeMap[type]
 }
 
+function getProfileRole(type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts'): string {
+  const roleMap = {
+    chat: 'chat',
+    embedding: 'embedding',
+    rerank: 'rerank',
+    vllm: 'vlm',
+    asr: 'asr',
+    tts: 'tts'
+  }
+	return roleMap[type]
+}
+
+const deploymentSummary = (model: any): string => {
+  const location = model.location || 'unknown'
+  const protocol = model.protocol || (model.source === 'local' ? 'ollama' : 'openai-compatible')
+  const policy = model.artifactPolicy || 'allow-download'
+  return `${protocol} · ${location} · ${policy}`
+}
+
+const runPreflight = async (model: any) => {
+  try {
+    const result = await preflightModel(model.id)
+    preflightResults.value[model.id] = result
+    const passed = result.probes.filter(item => item.status === 'passed').length
+    MessagePlugin.info(`能力预检：${passed}/${result.probes.length} 个角色通过`)
+  } catch (error: any) {
+    MessagePlugin.error(error.message || '能力预检失败')
+  }
+}
+
 // 组件挂载时加载模型列表
-onMounted(() => {
-  loadModels()
+onMounted(async () => {
+  await loadProfile()
+  await loadModels()
 })
 </script>
 
@@ -635,38 +861,17 @@ onMounted(() => {
   }
 }
 
-.builtin-models-hint {
-  margin-top: 4px;
-  padding: 10px 12px;
-  background: var(--td-bg-color-secondarycontainer);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+.model-profile-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
 }
 
-.builtin-hint-label {
-  margin: 0 0 4px 0;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--td-text-color-placeholder);
-  letter-spacing: 0.02em;
-}
-
-.builtin-hint-text {
-  margin: 0 0 6px 0;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--td-text-color-secondary);
-}
-
-.builtin-hint-link {
+.profile-switch-label {
+  margin-right: 4px;
   font-size: 13px;
   color: var(--td-text-color-secondary);
-  text-decoration: none;
-
-  &:hover {
-    color: var(--td-brand-color);
-    text-decoration: underline;
-  }
 }
 
 .settings-group {
@@ -721,6 +926,48 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.verifier-role-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.verifier-role-group {
+  min-width: 0;
+}
+
+.verifier-role-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 0 2px;
+
+  h4 {
+    margin: 0 0 3px;
+    color: var(--td-text-color-primary);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  p {
+    margin: 0;
+    color: var(--td-text-color-secondary);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+}
+
+.verifier-role-empty {
+  padding: 18px 12px;
+  border: 1px dashed var(--td-component-stroke);
+  border-radius: 6px;
+  color: var(--td-text-color-placeholder);
+  font-size: 13px;
+  text-align: center;
 }
 
 .model-card {
@@ -789,6 +1036,14 @@ onMounted(() => {
       border-radius: 3px;
       font-size: 11px;
       font-weight: 500;
+    }
+
+    .deployment-tag {
+      color: var(--td-text-color-placeholder);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 360px;
     }
 
     .model-id {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"strings"
 
 	_ "github.com/duckdb/duckdb-go/v2"
 )
@@ -15,6 +17,9 @@ import (
 var duckdbExtensions = []string{"spatial", "excel"}
 
 func downloadExtensions() {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("AIR_GAPPED_MODE")), "true") {
+		panic("AIR_GAPPED_MODE forbids downloading DuckDB extensions; preload them before startup")
+	}
 	ctx := context.Background()
 
 	sqlDB, err := sql.Open("duckdb", ":memory:")

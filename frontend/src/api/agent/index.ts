@@ -30,6 +30,30 @@ export interface CustomAgentConfig {
   llm_call_timeout?: number;        // LLM调用超时时间（秒）
   allowed_tools?: string[];         // 允许的工具
   reflection_enabled?: boolean;     // 是否启用反思
+	verified_answer?: {
+	  enabled?: boolean;
+	  strict_multi_model?: boolean;
+	  fact_validator_model_id?: string;
+	  logic_validator_model_id?: string;
+	  citation_validator_model_id?: string;
+	  max_reflections?: number;
+	  degradation_strategy?: 'conservative' | 'stop';
+	};
+	complexity_routing?: {
+	  enabled?: boolean;
+	  taxonomy_id?: string;
+	  taxonomy_version?: string;
+	  confidence_threshold?: number;
+	  fallback_action?: 'quick_rag' | 'contextual_rag' | 'graph_reasoning' | 'verified_agent';
+	  level_actions?: Partial<Record<'L1' | 'L2' | 'L3' | 'L4', 'quick_rag' | 'contextual_rag' | 'graph_reasoning' | 'verified_agent'>>;
+	  capabilities?: {
+	    quick_rag?: boolean;
+	    contextual_rag?: boolean;
+	    graph_reasoning?: boolean;
+	    verified_agent?: boolean;
+	  };
+	  few_shot?: Array<{ question: string; level: string; subtype?: string }>;
+	};
   // MCP服务选择模式：all=全部启用的MCP服务, selected=指定服务, none=不使用MCP
   mcp_selection_mode?: 'all' | 'selected' | 'none';
   mcp_services?: string[];          // 选择的MCP服务ID列表
@@ -54,6 +78,12 @@ export interface CustomAgentConfig {
   image_storage_provider?: string;   // 图片存储提供商
   audio_upload_enabled?: boolean;    // 是否启用音频上传/ASR转录（默认: false）
   asr_model_id?: string;            // ASR模型ID（音频转录用）
+	voice_input_enabled?: boolean;
+	voice_output_enabled?: boolean;
+	tts_model_id?: string;
+	voice_language?: string;
+	voice_name?: string;
+	voice_auto_play?: boolean;
 
   // ===== 文件类型限制 =====
   // 支持的文件类型（如 ["csv", "xlsx", "xls"]）
@@ -134,7 +164,7 @@ export const BUILTIN_AGENT_NORMAL_ID = BUILTIN_QUICK_ANSWER_ID;
 export const BUILTIN_AGENT_AGENT_ID = BUILTIN_SMART_REASONING_ID;
 
 // 获取智能体列表（包括内置智能体）
-// disabled_own_agent_ids: 当前租户在对话下拉中停用的「我的」智能体 ID，仅影响本租户
+// disabled_own_agent_ids: 当前租户自有停用项与平台全局停用智能体 ID 的合并结果
 export function listAgents() {
   return get<{ data: CustomAgent[]; disabled_own_agent_ids?: string[] }>('/api/v1/agents');
 }

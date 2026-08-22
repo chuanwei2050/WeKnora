@@ -1,0 +1,154 @@
+{
+  "models": [
+    {
+      "role": "chat",
+      "protocol": "ollama",
+      "location": "same-host",
+      "artifact_policy": "preloaded-only",
+      "model_name": "qwen3.5:0.8b",
+      "license": "Apache-2.0",
+      "redistributable": false,
+      "artifact_included": false,
+      "import_steps": [
+        "ollama pull qwen3.5:0.8b",
+        "确认服务端判定 location=same-host"
+      ]
+    },
+    {
+      "role": "vlm",
+      "protocol": "ollama",
+      "location": "same-host",
+      "artifact_policy": "preloaded-only",
+      "model_name": "qwen3.5:0.8b",
+      "license": "Apache-2.0",
+      "redistributable": false,
+      "artifact_included": false,
+      "import_steps": [
+        "复用 chat 制品 qwen3.5:0.8b",
+        "通过 VLM 图像输入探针后再启用"
+      ]
+    },
+    {
+      "role": "verifier_1",
+      "protocol": "ollama",
+      "location": "same-host",
+      "artifact_policy": "preloaded-only",
+      "model_name": "qwen3.5:0.8b",
+      "license": "Apache-2.0",
+      "redistributable": false,
+      "artifact_included": false,
+      "import_steps": [
+        "复用 chat 结构化输出作为验证模型 1",
+        "严格双模型验收需第二身份时替换为独立制品"
+      ]
+    },
+    {
+      "role": "verifier_2",
+      "protocol": "ollama",
+      "location": "same-host",
+      "artifact_policy": "preloaded-only",
+      "model_name": "qwen3.5:0.8b",
+      "license": "Apache-2.0",
+      "redistributable": false,
+      "artifact_included": false,
+      "import_steps": [
+        "桌面 Lite 可用同机第二会话复用 chat；生产应导入独立验证制品"
+      ]
+    },
+    {
+      "role": "judge",
+      "protocol": "ollama",
+      "location": "same-host",
+      "artifact_policy": "preloaded-only",
+      "model_name": "qwen3.5:0.8b",
+      "license": "Apache-2.0",
+      "redistributable": false,
+      "artifact_included": false,
+      "import_steps": [
+        "复用 chat 结构化输出作为评测裁判",
+        "正式评测基线需独立裁判身份时替换"
+      ]
+    },
+    {
+      "role": "embedding",
+      "protocol": "ollama",
+      "location": "same-host",
+      "artifact_policy": "preloaded-only",
+      "model_name": "bge-m3:latest",
+      "license": "MIT",
+      "redistributable": false,
+      "artifact_included": false,
+      "import_steps": [
+        "ollama pull bge-m3:latest",
+        "确认知识库维度绑定为 1024"
+      ]
+    },
+    {
+      "role": "rerank",
+      "protocol": "openai-compatible",
+      "location": "same-host",
+      "artifact_policy": "preloaded-only",
+      "model_name": "local/rerank-placeholder",
+      "license": "Apache-2.0",
+      "redistributable": false,
+      "artifact_included": false,
+      "import_steps": [
+        "客户自行导入同机 OpenAI-compatible Rerank 服务",
+        "写入 ApprovedEndpoint 后完成角色预检"
+      ]
+    },
+    {
+      "role": "asr",
+      "protocol": "openai-compatible",
+      "location": "same-host",
+      "artifact_policy": "preloaded-only",
+      "model_name": "local/asr-placeholder",
+      "license": "Apache-2.0",
+      "redistributable": false,
+      "artifact_included": false,
+      "import_steps": [
+        "客户自行导入同机 ASR 端点",
+        "完成 ASR 转写探针"
+      ]
+    },
+    {
+      "role": "tts",
+      "protocol": "openai-compatible",
+      "location": "same-host",
+      "artifact_policy": "preloaded-only",
+      "model_name": "local/tts-placeholder",
+      "license": "Apache-2.0",
+      "redistributable": false,
+      "artifact_included": false,
+      "import_steps": [
+        "客户自行导入同机 TTS 端点",
+        "完成 TTS 合成探针"
+      ]
+    }
+  ],
+  "schema": "weknora-airgap/v1",
+  "model_inventory_provided": true,
+  "artifacts": [],
+  "checksums": [],
+  "components": [
+    {
+      "source": "repository",
+      "name": "app",
+      "license": "Apache-2.0",
+      "location": "same-host"
+    },
+    {
+      "source": "repository",
+      "name": "docreader",
+      "license": "Apache-2.0",
+      "location": "same-host"
+    }
+  ],
+  "secrets": {
+    "injected": true,
+    "excluded": true
+  },
+  "generated_at": "2026-08-12T16:42:11.4053465Z",
+  "profile": "compose-airgap",
+  "architecture": "amd64"
+}

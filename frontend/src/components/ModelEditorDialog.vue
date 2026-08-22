@@ -19,41 +19,6 @@
           <!-- 表单内容区域 -->
           <div class="modal-body">
             <t-form ref="formRef" :data="formData" :rules="rules" layout="vertical">
-        <!-- 模型来源 -->
-        <div class="form-item">
-          <label class="form-label required">{{ $t('model.editor.sourceLabel') }}</label>
-          <t-radio-group v-model="formData.source">
-            <t-radio
-              value="local"
-              :disabled="ollamaServiceStatus === false || modelType === 'rerank'"
-            >
-              {{ $t('model.editor.sourceLocal') }}
-            </t-radio>
-            <t-radio value="remote">{{ $t('model.editor.sourceRemote') }}</t-radio>
-          </t-radio-group>
-
-          <!-- ReRank模型不支持Ollama的提示信息 -->
-          <div v-if="modelType === 'rerank'" class="ollama-unavailable-tip rerank-tip">
-            <t-icon name="info-circle-filled" class="tip-icon info" />
-            <span class="tip-text">{{ $t('model.editor.ollamaNotSupportRerank') }}</span>
-          </div>
-
-          <!-- Ollama不可用时的提示信息 -->
-          <div v-else-if="ollamaServiceStatus === false" class="ollama-unavailable-tip">
-            <t-icon name="error-circle-filled" class="tip-icon" />
-            <span class="tip-text">{{ $t('model.editor.ollamaUnavailable') }}</span>
-            <t-button
-              variant="text"
-              size="small"
-              theme="primary"
-              @click="goToOllamaSettings"
-              class="tip-link"
-            >
-              {{ $t('model.editor.goToOllamaSettings') }}
-            </t-button>
-          </div>
-        </div>
-
         <!-- Ollama 本地模型选择器 -->
         <div v-if="formData.source === 'local'" class="form-item">
           <label class="form-label required">{{ $t('model.modelName') }}</label>
@@ -328,6 +293,26 @@
           </div>
         </div>
 
+        <div v-else-if="modelType === 'tts'" class="ollama-unavailable-tip rerank-tip">
+          <t-icon name="info-circle-filled" class="tip-icon info" />
+          <span class="tip-text">TTS 当前使用 OpenAI-compatible 远程接口。</span>
+        </div>
+
+        <div v-if="modelType === 'tts'" class="form-item">
+          <label class="form-label required">默认音色</label>
+          <t-select
+            v-model="formData.defaultVoice"
+            :options="ttsVoiceOptions"
+            :loading="loadingTTSVoices"
+            creatable
+            filterable
+            clearable
+            placeholder="选择或输入音色"
+            @focus="loadTTSVoiceOptions"
+          />
+          <p class="form-desc">按服务商/模型加载预设；自部署 TTS 会尝试读取 /v1/audio/voices。</p>
+        </div>
+
       </t-form>
           </div>
 
@@ -349,7 +334,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, onUnmounted, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, listOllamaModels, downloadOllamaModel, getDownloadProgress, checkOllamaStatus, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
+import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, checkTTSModel, listTTSVoices, listOllamaModels, downloadOllamaModel, getDownloadProgress, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
 import { getWeKnoraCloudStatus } from '@/api/model'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
@@ -368,16 +353,18 @@ interface ModelFormData {
   baseUrl?: string
   apiKey?: string
   dimension?: number
+  compatibilityId?: string
   interfaceType?: 'ollama' | 'openai'
   isDefault: boolean
   supportsVision?: boolean
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
   customHeaders?: CustomHeaderItem[]
+  defaultVoice?: string
 }
 
 interface Props {
   visible: boolean
-  modelType: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
+  modelType: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts'
   modelData?: ModelFormData | null
 }
 
@@ -408,10 +395,11 @@ const fallbackProviderOptions = computed(() => [
       embedding: 'https://api.openai.com/v1',
       rerank: 'https://api.openai.com/v1',
       vllm: 'https://api.openai.com/v1',
-      asr: 'https://api.openai.com/v1'
+      asr: 'https://api.openai.com/v1',
+      tts: 'https://api.openai.com/v1'
     },
     description: t('model.editor.providers.openai.description'),
-    modelTypes: ['chat', 'embedding', 'vllm', 'asr']
+    modelTypes: ['chat', 'embedding', 'vllm', 'asr', 'tts']
   },
   {
     value: 'azure_openai',
@@ -423,7 +411,7 @@ const fallbackProviderOptions = computed(() => [
       asr: 'https://{resource}.openai.azure.com'
     },
     description: t('model.editor.providers.azure_openai.description'),
-    modelTypes: ['chat', 'embedding', 'vllm', 'asr']
+    modelTypes: ['chat', 'embedding', 'vllm', 'asr', 'tts']
   },
   {
     value: 'aliyun',
@@ -464,10 +452,12 @@ const fallbackProviderOptions = computed(() => [
     defaultUrls: {
       chat: 'https://api.siliconflow.cn/v1',
       embedding: 'https://api.siliconflow.cn/v1',
-      rerank: 'https://api.siliconflow.cn/v1'
+      rerank: 'https://api.siliconflow.cn/v1',
+      asr: 'https://api.siliconflow.cn/v1',
+      tts: 'https://api.siliconflow.cn/v1'
     },
     description: t('model.editor.providers.siliconflow.description'),
-    modelTypes: ['chat', 'embedding', 'rerank']
+    modelTypes: ['chat', 'embedding', 'rerank', 'asr', 'tts']
   },
   { 
     value: 'jina', 
@@ -507,7 +497,7 @@ const fallbackProviderOptions = computed(() => [
     label: t('model.editor.providers.generic.label'),
     defaultUrls: {},
     description: t('model.editor.providers.generic.description'),
-    modelTypes: ['chat', 'embedding', 'rerank', 'vllm', 'asr']
+    modelTypes: ['chat', 'embedding', 'rerank', 'vllm', 'asr', 'tts']
   },
 ])
 
@@ -530,7 +520,7 @@ const loadProviders = async () => {
 // API 返回的 defaultUrls/modelTypes 数据优先，但 label/description 使用 i18n
 const providerOptions = computed(() => {
   // API 数据可用时，用 API 的结构数据 + i18n 的显示文本
-  if (apiProviderOptions.value.length > 0) {
+  if (apiProviderOptions.value.length > 0 && apiProviderOptions.value.some(p => p.modelTypes.includes(props.modelType))) {
     return apiProviderOptions.value.map(p => ({
       ...p,
       label: te(`model.editor.providers.${p.value}.label`)
@@ -552,7 +542,7 @@ const dialogVisible = computed({
   set: (val) => emit('update:visible', val)
 })
 
-const isEdit = computed(() => !!props.modelData)
+const isEdit = computed(() => !!props.modelData?.id)
 
 const formRef = ref()
 const saving = ref(false)
@@ -566,6 +556,11 @@ const dimensionChecked = ref(false)
 const dimensionSuccess = ref(false)
 const dimensionMessage = ref('')
 
+const ttsVoiceOptions = ref<Array<{ label: string; value: string }>>([])
+const loadingTTSVoices = ref(false)
+
+const getInitialDefaultVoice = (voice?: string) => voice?.trim() || ''
+
 // Ollama 模型状态
 const ollamaModelList = ref<OllamaModelInfo[]>([])
 const loadingOllamaModels = ref(false)
@@ -574,10 +569,6 @@ const downloading = ref(false)
 const downloadProgress = ref(0)
 const currentDownloadModel = ref('')
 let downloadInterval: any = null
-
-// Ollama 服务状态
-const ollamaServiceStatus = ref<boolean | null>(null)
-const checkingOllamaStatus = ref(false)
 
 // WeKnoraCloud 凭证状态
 const wkcCredentialState = ref<'loading' | 'unconfigured' | 'configured' | 'expired'>('loading')
@@ -610,16 +601,17 @@ const goToWeKnoraCloudSettings = async () => {
 const formData = ref<ModelFormData>({
   id: '',
   name: '',
-  source: 'local',
+  source: 'remote',
   provider: 'openai',
   modelName: '',
   baseUrl: '',
   apiKey: '',
   dimension: undefined,
-  interfaceType: 'ollama',
+  interfaceType: 'openai',
   isDefault: false,
   supportsVision: false,
-  customHeaders: []
+  customHeaders: [],
+  defaultVoice: getInitialDefaultVoice()
 })
 
 const rules = computed(() => ({
@@ -664,6 +656,9 @@ const rules = computed(() => ({
 
 // 获取弹窗描述文字
 const getModalDescription = () => {
+  if (props.modelType === 'tts') {
+    return '配置 OpenAI-compatible 文本转语音模型。'
+  }
   const key = `model.editor.description.${props.modelType}` as const
   return t(key) || t('model.editor.description.default')
 }
@@ -678,6 +673,9 @@ const getModelNamePlaceholder = () => {
   if (props.modelType === 'asr') {
     return t('model.editor.modelNamePlaceholder.remoteAsr')
   }
+  if (props.modelType === 'tts') {
+    return '例如：gpt-4o-mini-tts'
+  }
   return formData.value.source === 'local'
     ? t('model.editor.modelNamePlaceholder.local')
     : t('model.editor.modelNamePlaceholder.remote')
@@ -690,42 +688,10 @@ const getBaseUrlPlaceholder = () => {
   if (props.modelType === 'asr') {
     return t('model.editor.baseUrlPlaceholderAsr')
   }
+  if (props.modelType === 'tts') {
+    return '例如：https://内网网关/v1'
+  }
   return t('model.editor.baseUrlPlaceholder')
-}
-
-// 检查Ollama服务状态
-const checkOllamaServiceStatus = async () => {
-  console.log('开始检查Ollama服务状态...')
-  checkingOllamaStatus.value = true
-  try {
-    const result = await checkOllamaStatus()
-    ollamaServiceStatus.value = result.available
-    console.log('Ollama服务状态检查完成:', result.available)
-  } catch (error) {
-    console.error('检查Ollama服务状态失败:', error)
-    ollamaServiceStatus.value = false
-  } finally {
-    checkingOllamaStatus.value = false
-  }
-}
-
-// 打开Ollama设置窗口
-const goToOllamaSettings = async () => {
-  console.log('点击跳转到Ollama设置按钮')
-  // 关闭当前弹窗
-  emit('update:visible', false)
-  
-  // 先关闭设置弹窗（如果已打开）
-  if (uiStore.showSettingsModal) {
-    uiStore.closeSettings()
-    // 等待 DOM 更新
-    await nextTick()
-  }
-  
-  // 打开设置窗口并直接跳转到Ollama设置
-  console.log('调用uiStore.openSettings')
-  uiStore.openSettings('ollama')
-  console.log('uiStore.openSettings调用完成')
 }
 
 // 监听 visible 变化，初始化表单
@@ -734,15 +700,13 @@ watch(() => props.visible, (val) => {
     // 锁定背景滚动
     document.body.style.overflow = 'hidden'
 
-    // 检查Ollama服务状态
-    checkOllamaServiceStatus()
-
     // 从 API 加载 Model Provider 列表
     loadProviders()
 
     if (props.modelData) {
       formData.value = {
         ...props.modelData,
+        defaultVoice: getInitialDefaultVoice(props.modelData.defaultVoice),
         customHeaders: Array.isArray(props.modelData.customHeaders)
           ? props.modelData.customHeaders.map(h => ({ key: h.key, value: h.value }))
           : []
@@ -752,13 +716,16 @@ watch(() => props.visible, (val) => {
     }
 
     // ReRank 模型强制使用 remote 来源（Ollama 不支持 ReRank）
-    if (props.modelType === 'rerank') {
+    if (props.modelType === 'rerank' || props.modelType === 'tts') {
       formData.value.source = 'remote'
     }
 
     // 如果当前 provider 是 WeKnoraCloud，检查凭证状态
     if (formData.value.provider === 'weknoracloud') {
       checkWkcCredentialStatus()
+    }
+    if (props.modelType === 'tts') {
+      loadTTSVoiceOptions()
     }
   } else {
     // 恢复背景滚动
@@ -771,7 +738,7 @@ const resetForm = () => {
   formData.value = {
     id: generateId(),
     name: '', // 保留字段但不使用，保存时用 modelName
-    source: 'local',
+    source: 'remote',
     provider: 'generic',
     modelName: '',
     baseUrl: '',
@@ -780,7 +747,8 @@ const resetForm = () => {
     interfaceType: undefined,
     isDefault: false,
     supportsVision: false,
-    customHeaders: []
+    customHeaders: [],
+    defaultVoice: getInitialDefaultVoice()
   }
   modelChecked.value = false
   modelAvailable.value = false
@@ -806,9 +774,62 @@ const handleProviderChange = (value: string) => {
     remoteAvailable.value = false
     remoteMessage.value = ''
   }
+  if (props.modelType === 'tts') {
+    loadTTSVoiceOptions()
+  }
   // WeKnoraCloud: 检查凭证状态
   if (value === 'weknoracloud') {
     checkWkcCredentialStatus()
+  }
+}
+
+const buildCustomHeaderPayload = () => {
+  const customHeaders: Record<string, string> = {}
+  if (Array.isArray(formData.value.customHeaders)) {
+    for (const item of formData.value.customHeaders) {
+      const key = (item?.key ?? '').trim()
+      const value = (item?.value ?? '').trim()
+      if (key && value) customHeaders[key] = value
+    }
+  }
+  return Object.keys(customHeaders).length > 0 ? { customHeaders } : {}
+}
+
+const isPresetTTSProvider = (provider?: string) => {
+  const normalized = provider?.trim().toLowerCase()
+  return normalized === 'siliconflow' || normalized === 'openai'
+}
+
+const loadTTSVoiceOptions = async () => {
+  if (props.modelType !== 'tts') return
+  const modelName = formData.value.modelName?.trim()
+  const baseUrl = formData.value.baseUrl?.trim()
+  if (!modelName || (!baseUrl && !isPresetTTSProvider(formData.value.provider))) {
+    ttsVoiceOptions.value = []
+    return
+  }
+  loadingTTSVoices.value = true
+  try {
+    const result = await listTTSVoices({
+      modelName,
+      baseUrl,
+      apiKey: formData.value.apiKey || '',
+      provider: formData.value.provider || '',
+      ...buildCustomHeaderPayload(),
+    })
+    ttsVoiceOptions.value = (result.voices || []).map((voice) => ({
+      label: voice.label || voice.value,
+      value: voice.value,
+    }))
+    const current = formData.value.defaultVoice?.trim()
+    const hasCurrent = current && ttsVoiceOptions.value.some((item) => item.value === current)
+    if (!hasCurrent && ttsVoiceOptions.value.length > 0 && !current) {
+      formData.value.defaultVoice = ttsVoiceOptions.value[0].value
+    }
+  } catch {
+    ttsVoiceOptions.value = []
+  } finally {
+    loadingTTSVoices.value = false
   }
 }
 
@@ -990,9 +1011,9 @@ const checkRemoteAPI = async () => {
         // 对话模型（KnowledgeQA）
         result = await checkRemoteModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
-          provider: formData.value.provider,
+          provider: formData.value.provider || '',
           ...headerPayload,
         })
         break
@@ -1002,10 +1023,10 @@ const checkRemoteAPI = async () => {
         result = await testEmbeddingModel({
           source: 'remote',
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           dimension: formData.value.dimension,
-          provider: formData.value.provider,
+          provider: formData.value.provider || '',
           ...headerPayload,
         })
         // 如果测试成功且返回了维度，自动填充
@@ -1019,9 +1040,9 @@ const checkRemoteAPI = async () => {
         // Rerank 模型
         result = await checkRerankModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
-          provider: formData.value.provider,
+          provider: formData.value.provider || '',
           ...headerPayload,
         })
         break
@@ -1031,9 +1052,9 @@ const checkRemoteAPI = async () => {
         // VLLM 使用 checkRemoteModel 进行基础连接测试
         result = await checkRemoteModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
-          provider: formData.value.provider,
+          provider: formData.value.provider || '',
           ...headerPayload,
         })
         break
@@ -1042,9 +1063,24 @@ const checkRemoteAPI = async () => {
         // ASR 模型（语音识别）— 使用专用的 ASR 测试接口（/v1/audio/transcriptions）
         result = await checkASRModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
-          provider: formData.value.provider,
+          provider: formData.value.provider || '',
+          ...headerPayload,
+        })
+        break
+
+      case 'tts':
+        if (!formData.value.defaultVoice?.trim()) {
+          MessagePlugin.warning('请选择或输入默认音色')
+          return
+        }
+        result = await checkTTSModel({
+          modelName: formData.value.modelName,
+          baseUrl: formData.value.baseUrl || '',
+          apiKey: formData.value.apiKey || '',
+          provider: formData.value.provider || '',
+          extraConfig: { voice: formData.value.defaultVoice.trim() },
           ...headerPayload,
         })
         break
@@ -1251,6 +1287,15 @@ watch(() => formData.value.modelName, () => {
   dimensionChecked.value = false
   dimensionSuccess.value = false
   dimensionMessage.value = ''
+  if (props.modelType === 'tts' && props.visible) {
+    loadTTSVoiceOptions()
+  }
+})
+
+watch([() => formData.value.baseUrl, () => formData.value.provider], () => {
+  if (props.modelType === 'tts' && props.visible) {
+    loadTTSVoiceOptions()
+  }
 })
 
 // 取消
@@ -1443,34 +1488,6 @@ const handleOverlayMouseUp = () => {
 
 // 厂商选择器样式 — 移至非 scoped 块，因为 t-select popup 渲染到 body 下
 // .provider-option 样式见文件末尾
-
-// 单选按钮组
-:deep(.t-radio-group) {
-  display: flex;
-  gap: 24px;
-
-  .t-radio {
-    margin-right: 0;
-    font-size: 13px;
-
-    &:hover {
-      .t-radio__label {
-        color: var(--td-brand-color);
-      }
-    }
-  }
-
-  .t-radio__label {
-    font-size: 13px;
-    color: var(--td-text-color-primary);
-    transition: color 0.15s ease;
-  }
-
-  .t-radio__input:checked + .t-radio__label {
-    color: var(--td-brand-color);
-    font-weight: 500;
-  }
-}
 
 // 复选框
 :deep(.t-checkbox) {
@@ -1861,39 +1878,6 @@ const handleOverlayMouseUp = () => {
     }
   }
 
-  :deep(.tip-link) {
-    color: var(--td-brand-color);
-    font-size: 13px;
-    font-weight: 500;
-    padding: 4px 6px 4px 10px !important;
-    min-height: auto !important;
-    height: auto !important;
-    line-height: 1.4 !important;
-    text-decoration: none;
-    white-space: nowrap;
-    display: inline-flex !important;
-    align-items: center !important;
-    gap: 1px;
-    border-radius: 4px;
-    transition: all 0.2s ease;
-
-    &:hover {
-      background: rgba(23, 74, 124, 0.08) !important;
-      color: var(--td-brand-color-active) !important;
-    }
-
-    &:active {
-      background: rgba(23, 74, 124, 0.12) !important;
-    }
-
-    .t-icon {
-      font-size: 14px !important;
-      margin: 0 !important;
-      line-height: 1 !important;
-      display: inline-flex !important;
-      align-items: center !important;
-    }
-  }
 }
 </style>
 

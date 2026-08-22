@@ -130,6 +130,7 @@ type KnowledgeSearchTool struct {
 	rerankModel          rerank.Reranker
 	chatModel            chat.Chat      // Optional chat model for LLM-based reranking
 	config               *config.Config // Global config for fallback values
+	rerankTopK           int
 
 	seenMu     sync.Mutex
 	seenChunks map[string]bool
@@ -144,7 +145,11 @@ func NewKnowledgeSearchTool(
 	rerankModel rerank.Reranker,
 	chatModel chat.Chat,
 	cfg *config.Config,
+	rerankTopK int,
 ) *KnowledgeSearchTool {
+	if rerankTopK <= 0 {
+		rerankTopK = 5
+	}
 	return &KnowledgeSearchTool{
 		BaseTool:             knowledgeSearchTool,
 		knowledgeBaseService: knowledgeBaseService,
@@ -154,6 +159,7 @@ func NewKnowledgeSearchTool(
 		rerankModel:          rerankModel,
 		chatModel:            chatModel,
 		config:               cfg,
+		rerankTopK:           rerankTopK,
 		seenChunks:           make(map[string]bool),
 	}
 }
@@ -268,6 +274,9 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	if minScore == 0 {
 		minScore = 0.3
 	}
+	if routedTopK, ok := ctx.Value(types.RetrievalTopKContextKey).(int); ok && routedTopK > 0 && routedTopK < topK {
+		topK = routedTopK
+	}
 
 	logger.Infof(
 		ctx,
@@ -329,14 +338,8 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	// Apply MMR (Maximal Marginal Relevance) to reduce redundancy and improve diversity
 	// Note: composite scoring is already applied inside rerankResults
 	if len(filteredResults) > 0 {
-		// Calculate k for MMR: use min(len(results), max(1, topK))
-		mmrK := len(filteredResults)
-		if topK > 0 && mmrK > topK {
-			mmrK = topK
-		}
-		if mmrK < 1 {
-			mmrK = 1
-		}
+		// Calculate k for MMR using the configured post-rerank result limit.
+		mmrK := t.rerankResultLimit(len(filteredResults))
 		// Apply MMR with lambda=0.7 (balance between relevance and diversity)
 		logger.Debugf(
 			ctx,
@@ -1085,6 +1088,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 		data := map[string]interface{}{
 			"knowledge_base_ids": kbsToSearch,
 			"results":            []interface{}{},
+			"search_results":     []*types.SearchResult{},
 			"count":              0,
 		}
 		if len(queries) > 0 {
@@ -1319,6 +1323,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 	data := map[string]interface{}{
 		"knowledge_base_ids": kbsToSearch,
 		"results":            formattedResults,
+		"search_results":     searchResultsForAgent(results),
 		"count":              len(formattedResults),
 		"kb_counts":          kbCounts,
 		"display_type":       "search_results",
@@ -1333,6 +1338,25 @@ func (t *KnowledgeSearchTool) formatOutput(
 		Output:  output,
 		Data:    data,
 	}, nil
+}
+
+func (t *KnowledgeSearchTool) rerankResultLimit(resultCount int) int {
+	return min(resultCount, max(1, t.rerankTopK))
+}
+
+// searchResultsForAgent keeps the typed retrieval results available to the
+// agent boundary. The rendered Output is intentionally optimized for the LLM,
+// while the verified-answer pipeline needs the original chunk IDs and content
+// to build its evidence bundle without reparsing XML.
+func searchResultsForAgent(results []*searchResultWithMeta) []*types.SearchResult {
+	refs := make([]*types.SearchResult, 0, len(results))
+	for _, result := range results {
+		if result == nil || result.SearchResult == nil {
+			continue
+		}
+		refs = append(refs, result.SearchResult)
+	}
+	return refs
 }
 
 // chunkRange represents a continuous range of chunk indices

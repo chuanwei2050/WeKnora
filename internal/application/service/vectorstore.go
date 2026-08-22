@@ -16,8 +16,8 @@ import (
 // vectorStoreService implements interfaces.VectorStoreService
 type vectorStoreService struct {
 	repo          interfaces.VectorStoreRepository
-	storeRegistry interfaces.StoreRegistry  // for dynamic registry updates on CRUD
-	factory       interfaces.EngineFactory  // creates engine services from VectorStore config
+	storeRegistry interfaces.StoreRegistry // for dynamic registry updates on CRUD
+	factory       interfaces.EngineFactory // creates engine services from VectorStore config
 }
 
 // NewVectorStoreService creates a new vector store service
@@ -35,6 +35,9 @@ func NewVectorStoreService(
 
 // CreateStore validates and creates a new vector store.
 func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.VectorStore) error {
+	if !isPlatformAdmin(ctx) {
+		return errors.NewForbiddenError("only platform administrators can manage vector stores")
+	}
 	// 1. Basic validation (name, engine_type, tenant_id)
 	if err := store.Validate(); err != nil {
 		return err
@@ -83,6 +86,7 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 	if version != "" {
 		store.ConnectionConfig.Version = version
 	}
+	store.TenantID = types.PlatformScopeTenantID
 
 	// 6. Persist
 	logger.Infof(ctx, "Creating vector store: tenant=%d, name=%s, engine=%s",
@@ -102,12 +106,16 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 // NOTE: If connection_config or index_config become mutable in the future,
 // registry re-registration must be added here (unregister old + register new).
 func (s *vectorStoreService) UpdateStore(ctx context.Context, store *types.VectorStore) error {
+	if !isPlatformAdmin(ctx) {
+		return errors.NewForbiddenError("only platform administrators can manage vector stores")
+	}
 	if store.TenantID == 0 {
 		return errors.NewValidationError("tenant_id is required")
 	}
 	if store.Name == "" {
 		return errors.NewValidationError("name is required")
 	}
+	store.TenantID = types.PlatformScopeTenantID
 
 	logger.Infof(ctx, "Updating vector store: tenant=%d, id=%s", store.TenantID, store.ID)
 	return s.repo.Update(ctx, store)
@@ -116,7 +124,10 @@ func (s *vectorStoreService) UpdateStore(ctx context.Context, store *types.Vecto
 // DeleteStore deletes a vector store by tenant + id.
 // Phase 2: KB binding check will be added here.
 func (s *vectorStoreService) DeleteStore(ctx context.Context, tenantID uint64, id string) error {
-	if err := s.repo.Delete(ctx, tenantID, id); err != nil {
+	if !isPlatformAdmin(ctx) {
+		return errors.NewForbiddenError("only platform administrators can manage vector stores")
+	}
+	if err := s.repo.Delete(ctx, types.PlatformScopeTenantID, id); err != nil {
 		return err
 	}
 

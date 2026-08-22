@@ -200,6 +200,13 @@ func (e *AgentEngine) emitCompletionEvent(
 		knowledgeRefsInterface = append(knowledgeRefsInterface, ref)
 	}
 
+	extra := map[string]interface{}{"execution_path": "agent"}
+	if e.config != nil && e.config.RoutingDecision != nil {
+		extra["routing"] = e.config.RoutingDecision.Summary()
+	}
+	if e.config != nil && e.config.SubQuestionPlan != nil {
+		extra["sub_question_plan"] = e.config.SubQuestionPlan
+	}
 	e.eventBus.Emit(ctx, event.Event{
 		ID:        generateEventID("complete"),
 		Type:      event.EventAgentComplete,
@@ -211,6 +218,7 @@ func (e *AgentEngine) emitCompletionEvent(
 			TotalSteps:      len(state.RoundSteps),
 			TotalDurationMs: time.Since(startTime).Milliseconds(),
 			MessageID:       messageID, // Include message ID for proper message update
+			Extra:           extra,
 		},
 	})
 

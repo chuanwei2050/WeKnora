@@ -384,7 +384,7 @@ const previewHTML = computed(() => {
     return `<p class="empty-preview">${t('manualEditor.preview.empty')}</p>`
   }
   const safeMarkdown = safeMarkdownToHTML(form.content)
-  const html = marked.parse(safeMarkdown)
+  const html = marked.parse(safeMarkdown, { async: false })
   return sanitizeHTML(html)
 })
 
@@ -589,7 +589,7 @@ const handleSave = async (targetStatus: ManualStatus) => {
       response = await updateManualKnowledge(knowledgeId.value, payload)
     } else {
       // 创建新知识时，从 store 获取当前选中的分类ID
-      const tagIdToUpload = uiStore.selectedTagId !== '__untagged__' ? uiStore.selectedTagId : undefined
+      const tagIdToUpload = uiStore.uploadTargetTagId
       if (tagIdToUpload) {
         payload.tag_id = tagIdToUpload
       }

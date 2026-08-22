@@ -1083,6 +1083,7 @@ function renderGraph() {
     container.innerHTML = ''
     return
   }
+  const graphEdges = data.edges
 
   // Stop any previous animation
   if (graphAnimFrame) { cancelAnimationFrame(graphAnimFrame); graphAnimFrame = 0 }
@@ -1387,7 +1388,7 @@ function renderGraph() {
     }
 
     // Attraction along edges
-    for (const edge of data.edges) {
+    for (const edge of graphEdges) {
       const s = nodeMap.get(edge.source)
       const t = nodeMap.get(edge.target)
       if (!s || !t) continue

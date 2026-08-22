@@ -33,7 +33,10 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 	if err != nil {
 		return err
 	}
-	cli := newClient(cfg)
+	cli, err := newClientWithEndpoint(cfg, config.ApprovedEndpoint)
+	if err != nil {
+		return fmt.Errorf("yuque approved endpoint: %w", err)
+	}
 	if err := cli.Ping(ctx); err != nil {
 		return fmt.Errorf("yuque connection failed: %w", err)
 	}
@@ -47,7 +50,10 @@ func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceC
 	if err != nil {
 		return nil, err
 	}
-	cli := newClient(cfg)
+	cli, err := newClientWithEndpoint(cfg, config.ApprovedEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("yuque approved endpoint: %w", err)
+	}
 
 	me, err := cli.GetCurrentUser(ctx)
 	if err != nil {
@@ -126,7 +132,10 @@ func (c *Connector) walk(
 	if err != nil {
 		return nil, nil, err
 	}
-	cli := newClient(cfg)
+	cli, err := newClientWithEndpoint(cfg, config.ApprovedEndpoint)
+	if err != nil {
+		return nil, nil, fmt.Errorf("yuque approved endpoint: %w", err)
+	}
 
 	newCursor := &yuqueCursor{LastSyncTime: time.Now(), BookDocTimes: make(map[string]map[string]string)}
 	var out []types.FetchedItem

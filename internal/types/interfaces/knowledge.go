@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"mime/multipart"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
@@ -57,6 +58,8 @@ type KnowledgeService interface {
 	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
 	// GetKnowledgeBatch retrieves a batch of knowledge by IDs.
 	GetKnowledgeBatch(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)
+	// MarkKnowledgeListDeleting marks knowledge entries as deleting before async cleanup runs.
+	MarkKnowledgeListDeleting(ctx context.Context, tenantID uint64, ids []string) error
 	// GetKnowledgeBatchWithSharedAccess retrieves knowledge by IDs including items from shared KBs the user has access to.
 	GetKnowledgeBatchWithSharedAccess(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)
 	// ListKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base.
@@ -219,4 +222,24 @@ type KnowledgeRepository interface {
 	SearchKnowledgeInScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, error)
 	// ListIDsByTagID returns all knowledge IDs that have the specified tag ID.
 	ListIDsByTagID(ctx context.Context, tenantID uint64, kbID, tagID string) ([]string, error)
+}
+
+// KnowledgeGovernanceRepository manages immutable governed versions and their
+// review history within tenant and knowledge scopes.
+type KnowledgeGovernanceRepository interface {
+	CreateVersion(ctx context.Context, version *types.KnowledgeVersion) error
+	DeleteDraftVersion(ctx context.Context, tenantID uint64, id string) error
+	GetVersion(ctx context.Context, tenantID uint64, id string) (*types.KnowledgeVersion, error)
+	ListVersions(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.KnowledgeVersion, error)
+	UpdateVersionStatus(ctx context.Context, tenantID uint64, id string, status types.KnowledgeVersionStatus) error
+	// PrepareManagedUpload atomically auto-approves an administrator upload and marks it ready for parsing.
+	PrepareManagedUpload(ctx context.Context, tenantID uint64, knowledgeID, versionID, reviewerID string) error
+	// TransitionVersionWithReview atomically changes a version status and records its audit entry.
+	TransitionVersionWithReview(ctx context.Context, tenantID uint64, id string, status types.KnowledgeVersionStatus, review *types.KnowledgeVersionReview) error
+	// ActivateVersion atomically switches the current version after its index is ready.
+	ActivateVersion(ctx context.Context, tenantID uint64, id string, now time.Time) error
+	// ActivateDueVersions performs an idempotent scheduled activation/expiry pass.
+	ActivateDueVersions(ctx context.Context, now time.Time) (int, error)
+	CreateReview(ctx context.Context, review *types.KnowledgeVersionReview) error
+	ListReviews(ctx context.Context, versionID string) ([]*types.KnowledgeVersionReview, error)
 }

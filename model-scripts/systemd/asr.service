@@ -1,0 +1,22 @@
+[Unit]
+Description=WeKnora Airgap ASR (SenseVoiceSmall)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=AIR_GAPPED_MODE=true
+Environment=MODEL_DIR=@DATA_DIR@/models/asr
+Environment=SERVED_MODEL_NAME=model
+Environment=PORT=8004
+Environment=QUANT=onnx-int8
+WorkingDirectory=@DATA_DIR@/services/asr
+ExecStart=@PYTHON@ server.py
+Restart=on-failure
+RestartSec=5
+# 按需调整用户
+# User=weknora
+# Group=weknora
+
+[Install]
+WantedBy=multi-user.target

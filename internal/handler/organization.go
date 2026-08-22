@@ -1279,10 +1279,6 @@ func (h *OrganizationHandler) ShareAgent(c *gin.Context) {
 			c.Error(apperrors.NewForbiddenError("Only editors and admins can share agents to this organization"))
 			return
 		}
-		if errors.Is(err, service.ErrAgentNotConfigured) {
-			c.Error(apperrors.NewValidationError("Agent is not fully configured. Please set the chat model, and set the rerank model if the knowledge_search tool is enabled in agent settings."))
-			return
-		}
 		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
 		return
 	}
@@ -1584,7 +1580,7 @@ type SetSharedAgentDisabledByMeRequest struct {
 	Disabled bool   `json:"disabled"`
 }
 
-// SetSharedAgentDisabledByMe sets whether the current tenant has disabled this shared agent for their conversation dropdown
+// SetSharedAgentDisabledByMe updates a platform agent's global status or a tenant's shared-agent preference.
 func (h *OrganizationHandler) SetSharedAgentDisabledByMe(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID := c.GetString(types.UserIDContextKey.String())
@@ -1597,11 +1593,23 @@ func (h *OrganizationHandler) SetSharedAgentDisabledByMe(c *gin.Context) {
 		c.Error(apperrors.NewBadRequestError("Invalid request").WithDetails(err.Error()))
 		return
 	}
-	// Derive sourceTenantID: own agent (current tenant) or from shared list
+	if req.AgentID == types.BuiltinQuickAnswerID && req.Disabled {
+		c.Error(apperrors.NewBadRequestError("The quick-answer agent cannot be disabled"))
+		return
+	}
+	// Platform agents are globally managed; tenant-owned/shared agents remain tenant-scoped.
+	preferenceTenantID := tid
 	var sourceTenantID uint64
 	agent, err := h.customAgentService.GetAgentByID(ctx, req.AgentID)
-	if err == nil && agent != nil && agent.TenantID == tid {
-		sourceTenantID = tid
+	if err == nil && agent != nil && agent.TenantID == types.PlatformAgentTenantID {
+		if !isPlatformAdmin(c) {
+			c.Error(apperrors.NewForbiddenError("Only platform administrators can change platform agent status"))
+			return
+		}
+		preferenceTenantID = types.PlatformAgentTenantID
+		sourceTenantID = types.PlatformAgentTenantID
+	} else if err == nil && agent != nil && agent.TenantID == tid {
+		sourceTenantID = agent.TenantID
 	} else {
 		share, err := h.agentShareService.GetShareByAgentIDForUser(ctx, uid, req.AgentID, tid)
 		if err != nil || share == nil {
@@ -1610,7 +1618,7 @@ func (h *OrganizationHandler) SetSharedAgentDisabledByMe(c *gin.Context) {
 		}
 		sourceTenantID = share.SourceTenantID
 	}
-	if err := h.agentShareService.SetSharedAgentDisabledByMe(ctx, tid, req.AgentID, sourceTenantID, req.Disabled); err != nil {
+	if err := h.agentShareService.SetSharedAgentDisabledByMe(ctx, preferenceTenantID, req.AgentID, sourceTenantID, req.Disabled); err != nil {
 		logger.Errorf(ctx, "SetSharedAgentDisabledByMe failed: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to update preference"))
 		return

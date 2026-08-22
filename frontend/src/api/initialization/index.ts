@@ -55,8 +55,18 @@ export interface InitializationConfig {
     storageType?: 'cos' | 'minio';
     nodeExtract: {
         enabled: boolean,
+        mode?: 'general' | 'template' | 'custom',
+        template_key?: string,
+        model_id?: string,
+        ingestion_mode?: 'all' | 'signal',
+        max_entities?: number,
+        max_relations?: number,
+        min_confidence?: number,
         text: string,
         tags: string[],
+        entity_types?: string[],
+        strict_schema?: boolean,
+        require_triple_review?: boolean,
         nodes: Node[],
         relations: Relation[]
     }
@@ -90,7 +100,6 @@ export interface KBModelConfigRequest {
         chunkSize: number
         chunkOverlap: number
         separators: string[]
-        parserEngineRules?: { file_types: string[]; engine: string }[]
         enableParentChild?: boolean
         parentChunkSize?: number
         childChunkSize?: number
@@ -98,12 +107,22 @@ export interface KBModelConfigRequest {
     multimodal: {
         enabled: boolean
     }
-    /** 存储引擎选择："local" | "minio" | "cos"，影响文档上传与文档内图片存储 */
-    storageProvider?: string
     nodeExtract: {
         enabled: boolean
+        mode?: 'general' | 'template' | 'custom'
+        template_key?: string
+        model_id?: string
+        ingestion_mode?: 'all' | 'signal'
+        max_entities?: number
+        max_relations?: number
+        min_confidence?: number
         text: string
         tags: string[]
+        entity_types?: string[]
+        entity_schema?: Array<{ type: string; base_type: string; description: string }>
+        relation_schema?: Array<{ type: string; source_type: string; target_type: string; description: string }>
+        strict_schema?: boolean
+        require_triple_review?: boolean
         nodes: Node[]
         relations: Relation[]
     }
@@ -346,6 +365,54 @@ export function checkASRModel(modelConfig: {
     });
 }
 
+// 检查 TTS 模型连接（通过 /v1/audio/speech 端点测试）
+export function checkTTSModel(modelConfig: {
+    modelName: string;
+    baseUrl: string;
+    apiKey?: string;
+    provider?: string;
+} & BaseModelTestPayload): Promise<{
+    available: boolean;
+    message?: string;
+}> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/tts/check', modelConfig)
+            .then((response: any) => {
+                resolve(response.data || {});
+            })
+            .catch((error: any) => {
+                console.error('Failed to check TTS model:', error);
+                reject(error);
+            });
+    });
+}
+
+export interface TTSVoiceOption {
+    value: string;
+    label: string;
+}
+
+// 获取 TTS 可用音色（预设 + 自部署端点动态列表）
+export function listTTSVoices(modelConfig: {
+    modelName: string;
+    baseUrl: string;
+    apiKey?: string;
+    provider?: string;
+} & BaseModelTestPayload): Promise<{
+    voices: TTSVoiceOption[];
+}> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/tts/voices', modelConfig)
+            .then((response: any) => {
+                resolve(response.data || { voices: [] });
+            })
+            .catch((error: any) => {
+                console.error('Failed to list TTS voices:', error);
+                reject(error);
+            });
+    });
+}
+
 export function testMultimodalFunction(testData: {
     image: File;
     vlm_model: string;
@@ -450,18 +517,28 @@ export function testMultimodalFunction(testData: {
 export interface TextRelationExtractionRequest {
     text: string;
     tags: string[];
+    entity_types?: string[];
+    strict_schema?: boolean;
+    max_entities?: number;
+    max_relations?: number;
+    min_confidence?: number;
     model_id: string;
 }
 
 export interface Node {
     name: string;
+    entity_type?: string;
+    description?: string;
     attributes: string[];
+    aliases?: string[];
 }
 
 export interface Relation {
     node1: string;
     node2: string;
     type: string;
+    confidence?: number;
+    description?: string;
 }
 
 export interface TextRelationExtractionResponse {

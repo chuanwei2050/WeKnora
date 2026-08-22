@@ -67,8 +67,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/im/wecom"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
+	"github.com/Tencent/WeKnora/internal/integration"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
+	"github.com/Tencent/WeKnora/internal/modelprofile"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
@@ -77,6 +79,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	apputils "github.com/Tencent/WeKnora/internal/utils"
 	slackpkg "github.com/slack-go/slack"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
@@ -104,6 +107,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(initTracer))
 	must(container.Provide(initLangfuse))
 	must(container.Provide(initDatabase))
+	must(container.Provide(repository.NewApprovedEndpointRepository))
 	must(container.Provide(initFileService))
 	must(container.Provide(initRedisClient))
 	must(container.Provide(initAntsPool))
@@ -155,6 +159,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewDataSourceRepository))
 	must(container.Provide(repository.NewSyncLogRepository))
 	must(container.Provide(repository.NewWikiPageRepository))
+	must(container.Provide(repository.NewAnswerFeedbackRepository))
+	must(container.Provide(repository.NewGraphTripleReviewRepository))
+	must(container.Provide(repository.NewKnowledgeGovernanceRepository))
+	must(container.Provide(repository.NewAcceptanceBenchmarkRepository))
+	must(container.Provide(integration.NewService))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -172,9 +181,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewKnowledgeTagService))
 	must(container.Provide(embedding.NewBatchEmbedder))
 	must(container.Provide(service.NewModelService))
+	must(container.Invoke(bootstrapProfileModels))
+	must(container.Invoke(bootstrapStorageEngineConfig))
 	must(container.Provide(service.NewDatasetService))
 	must(container.Provide(service.NewEvaluationService))
 	must(container.Provide(service.NewUserService))
+	must(container.Invoke(ensureDefaultAdmin))
 	must(container.Provide(service.NewWeKnoraCloudService))
 
 	// Extract services - register individual extracters with names
@@ -182,6 +194,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewDataTableSummaryService, dig.Name("dataTableSummary")))
 	must(container.Provide(service.NewImageMultimodalService, dig.Name("imageMultimodal")))
 	must(container.Provide(service.NewKnowledgePostProcessService, dig.Name("knowledgePostProcess")))
+	must(container.Provide(service.NewKnowledgePublishService, dig.Name("knowledgePublish")))
 
 	must(container.Provide(service.NewMessageService))
 	must(container.Provide(service.NewMCPServiceService))
@@ -251,6 +264,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginDataAnalysis))
 	must(container.Invoke(chatpipeline.NewPluginIntoChatMessage))
 	must(container.Invoke(chatpipeline.NewPluginChatCompletion))
+	must(container.Invoke(chatpipeline.NewPluginVerifiedAnswer))
 	must(container.Invoke(chatpipeline.NewPluginChatCompletionStream))
 	must(container.Invoke(chatpipeline.NewPluginFilterTopK))
 	must(container.Invoke(chatpipeline.NewPluginQueryUnderstand))
@@ -290,6 +304,14 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewDataSourceHandler))
 	// Wiki page handler
 	must(container.Provide(handler.NewWikiPageHandler))
+	must(container.Provide(handler.NewAnswerFeedbackHandler))
+	must(container.Provide(handler.NewGraphTripleReviewHandler))
+	must(container.Provide(handler.NewKnowledgeGovernanceHandler))
+	must(container.Provide(handler.NewAcceptanceBenchmarkHandler))
+	must(container.Invoke(startVoiceTempCleaner))
+	must(container.Provide(handler.NewApprovedEndpointHandler))
+	must(container.Provide(handler.NewAdminHandler))
+	must(container.Provide(handler.NewIntegrationHandler))
 	// IM integration
 	logger.Debugf(ctx, "[Container] Registering IM integration...")
 	must(container.Provide(imPkg.NewService))
@@ -309,6 +331,61 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container
+}
+
+func ensureDefaultAdmin(userService interfaces.UserService) error {
+	return userService.EnsureDefaultAdmin(context.Background())
+}
+
+func bootstrapProfileModels(
+	repo interfaces.ModelRepository,
+	tenantRepo interfaces.TenantRepository,
+	approvedEndpoints interfaces.ApprovedEndpointRepository,
+) error {
+	return modelprofile.Bootstrap(context.Background(), repo, tenantRepo, approvedEndpoints)
+}
+
+type platformSettingsRepository interface {
+	GetPlatformSettings(ctx context.Context) (*types.PlatformSettings, error)
+	UpdatePlatformSettings(ctx context.Context, settings *types.PlatformSettings) error
+}
+
+func bootstrapStorageEngineConfig(repo interfaces.TenantRepository) error {
+	return bootstrapStorageEngineConfigWithRepository(repo)
+}
+
+func bootstrapStorageEngineConfigWithRepository(repo platformSettingsRepository) error {
+	ctx := context.Background()
+	settings, err := repo.GetPlatformSettings(ctx)
+	if err != nil {
+		return fmt.Errorf("load storage engine settings: %w", err)
+	}
+	if settings.StorageEngineConfig != nil && settings.StorageEngineConfig.DefaultProvider != "" {
+		return nil
+	}
+
+	storageType := strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
+	if storageType != "minio" {
+		return nil
+	}
+	config := &types.StorageEngineConfig{
+		DefaultProvider: storageType,
+		Local: &types.LocalEngineConfig{
+			PathPrefix: strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR")),
+		},
+	}
+	if storageType == "minio" {
+		config.MinIO = &types.MinIOEngineConfig{
+			Mode:       "docker",
+			BucketName: strings.TrimSpace(os.Getenv("MINIO_BUCKET_NAME")),
+			UseSSL:     strings.EqualFold(strings.TrimSpace(os.Getenv("MINIO_USE_SSL")), "true"),
+		}
+	}
+	settings.StorageEngineConfig = config
+	if err := repo.UpdatePlatformSettings(ctx, settings); err != nil {
+		return fmt.Errorf("save default storage engine settings: %w", err)
+	}
+	return nil
 }
 
 // must is a helper function for error handling
@@ -337,8 +414,21 @@ func initTracer() (*tracing.Tracer, error) {
 // Configuration is read from LANGFUSE_* environment variables (see
 // docs/langfuse.md). Returns a disabled manager if credentials are absent —
 // never an error — so deployments that don't use Langfuse are unaffected.
-func initLangfuse() (*langfuse.Manager, error) {
+func initLangfuse(approvedEndpoints interfaces.ApprovedEndpointRepository) (*langfuse.Manager, error) {
 	cfg := langfuse.LoadConfigFromEnv()
+	if strings.TrimSpace(cfg.ApprovedEndpointID) != "" {
+		if cfg.TenantID == 0 {
+			return nil, fmt.Errorf("langfuse approved endpoint requires LANGFUSE_TENANT_ID")
+		}
+		endpoint, err := approvedEndpoints.GetByID(context.Background(), cfg.TenantID, cfg.ApprovedEndpointID)
+		if err != nil {
+			return nil, fmt.Errorf("load langfuse approved endpoint: %w", err)
+		}
+		if endpoint == nil {
+			return nil, fmt.Errorf("langfuse approved endpoint not found: %s", cfg.ApprovedEndpointID)
+		}
+		cfg.ApprovedEndpoint = endpoint
+	}
 	return langfuse.Init(cfg)
 }
 
@@ -490,12 +580,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		// Run base migrations (all versioned migrations including embeddings)
 		// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
 		if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
-			// Log warning but don't fail startup - migrations might be handled externally
-			logger.Warnf(context.Background(), "Database migration failed: %v", err)
-			logger.Warnf(
-				context.Background(),
-				"Continuing with application startup. Please run migrations manually if needed.",
-			)
+			return nil, fmt.Errorf("database migration failed: %w", err)
 		}
 
 		// Post-migration: resolve __pending_env__ storage provider markers for historical KBs.
@@ -619,7 +704,7 @@ func resetPendingTasks(db *gorm.DB) {
 		Updates(map[string]interface{}{
 			"status":        types.SyncLogStatusFailed,
 			"error_message": "Sync interrupted due to application restart",
-			"end_time":      time.Now(),
+			"finished_at":   time.Now(),
 		})
 	if resultSync.Error != nil {
 		logger.Warnf(context.Background(), "Failed to reset pending data source sync tasks: %v", resultSync.Error)
@@ -999,16 +1084,7 @@ func loadDBStoresIntoRegistry(storeRegistry interfaces.StoreRegistry, db *gorm.D
 //   - Configured goroutine pool
 //   - Error if initialization fails
 func initAntsPool(cfg *config.Config) (*ants.Pool, error) {
-	// Default to 5 if not specified in config
-	poolSize := os.Getenv("CONCURRENCY_POOL_SIZE")
-	if poolSize == "" {
-		poolSize = "5"
-	}
-	poolSizeInt, err := strconv.Atoi(poolSize)
-	if err != nil {
-		return nil, err
-	}
-	// Set up the pool with pre-allocation for better performance
+	poolSizeInt := apputils.ConcurrencyPoolSize()
 	return ants.NewPool(poolSizeInt, ants.WithPreAlloc(true))
 }
 
@@ -1137,7 +1213,22 @@ func NewDuckDB() (*sql.DB, error) {
 	//   - spatial: used for st_read_meta() to enumerate layer (sheet) names from .xlsx/.xls
 	//   - excel:   used for read_xlsx() which gives proper type inference per sheet
 	bgCtx := context.Background()
+	strictAirGapped := strings.EqualFold(strings.TrimSpace(os.Getenv("AIR_GAPPED_MODE")), "true")
+	duckdbExtensionDir := strings.TrimSpace(os.Getenv("WEKNORA_DUCKDB_EXTENSION_DIR"))
 	for _, ext := range []string{"spatial", "excel"} {
+		if strictAirGapped {
+			loadTarget := ext
+			if duckdbExtensionDir != "" {
+				loadTarget = filepath.Join(duckdbExtensionDir, ext+".duckdb_extension")
+				loadTarget = strings.ReplaceAll(loadTarget, "'", "''")
+				loadTarget = "'" + loadTarget + "'"
+			}
+			if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("LOAD %s;", loadTarget)); err != nil {
+				_ = sqlDB.Close()
+				return nil, fmt.Errorf("strict air-gapped mode requires preloaded DuckDB extension %q: %w", ext, err)
+			}
+			continue
+		}
 		if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("INSTALL %s;", ext)); err != nil {
 			logger.Warnf(bgCtx, "[DuckDB] Failed to install %s extension: %v", ext, err)
 		}
@@ -1534,4 +1625,24 @@ func startDataSourceScheduler(scheduler *datasource.Scheduler, cleaner interface
 		scheduler.Stop()
 		return nil
 	})
+}
+
+func startVoiceTempCleaner(cfg *config.Config, cleaner interfaces.ResourceCleaner) error {
+	if cfg == nil {
+		return fmt.Errorf("config is required for voice temp cleanup")
+	}
+	interval := cfg.Voice.TempMaxAge / 2
+	if interval <= 0 {
+		interval = time.Hour
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := types.StartVoiceTempCleaner(ctx, cfg.Voice.TempRoot, cfg.Voice.TempMaxAge, interval); err != nil {
+		cancel()
+		return err
+	}
+	cleaner.RegisterWithName("VoiceTempCleaner", func() error {
+		cancel()
+		return nil
+	})
+	return nil
 }

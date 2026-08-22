@@ -12,6 +12,22 @@ import (
 	"gorm.io/gorm"
 )
 
+type TenantStatus string
+
+const (
+	TenantStatusActive    TenantStatus = "active"
+	TenantStatusSuspended TenantStatus = "suspended"
+)
+
+func IsTenantStatus(value string) bool {
+	switch TenantStatus(strings.TrimSpace(value)) {
+	case TenantStatusActive, TenantStatusSuspended:
+		return true
+	default:
+		return false
+	}
+}
+
 // retrieverEngineMapping maps RETRIEVE_DRIVER values to retriever engine configurations
 var retrieverEngineMapping = map[string][]RetrieverEngineParams{
 	"postgres": {
@@ -23,7 +39,6 @@ var retrieverEngineMapping = map[string][]RetrieverEngineParams{
 	},
 	"elasticsearch_v8": {
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: ElasticsearchRetrieverEngineType},
-		{RetrieverType: VectorRetrieverType, RetrieverEngineType: ElasticsearchRetrieverEngineType},
 	},
 	"qdrant": {
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: QdrantRetrieverEngineType},
@@ -31,7 +46,6 @@ var retrieverEngineMapping = map[string][]RetrieverEngineParams{
 	},
 	"milvus": {
 		{RetrieverType: VectorRetrieverType, RetrieverEngineType: MilvusRetrieverEngineType},
-		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: MilvusRetrieverEngineType},
 	},
 	"weaviate": {
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: WeaviateRetrieverEngineType},
@@ -49,6 +63,37 @@ func GetRetrieverEngineMapping() map[string][]RetrieverEngineParams {
 	return retrieverEngineMapping
 }
 
+// GetDefaultRetrieverDrivers returns the configured drivers for one retrieval role.
+// A role-specific driver must also be present in RETRIEVE_DRIVER so its engine is initialized.
+func GetDefaultRetrieverDrivers(retrieverType RetrieverType) []string {
+	preferredDriver := preferredRetrieverDriver(retrieverType)
+	drivers := []string{}
+	for _, driver := range strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",") {
+		driver = strings.TrimSpace(driver)
+		if preferredDriver != "" && driver != preferredDriver {
+			continue
+		}
+		for _, params := range retrieverEngineMapping[driver] {
+			if params.RetrieverType == retrieverType {
+				drivers = append(drivers, driver)
+				break
+			}
+		}
+	}
+	return drivers
+}
+
+func preferredRetrieverDriver(retrieverType RetrieverType) string {
+	switch retrieverType {
+	case KeywordsRetrieverType:
+		return strings.TrimSpace(os.Getenv("KEYWORD_RETRIEVE_DRIVER"))
+	case VectorRetrieverType:
+		return strings.TrimSpace(os.Getenv("VECTOR_RETRIEVE_DRIVER"))
+	default:
+		return ""
+	}
+}
+
 // GetDefaultRetrieverEngines returns the default retriever engines based on RETRIEVE_DRIVER env
 func GetDefaultRetrieverEngines() []RetrieverEngineParams {
 	result := []RetrieverEngineParams{}
@@ -58,6 +103,9 @@ func GetDefaultRetrieverEngines() []RetrieverEngineParams {
 		driver = strings.TrimSpace(driver)
 		if params, ok := retrieverEngineMapping[driver]; ok {
 			for _, p := range params {
+				if preferredDriver := preferredRetrieverDriver(p.RetrieverType); preferredDriver != "" && driver != preferredDriver {
+					continue
+				}
 				key := string(p.RetrieverType) + ":" + string(p.RetrieverEngineType)
 				if !seen[key] {
 					seen[key] = true
@@ -117,6 +165,43 @@ type Tenant struct {
 	DeletedAt gorm.DeletedAt `yaml:"deleted_at"          json:"deleted_at"          gorm:"index"`
 }
 
+// PlatformSettings stores the system-wide configuration managed by platform administrators.
+// Tenant records receive an effective copy of these fields at read time; tenant-specific
+// configuration fields are retained only for backward-compatible data migration.
+type PlatformSettings struct {
+	ID                  uint64               `json:"id" gorm:"primaryKey"`
+	RetrieverEngines    RetrieverEngines     `json:"retriever_engines" gorm:"type:jsonb"`
+	AgentConfig         *AgentConfig         `json:"agent_config" gorm:"type:jsonb"`
+	ContextConfig       *ContextConfig       `json:"context_config" gorm:"type:jsonb"`
+	WebSearchConfig     *WebSearchConfig     `json:"web_search_config" gorm:"type:jsonb"`
+	ConversationConfig  *ConversationConfig  `json:"conversation_config" gorm:"type:jsonb"`
+	ParserEngineConfig  *ParserEngineConfig  `json:"parser_engine_config" gorm:"type:jsonb"`
+	Credentials         *CredentialsConfig   `json:"credentials" gorm:"type:jsonb"`
+	StorageEngineConfig *StorageEngineConfig `json:"storage_engine_config" gorm:"type:jsonb"`
+	RetrievalConfig     *RetrievalConfig     `json:"retrieval_config" gorm:"type:jsonb"`
+	ModelSeedVersion    int                  `json:"model_seed_version" gorm:"default:0"`
+	ModelProfile        ModelProfile         `json:"model_profile" gorm:"type:varchar(16)"`
+	CreatedAt           time.Time            `json:"created_at"`
+	UpdatedAt           time.Time            `json:"updated_at"`
+}
+
+// ApplyToTenant overlays platform-managed settings onto a tenant read model.
+// The tenant identity, quota, status and data ownership fields are intentionally untouched.
+func (p *PlatformSettings) ApplyToTenant(t *Tenant) {
+	if p == nil || t == nil {
+		return
+	}
+	t.RetrieverEngines = p.RetrieverEngines
+	t.AgentConfig = p.AgentConfig
+	t.ContextConfig = p.ContextConfig
+	t.WebSearchConfig = p.WebSearchConfig
+	t.ConversationConfig = p.ConversationConfig
+	t.ParserEngineConfig = p.ParserEngineConfig
+	t.Credentials = p.Credentials
+	t.StorageEngineConfig = p.StorageEngineConfig
+	t.RetrievalConfig = p.RetrievalConfig
+}
+
 // RetrieverEngines represents the retriever engines for a tenant
 type RetrieverEngines struct {
 	Engines []RetrieverEngineParams `yaml:"engines" json:"engines" gorm:"type:json"`
@@ -125,7 +210,21 @@ type RetrieverEngines struct {
 // GetEffectiveEngines returns the tenant's engines if configured, otherwise returns system defaults
 func (t *Tenant) GetEffectiveEngines() []RetrieverEngineParams {
 	if len(t.RetrieverEngines.Engines) > 0 {
-		return t.RetrieverEngines.Engines
+		result := make([]RetrieverEngineParams, 0, len(t.RetrieverEngines.Engines))
+		for _, engine := range t.RetrieverEngines.Engines {
+			preferredDriver := preferredRetrieverDriver(engine.RetrieverType)
+			if preferredDriver == "" {
+				result = append(result, engine)
+				continue
+			}
+			for _, preferred := range retrieverEngineMapping[preferredDriver] {
+				if preferred == engine {
+					result = append(result, engine)
+					break
+				}
+			}
+		}
+		return result
 	}
 	return GetDefaultRetrieverEngines()
 }
@@ -399,8 +498,8 @@ func (c *ParserEngineConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// StorageEngineConfig holds tenant-level storage engine parameters for Local, MinIO, COS, TOS, S3, and OSS.
-// Knowledge bases select which provider to use; parameters are read from here.
+// StorageEngineConfig holds platform-level storage engine parameters for Local, MinIO, COS, TOS, S3, and OSS.
+// All knowledge bases use DefaultProvider and the corresponding parameters from this config.
 type StorageEngineConfig struct {
 	DefaultProvider string             `json:"default_provider"` // "local", "minio", "cos", "tos", "s3", "oss"
 	Local           *LocalEngineConfig `json:"local,omitempty"`
@@ -419,13 +518,15 @@ type LocalEngineConfig struct {
 // MinIOEngineConfig is for MinIO/S3-compatible object storage.
 // Mode "docker" uses env vars for endpoint/credentials; "remote" uses the fields below.
 type MinIOEngineConfig struct {
-	Mode            string `json:"mode"` // "docker" or "remote"
-	Endpoint        string `json:"endpoint"`
-	AccessKeyID     string `json:"access_key_id"`
-	SecretAccessKey string `json:"secret_access_key"`
-	BucketName      string `json:"bucket_name"`
-	UseSSL          bool   `json:"use_ssl"`
-	PathPrefix      string `json:"path_prefix"`
+	Mode               string            `json:"mode"` // "docker" or "remote"
+	Endpoint           string            `json:"endpoint"`
+	ApprovedEndpointID string            `json:"approved_endpoint_id,omitempty"`
+	ApprovedEndpoint   *ApprovedEndpoint `json:"-"`
+	AccessKeyID        string            `json:"access_key_id"`
+	SecretAccessKey    string            `json:"secret_access_key"`
+	BucketName         string            `json:"bucket_name"`
+	UseSSL             bool              `json:"use_ssl"`
+	PathPrefix         string            `json:"path_prefix"`
 }
 
 // COSEngineConfig is for Tencent Cloud COS.
@@ -440,35 +541,41 @@ type COSEngineConfig struct {
 
 // TOSEngineConfig is for Volcengine TOS (火山引擎对象存储).
 type TOSEngineConfig struct {
-	Endpoint   string `json:"endpoint"`
-	Region     string `json:"region"`
-	AccessKey  string `json:"access_key"`
-	SecretKey  string `json:"secret_key"`
-	BucketName string `json:"bucket_name"`
-	PathPrefix string `json:"path_prefix"`
+	Endpoint           string            `json:"endpoint"`
+	ApprovedEndpointID string            `json:"approved_endpoint_id,omitempty"`
+	ApprovedEndpoint   *ApprovedEndpoint `json:"-"`
+	Region             string            `json:"region"`
+	AccessKey          string            `json:"access_key"`
+	SecretKey          string            `json:"secret_key"`
+	BucketName         string            `json:"bucket_name"`
+	PathPrefix         string            `json:"path_prefix"`
 }
 
 // S3EngineConfig is for AWS S3 and S3-compatible object storage.
 type S3EngineConfig struct {
-	Endpoint   string `json:"endpoint"`
-	Region     string `json:"region"`
-	AccessKey  string `json:"access_key"`
-	SecretKey  string `json:"secret_key"`
-	BucketName string `json:"bucket_name"`
-	PathPrefix string `json:"path_prefix"`
+	Endpoint           string            `json:"endpoint"`
+	ApprovedEndpointID string            `json:"approved_endpoint_id,omitempty"`
+	ApprovedEndpoint   *ApprovedEndpoint `json:"-"`
+	Region             string            `json:"region"`
+	AccessKey          string            `json:"access_key"`
+	SecretKey          string            `json:"secret_key"`
+	BucketName         string            `json:"bucket_name"`
+	PathPrefix         string            `json:"path_prefix"`
 }
 
 // OSSEngineConfig is for Alibaba Cloud OSS (对象存储服务).
 type OSSEngineConfig struct {
-	Endpoint       string `json:"endpoint"`
-	Region         string `json:"region"`
-	AccessKey      string `json:"access_key"`
-	SecretKey      string `json:"secret_key"`
-	BucketName     string `json:"bucket_name"`
-	PathPrefix     string `json:"path_prefix"`
-	UseTempBucket  bool   `json:"use_temp_bucket"`
-	TempBucketName string `json:"temp_bucket_name"`
-	TempRegion     string `json:"temp_region"`
+	Endpoint           string            `json:"endpoint"`
+	ApprovedEndpointID string            `json:"approved_endpoint_id,omitempty"`
+	ApprovedEndpoint   *ApprovedEndpoint `json:"-"`
+	Region             string            `json:"region"`
+	AccessKey          string            `json:"access_key"`
+	SecretKey          string            `json:"secret_key"`
+	BucketName         string            `json:"bucket_name"`
+	PathPrefix         string            `json:"path_prefix"`
+	UseTempBucket      bool              `json:"use_temp_bucket"`
+	TempBucketName     string            `json:"temp_bucket_name"`
+	TempRegion         string            `json:"temp_region"`
 }
 
 // Value implements the driver.Valuer interface for StorageEngineConfig

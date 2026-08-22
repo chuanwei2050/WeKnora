@@ -1,13 +1,13 @@
 <template>
-    <div class="main" ref="dropzone">
-        <Menu></Menu>
+    <div class="main" :class="{ 'is-embedded': isEmbeddedPage }" ref="dropzone">
+        <Menu v-if="!isEmbeddedPage"></Menu>
         <RouterView v-if="isRouterAlive" />
         <div class="upload-mask" v-show="ismask">
             <input type="file" style="display: none" ref="uploadInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.md,.jpg,.jpeg,.png,.csv,.xls,.xlsx" />
             <UploadMask></UploadMask>
         </div>
         <!-- 全局设置模态框，供所有 platform 子路由使用 -->
-        <Settings />
+        <Settings v-if="!isEmbeddedPage && route.path !== '/platform/settings'" />
     </div>
 </template>
 <script setup lang="ts">
@@ -20,12 +20,15 @@ import Settings from '@/views/settings/Settings.vue'
 import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { isFileDrag } from '@/utils/file-drag'
+import { getRuntimeMode } from '@/utils/embedded-runtime'
 
 let { requestMethod } = useKnowledgeBase()
 const route = useRoute();
 let ismask = ref(false)
 let uploadInput = ref();
 const { t } = useI18n();
+const isEmbeddedPage = getRuntimeMode() === 'embedded-page'
 
 const isRouterAlive = ref(true)
 const reloadApp = () => {
@@ -59,33 +62,22 @@ const getCurrentKbId = (): string | null => {
     return (route.params as any)?.kbId as string || null
 }
 
-// 检查知识库初始化状态
-const checkKnowledgeBaseInitialization = async (): Promise<boolean> => {
+const loadCurrentKnowledgeBase = async (): Promise<any | null> => {
     const currentKbId = getCurrentKbId();
     
     if (!currentKbId) {
         MessagePlugin.error(t('knowledgeBase.missingId'));
-        return false;
+        return null;
     }
     
     try {
         const kbResponse = await getKnowledgeBaseById(currentKbId);
         const kb = kbResponse.data;
         
-        if (!kb.summary_model_id) {
-            MessagePlugin.warning(t('knowledgeBase.notInitialized'));
-            return false;
-        }
-        const strategy = kb.indexing_strategy;
-        const needsEmbedding = !strategy || strategy.vector_enabled;
-        if (needsEmbedding && !kb.embedding_model_id) {
-            MessagePlugin.warning(t('knowledgeBase.notInitialized'));
-            return false;
-        }
-        return true;
+        return kb;
     } catch (error) {
         MessagePlugin.error(t('knowledgeBase.getInfoFailed'));
-        return false;
+        return null;
     }
 }
 
@@ -94,6 +86,7 @@ const checkKnowledgeBaseInitialization = async (): Promise<boolean> => {
 const isInternalTagSortDrag = (event: DragEvent) => Boolean(event.dataTransfer?.types.includes("application/x-weknora-tag-sort"));
 const handleGlobalDragEnter = (event: DragEvent) => {
     if (isInternalTagSortDrag(event)) return;
+    if (!isFileDrag(event.dataTransfer)) return;
     event.preventDefault();
     dragCounter++;
     if (event.dataTransfer) {
@@ -104,6 +97,7 @@ const handleGlobalDragEnter = (event: DragEvent) => {
 
 const handleGlobalDragOver = (event: DragEvent) => {
     if (isInternalTagSortDrag(event)) return;
+    if (!isFileDrag(event.dataTransfer)) return;
     event.preventDefault();
     if (event.dataTransfer) {
         event.dataTransfer.dropEffect = 'copy';
@@ -112,6 +106,7 @@ const handleGlobalDragOver = (event: DragEvent) => {
 
 const handleGlobalDragLeave = (event: DragEvent) => {
     if (isInternalTagSortDrag(event)) return;
+    if (dragCounter === 0) return;
     event.preventDefault();
     dragCounter--;
     if (dragCounter === 0) {
@@ -121,6 +116,7 @@ const handleGlobalDragLeave = (event: DragEvent) => {
 
 const handleGlobalDrop = async (event: DragEvent) => {
     if (isInternalTagSortDrag(event)) return;
+    if (!isFileDrag(event.dataTransfer)) return;
     event.preventDefault();
     dragCounter = 0;
     ismask.value = false;
@@ -128,18 +124,19 @@ const handleGlobalDrop = async (event: DragEvent) => {
     const DataTransferFiles = event.dataTransfer?.files ? Array.from(event.dataTransfer.files) : [];
     const DataTransferItemList = event.dataTransfer?.items ? Array.from(event.dataTransfer.items) : [];
     
-    const isInitialized = await checkKnowledgeBaseInitialization();
-    if (!isInitialized) {
+    const knowledgeBase = await loadCurrentKnowledgeBase();
+    if (!knowledgeBase) {
         return;
     }
+    const governanceEnabled = Boolean(knowledgeBase.governance?.enabled);
     
     if (DataTransferFiles.length > 0) {
-        DataTransferFiles.forEach(file => requestMethod(file, uploadInput));
+        DataTransferFiles.forEach(file => requestMethod(file, uploadInput, governanceEnabled));
     } else if (DataTransferItemList.length > 0) {
         DataTransferItemList.forEach(dataTransferItem => {
             const fileEntry = dataTransferItem.webkitGetAsEntry() as FileSystemFileEntry | null;
             if (fileEntry) {
-                fileEntry.file((file: File) => requestMethod(file, uploadInput));
+                fileEntry.file((file: File) => requestMethod(file, uploadInput, governanceEnabled));
             }
         });
     } else {
@@ -187,6 +184,10 @@ onUnmounted(() => {
     min-width: 600px;
     /* 统一整页背景，让左侧菜单与右侧内容区视觉连贯 */
     background: var(--td-bg-color-container);
+}
+
+.main.is-embedded {
+    min-width: 0;
 }
 
 .upload-mask {

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { autoSetup } from '@/api/auth'
+import { getRuntimeMode } from '@/utils/embedded-runtime'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -32,12 +33,24 @@ function isSafeLiteRestoreTarget(path: string) {
   return path.startsWith('/platform/') && !path.startsWith('/platform/organizations')
 }
 
+function workspaceHome(authStore: ReturnType<typeof useAuthStore>) {
+  return authStore.user?.role === 'platform_admin' && authStore.workspaceMode === 'platform'
+    ? '/platform/admin/tenants'
+    : '/platform/knowledge-bases'
+}
+
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  history: createWebHistory(window.location.pathname.startsWith('/knowledge/embed/') ? '/knowledge/embed/' : import.meta.env.BASE_URL),
   routes: [
     {
+      path: '/embed/widget',
+      name: 'embeddedWidget',
+      component: () => import('../views/embedded/EmbeddedWidget.vue'),
+      meta: { requiresAuth: false, requiresInit: false },
+    },
+    {
       path: "/",
-      redirect: "/platform/knowledge-bases",
+      redirect: "/platform",
     },
     {
       path: "/login",
@@ -67,7 +80,7 @@ const router = createRouter({
     {
       path: "/platform",
       name: "Platform",
-      redirect: "/platform/knowledge-bases",
+      redirect: () => workspaceHome(useAuthStore()),
       component: () => import("../views/platform/index.vue"),
       meta: { requiresInit: true, requiresAuth: true },
       children: [
@@ -85,49 +98,61 @@ const router = createRouter({
           path: "knowledge-bases",
           name: "knowledgeBaseList",
           component: () => import("../views/knowledge/KnowledgeBaseList.vue"),
-          meta: { requiresInit: true, requiresAuth: true }
+          meta: { requiresInit: true, requiresAuth: true, allowedRoles: ['tenant_admin', 'member'] }
         },
         {
           path: "knowledge-bases/:kbId",
           name: "knowledgeBaseDetail",
           component: () => import("../views/knowledge/KnowledgeBase.vue"),
-          meta: { requiresInit: true, requiresAuth: true }
+          meta: { requiresInit: true, requiresAuth: true, allowedRoles: ['tenant_admin', 'member'] }
         },
         {
           path: "knowledge-search",
           name: "knowledgeSearch",
           component: () => import("../views/knowledge/KnowledgeSearch.vue"),
-          meta: { requiresInit: true, requiresAuth: true }
+          meta: { requiresInit: true, requiresAuth: true, allowedRoles: ['tenant_admin', 'member'] }
         },
         {
           path: "agents",
           name: "agentList",
           component: () => import("../views/agent/AgentList.vue"),
-          meta: { requiresInit: true, requiresAuth: true }
+          meta: { requiresInit: true, requiresAuth: true, allowedRoles: ['platform_admin'] }
         },
         {
           path: "creatChat",
           name: "globalCreatChat",
           component: () => import("../views/creatChat/creatChat.vue"),
-          meta: { requiresInit: true, requiresAuth: true }
+          meta: { requiresInit: true, requiresAuth: true, allowedRoles: ['tenant_admin', 'member'] }
         },
         {
           path: "knowledge-bases/:kbId/creatChat",
           name: "kbCreatChat",
           component: () => import("../views/creatChat/creatChat.vue"),
-          meta: { requiresInit: true, requiresAuth: true }
+          meta: { requiresInit: true, requiresAuth: true, allowedRoles: ['tenant_admin', 'member'] }
         },
         {
           path: "chat/:chatid",
           name: "chat",
           component: () => import("../views/chat/index.vue"),
-          meta: { requiresInit: true, requiresAuth: true }
+          meta: { requiresInit: true, requiresAuth: true, allowedRoles: ['tenant_admin', 'member'] }
         },
         {
           path: "organizations",
           name: "organizationList",
           component: () => import("../views/organization/OrganizationList.vue"),
-          meta: { requiresInit: true, requiresAuth: true }
+          meta: { requiresInit: true, requiresAuth: true, allowedRoles: [] }
+        },
+        {
+          path: "admin/tenants",
+          name: "tenantAdmin",
+          component: () => import("../views/admin/TenantAdmin.vue"),
+          meta: { requiresInit: true, requiresAuth: true, allowedRoles: ['platform_admin'] }
+        },
+        {
+          path: "admin/users",
+          name: "userAdmin",
+          component: () => import("../views/admin/UserAdmin.vue"),
+          meta: { requiresInit: true, requiresAuth: true, allowedRoles: ['platform_admin', 'tenant_admin'] }
         },
       ],
     },
@@ -147,10 +172,12 @@ function persistLoginResponse(authStore: ReturnType<typeof useAuthStore>, respon
     authStore.setUser({
       id: response.user.id || '',
       username: response.user.username || '',
+      nickname: response.user.nickname || response.user.username || '',
       email: response.user.email || '',
       avatar: response.user.avatar,
       tenant_id: String(response.tenant.id) || '',
       can_access_all_tenants: response.user.can_access_all_tenants || false,
+      role: response.user.role || 'member',
       created_at: response.user.created_at || new Date().toISOString(),
       updated_at: response.user.updated_at || new Date().toISOString()
     })
@@ -176,6 +203,16 @@ let liteDeepLinkRestoreDone = false
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
 
+  if (getRuntimeMode() === 'embedded-page') {
+    const allowed = to.path.startsWith('/platform/knowledge-bases') || to.path === '/platform/knowledge-search'
+    if (!allowed) {
+      next('/platform/knowledge-bases')
+      return
+    }
+    next()
+    return
+  }
+
   // Lite：硬刷新后若落在默认首页，恢复本次会话中最后访问的 /platform 子路径
   if (!liteDeepLinkRestoreDone) {
     liteDeepLinkRestoreDone = true
@@ -194,7 +231,7 @@ router.beforeEach(async (to, from, next) => {
   if (to.meta.requiresAuth === false || to.meta.requiresInit === false) {
     // 如果已登录用户访问登录页面，重定向到知识库列表页面
     if (to.path === '/login' && authStore.isLoggedIn) {
-      next('/platform/knowledge-bases')
+      next(workspaceHome(authStore))
       return
     }
     next()
@@ -223,6 +260,18 @@ router.beforeEach(async (to, from, next) => {
       next('/login')
       return
     }
+  }
+
+  const actualRole = authStore.user?.role || 'member'
+  const effectiveRole = actualRole === 'platform_admin' && authStore.workspaceMode === 'tenant' ? 'tenant_admin' : actualRole
+  if (actualRole === 'platform_admin' && authStore.workspaceMode === 'platform' && to.name !== 'tenantAdmin' && to.name !== 'userAdmin' && to.name !== 'settings' && to.name !== 'agentList') {
+    next('/platform/admin/tenants')
+    return
+  }
+  const allowedRoles = to.meta.allowedRoles
+  if (Array.isArray(allowedRoles) && !allowedRoles.includes(effectiveRole)) {
+    next(workspaceHome(authStore))
+    return
   }
 
   next()

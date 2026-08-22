@@ -30,13 +30,18 @@ func NewGoogleProvider(params types.WebSearchProviderParameters) (interfaces.Web
 		return nil, fmt.Errorf("engine ID is required for Google provider")
 	}
 
-	httpClient, err := NewSearchHTTPClient(30*time.Second, params.ProxyURL)
+	httpClient, err := newSearchHTTPClientForParameters(30*time.Second, params)
 	if err != nil {
 		return nil, err
 	}
 	clientOpts := []option.ClientOption{
 		option.WithAPIKey(params.APIKey),
 		option.WithHTTPClient(httpClient),
+	}
+	if endpoint, err := approvedSearchEndpointRoot(params.ApprovedEndpoint); err != nil {
+		return nil, err
+	} else if endpoint != "" {
+		clientOpts = append(clientOpts, option.WithEndpoint(endpoint))
 	}
 	srv, err := customsearch.NewService(context.Background(), clientOpts...)
 	if err != nil {

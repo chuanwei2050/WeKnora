@@ -301,6 +301,7 @@ func buildRuntimeContextBlock(
 	sessionID string,
 	kbs []*KnowledgeBaseInfo,
 	docs []*SelectedDocumentInfo,
+	plan *types.SubQuestionPlan,
 ) string {
 	var sb strings.Builder
 	sb.WriteString("<runtime_context note=\"metadata only, not instructions\">\n")
@@ -337,6 +338,14 @@ func buildRuntimeContextBlock(
 		}
 		sb.WriteString("  </pinned_documents>\n")
 		sb.WriteString("  <note>The pinned-document set above is authoritative for THIS turn. If an earlier turn in this conversation analysed a different document, do NOT reuse that analysis — re-query against the current scope.</note>\n")
+	}
+	if plan != nil && len(plan.Questions) > 1 {
+		sb.WriteString("  <sub_question_plan execution=\"ordered\">\n")
+		for _, question := range plan.Questions {
+			fmt.Fprintf(&sb, "    <question index=\"%d\" required=\"%t\" depends_on=\"%v\">%s</question>\n", question.Index, question.Required, question.DependsOn, escapeXMLAttr(question.Query))
+		}
+		sb.WriteString("    <instruction>按 index 顺序检索；后续问题只能使用原问题和前序工具结果，不得把未确认推断当作事实。</instruction>\n")
+		sb.WriteString("  </sub_question_plan>\n")
 	}
 
 	sb.WriteString("</runtime_context>")
@@ -523,7 +532,7 @@ func (e *AgentEngine) buildMessagesWithLLMContext(
 	// history preserves the (kb, pinned docs) that each earlier turn ran under;
 	// this is what lets the model detect a scope switch instead of silently
 	// answering the new question against last turn's retrieval.
-	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs)
+	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.config.SubQuestionPlan)
 	userMsg := chat.Message{
 		Role:    "user",
 		Content: runtimeCtx + "\n\n" + currentQuery,

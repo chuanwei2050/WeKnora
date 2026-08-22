@@ -3,10 +3,11 @@ package interfaces
 import (
 	"context"
 
+	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
-	"github.com/Tencent/WeKnora/internal/models/asr"
+	"github.com/Tencent/WeKnora/internal/models/tts"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -19,6 +20,8 @@ type ModelService interface {
 	GetModelByID(ctx context.Context, id string) (*types.Model, error)
 	// ListModels lists all models
 	ListModels(ctx context.Context) ([]*types.Model, error)
+	// GetDefaultModel returns the platform default for the active profile and role.
+	GetDefaultModel(ctx context.Context, modelType types.ModelType, profileRole string) (*types.Model, error)
 	// UpdateModel updates a model
 	UpdateModel(ctx context.Context, model *types.Model) error
 	// DeleteModel deletes a model
@@ -35,6 +38,8 @@ type ModelService interface {
 	GetVLMModel(ctx context.Context, modelId string) (vlm.VLM, error)
 	// GetASRModel gets an automatic speech recognition model
 	GetASRModel(ctx context.Context, modelId string) (asr.ASR, error)
+	GetTTSModel(ctx context.Context, modelId string) (tts.TTS, error)
+	ProbeModelCapabilities(ctx context.Context, modelID string) (*types.ModelPreflightResult, error)
 }
 
 // ModelRepository defines the model repository interface
@@ -56,5 +61,5 @@ type ModelRepository interface {
 	Delete(ctx context.Context, tenantID uint64, id string) error
 	// ClearDefaultByType clears the default flag for all models of a specific type
 	// optionally excluding a specific model ID.
-	ClearDefaultByType(ctx context.Context, tenantID uint, modelType types.ModelType, excludeID string) error
+	ClearDefaultByType(ctx context.Context, tenantID uint, modelType types.ModelType, profile types.ModelProfile, profileRole, excludeID string) error
 }

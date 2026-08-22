@@ -1,0 +1,2 @@
+-- Compatibility migration is intentionally irreversible because the restored
+-- column may contain application data after the upgrade.

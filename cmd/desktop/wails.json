@@ -1,19 +1,19 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "WeKnora Lite",
-  "outputfilename": "WeKnora Lite",
+  "name": "知识问答智能体 Lite",
+  "outputfilename": "知识问答智能体 Lite",
   "frontend:dir": "../../frontend",
   "wailsjsdir": "../../frontend/src",
   "author": {
-    "name": "WeKnora Team",
+    "name": "知识问答智能体",
     "email": ""
   },
   "info": {
-    "companyName": "Tencent",
-    "productName": "WeKnora Lite",
+    "companyName": "",
+    "productName": "知识问答智能体 Lite",
     "productVersion": "1.0.0",
-    "copyright": "Copyright 2026 Tencent",
-    "comments": "WeKnora Desktop Edition"
+    "copyright": "",
+    "comments": "知识问答智能体桌面版"
   },
   "mac": {
     "category": "public.app-category.productivity",

@@ -3,6 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -13,16 +14,46 @@ import (
 // ModelType represents the type of AI model
 type ModelType string
 
+type ModelProfile string
+
+const (
+	ModelProfileOnline  ModelProfile = "online"
+	ModelProfileOffline ModelProfile = "offline"
+)
+
+func ParseModelProfile(value string) (ModelProfile, bool) {
+	switch ModelProfile(strings.ToLower(strings.TrimSpace(value))) {
+	case ModelProfileOnline:
+		return ModelProfileOnline, true
+	case ModelProfileOffline:
+		return ModelProfileOffline, true
+	default:
+		return "", false
+	}
+}
+
 const (
 	ModelTypeEmbedding   ModelType = "Embedding"   // Embedding model
 	ModelTypeRerank      ModelType = "Rerank"      // Rerank model
 	ModelTypeKnowledgeQA ModelType = "KnowledgeQA" // KnowledgeQA model
 	ModelTypeVLLM        ModelType = "VLLM"        // VLLM model
 	ModelTypeASR         ModelType = "ASR"         // ASR (Automatic Speech Recognition) model
+	ModelTypeTTS         ModelType = "TTS"
+	ModelTypeVLM         ModelType = "VLM"
+	ModelTypeVerifier    ModelType = "Verifier"
+	ModelTypeJudge       ModelType = "EvaluationJudge"
+	ModelTypeParserOCR   ModelType = "ParserOCR"
 )
 
 // ModelStatus represents the status of the model
 type ModelStatus string
+
+// PlatformScopeTenantID is the reserved scope for platform-managed
+// configuration records inherited by every tenant.
+const PlatformScopeTenantID uint64 = 0
+
+// PlatformModelTenantID is kept as a descriptive alias for model records.
+const PlatformModelTenantID = PlatformScopeTenantID
 
 const (
 	ModelStatusActive         ModelStatus = "active"          // Model is active
@@ -34,39 +65,47 @@ const (
 type ModelSource string
 
 const (
-	ModelSourceLocal       ModelSource = "local"       // Local model
-	ModelSourceRemote      ModelSource = "remote"      // Remote model
-	ModelSourceAliyun      ModelSource = "aliyun"      // Aliyun DashScope model
-	ModelSourceZhipu       ModelSource = "zhipu"       // Zhipu model
-	ModelSourceVolcengine  ModelSource = "volcengine"  // Volcengine model
-	ModelSourceDeepseek    ModelSource = "deepseek"    // Deepseek model
-	ModelSourceHunyuan     ModelSource = "hunyuan"     // Hunyuan model
-	ModelSourceMinimax     ModelSource = "minimax"     // Minimax mode
-	ModelSourceOpenAI      ModelSource = "openai"      // OpenAI model
-	ModelSourceGemini      ModelSource = "gemini"      // Gemini model
-	ModelSourceMimo        ModelSource = "mimo"        // Mimo model
-	ModelSourceSiliconFlow ModelSource = "siliconflow" // SiliconFlow model
-	ModelSourceJina        ModelSource = "jina"        // Jina AI model
-	ModelSourceOpenRouter  ModelSource = "openrouter"  // OpenRouter model
-	ModelSourceNvidia      ModelSource = "nvidia"      // NVIDIA model
-	ModelSourceNovita      ModelSource = "novita"      // Novita AI model
+	ModelSourceLocal       ModelSource = "local"        // Local model
+	ModelSourceRemote      ModelSource = "remote"       // Remote model
+	ModelSourceAliyun      ModelSource = "aliyun"       // Aliyun DashScope model
+	ModelSourceZhipu       ModelSource = "zhipu"        // Zhipu model
+	ModelSourceVolcengine  ModelSource = "volcengine"   // Volcengine model
+	ModelSourceDeepseek    ModelSource = "deepseek"     // Deepseek model
+	ModelSourceHunyuan     ModelSource = "hunyuan"      // Hunyuan model
+	ModelSourceMinimax     ModelSource = "minimax"      // Minimax mode
+	ModelSourceOpenAI      ModelSource = "openai"       // OpenAI model
+	ModelSourceGemini      ModelSource = "gemini"       // Gemini model
+	ModelSourceMimo        ModelSource = "mimo"         // Mimo model
+	ModelSourceSiliconFlow ModelSource = "siliconflow"  // SiliconFlow model
+	ModelSourceJina        ModelSource = "jina"         // Jina AI model
+	ModelSourceOpenRouter  ModelSource = "openrouter"   // OpenRouter model
+	ModelSourceNvidia      ModelSource = "nvidia"       // NVIDIA model
+	ModelSourceNovita      ModelSource = "novita"       // Novita AI model
 	ModelSourceAzureOpenAI ModelSource = "azure_openai" // Azure OpenAI model
 )
 
 // EmbeddingParameters represents the embedding parameters for a model
 type EmbeddingParameters struct {
-	Dimension            int `yaml:"dimension"              json:"dimension"`
-	TruncatePromptTokens int `yaml:"truncate_prompt_tokens" json:"truncate_prompt_tokens"`
+	Dimension            int    `yaml:"dimension"              json:"dimension"`
+	TruncatePromptTokens int    `yaml:"truncate_prompt_tokens" json:"truncate_prompt_tokens"`
+	CompatibilityID      string `yaml:"compatibility_id"       json:"compatibility_id"`
 }
 
 type ModelParameters struct {
-	BaseURL             string              `yaml:"base_url"             json:"base_url"`
-	APIKey              string              `yaml:"api_key"              json:"api_key"`
-	InterfaceType       string              `yaml:"interface_type"       json:"interface_type"`
-	EmbeddingParameters EmbeddingParameters `yaml:"embedding_parameters" json:"embedding_parameters"`
-	ParameterSize       string              `yaml:"parameter_size"       json:"parameter_size"`  // Ollama model parameter size (e.g., "7B", "13B", "70B")
-	Provider            string              `yaml:"provider"             json:"provider"`        // Provider identifier: openai, aliyun, zhipu, generic
-	ExtraConfig         map[string]string   `yaml:"extra_config"         json:"extra_config"`    // Provider-specific configuration
+	BaseURL             string                  `yaml:"base_url"             json:"base_url"`
+	APIKey              string                  `yaml:"api_key"              json:"api_key"`
+	InterfaceType       string                  `yaml:"interface_type"       json:"interface_type"`
+	EmbeddingParameters EmbeddingParameters     `yaml:"embedding_parameters" json:"embedding_parameters"`
+	ParameterSize       string                  `yaml:"parameter_size"       json:"parameter_size"` // Ollama model parameter size (e.g., "7B", "13B", "70B")
+	Provider            string                  `yaml:"provider"             json:"provider"`       // Provider identifier: openai, aliyun, zhipu, generic
+	Protocol            ModelProtocol           `yaml:"protocol,omitempty"    json:"protocol,omitempty"`
+	Location            EndpointLocation        `yaml:"location,omitempty"    json:"location,omitempty"`
+	ArtifactPolicy      ArtifactPolicy          `yaml:"artifact_policy,omitempty" json:"artifact_policy,omitempty"`
+	InferenceEngine     string                  `yaml:"inference_engine,omitempty" json:"inference_engine,omitempty"`
+	Capabilities        ModelCapabilityManifest `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
+	ApprovedEndpointID  string                  `yaml:"approved_endpoint_id,omitempty" json:"approved_endpoint_id,omitempty"`
+	EndpointUse         string                  `yaml:"endpoint_use,omitempty" json:"endpoint_use,omitempty"`
+	ExtraConfig         map[string]string       `yaml:"extra_config"         json:"extra_config"` // Provider-specific configuration
 	// CustomHeaders 允许在调用远程模型 API 时附加自定义 HTTP 请求头，
 	// 用途类似 Python OpenAI SDK 的 extra_headers 参数，
 	// 常见场景包括透传企业网关鉴权信息、追踪 ID、路由标识等。
@@ -98,6 +137,9 @@ type Model struct {
 	IsDefault bool `yaml:"is_default"  json:"is_default"`
 	// Whether the model is a builtin model (visible to all tenants)
 	IsBuiltin bool `yaml:"is_builtin"  json:"is_builtin"  gorm:"default:false"`
+	// Profile and logical role select the runtime endpoint without changing persisted model references.
+	Profile     ModelProfile `yaml:"profile"      json:"profile"      gorm:"type:varchar(16);index"`
+	ProfileRole string       `yaml:"profile_role" json:"profile_role" gorm:"type:varchar(32);index"`
 	// Model status, default: active, possible: downloading, download_failed
 	Status ModelStatus `yaml:"status"      json:"status"`
 	// Creation time of the model

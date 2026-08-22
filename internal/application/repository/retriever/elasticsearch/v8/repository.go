@@ -108,9 +108,9 @@ func (e *elasticsearchRepository) EngineType() typesLocal.RetrieverEngineType {
 	return typesLocal.ElasticsearchRetrieverEngineType
 }
 
-// Support returns the retrieval types supported by this repository (Keywords and Vector)
+// Support returns the retrieval types supported by this repository.
 func (e *elasticsearchRepository) Support() []typesLocal.RetrieverType {
-	return []typesLocal.RetrieverType{typesLocal.KeywordsRetrieverType, typesLocal.VectorRetrieverType}
+	return []typesLocal.RetrieverType{typesLocal.KeywordsRetrieverType}
 }
 
 // calculateStorageSize estimates the storage size in bytes for a single index document
@@ -163,11 +163,6 @@ func (e *elasticsearchRepository) Save(ctx context.Context,
 
 	// Convert to database format
 	embeddingDB := elasticsearchRetriever.ToDBVectorEmbedding(embedding, additionalParams)
-	if len(embeddingDB.Embedding) == 0 {
-		err := fmt.Errorf("empty embedding vector for chunk ID: %s", embedding.ChunkID)
-		log.Errorf("[Elasticsearch] %v", err)
-		return err
-	}
 
 	// Index the document
 	resp, err := e.client.Index(e.index).Request(embeddingDB).Do(ctx)

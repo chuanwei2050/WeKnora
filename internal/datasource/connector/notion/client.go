@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/time/rate"
-
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
+	"golang.org/x/time/rate"
 )
 
 // notionClient wraps the Notion API with rate limiting and retry logic.
@@ -36,6 +36,19 @@ func newClient(token, baseURL string) *notionClient {
 		limiter:    rate.NewLimiter(rate.Limit(3), 3), // 3 req/s with burst of 3 (matches Notion's actual behavior)
 		baseURL:    baseURL,
 	}
+}
+
+func newClientWithEndpoint(token, baseURL string, endpoint *types.ApprovedEndpoint) (*notionClient, error) {
+	client := newClient(token, baseURL)
+	if endpoint == nil {
+		return client, nil
+	}
+	httpClient, err := datasource.NewApprovedEndpointHTTPClient(endpoint, 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	client.httpClient = httpClient
+	return client, nil
 }
 
 const maxRetries = 3
@@ -266,7 +279,7 @@ func (c *notionClient) GetBlockChildrenFlat(ctx context.Context, blockID string)
 	return allBlocks, nil
 }
 
-const maxBlockDepth = 5    // Limit recursion depth — deeper content has diminishing value for knowledge bases
+const maxBlockDepth = 5       // Limit recursion depth — deeper content has diminishing value for knowledge bases
 const maxBlocksPerPage = 1000 // Limit total blocks fetched per page to prevent runaway API calls
 
 // GetBlockChildrenAll recursively fetches all blocks under a given block ID,

@@ -1,17 +1,30 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n';
+import type { DocumentBatchAction, GovernanceRowAction } from './knowledge-governance-actions';
 
 defineProps<{
   count: number;
-  loading?: boolean;
+  actions: DocumentBatchAction[];
+  loadingAction?: GovernanceRowAction | null;
+  folderTargets?: Array<{ content: string; value: string }>;
+  movingFolder?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'clear'): void;
-  (e: 'delete'): void;
+  (e: 'action', action: GovernanceRowAction): void;
+  (e: 'move-folder', tagId: string): void;
 }>();
 
 const { t } = useI18n();
+
+const actionLabelKeys: Record<GovernanceRowAction, string> = {
+  submit: 'knowledgeBase.governanceSubmit',
+  withdraw: 'knowledgeBase.governanceWithdraw',
+  approve: 'knowledgeBase.governanceApprove',
+  reject: 'knowledgeBase.governanceReject',
+  delete: 'knowledgeBase.governanceDelete',
+};
 </script>
 
 <template>
@@ -25,15 +38,34 @@ const { t } = useI18n();
       </div>
       <div class="batch-bar-actions">
         <t-button
-          theme="danger"
-          variant="base"
+          v-for="item in actions"
+          :key="item.action"
+          :theme="item.action === 'delete' ? 'danger' : 'primary'"
+          :variant="item.action === 'submit' || item.action === 'approve' ? 'base' : 'outline'"
           size="small"
-          :loading="loading"
-          @click="emit('delete')"
+          :loading="loadingAction === item.action"
+          :disabled="Boolean(movingFolder) || (Boolean(loadingAction) && loadingAction !== item.action)"
+          @click="emit('action', item.action)"
         >
-          <template #icon><t-icon name="delete" size="14px" /></template>
-          {{ t('knowledgeBase.batchDelete') }}
+          {{ t(actionLabelKeys[item.action]) }}（{{ item.count }}）
         </t-button>
+        <t-dropdown
+          v-if="folderTargets?.length"
+          :options="folderTargets"
+          trigger="click"
+          placement="top-right"
+          @click="(data: { value: string | number }) => emit('move-folder', String(data.value))"
+        >
+          <t-button
+            theme="primary"
+            variant="outline"
+            size="small"
+            :loading="movingFolder"
+            :disabled="Boolean(loadingAction)"
+          >
+            {{ t('knowledgeBase.moveToFolder') }}（{{ count }}）
+          </t-button>
+        </t-dropdown>
       </div>
     </div>
   </transition>
@@ -50,7 +82,7 @@ const { t } = useI18n();
   padding: 8px 12px 8px 16px;
   margin: 12px auto 4px;
   min-width: 320px;
-  max-width: 720px;
+  max-width: min(920px, calc(100% - 24px));
   background: var(--td-bg-color-container, #fff);
   border: 1px solid var(--td-component-border, #e7e7e7);
   border-radius: 999px;
@@ -87,6 +119,8 @@ const { t } = useI18n();
 .batch-bar-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
   margin-left: auto;
 }

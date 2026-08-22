@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/transport"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -48,6 +50,13 @@ type OpenAIEmbedResponse struct {
 func NewOpenAIEmbedder(apiKey, baseURL, modelName string,
 	truncatePromptTokens int, dimensions int, modelID string, pooler EmbedderPooler,
 ) (*OpenAIEmbedder, error) {
+	return NewOpenAIEmbedderWithValidation(apiKey, baseURL, modelName, truncatePromptTokens, dimensions, modelID, pooler, nil)
+}
+
+func NewOpenAIEmbedderWithValidation(apiKey, baseURL, modelName string,
+	truncatePromptTokens int, dimensions int, modelID string, pooler EmbedderPooler,
+	validateIP func(net.IP) error,
+) (*OpenAIEmbedder, error) {
 	if baseURL == "" {
 		baseURL = "https://api.openai.com/v1"
 	}
@@ -63,8 +72,9 @@ func NewOpenAIEmbedder(apiKey, baseURL, modelName string,
 	timeout := 60 * time.Second
 
 	// Create HTTP client
-	client := &http.Client{
-		Timeout: timeout,
+	client, err := transport.NewEndpointHTTPClientWithValidation(baseURL, timeout, validateIP)
+	if err != nil {
+		return nil, fmt.Errorf("invalid embedding endpoint: %w", err)
 	}
 
 	return &OpenAIEmbedder{

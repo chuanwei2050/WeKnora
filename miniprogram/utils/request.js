@@ -3,10 +3,10 @@ const { getSettings } = require("./config");
 function request(path, options = {}) {
   const settings = getSettings();
   if (!settings.baseUrl) {
-    return Promise.reject(new Error("Please configure the WeKnora API base URL first."));
+    return Promise.reject(new Error("请先配置 API 地址。"));
   }
   if (!settings.apiKey) {
-    return Promise.reject(new Error("Please configure the WeKnora API key first."));
+    return Promise.reject(new Error("请先配置 API Key。"));
   }
 
   return new Promise((resolve, reject) => {

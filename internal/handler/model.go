@@ -32,8 +32,8 @@ func NewModelHandler(service interfaces.ModelService) *ModelHandler {
 
 // hideSensitiveInfo hides sensitive information (APIKey, BaseURL) for builtin models
 // Returns a copy of the model with sensitive fields cleared if it's a builtin model
-func hideSensitiveInfo(model *types.Model) *types.Model {
-	if !model.IsBuiltin {
+func hideSensitiveInfo(model *types.Model, hideCredentials bool) *types.Model {
+	if !model.IsBuiltin && !(hideCredentials && model.TenantID == types.PlatformModelTenantID) {
 		return model
 	}
 
@@ -52,12 +52,37 @@ func hideSensitiveInfo(model *types.Model) *types.Model {
 			// Keep other parameters like embedding dimensions
 			EmbeddingParameters: model.Parameters.EmbeddingParameters,
 			ParameterSize:       model.Parameters.ParameterSize,
+			Protocol:            model.Parameters.Protocol,
+			Location:            model.Parameters.Location,
+			ArtifactPolicy:      model.Parameters.ArtifactPolicy,
+			InferenceEngine:     model.Parameters.InferenceEngine,
+			Capabilities:        model.Parameters.Capabilities,
 		},
-		IsBuiltin: model.IsBuiltin,
-		Status:    model.Status,
-		CreatedAt: model.CreatedAt,
-		UpdatedAt: model.UpdatedAt,
+		IsBuiltin:   model.IsBuiltin,
+		IsDefault:   model.IsDefault,
+		Profile:     model.Profile,
+		ProfileRole: model.ProfileRole,
+		Status:      model.Status,
+		CreatedAt:   model.CreatedAt,
+		UpdatedAt:   model.UpdatedAt,
 	}
+}
+
+func isPlatformAdmin(c *gin.Context) bool {
+	method, ok := c.Request.Context().Value(types.AuthenticationMethodContextKey).(types.AuthenticationMethod)
+	if !ok || method != types.AuthenticationMethodBearer {
+		return false
+	}
+	user, ok := types.UserFromContext(c.Request.Context())
+	return ok && user.IsPlatformAdmin()
+}
+
+func requirePlatformAdmin(c *gin.Context) bool {
+	if isPlatformAdmin(c) {
+		return true
+	}
+	c.Error(errors.NewForbiddenError("Only platform administrators can manage models"))
+	return false
 }
 
 // CreateModelRequest defines the structure for model creation requests
@@ -68,6 +93,9 @@ type CreateModelRequest struct {
 	Source      types.ModelSource     `json:"source"      binding:"required"`
 	Description string                `json:"description"`
 	Parameters  types.ModelParameters `json:"parameters"  binding:"required"`
+	Profile     types.ModelProfile    `json:"profile"`
+	ProfileRole string                `json:"profile_role"`
+	IsDefault   bool                  `json:"is_default"`
 }
 
 // CreateModel godoc
@@ -84,6 +112,9 @@ type CreateModelRequest struct {
 // @Router       /models [post]
 func (h *ModelHandler) CreateModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdmin(c) {
+		return
+	}
 
 	logger.Info(ctx, "Start creating model")
 
@@ -93,15 +124,8 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		logger.Error(ctx, "Tenant ID is empty")
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
-		return
-	}
-
 	logger.Infof(ctx, "Creating model, Tenant ID: %d, Model name: %s, Model type: %s",
-		tenantID, secutils.SanitizeForLog(req.Name), secutils.SanitizeForLog(string(req.Type)))
+		types.PlatformModelTenantID, secutils.SanitizeForLog(req.Name), secutils.SanitizeForLog(string(req.Type)))
 
 	// SSRF validation for model BaseURL
 	if req.Parameters.BaseURL != "" {
@@ -113,12 +137,15 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	}
 
 	model := &types.Model{
-		TenantID:    tenantID,
+		TenantID:    types.PlatformModelTenantID,
 		Name:        secutils.SanitizeForLog(req.Name),
 		Type:        types.ModelType(secutils.SanitizeForLog(string(req.Type))),
 		Source:      req.Source,
 		Description: secutils.SanitizeForLog(req.Description),
 		Parameters:  req.Parameters,
+		Profile:     req.Profile,
+		ProfileRole: req.ProfileRole,
+		IsDefault:   req.IsDefault,
 	}
 
 	if err := h.service.CreateModel(ctx, model); err != nil {
@@ -135,7 +162,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	)
 
 	// Hide sensitive information for builtin models (though newly created models are unlikely to be builtin)
-	responseModel := hideSensitiveInfo(model)
+	responseModel := hideSensitiveInfo(model, false)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
@@ -183,7 +210,7 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 	logger.Infof(ctx, "Retrieved model successfully, ID: %s, Name: %s", model.ID, model.Name)
 
 	// Hide sensitive information for builtin models
-	responseModel := hideSensitiveInfo(model)
+	responseModel := hideSensitiveInfo(model, !isPlatformAdmin(c))
 	if model.IsBuiltin {
 		logger.Infof(ctx, "Builtin model detected, hiding sensitive information for model: %s", model.ID)
 	}
@@ -229,7 +256,7 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 	// Hide sensitive information for builtin models in the list
 	responseModels := make([]*types.Model, len(models))
 	for i, model := range models {
-		responseModels[i] = hideSensitiveInfo(model)
+		responseModels[i] = hideSensitiveInfo(model, !isPlatformAdmin(c))
 		if model.IsBuiltin {
 			logger.Infof(ctx, "Builtin model detected in list, hiding sensitive information for model: %s", model.ID)
 		}
@@ -249,6 +276,9 @@ type UpdateModelRequest struct {
 	Parameters  types.ModelParameters `json:"parameters"`
 	Source      types.ModelSource     `json:"source"`
 	Type        types.ModelType       `json:"type"`
+	Profile     types.ModelProfile    `json:"profile"`
+	ProfileRole string                `json:"profile_role"`
+	IsDefault   *bool                 `json:"is_default"`
 }
 
 // UpdateModel godoc
@@ -266,6 +296,9 @@ type UpdateModelRequest struct {
 // @Router       /models/{id} [put]
 func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdmin(c) {
+		return
+	}
 
 	logger.Info(ctx, "Start updating model")
 
@@ -317,12 +350,30 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	}
 	model.Parameters = req.Parameters
 
-	model.Source = req.Source
-	model.Type = req.Type
+	// Keep existing source/type when the client omits them (empty string would wipe DB values).
+	if req.Source != "" {
+		model.Source = req.Source
+	}
+	if req.Type != "" {
+		model.Type = req.Type
+	}
+	if req.Profile != "" {
+		model.Profile = req.Profile
+	}
+	if req.ProfileRole != "" {
+		model.ProfileRole = req.ProfileRole
+	}
+	if req.IsDefault != nil && *req.IsDefault {
+		model.IsDefault = true
+	}
 
 	logger.Infof(ctx, "Updating model, ID: %s, Name: %s", id, model.Name)
 	if err := h.service.UpdateModel(ctx, model); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
+		if err == service.ErrModelAlreadyExists {
+			c.Error(errors.NewConflictError(err.Error()))
+			return
+		}
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
@@ -330,7 +381,7 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	logger.Infof(ctx, "Model updated successfully, ID: %s", id)
 
 	// Hide sensitive information for builtin models (though builtin models cannot be updated)
-	responseModel := hideSensitiveInfo(model)
+	responseModel := hideSensitiveInfo(model, false)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -352,6 +403,9 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 // @Router       /models/{id} [delete]
 func (h *ModelHandler) DeleteModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !requirePlatformAdmin(c) {
+		return
+	}
 
 	logger.Info(ctx, "Start deleting model")
 
@@ -404,9 +458,24 @@ func modelTypeToFrontend(mt types.ModelType) string {
 		return "vllm"
 	case types.ModelTypeASR:
 		return "asr"
+	case types.ModelTypeTTS:
+		return "tts"
 	default:
 		return string(mt)
 	}
+}
+
+func (h *ModelHandler) PreflightModel(c *gin.Context) {
+	if c.GetUint64(types.TenantIDContextKey.String()) == 0 {
+		c.Error(errors.NewUnauthorizedError("unauthorized"))
+		return
+	}
+	result, err := h.service.ProbeModelCapabilities(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
 
 // ListModelProviders godoc

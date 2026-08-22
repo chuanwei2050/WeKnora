@@ -1,0 +1,65 @@
+{
+  "schema": "weknora-helm-airgap-kind-e2e/v1",
+  "profile": "helm-airgap",
+  "environment": {
+    "runtime": "kind",
+    "cluster": "weknora-airgap-20260812",
+    "kubernetes_context": "kind-weknora-airgap-20260812",
+    "node": "weknora-airgap-20260812-control-plane",
+    "namespace": "weknora-airgap",
+    "registry": "localhost:5001",
+    "air_gapped_mode": true,
+    "egress_policy": "node OUTPUT/FORWARD allowlisted loopback, cluster/private/link-local ranges; all other destinations rejected"
+  },
+  "deployment": {
+    "helm_release": "weknora-airgap",
+    "revision": 1,
+    "status": "deployed",
+    "installed_after_egress_block": true,
+    "components": [
+      {
+        "name": "app",
+        "image": "localhost:5001/weknora-app@sha256:c192a33395a5fb638694c31a442a693e4600eeb13a0c21fcbb3bb9570a59bca4",
+        "ready": true
+      },
+      {
+        "name": "frontend",
+        "image": "localhost:5001/weknora-ui@sha256:b64ed72e5ca5ca9e5dccfd29993bb485c82dd2ffa5e214211b762401de7ba03b",
+        "ready": true
+      },
+      {
+        "name": "docreader",
+        "image": "localhost:5001/weknora-docreader@sha256:043e4fe54a80649600a457d21e08ff19ad15efdc44389d4a58c785725882fd58",
+        "ready": true
+      },
+      {
+        "name": "postgres",
+        "image": "localhost:5001/paradedb@sha256:cb2af8cbafea8c41cde450b7be845abfd74c014cb13e35e06677aad8aed0eba0",
+        "ready": true
+      },
+      {
+        "name": "redis",
+        "image": "localhost:5001/redis@sha256:9702d01c1f10c3ea9f48211b4362e44f154ff02d063e6f7268eba804059f53bf",
+        "ready": true
+      }
+    ]
+  },
+  "checks": {
+    "helm_lint": "passed",
+    "airgap_preflight": "passed",
+    "app_health": {
+      "status": "passed",
+      "response": "{\"status\":\"ok\"}"
+    },
+    "frontend_internal_probe": "passed",
+    "public_egress_probe": {
+      "status": "blocked",
+      "target": "http://1.1.1.1/",
+      "exit_code": 4
+    }
+  },
+  "notes": [
+    "The local registry rewrote single-platform manifest digests when importing the locally cached images; the Helm run used those registry digests explicitly and did not alter the repository lock file.",
+    "This evidence covers the Helm profile and core component smoke checks; online-model, voice-model, and cross-profile frozen-suite evidence remain separate gates."
+  ]
+}

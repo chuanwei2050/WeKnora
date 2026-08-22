@@ -257,16 +257,34 @@ func mustParseCIDR(s string) *net.IPNet {
 	return ipNet
 }
 
+// isPrivateNetworksAllowed reports whether SSRF_ALLOW_PRIVATE_NETWORKS is enabled.
+// When true, private/loopback/link-local addresses and proxy fake-ip ranges
+// (198.18.0.0/15) are permitted for admin-configured endpoints such as model APIs.
+func isPrivateNetworksAllowed() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("SSRF_ALLOW_PRIVATE_NETWORKS")), "true")
+}
+
 // isRestrictedIP checks if an IP address falls within any restricted range
 func isRestrictedIP(ip net.IP) (bool, string) {
+	allowPrivate := isPrivateNetworksAllowed()
+
 	// Check Go's built-in methods first
 	if ip.IsPrivate() {
+		if allowPrivate {
+			return false, ""
+		}
 		return true, "private IP address"
 	}
 	if ip.IsLoopback() {
+		if allowPrivate {
+			return false, ""
+		}
 		return true, "loopback address"
 	}
 	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		if allowPrivate {
+			return false, ""
+		}
 		return true, "link-local address"
 	}
 	if ip.IsMulticast() {
@@ -280,6 +298,14 @@ func isRestrictedIP(ip net.IP) (bool, string) {
 	if ip4 := ip.To4(); ip4 != nil {
 		for _, cidr := range restrictedIPv4Ranges {
 			if cidr.Contains(ip4) {
+				// 198.18.0.0/15 is commonly used by proxy fake-ip DNS (e.g. Clash/Mihomo).
+				if allowPrivate && cidr.String() == "198.18.0.0/15" {
+					continue
+				}
+				// Docker bridge ranges are typical in internal deployments.
+				if allowPrivate && strings.HasPrefix(cidr.String(), "172.1") {
+					continue
+				}
 				return true, fmt.Sprintf("restricted range %s", cidr.String())
 			}
 		}
@@ -426,28 +452,37 @@ func isSSRFSafeURL(rawURL string) (bool, string) {
 	// transition mechanism bypasses. Legitimate IPs should be whitelisted via
 	// SSRF_WHITELIST env var; the whitelist is checked by ValidateURLForSSRF
 	// before this function is called.
-	ip := net.ParseIP(hostname)
-	if ip != nil {
-		return false, "direct IP address access is not allowed, use domain name or add to SSRF_WHITELIST"
+	directIPAllowed := false
+	if ip := net.ParseIP(hostname); ip != nil {
+		if isPrivateNetworksAllowed() {
+			if restricted, reason := isRestrictedIP(ip); restricted {
+				return false, fmt.Sprintf("IP address %s is restricted: %s", hostname, reason)
+			}
+			directIPAllowed = true
+		} else {
+			return false, "direct IP address access is not allowed, use domain name or add to SSRF_WHITELIST"
+		}
 	}
 
 	// Also check for IP addresses in various formats that ParseIP might not catch
 	// e.g., octal (0177.0.0.1), hex (0x7f.0.0.1), decimal (2130706433)
-	if isIPLikeHostname(hostname) {
+	if !directIPAllowed && isIPLikeHostname(hostname) {
 		return false, "IP-like hostname format is not allowed"
 	}
 
-	// Perform DNS resolution to check the resolved IP
-	// This prevents DNS rebinding attacks where a domain resolves to internal IPs
-	ips, err := net.LookupIP(hostname)
-	if err != nil {
-		return false, fmt.Sprintf("DNS resolution failed for hostname %s: cannot verify if it resolves to safe IP", hostname)
-	}
+	if !directIPAllowed {
+		// Perform DNS resolution to check the resolved IP
+		// This prevents DNS rebinding attacks where a domain resolves to internal IPs
+		ips, err := net.LookupIP(hostname)
+		if err != nil {
+			return false, fmt.Sprintf("DNS resolution failed for hostname %s: cannot verify if it resolves to safe IP", hostname)
+		}
 
-	// Check if any resolved IP is restricted
-	for _, resolvedIP := range ips {
-		if restricted, reason := isRestrictedIP(resolvedIP); restricted {
-			return false, fmt.Sprintf("hostname %s resolves to restricted IP %s: %s", hostname, resolvedIP.String(), reason)
+		// Check if any resolved IP is restricted
+		for _, resolvedIP := range ips {
+			if restricted, reason := isRestrictedIP(resolvedIP); restricted {
+				return false, fmt.Sprintf("hostname %s resolves to restricted IP %s: %s", hostname, resolvedIP.String(), reason)
+			}
 		}
 	}
 
@@ -991,6 +1026,11 @@ func ValidateURLForSSRF(rawURL string) error {
 	if hostname == "" {
 		return fmt.Errorf("URL has no hostname")
 	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("AIR_GAPPED_MODE")), "true") {
+		if err := validateStrictAirGappedHost(hostname); err != nil {
+			return err
+		}
+	}
 
 	// If the host is whitelisted, skip the heavy checks.
 	if IsSSRFWhitelisted(hostname) {
@@ -1002,6 +1042,29 @@ func ValidateURLForSSRF(rawURL string) error {
 		return fmt.Errorf("SSRF validation failed: %s", reason)
 	}
 	return nil
+}
+
+func validateStrictAirGappedHost(hostname string) error {
+	if ip := net.ParseIP(hostname); ip != nil {
+		if !isPrivateAirGappedIP(ip) {
+			return fmt.Errorf("strict air-gapped mode rejects public endpoint %q", hostname)
+		}
+		return nil
+	}
+	ips, err := net.DefaultResolver.LookupIP(context.Background(), "ip", hostname)
+	if err != nil || len(ips) == 0 {
+		return fmt.Errorf("strict air-gapped mode cannot resolve endpoint %q", hostname)
+	}
+	for _, ip := range ips {
+		if !isPrivateAirGappedIP(ip) {
+			return fmt.Errorf("strict air-gapped mode rejects endpoint %q resolving to public IP %s", hostname, ip)
+		}
+	}
+	return nil
+}
+
+func isPrivateAirGappedIP(ip net.IP) bool {
+	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
 }
 
 // IsSystemProxy 判断是否为系统代理

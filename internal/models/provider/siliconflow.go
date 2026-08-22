@@ -29,6 +29,7 @@ func (p *SiliconFlowProvider) Info() ProviderInfo {
 			types.ModelTypeRerank:      SiliconFlowBaseURL,
 			types.ModelTypeVLLM:        SiliconFlowBaseURL,
 			types.ModelTypeASR:         SiliconFlowBaseURL,
+			types.ModelTypeTTS:         SiliconFlowBaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
@@ -36,6 +37,7 @@ func (p *SiliconFlowProvider) Info() ProviderInfo {
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
 			types.ModelTypeASR,
+			types.ModelTypeTTS,
 		},
 		RequiresAuth: true,
 	}

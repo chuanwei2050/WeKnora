@@ -1,0 +1,83 @@
+{
+  "schema": "software-testing-governance-es-e2e/v1",
+  "run_at": "2026-08-13T14:47:00+08:00",
+  "change_id": "add-software-testing-knowledge-governance",
+  "gate": "blocked",
+  "summary": "Elasticsearch is not deployed or configured for the live e2e stack; governance ES-dependent end-to-end validation cannot run honestly.",
+  "elasticsearch": {
+    "in_docker_compose": false,
+    "compose_service_name": null,
+    "host_port_9200": {
+      "reachable": false,
+      "error": "无法连接到远程服务器 (connection refused / no listener on 127.0.0.1:9200)"
+    },
+    "from_e2e_app_container": {
+      "reachable": false,
+      "probe": "wget --timeout=2 http://es:9200/ inside WeKnora-app-e2e",
+      "result": "ES_unreachable_from_app"
+    },
+    "start_attempted": false,
+    "start_skipped_reason": "No elasticsearch service in docker-compose.yml; e2e app uses RETRIEVE_DRIVER=postgres with empty ELASTICSEARCH_* env. Starting a standalone ES container on the compose network would not wire into the running app without compose/env changes and app restart — not low-risk."
+  },
+  "e2e_app": {
+    "target": "http://127.0.0.1:18080",
+    "container": "WeKnora-app-e2e",
+    "status": "up",
+    "health": "ok",
+    "retrieve_driver": "postgres",
+    "elasticsearch_env": {
+      "ELASTICSEARCH_ADDR": "",
+      "ELASTICSEARCH_USERNAME": "",
+      "ELASTICSEARCH_PASSWORD": "",
+      "ELASTICSEARCH_INDEX": ""
+    },
+    "database": "weknora_codex_e2e"
+  },
+  "login_probe": {
+    "email": "codex-e2e-ffe6a43a902245778f7793ac8e06ddcd@example.invalid",
+    "result": "pass",
+    "token_received": true
+  },
+  "governance_live_data": {
+    "knowledge_bases_total": 4,
+    "governance_enabled_kbs": 0,
+    "knowledge_versions_total": 0,
+    "note": "No governed KB or version rows in e2e DB; full publish/index/retrieval lifecycle cannot be exercised live."
+  },
+  "acceptance_runs": [
+    {
+      "name": "live_governance_api_smoke",
+      "status": "blocked",
+      "reason": "Zero knowledge_versions and no governance-enabled knowledge base in e2e tenant DB."
+    },
+    {
+      "name": "docreader_governance_acceptance",
+      "command": "go test -tags acceptance ./docreader/client -run TestGovernanceDocumentFormats (docker network weknora-development_WeKnora-network, DOCREADER_ACCEPTANCE_ADDR=docreader:50051)",
+      "status": "partial",
+      "cases": {
+        "pdf": "pass",
+        "word": "pass",
+        "excel": "fail",
+        "excel_error": "docreader returned error: Failed to parse: governance.xlsx"
+      }
+    },
+    {
+      "name": "handler_knowledge_governance_acceptance_test",
+      "location": "internal/handler/knowledge_governance_acceptance_test.go",
+      "status": "not_run_live",
+      "note": "In-memory sqlite acceptance test only; does not require or validate Elasticsearch."
+    },
+    {
+      "name": "vectorstore_elasticsearch_connectivity",
+      "location": "internal/application/service/vectorstore_test.go",
+      "status": "blocked",
+      "reason": "Requires live http://es:9200; documented blocker in tasks.md 4.4."
+    }
+  ],
+  "pdf_sample_import_status": {
+    "docreader_pdf_parse": "pass",
+    "full_governance_import_publish_retrieval": "not_run",
+    "reason": "No governed KB seeded; ES/index path not configured on e2e stack."
+  },
+  "honest_verdict": "ES/e2e gap remains open. Unit gates pass (see unit-governance-20260813.md); live ES-backed governance publish/retrieval e2e is blocked by missing ES deployment and e2e stack using postgres retriever without governance seed data."
+}

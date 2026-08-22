@@ -1,0 +1,2 @@
+ALTER TABLE platform_settings
+ADD COLUMN IF NOT EXISTS model_seed_version INTEGER NOT NULL DEFAULT 0;

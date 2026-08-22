@@ -63,7 +63,7 @@
                       {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatImportTime(currentSharedKb.shared_at) }}
                     </span>
                   </template>
-                  <template v-else-if="effectiveKBPermission">
+                  <template v-else-if="isAgentVisibleKnowledgeBase">
                     <span class="faq-access-meta-sep">·</span>
                     <span class="faq-access-meta-text">{{ $t('knowledgeList.detail.sourceTypeAgent') }}</span>
                   </template>
@@ -244,15 +244,17 @@
               <div v-if="creatingTag" class="faq-tag-item tag-editing" @click.stop>
               <div class="faq-tag-left">
                 <span class="tag-hash-icon">#</span>
-                <div class="tag-edit-input">
+                <div
+                  class="tag-edit-input"
+                  @keydown.enter="onCreateTagEnterKey"
+                  @keydown.esc.prevent.stop="cancelCreateTag"
+                >
                   <t-input
                       ref="newTagInputRef"
                       v-model="newTagName"
                       size="small"
                       :maxlength="40"
                       :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
-                      @keydown.enter.stop.prevent="submitCreateTag"
-                      @keydown.esc.stop.prevent="cancelCreateTag"
                     />
                   </div>
                 </div>
@@ -290,14 +292,17 @@
               <div class="faq-tag-left">
                 <span class="tag-hash-icon">#</span>
                 <template v-if="editingTagId === tag.id">
-                      <div class="tag-edit-input" @click.stop>
+                      <div
+                        class="tag-edit-input"
+                        @click.stop
+                        @keydown.enter="onEditTagEnterKey"
+                        @keydown.esc.prevent.stop="cancelEditTag"
+                      >
                         <t-input
                           :ref="setEditingTagInputRefByTag(tag.id)"
                           v-model="editingTagName"
                           size="small"
                           :maxlength="40"
-                          @keydown.enter.stop.prevent="submitEditTag"
-                          @keydown.esc.stop.prevent="cancelEditTag"
                         />
                       </div>
                     </template>
@@ -1270,6 +1275,8 @@ import Papa from 'papaparse'
 import FAQTagTooltip from '@/components/FAQTagTooltip.vue'
 import { useUIStore } from '@/stores/ui'
 import { canManageBidReviewKnowledge } from '@/utils/bidreview-sso'
+import { getRuntimeMode } from '@/utils/embedded-runtime'
+import { openExternalUrl } from '@/utils/open-external-url'
 
 interface FAQEntry {
   id: number
@@ -1315,22 +1322,31 @@ const uiStore = useUIStore()
 const authStore = useAuthStore()
 const orgStore = useOrganizationStore()
 
+const isSameTenantKnowledgeBase = computed(() => {
+  if (!kbInfo.value) return false
+  return Number(kbInfo.value.tenant_id) === Number(authStore.effectiveTenantId)
+})
+
+const canManageEmbeddedKnowledge = computed(() =>
+  getRuntimeMode() === 'embedded-page' && authStore.canManageTenant && canManageBidReviewKnowledge()
+)
+
 // Permission control: check if current user owns this KB or has edit/manage permission
 const isOwner = computed(() => {
   if (!kbInfo.value) return false
-  // Check if the current user's tenant ID matches the KB's tenant ID
-  const userTenantId = authStore.effectiveTenantId
-  return kbInfo.value.tenant_id === userTenantId
+  return kbInfo.value.created_by === authStore.currentUserId
 })
 
 // Can edit: owner, admin, or editor
 const canEdit = computed(() => {
-  return canManageBidReviewKnowledge() && orgStore.canEditKB(props.kbId, isOwner.value)
+  return canManageEmbeddedKnowledge.value
+    || (canManageBidReviewKnowledge() && orgStore.canEditKB(props.kbId, isSameTenantKnowledgeBase.value))
 })
 
 // Can manage (delete, settings, etc.): owner or admin
 const canManage = computed(() => {
-  return canManageBidReviewKnowledge() && orgStore.canManageKB(props.kbId, isOwner.value)
+  return canManageEmbeddedKnowledge.value
+    || (canManageBidReviewKnowledge() && orgStore.canManageKB(props.kbId, isSameTenantKnowledgeBase.value))
 })
 
 // Current KB's shared record (when accessed via organization share)
@@ -1340,6 +1356,9 @@ const currentSharedKb = computed(() =>
 
 // Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
 const effectiveKBPermission = computed(() => orgStore.getKBPermission(props.kbId) || kbInfo.value?.my_permission || '')
+const isAgentVisibleKnowledgeBase = computed(() =>
+  Boolean(effectiveKBPermission.value) && !currentSharedKb.value && !isSameTenantKnowledgeBase.value
+)
 
 // Display role label: owner or org role (admin/editor/viewer)
 const accessRoleLabel = computed(() => {
@@ -1405,7 +1424,7 @@ const hasMore = ref(true)
 const pageSize = 20
 let currentPage = 1
 const entrySearchKeyword = ref('')
-let entrySearchDebounce: ReturnType<typeof setTimeout> | null = null
+let entrySearchDebounce: number | null = null
 type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>
 
 const tagList = ref<any[]>([])
@@ -1420,7 +1439,7 @@ const tagPage = ref(1)
 const tagHasMore = ref(false)
 const tagLoadingMore = ref(false)
 const tagTotal = ref(0)
-let tagSearchDebounce: ReturnType<typeof setTimeout> | null = null
+let tagSearchDebounce: number | null = null
 const editingTagInputRefs = new Map<string, TagInputInstance | null>()
 const setEditingTagInputRef = (el: TagInputInstance | null, tagId: string) => {
   if (el) {
@@ -1518,7 +1537,7 @@ const loadKnowledgeList = async () => {
       }))
     
     // Merge and deduplicate by id (my KBs take precedence)
-    const myKbIds = new Set(myKbs.map(kb => kb.id))
+    const myKbIds = new Set(myKbs.map((kb: { id: string }) => kb.id))
     const uniqueSharedKbs = sharedKbs.filter(kb => !myKbIds.has(kb.id))
     
     knowledgeList.value = [...myKbs, ...uniqueSharedKbs]
@@ -1707,6 +1726,14 @@ const cancelCreateTag = () => {
   newTagName.value = ''
 }
 
+const onCreateTagEnterKey = (e: KeyboardEvent) => {
+  // Ignore Enter that only confirms IME composition (Chinese input, etc.)
+  if (e.isComposing || e.keyCode === 229) return
+  e.preventDefault()
+  e.stopPropagation()
+  void submitCreateTag()
+}
+
 const submitCreateTag = async () => {
   if (!props.kbId) {
     MessagePlugin.warning(t('knowledgeEditor.messages.missingId'))
@@ -1744,6 +1771,13 @@ const startEditTag = (tag: any) => {
 const cancelEditTag = () => {
   editingTagId.value = null
   editingTagName.value = ''
+}
+
+const onEditTagEnterKey = (e: KeyboardEvent) => {
+  if (e.isComposing || e.keyCode === 229) return
+  e.preventDefault()
+  e.stopPropagation()
+  void submitEditTag()
 }
 
 const submitEditTag = async () => {
@@ -2736,8 +2770,8 @@ const downloadFailedEntries = () => {
     MessagePlugin.warning(t('faqManager.import.noFailedRecords'))
     return
   }
-  // 直接打开下载链接
-  window.open(importResult.value.failed_entries_url, '_blank')
+  // 直接打开下载链接（沙箱下依赖 allow-popups / allow-downloads）
+  openExternalUrl(importResult.value.failed_entries_url, { downloadName: 'faq_import_failed.csv' })
 }
 
 // 格式化导入时间
@@ -2841,10 +2875,10 @@ const downloadExampleOptions = computed(() => [
 // 示例数据
 const exampleData: FAQEntryPayload[] = [
   {
-    standard_question: '什么是 WeKnora？',
-    answers: ['WeKnora 是一个智能知识库管理系统', '它支持多种知识库类型和导入方式'],
-    similar_questions: ['WeKnora 是什么？', '介绍一下 WeKnora'],
-    negative_questions: ['这不是 WeKnora', '与 WeKnora 无关'],
+    standard_question: '什么是知识问答智能体？',
+    answers: ['知识问答智能体是一个智能知识库管理系统', '它支持多种知识库类型和导入方式'],
+    similar_questions: ['知识问答智能体是什么？', '介绍一下知识问答智能体'],
+    negative_questions: ['这不是知识问答智能体', '与知识问答智能体无关'],
     tag_name: '产品介绍',
   },
   {
@@ -3274,6 +3308,7 @@ watch(() => entries.value.map(e => ({
 <style lang="less">
 /* 下拉菜单样式已统一至 @/assets/dropdown-menu.less */
 </style>
+
 <style scoped lang="less">
 .faq-manager {
   display: flex;
@@ -6292,5 +6327,3 @@ watch(() => entries.value.map(e => ({
   line-height: 1.4;
 }
 </style>
-
-

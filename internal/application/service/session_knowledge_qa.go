@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/common"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -64,8 +65,12 @@ func (s *sessionService) KnowledgeQA(
 			chatModelSupportsVision = chatModelInfo.Parameters.SupportsVision
 		}
 	}
-	if req.CustomAgent != nil {
-		vlmModelID = req.CustomAgent.Config.VLMModelID
+	if model, defaultErr := s.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm"); defaultErr == nil {
+		vlmModelID = model.ID
+	}
+	var rerankModelID string
+	if model, defaultErr := s.modelService.GetDefaultModel(ctx, types.ModelTypeRerank, "rerank"); defaultErr == nil {
+		rerankModelID = model.ID
 	}
 
 	// Resolve retrieval tenant scope using shared helper
@@ -106,6 +111,7 @@ func (s *sessionService) KnowledgeQA(
 			RerankTopK:              s.cfg.Conversation.RerankTopK,
 			RerankThreshold:         s.cfg.Conversation.RerankThreshold,
 			ChatModelID:             chatModelID,
+			RerankModelID:           rerankModelID,
 			SummaryConfig:           summaryConfig,
 			FallbackStrategy:        fallbackStrategy,
 			FallbackResponse:        s.cfg.Conversation.FallbackResponse,
@@ -125,6 +131,7 @@ func (s *sessionService) KnowledgeQA(
 			ChatModelSupportsVision: chatModelSupportsVision,
 			Attachments:             req.Attachments,
 			Language:                types.LanguageNameFromContext(ctx),
+			ComplexityRouting:       types.DefaultComplexityRoutingConfig(),
 		},
 		PipelineState: types.PipelineState{
 			RewriteQuery:     req.Query,
@@ -137,10 +144,14 @@ func (s *sessionService) KnowledgeQA(
 			UserMessageID: req.UserMessageID,
 		},
 	}
+	chatManage.VerifiedRetrieve = func(retrieveCtx context.Context, query string) ([]*types.SearchResult, error) {
+		return s.SearchKnowledge(retrieveCtx, chatManage.KnowledgeBaseIDs, chatManage.KnowledgeIDs, query)
+	}
 
 	// Apply custom agent overrides (system prompt, temperature, retrieval params,
 	// rewrite, fallback, FAQ strategy, history turns)
 	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
+	s.applyPlatformVerificationDefaults(ctx, &chatManage.VerifiedAnswer)
 
 	// Determine pipeline based on knowledge bases availability and web search setting
 	hasKB := len(knowledgeBaseIDs) > 0 || len(knowledgeIDs) > 0
@@ -199,15 +210,43 @@ func (s *sessionService) KnowledgeQA(
 		return err
 	}
 
-	// Emit references event if we have search results
-	if len(chatManage.MergeResult) > 0 {
+	// Emit the references/telemetry event even when retrieval is empty so a
+	// formal acceptance run can distinguish graph skip from a missing stream
+	// observation on refusal and unanswerable cases.
+	{
 		logger.Infof(ctx, "Emitting references event with %d results", len(chatManage.MergeResult))
+		skip := chatpipeline.AssessGraphSkip(chatManage)
+		graphRequested := skip.Layer1Allowed
+		graphUsed := chatManage.GraphSearchResult != nil && (len(chatManage.GraphSearchResult.Paths) > 0 || len(chatManage.GraphSearchResult.Citations) > 0)
+		graphReason, graphReasonLegacy := chatpipeline.ResolveGraphTelemetryReason(graphRequested, graphUsed, skip)
+		pathSummaries := chatpipeline.SummarizeGraphPaths(chatManage.GraphSearchResult)
+		hasVerification := chatManage.VerifiedResult != nil
+		confidence := 0.0
+		if hasVerification {
+			confidence = chatManage.VerifiedResult.Confidence
+		}
+		pathSummaries = chatpipeline.RankGraphPathsForDisplay(pathSummaries, confidence, hasVerification)
+		graphTelemetry := map[string]interface{}{
+			"requested":     graphRequested,
+			"used":          graphUsed,
+			"reason":        graphReason,
+			"reason_legacy": graphReasonLegacy,
+		}
+		if len(pathSummaries) > 0 {
+			graphTelemetry["paths"] = pathSummaries
+		}
+		telemetry := map[string]interface{}{
+			"routing":           routingDecisionSummary(chatManage.RoutingDecision),
+			"graph":             graphTelemetry,
+			"verification_path": verifiedExecutionPath(chatManage.VerifiedResult),
+		}
 		if err := eventBus.Emit(ctx, event.Event{
 			ID:        generateEventID("references"),
 			Type:      event.EventAgentReferences,
 			SessionID: req.Session.ID,
 			Data: event.AgentReferencesData{
 				References: chatManage.MergeResult,
+				Extra:      telemetry,
 			},
 		}); err != nil {
 			logger.Errorf(ctx, "Failed to emit references event: %v", err)
@@ -221,6 +260,13 @@ func (s *sessionService) KnowledgeQA(
 
 	logger.Info(ctx, "Knowledge base question answering initiated")
 	return nil
+}
+
+func verifiedExecutionPath(answer *types.VerifiedAnswer) string {
+	if answer == nil {
+		return ""
+	}
+	return answer.ExecutionPath
 }
 
 // selectChatModelID selects the appropriate chat model ID with priority for Remote models
@@ -421,8 +467,9 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 // tenantID is the retrieval scope: session.TenantID or effective tenant from shared agent (set by handler).
 // This is called once at the request entry point to avoid repeated queries later in the pipeline.
 // Logic:
-//   - For each knowledgeBaseID: resolve actual TenantID (own, org-shared, or in retrieval-tenant scope for shared agent)
-//   - For each knowledgeID: find its knowledgeBaseID; if the KB is already in the list, skip; otherwise add SearchTargetTypeKnowledge
+//   - Without knowledgeIDs, each knowledgeBaseID becomes a full-KB target.
+//   - With knowledgeIDs, every document must belong to the supplied KB scope and
+//     only those documents become targets.
 func (s *sessionService) buildSearchTargets(
 	ctx context.Context,
 	tenantID uint64,
@@ -434,8 +481,7 @@ func (s *sessionService) buildSearchTargets(
 	// Build a map from KB ID to TenantID for all KBs we need to process
 	kbTenantMap := make(map[string]uint64)
 
-	// Track which KBs are fully searched
-	fullKBSet := make(map[string]bool)
+	allowedKBSet := make(map[string]struct{}, len(knowledgeBaseIDs))
 
 	// First pass: batch-fetch KBs, then resolve tenant per ID (tenant scope already set by caller)
 	if len(knowledgeBaseIDs) > 0 {
@@ -448,11 +494,12 @@ func (s *sessionService) buildSearchTargets(
 		}
 		userID, _ := types.UserIDFromContext(ctx)
 		for _, kbID := range knowledgeBaseIDs {
-			fullKBSet[kbID] = true
 			kb := kbByID[kbID]
 			if kb == nil {
-				kbTenantMap[kbID] = tenantID
-			} else if kb.TenantID == tenantID {
+				return nil, werrors.NewForbiddenError("Knowledge base is outside the authorized scope")
+			}
+			allowedKBSet[kbID] = struct{}{}
+			if kb.TenantID == tenantID {
 				kbTenantMap[kbID] = tenantID
 			} else if s.kbShareService != nil && userID != "" {
 				hasAccess, _ := s.kbShareService.HasKBPermission(ctx, kbID, userID, types.OrgRoleViewer)
@@ -464,11 +511,13 @@ func (s *sessionService) buildSearchTargets(
 			} else {
 				kbTenantMap[kbID] = tenantID
 			}
-			targets = append(targets, &types.SearchTarget{
-				Type:            types.SearchTargetTypeKnowledgeBase,
-				KnowledgeBaseID: kbID,
-				TenantID:        kbTenantMap[kbID],
-			})
+			if len(knowledgeIDs) == 0 {
+				targets = append(targets, &types.SearchTarget{
+					Type:            types.SearchTargetTypeKnowledgeBase,
+					KnowledgeBaseID: kbID,
+					TenantID:        kbTenantMap[kbID],
+				})
+			}
 		}
 	}
 
@@ -477,25 +526,44 @@ func (s *sessionService) buildSearchTargets(
 		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get knowledge batch for search targets: %v", err)
-			return targets, nil // Return what we have, don't fail
+			return nil, err
 		}
 
-		// Group knowledge IDs by their KB, excluding those already covered by full KB search
-		// Also track KB tenant IDs from knowledge items
+		requestedKnowledgeIDs := make(map[string]struct{}, len(knowledgeIDs))
+		for _, knowledgeID := range knowledgeIDs {
+			requestedKnowledgeIDs[knowledgeID] = struct{}{}
+		}
+		if len(knowledgeList) != len(requestedKnowledgeIDs) {
+			return nil, werrors.NewForbiddenError("Knowledge is outside the authorized scope")
+		}
+
+		// Group the explicitly requested documents by KB after enforcing the
+		// caller-supplied KB boundary.
 		kbToKnowledgeIDs := make(map[string][]string)
+		resolvedKnowledgeIDs := make(map[string]struct{}, len(knowledgeList))
 		for _, k := range knowledgeList {
 			if k == nil || k.KnowledgeBaseID == "" {
-				continue
+				return nil, werrors.NewForbiddenError("Knowledge is outside the authorized scope")
 			}
-			// Track KB -> TenantID mapping from knowledge items
+			if _, requested := requestedKnowledgeIDs[k.ID]; !requested {
+				return nil, werrors.NewForbiddenError("Knowledge is outside the authorized scope")
+			}
+			if _, duplicate := resolvedKnowledgeIDs[k.ID]; duplicate {
+				return nil, werrors.NewForbiddenError("Knowledge is outside the authorized scope")
+			}
+			resolvedKnowledgeIDs[k.ID] = struct{}{}
+			if len(allowedKBSet) > 0 {
+				if _, allowed := allowedKBSet[k.KnowledgeBaseID]; !allowed {
+					return nil, werrors.NewForbiddenError("Knowledge is outside the authorized knowledge base scope")
+				}
+			}
 			if kbTenantMap[k.KnowledgeBaseID] == 0 {
 				kbTenantMap[k.KnowledgeBaseID] = k.TenantID
 			}
-			// Skip if this KB is already fully searched
-			if fullKBSet[k.KnowledgeBaseID] {
-				continue
-			}
 			kbToKnowledgeIDs[k.KnowledgeBaseID] = append(kbToKnowledgeIDs[k.KnowledgeBaseID], k.ID)
+		}
+		if len(resolvedKnowledgeIDs) != len(requestedKnowledgeIDs) {
+			return nil, werrors.NewForbiddenError("Knowledge is outside the authorized scope")
 		}
 
 		// Create SearchTargetTypeKnowledge targets for each KB with specific files
@@ -513,8 +581,8 @@ func (s *sessionService) buildSearchTargets(
 		}
 	}
 
-	logger.Infof(ctx, "Built %d search targets: %d full KB, %d partial KB, kbTenantMap=%v",
-		len(targets), len(knowledgeBaseIDs), len(targets)-len(knowledgeBaseIDs), kbTenantMap)
+	logger.Infof(ctx, "Built %d search targets from %d KB IDs and %d knowledge IDs, kbTenantMap=%v",
+		len(targets), len(knowledgeBaseIDs), len(knowledgeIDs), kbTenantMap)
 
 	return targets, nil
 }
@@ -595,6 +663,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets: %v", err)
+		return nil, err
 	}
 
 	if len(searchTargets) == 0 {
@@ -630,26 +699,9 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		},
 	}
 
-	// Get default models
-	models, err := s.modelService.ListModels(ctx)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get models: %v", err)
-		return nil, err
-	}
-
-	// Use rerank model from RetrievalConfig if set, otherwise auto-select the first available
-	if rc != nil && rc.RerankModelID != "" {
-		chatManage.RerankModelID = rc.RerankModelID
-	} else {
-		for _, model := range models {
-			if model == nil {
-				continue
-			}
-			if model.Type == types.ModelTypeRerank {
-				chatManage.RerankModelID = model.ID
-				break
-			}
-		}
+	// Retrieval always uses the platform-managed default rerank model.
+	if model, defaultErr := s.modelService.GetDefaultModel(ctx, types.ModelTypeRerank, "rerank"); defaultErr == nil {
+		chatManage.RerankModelID = model.ID
 	}
 
 	// Use specific event list, only including retrieval-related events, not LLM summarization
@@ -757,8 +809,10 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 		return
 	}
 
-	// Start goroutine to consume stream and emit events
-	go s.consumeFallbackStream(ctx, chatManage, responseChan)
+	// The caller persists the assistant message after this method returns, so the
+	// fallback stream must finish before returning or the request context is
+	// cancelled with an empty answer.
+	s.consumeFallbackStream(ctx, chatManage, responseChan)
 }
 
 // renderFallbackPrompt renders the fallback prompt template with query and image context.

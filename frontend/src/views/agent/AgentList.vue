@@ -1,7 +1,7 @@
 <template>
   <div class="agent-list-container">
     <ListSpaceSidebar
-      v-if="!authStore.isLiteMode"
+      v-if="!authStore.isLiteMode && authStore.workspaceMode !== 'platform'"
       v-model="spaceSelection"
       :count-all="allAgentsCount"
       :count-mine="agents.length"
@@ -105,32 +105,7 @@
               <div class="popup-menu">
                 <div class="popup-menu-item" @click="handleEdit(agent)"><t-icon class="menu-icon" name="edit" /><span>{{ $t('common.edit') }}</span></div>
                 <div class="popup-menu-item" @click="handleCopy(agent)"><t-icon class="menu-icon" name="file-copy" /><span>{{ $t('common.copy') }}</span></div>
-                <div v-if="!agent.is_builtin" class="popup-menu-item" @click="handleToggleDisabled(agent)">
-                  <t-icon class="menu-icon" name="poweroff" />
-                  <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
-                </div>
                 <div v-if="!agent.is_builtin" class="popup-menu-item delete" @click="handleDelete(agent)"><t-icon class="menu-icon" name="delete" /><span>{{ $t('common.delete') }}</span></div>
-              </div>
-            </template>
-          </t-popup>
-          <t-popup
-            v-else
-            :visible="openMoreAgentId === 'shared-' + agent.share_id"
-            trigger="hover"
-            overlayClassName="card-more-popup"
-            destroy-on-close
-            placement="bottom-right"
-            @update:visible="(v: boolean) => { if (!v) openMoreAgentId = null }"
-          >
-            <div class="more-wrap" :class="{ 'active-more': openMoreAgentId === 'shared-' + agent.share_id }" @click.stop="toggleMore($event, 'shared-' + agent.share_id)">
-              <img class="more-icon" src="@/assets/img/more.png" alt="" />
-            </div>
-            <template #content>
-              <div class="popup-menu">
-                <div class="popup-menu-item" @click="handleToggleSharedDisabled(agent)">
-                  <t-icon class="menu-icon" name="poweroff" />
-                  <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
-                </div>
               </div>
             </template>
           </t-popup>
@@ -141,8 +116,8 @@
         <div class="card-bottom">
           <div class="bottom-left">
             <div class="feature-badges">
-              <t-tag v-if="agent.isMine && !agent.is_builtin && agent.disabled_by_me" theme="default" size="small" class="disabled-badge">{{ $t('agent.disabled') }}</t-tag>
-              <t-tag v-if="!agent.isMine && agent.disabled_by_me" theme="default" size="small" class="disabled-badge">{{ $t('agent.disabled') }}</t-tag>
+              <t-tag v-if="agent.isMine && canToggleAgent(agent) && agent.disabled_by_me" theme="default" size="small" class="disabled-badge">{{ $t('agent.disabled') }}</t-tag>
+              <t-tag v-if="!agent.isMine && canToggleAgent(agent) && agent.disabled_by_me" theme="default" size="small" class="disabled-badge">{{ $t('agent.disabled') }}</t-tag>
               <t-tooltip :content="agent.config?.agent_mode === 'smart-reasoning' ? $t('agent.mode.agent') : $t('agent.mode.normal')" placement="top">
                 <div class="feature-badge" :class="{ 'mode-normal': agent.config?.agent_mode === 'quick-answer', 'mode-agent': agent.config?.agent_mode === 'smart-reasoning' }">
                   <t-icon :name="agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'" size="14px" />
@@ -175,17 +150,33 @@
               </t-tooltip>
             </div>
           </div>
-          <!-- 右下角：内置 / 自定义 / 空间图标+名称 -->
-          <div v-if="!agent.isMine" class="card-bottom-source">
-            <img src="@/assets/img/organization-green.svg" class="org-icon" alt="" aria-hidden="true" />
-            <span class="org-source-text">{{ agent.org_name }}</span>
-          </div>
-          <div v-else-if="agent.is_builtin" class="builtin-badge">
-            <t-icon name="lock-on" size="12px" />
-            <span>{{ $t('agent.builtin') }}</span>
-          </div>
-          <div v-else class="custom-badge">
-            <span>{{ $t('agent.type.custom') }}</span>
+          <div class="card-bottom-actions">
+            <!-- 右下角：内置 / 自定义 / 空间图标+名称 -->
+            <div v-if="!agent.isMine" class="card-bottom-source">
+              <img src="@/assets/img/organization-green.svg" class="org-icon" alt="" aria-hidden="true" />
+              <span class="org-source-text">{{ agent.org_name }}</span>
+            </div>
+            <div v-else-if="agent.is_builtin" class="builtin-badge">
+              <t-icon name="lock-on" size="12px" />
+              <span>{{ $t('agent.builtin') }}</span>
+            </div>
+            <div v-else class="custom-badge">
+              <span>{{ $t('agent.type.custom') }}</span>
+            </div>
+            <t-tooltip
+              v-if="canToggleAgent(agent)"
+              :content="agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable')"
+              placement="top"
+            >
+              <span class="agent-status-switch" @click.stop>
+                <t-switch
+                  :value="!agent.disabled_by_me"
+                  :loading="togglingAgentIds.has(agent.id)"
+                  size="small"
+                  @change="agent.isMine ? handleToggleDisabled(agent) : handleToggleSharedDisabled(agent)"
+                />
+              </span>
+            </t-tooltip>
           </div>
         </div>
       </div>
@@ -251,10 +242,6 @@
                   <t-icon class="menu-icon" name="file-copy" />
                   <span>{{ $t('common.copy') }}</span>
                 </div>
-                <div v-if="!agent.is_builtin" class="popup-menu-item" @click="handleToggleDisabled(agent)">
-                  <t-icon class="menu-icon" name="poweroff" />
-                  <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
-                </div>
                 <div v-if="!agent.is_builtin" class="popup-menu-item delete" @click="handleDelete(agent)">
                   <t-icon class="menu-icon" name="delete" />
                   <span>{{ $t('common.delete') }}</span>
@@ -275,7 +262,7 @@
         <div class="card-bottom">
           <div class="bottom-left">
             <div class="feature-badges">
-              <t-tag v-if="!agent.is_builtin && agent.disabled_by_me" theme="default" size="small" class="disabled-badge">{{ $t('agent.disabled') }}</t-tag>
+              <t-tag v-if="canToggleAgent(agent) && agent.disabled_by_me" theme="default" size="small" class="disabled-badge">{{ $t('agent.disabled') }}</t-tag>
               <t-tooltip :content="agent.config?.agent_mode === 'smart-reasoning' ? $t('agent.mode.agent') : $t('agent.mode.normal')" placement="top">
                 <div class="feature-badge" :class="{ 'mode-normal': agent.config?.agent_mode === 'quick-answer', 'mode-agent': agent.config?.agent_mode === 'smart-reasoning' }">
                   <t-icon :name="agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'" size="14px" />
@@ -309,12 +296,28 @@
             </div>
           </div>
           <!-- 右下角：内置 / 自定义 -->
-          <div v-if="agent.is_builtin" class="builtin-badge">
-            <t-icon name="lock-on" size="12px" />
-            <span>{{ $t('agent.builtin') }}</span>
-          </div>
-          <div v-else class="custom-badge">
-            <span>{{ $t('agent.type.custom') }}</span>
+          <div class="card-bottom-actions">
+            <div v-if="agent.is_builtin" class="builtin-badge">
+              <t-icon name="lock-on" size="12px" />
+              <span>{{ $t('agent.builtin') }}</span>
+            </div>
+            <div v-else class="custom-badge">
+              <span>{{ $t('agent.type.custom') }}</span>
+            </div>
+            <t-tooltip
+              v-if="canToggleAgent(agent)"
+              :content="agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable')"
+              placement="top"
+            >
+              <span class="agent-status-switch" @click.stop>
+                <t-switch
+                  :value="!agent.disabled_by_me"
+                  :loading="togglingAgentIds.has(agent.id)"
+                  size="small"
+                  @change="handleToggleDisabled(agent)"
+                />
+              </span>
+            </t-tooltip>
           </div>
         </div>
       </div>
@@ -350,27 +353,6 @@
             <span class="card-title" :title="shared.agent?.name">{{ shared.agent?.name }}</span>
             <span v-if="shared.is_mine" class="shared-by-me-badge">{{ $t('listSpaceSidebar.mine') }}</span>
           </div>
-          <t-popup
-            v-if="!shared.is_mine"
-            :visible="openMoreAgentId === 'shared-tab-' + shared.share_id"
-            trigger="hover"
-            overlayClassName="card-more-popup"
-            destroy-on-close
-            placement="bottom-right"
-            @update:visible="(v: boolean) => { if (!v) openMoreAgentId = null }"
-          >
-            <div class="more-wrap" :class="{ 'active-more': openMoreAgentId === 'shared-tab-' + shared.share_id }" @click.stop="toggleMore($event, 'shared-tab-' + shared.share_id)">
-              <img class="more-icon" src="@/assets/img/more.png" alt="" />
-            </div>
-            <template #content>
-              <div class="popup-menu">
-                <div class="popup-menu-item" @click="handleToggleSharedDisabledFromShared(shared)">
-                  <t-icon class="menu-icon" name="poweroff" />
-                  <span>{{ shared.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
-                </div>
-              </div>
-            </template>
-          </t-popup>
         </div>
         <div class="card-content">
           <div class="card-description">{{ shared.agent?.description || $t('agent.noDescription') }}</div>
@@ -378,7 +360,7 @@
         <div class="card-bottom">
           <div class="bottom-left">
             <div class="feature-badges">
-              <t-tag v-if="shared.disabled_by_me" theme="default" size="small" class="disabled-badge">{{ $t('agent.disabled') }}</t-tag>
+              <t-tag v-if="canToggleAgent(shared.agent) && shared.disabled_by_me" theme="default" size="small" class="disabled-badge">{{ $t('agent.disabled') }}</t-tag>
               <t-tooltip :content="shared.agent?.config?.agent_mode === 'smart-reasoning' ? $t('agent.mode.agent') : $t('agent.mode.normal')" placement="top">
                 <div class="feature-badge" :class="{ 'mode-normal': shared.agent?.config?.agent_mode === 'quick-answer', 'mode-agent': shared.agent?.config?.agent_mode === 'smart-reasoning' }">
                   <t-icon :name="shared.agent?.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'" size="14px" />
@@ -398,10 +380,26 @@
               </t-tooltip>
             </div>
           </div>
-          <!-- 右下角：空间图标+名称 -->
-          <div class="card-bottom-source">
-            <img src="@/assets/img/organization-green.svg" class="org-icon" alt="" aria-hidden="true" />
-            <span class="org-source-text">{{ shared.org_name }}</span>
+          <div class="card-bottom-actions">
+            <!-- 右下角：空间图标+名称 -->
+            <div class="card-bottom-source">
+              <img src="@/assets/img/organization-green.svg" class="org-icon" alt="" aria-hidden="true" />
+              <span class="org-source-text">{{ shared.org_name }}</span>
+            </div>
+            <t-tooltip
+              v-if="canToggleAgent(shared.agent)"
+              :content="shared.disabled_by_me ? $t('agent.enable') : $t('agent.disable')"
+              placement="top"
+            >
+              <span class="agent-status-switch" @click.stop>
+                <t-switch
+                  :value="!shared.disabled_by_me"
+                  :loading="!!shared.agent && togglingAgentIds.has(shared.agent.id)"
+                  size="small"
+                  @change="handleToggleSharedDisabledFromShared(shared)"
+                />
+              </span>
+            </t-tooltip>
           </div>
         </div>
       </div>
@@ -509,14 +507,6 @@
                 <span class="shared-detail-value">{{ sharedAgentKbScopeText }}</span>
               </div>
               <div class="shared-detail-row">
-                <span class="shared-detail-label">{{ $t('agent.shareScope.chatModel') }}</span>
-                <span class="shared-detail-value">{{ currentSharedAgent.agent.config.model_id ? $t('agent.shareScope.modelConfigured') : $t('agent.shareScope.modelNotSet') }}</span>
-              </div>
-              <div v-if="sharedAgentUsesKb" class="shared-detail-row">
-                <span class="shared-detail-label">{{ $t('agent.shareScope.rerankModel') }}</span>
-                <span class="shared-detail-value">{{ currentSharedAgent.agent.config.rerank_model_id ? $t('agent.shareScope.modelConfigured') : $t('agent.shareScope.modelNotSet') }}</span>
-              </div>
-              <div class="shared-detail-row">
                 <span class="shared-detail-label">{{ $t('agent.shareScope.webSearch') }}</span>
                 <span class="shared-detail-value">{{ currentSharedAgent.agent.config.web_search_enabled ? $t('agent.shareScope.enabled') : $t('agent.shareScope.disabled') }}</span>
               </div>
@@ -551,7 +541,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
-import { listAgents, deleteAgent, copyAgent, type CustomAgent } from '@/api/agent'
+import { BUILTIN_QUICK_ANSWER_ID, listAgents, deleteAgent, copyAgent, type CustomAgent } from '@/api/agent'
 import { formatStringDate } from '@/utils/index'
 import { useI18n } from 'vue-i18n'
 import { createSessions } from '@/api/chat/index'
@@ -571,9 +561,11 @@ const router = useRouter()
 const authStore = useAuthStore()
 const orgStore = useOrganizationStore()
 
+const canToggleAgent = (agent?: Pick<CustomAgent, 'id'> | null): boolean => Boolean(agent && agent.id !== BUILTIN_QUICK_ANSWER_ID)
+
 interface AgentWithUI extends CustomAgent {
   showMore?: boolean
-  /** 当前租户在对话下拉中停用（仅影响本租户） */
+  /** 平台全局停用或当前租户停用 */
   disabled_by_me?: boolean
 }
 
@@ -650,11 +642,6 @@ const deleteVisible = ref(false)
 const deletingAgent = ref<AgentWithUI | null>(null)
 const sharedDetailVisible = ref(false)
 const currentSharedAgent = ref<SharedAgentInfo | null>(null)
-const sharedAgentUsesKb = computed(() => {
-  const c = currentSharedAgent.value?.agent?.config
-  if (!c) return false
-  return c.kb_selection_mode !== 'none' && c.kb_selection_mode !== undefined
-})
 const sharedAgentKbScopeText = computed(() => {
   const c = currentSharedAgent.value?.agent?.config
   if (!c) return t('agent.shareScope.kbNone')
@@ -675,10 +662,11 @@ const editingAgent = ref<CustomAgent | null>(null)
 const editorInitialSection = ref<string>('basic')
 /** 当前打开三点菜单的卡片 agent.id（用于受控弹出层，避免 computed 项无持久引用导致菜单不响应） */
 const openMoreAgentId = ref<string | null>(null)
+const togglingAgentIds = ref(new Set<string>())
 
 const fetchList = () => {
   loading.value = true
-  return Promise.all([
+  const requests: Promise<unknown>[] = [
     listAgents().then((res: any) => {
       const data = res.data || []
       const disabledOwnIds = res.disabled_own_agent_ids || []
@@ -688,10 +676,12 @@ const fetchList = () => {
         disabled_by_me: disabledOwnIds.includes(agent.id)
       }))
       checkAndOpenEditModal()
-    }),
-    orgStore.fetchSharedAgents(),
-    orgStore.fetchOrganizations()
-  ]).finally(() => { loading.value = false }).then(() => {
+    })
+  ]
+  if (authStore.workspaceMode !== 'platform') {
+    requests.push(orgStore.fetchSharedAgents(), orgStore.fetchOrganizations())
+  }
+  return Promise.all(requests).finally(() => { loading.value = false }).then(() => {
     // 各空间智能体数量已由 GET /organizations 的 resource_counts 带回，存于 orgStore.resourceCounts
     const counts = orgStore.resourceCounts?.agents?.by_organization
     if (counts) spaceAgentCountByOrg.value = { ...counts }
@@ -852,52 +842,52 @@ const handleCopy = (agent: AgentWithUI) => {
   })
 }
 
-/** 切换「我的」智能体停用状态（仅影响当前租户对话下拉显示） */
+const setAgentEnabled = async (
+  agentId: string,
+  currentlyDisabled: boolean,
+  refresh: (disabled: boolean) => void | Promise<unknown>
+) => {
+  if (agentId === BUILTIN_QUICK_ANSWER_ID || togglingAgentIds.value.has(agentId)) return
+
+  const nextDisabled = !currentlyDisabled
+  togglingAgentIds.value = new Set(togglingAgentIds.value).add(agentId)
+  try {
+    const res = await setSharedAgentDisabledByMe(agentId, nextDisabled)
+    if (!res.success) {
+      MessagePlugin.error(res.message || t('agent.messages.saveFailed'))
+      return
+    }
+    await refresh(nextDisabled)
+    MessagePlugin.success(nextDisabled ? t('agent.messages.disabled') : t('agent.messages.enabled'))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    MessagePlugin.error(message || t('agent.messages.saveFailed'))
+  } finally {
+    const pending = new Set(togglingAgentIds.value)
+    pending.delete(agentId)
+    togglingAgentIds.value = pending
+  }
+}
+
+/** 切换平台智能体的全局启停状态 */
 const handleToggleDisabled = (agent: AgentWithUI) => {
   openMoreAgentId.value = null
-  const nextDisabled = !agent.disabled_by_me
-  setSharedAgentDisabledByMe(agent.id, nextDisabled).then((res: any) => {
-    if (res.success) {
-      MessagePlugin.success(nextDisabled ? t('agent.messages.disabled') : t('agent.messages.enabled'))
-      fetchList()
-    } else {
-      MessagePlugin.error(res.message || t('agent.messages.saveFailed'))
-    }
-  }).catch((e: any) => {
-    MessagePlugin.error(e?.message || t('agent.messages.saveFailed'))
-  })
+  return setAgentEnabled(agent.id, Boolean(agent.disabled_by_me), () => fetchList())
 }
 
 /** 切换共享智能体“停用”状态（仅影响当前用户对话下拉显示） */
 const handleToggleSharedDisabled = (agent: DisplayAgent) => {
   if (agent.isMine) return
   openMoreAgentId.value = null
-  const nextDisabled = !agent.disabled_by_me
-  setSharedAgentDisabledByMe(agent.id, nextDisabled).then((res: any) => {
-    if (res.success) {
-      MessagePlugin.success(nextDisabled ? t('agent.messages.disabled') : t('agent.messages.enabled'))
-      orgStore.fetchSharedAgents()
-    } else {
-      MessagePlugin.error(res.message || t('agent.messages.saveFailed'))
-    }
-  }).catch((e: any) => {
-    MessagePlugin.error(e?.message || t('agent.messages.saveFailed'))
-  })
+  return setAgentEnabled(agent.id, Boolean(agent.disabled_by_me), () => orgStore.fetchSharedAgents())
 }
 
 const handleToggleSharedDisabledFromShared = (shared: SharedAgentInfo) => {
   if (!shared.agent) return
   openMoreAgentId.value = null
-  const nextDisabled = !shared.disabled_by_me
-  setSharedAgentDisabledByMe(shared.agent.id, nextDisabled).then((res: any) => {
-    if (res.success) {
-      MessagePlugin.success(nextDisabled ? t('agent.messages.disabled') : t('agent.messages.enabled'))
-      orgStore.fetchSharedAgents()
-    } else {
-      MessagePlugin.error(res.message || t('agent.messages.saveFailed'))
-    }
-  }).catch((e: any) => {
-    MessagePlugin.error(e?.message || t('agent.messages.saveFailed'))
+  return setAgentEnabled(shared.agent.id, Boolean(shared.disabled_by_me), async (disabled) => {
+    shared.disabled_by_me = disabled
+    await orgStore.fetchSharedAgents()
   })
 }
 
@@ -1366,6 +1356,18 @@ defineExpose({
   gap: 8px;
   flex: 1;
   min-width: 0;
+}
+
+.card-bottom-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.agent-status-switch {
+  display: inline-flex;
+  align-items: center;
 }
 
 .card-title {

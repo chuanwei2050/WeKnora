@@ -1,0 +1,21 @@
+[Unit]
+Description=WeKnora Airgap TTS (CosyVoice2-0.5B)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=AIR_GAPPED_MODE=true
+Environment=MODEL_DIR=@DATA_DIR@/models/tts
+Environment=SERVED_MODEL_NAME=model
+Environment=PORT=8005
+Environment=QUANT=fp16
+WorkingDirectory=@DATA_DIR@/services/tts
+ExecStart=@PYTHON@ server.py
+Restart=on-failure
+RestartSec=5
+# User=weknora
+# Group=weknora
+
+[Install]
+WantedBy=multi-user.target

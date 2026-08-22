@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -20,34 +19,7 @@ var (
 	ErrAgentNotFoundForShare   = errors.New("agent not found")
 	ErrNotAgentOwner           = errors.New("only agent owner can share")
 	ErrOrgRoleCannotShareAgent = errors.New("only editors and admins can share agents to this organization")
-	ErrAgentNotConfigured      = errors.New("agent is not fully configured (missing required chat model, or rerank model when the knowledge_search tool is enabled)")
 )
-
-// agentRequiresRerankModel returns true when the agent's configured tools
-// will actually invoke the reranker at runtime. This mirrors the runtime
-// check in session_agent_qa.go: only `knowledge_search` uses the reranker.
-// Wiki-first agents (wiki_search / wiki_read_page / …) never call it and
-// therefore don't need a rerank model configured, even when knowledge bases
-// are attached.
-//
-// When AllowedTools is empty the runtime falls back to
-// tools.DefaultAllowedTools(), which includes knowledge_search, so we treat
-// that case as requiring the reranker.
-func agentRequiresRerankModel(agent *types.CustomAgent) bool {
-	if agent == nil {
-		return false
-	}
-	allowed := agent.Config.AllowedTools
-	if len(allowed) == 0 {
-		allowed = tools.DefaultAllowedTools()
-	}
-	for _, t := range allowed {
-		if t == tools.ToolKnowledgeSearch {
-			return true
-		}
-	}
-	return false
-}
 
 // agentShareService implements AgentShareService interface
 type agentShareService struct {
@@ -85,17 +57,6 @@ func (s *agentShareService) ShareAgent(ctx context.Context, agentID string, orgI
 	}
 	if agent.TenantID != tenantID {
 		return nil, ErrNotAgentOwner
-	}
-
-	// Require agent to be fully configured before sharing (same rules as for
-	// conversation — see session_agent_qa.go). Rerank model is only required
-	// when the `knowledge_search` tool is enabled; Wiki-only agents
-	// (wiki_search / wiki_read_page) don't call the reranker at runtime.
-	if agent.Config.ModelID == "" {
-		return nil, ErrAgentNotConfigured
-	}
-	if agentRequiresRerankModel(agent) && agent.Config.RerankModelID == "" {
-		return nil, ErrAgentNotConfigured
 	}
 
 	_, err = s.orgRepo.GetByID(ctx, orgID)
@@ -398,7 +359,7 @@ func (s *agentShareService) CountByOrganizations(ctx context.Context, orgIDs []s
 	return s.shareRepo.CountByOrganizations(ctx, orgIDs)
 }
 
-// SetSharedAgentDisabledByMe adds or removes (tenantID, agentID, sourceTenantID) from tenant_disabled_shared_agents.
+// SetSharedAgentDisabledByMe stores platform-wide agent status or a tenant-scoped shared-agent preference.
 func (s *agentShareService) SetSharedAgentDisabledByMe(ctx context.Context, tenantID uint64, agentID string, sourceTenantID uint64, disabled bool) error {
 	if disabled {
 		return s.disabledRepo.Add(ctx, tenantID, agentID, sourceTenantID)

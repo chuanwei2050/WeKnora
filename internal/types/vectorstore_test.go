@@ -198,8 +198,8 @@ func TestNewVectorStoreResponse(t *testing.T) {
 func TestGetVectorStoreTypes(t *testing.T) {
 	types := GetVectorStoreTypes()
 
-	t.Run("returns 4 engine types (excludes postgres and sqlite)", func(t *testing.T) {
-		assert.Len(t, types, 4)
+	t.Run("only Milvus is selectable", func(t *testing.T) {
+		assert.Len(t, types, 1)
 	})
 
 	t.Run("type names match engine constants", func(t *testing.T) {
@@ -207,34 +207,12 @@ func TestGetVectorStoreTypes(t *testing.T) {
 		for i, typ := range types {
 			typeNames[i] = typ.Type
 		}
-		assert.Contains(t, typeNames, "elasticsearch")
-		assert.Contains(t, typeNames, "qdrant")
 		assert.Contains(t, typeNames, "milvus")
-		assert.Contains(t, typeNames, "weaviate")
+		assert.NotContains(t, typeNames, "elasticsearch")
+		assert.NotContains(t, typeNames, "qdrant")
+		assert.NotContains(t, typeNames, "weaviate")
 		assert.NotContains(t, typeNames, "postgres")
 		assert.NotContains(t, typeNames, "sqlite")
-	})
-
-	t.Run("elasticsearch has connection and index fields", func(t *testing.T) {
-		var esType VectorStoreTypeInfo
-		for _, typ := range types {
-			if typ.Type == "elasticsearch" {
-				esType = typ
-				break
-			}
-		}
-		assert.NotEmpty(t, esType.ConnectionFields)
-		assert.NotEmpty(t, esType.IndexFields)
-
-		// Check sensitive field marking
-		var passwordField VectorStoreFieldInfo
-		for _, f := range esType.ConnectionFields {
-			if f.Name == "password" {
-				passwordField = f
-				break
-			}
-		}
-		assert.True(t, passwordField.Sensitive)
 	})
 
 	t.Run("display names have no parenthetical suffix", func(t *testing.T) {

@@ -661,7 +661,7 @@ export async function listOrganizationSharedAgents(orgId: string): Promise<ApiRe
   }
 }
 
-/** 设置当前用户对某共享智能体的停用状态（仅影响本人对话下拉显示） */
+/** 设置平台智能体的全局状态，或当前租户对共享智能体的停用偏好 */
 export async function setSharedAgentDisabledByMe(
   agentId: string,
   disabled: boolean

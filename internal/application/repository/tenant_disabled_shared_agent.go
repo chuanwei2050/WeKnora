@@ -26,7 +26,10 @@ func (r *tenantDisabledSharedAgentRepository) ListByTenantID(ctx context.Context
 func (r *tenantDisabledSharedAgentRepository) ListDisabledOwnAgentIDs(ctx context.Context, tenantID uint64) ([]string, error) {
 	var ids []string
 	err := r.db.WithContext(ctx).Model(&types.TenantDisabledSharedAgent{}).
-		Where("tenant_id = ? AND source_tenant_id = ?", tenantID, tenantID).
+		Where(
+			"(tenant_id = ? AND source_tenant_id = ?) OR (tenant_id = ? AND source_tenant_id = ?)",
+			tenantID, tenantID, types.PlatformAgentTenantID, types.PlatformAgentTenantID,
+		).
 		Pluck("agent_id", &ids).Error
 	return ids, err
 }

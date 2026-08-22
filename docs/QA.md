@@ -203,5 +203,21 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 3. 当你向该知识库上传文档时，系统会自动触发异步任务，通过大模型提取文档中的实体与核心概念，并自动生成结构化的 Wiki 页面及页面间的知识图谱链接。
 4. 你可以在该知识库的“Wiki”标签页中，使用专用的 Wiki 浏览器查阅、管理页面，并通过可视化的知识图谱查看不同内容之间的关联关系。
 
+## 11. 如何运行复杂度路由基准？
+
+准备一个仅包含专家标签样例的 JSON 文件（根节点可以是数组，也可以是 `{ "cases": [...] }`，每项含 `id`、`question`、`expert_level`，且四个级别都必须出现），再用单个 token 文件调用：
+
+```powershell
+./scripts/complexity-routing-benchmark.ps1 `
+  -Target 'https://model.example/v1' `
+  -Model 'your-model' `
+  -DatasetFile './complexity-cases.json' `
+  -TokenFile './model.token' `
+  -OutputFile './complexity-report.json' `
+  -ConfirmTestEnvironment
+```
+
+脚本只接受线上端点，拒绝本机、Docker host 和 RFC1918 私网地址；报告同时包含 L1-L4 混淆矩阵、逐级 precision/recall、确定性路由基线和 SHA-256。没有真实线上模型与专家标注集时，不应把本地结果作为线上验收证据。
+
 ## P.S.
 如果以上方式未解决问题，请在issue中描述您的问题，并提供必要的日志信息辅助我们进行问题排查

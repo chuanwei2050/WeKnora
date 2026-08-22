@@ -1,5 +1,7 @@
 import { get, post, put, del } from '../../utils/request';
+import { filterModelsByProfile } from '../../utils/model-profile'
 import i18n from '@/i18n'
+import { getModelProfile, type ModelProfile } from '@/api/system'
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -8,7 +10,7 @@ export interface ModelConfig {
   id?: string;
   tenant_id?: number;
   name: string;
-  type: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR';
+  type: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR' | 'TTS' | 'VLM' | 'Verifier' | 'EvaluationJudge' | 'ParserOCR';
   source: 'local' | 'remote';
   description?: string;
   parameters: {
@@ -18,6 +20,7 @@ export interface ModelConfig {
     embedding_parameters?: {
       dimension?: number;
       truncate_prompt_tokens?: number;
+      compatibility_id?: string;
     };
     interface_type?: 'ollama' | 'openai'; // VLLM专用
     parameter_size?: string; // Ollama模型参数大小 (e.g., "7B", "13B", "70B")
@@ -26,13 +29,56 @@ export interface ModelConfig {
     // 会在调用远程模型 API 时附加到每个请求上。Authorization、Content-Type 等保留头会被忽略。
     custom_headers?: Record<string, string>;
     supports_vision?: boolean; // Whether the model accepts image/multimodal input
+	protocol?: 'ollama' | 'openai-compatible' | 'native';
+	location?: 'public' | 'private-network' | 'same-host' | 'unknown';
+	artifact_policy?: 'preloaded-only' | 'allow-download';
+	inference_engine?: string;
+	capabilities?: {
+	  roles?: string[];
+	  streaming?: boolean;
+	  structured_output?: boolean;
+	  tool_calling?: boolean;
+	  vision_input?: boolean;
+	  audio_input?: boolean;
+	  audio_output?: boolean;
+	  embedding_dimension?: number;
+	  max_context_tokens?: number;
+	  max_concurrency?: number;
+	};
+	approved_endpoint_id?: string;
+	endpoint_use?: string;
   };
   is_default?: boolean;
   is_builtin?: boolean;
+  profile?: 'online' | 'offline' | '';
+  profile_role?: string;
   status?: string;
   created_at?: string;
   updated_at?: string;
   deleted_at?: string | null;
+}
+
+export interface ModelCapabilityProbeResult {
+  role: string;
+  status: 'passed' | 'unsupported' | 'missing_resource' | 'failed';
+  latency_ms?: number;
+  error?: string;
+  model_key?: string;
+  checked_at: string;
+}
+
+export interface ModelPreflightResult {
+  model_id: string;
+  model_name: string;
+  location: 'public' | 'private-network' | 'same-host' | 'unknown';
+  protocol: 'ollama' | 'openai-compatible' | 'native';
+  probes: ModelCapabilityProbeResult[];
+  checked_at: string;
+}
+
+export function preflightModel(id: string): Promise<ModelPreflightResult> {
+  return post<{ success: boolean; data: ModelPreflightResult }>(`/api/v1/models/${id}/preflight`, {})
+    .then((response: any) => response?.data ?? response);
 }
 
 // 创建模型
@@ -54,12 +100,16 @@ export function createModel(data: ModelConfig): Promise<ModelConfig> {
 }
 
 // 获取模型列表
-export function listModels(type?: string): Promise<ModelConfig[]> {
-  return new Promise((resolve, reject) => {
+export function listModels(type?: string, profile?: ModelProfile): Promise<ModelConfig[]> {
+  return new Promise((resolve) => {
     const url = `/api/v1/models`;
-    get(url)
-      .then((response: any) => {
+    Promise.all([
+      get(url),
+      profile ? Promise.resolve(profile) : getModelProfile().then(response => response.data.profile)
+    ])
+      .then(([response, activeProfile]: [any, ModelProfile]) => {
         if (response.success && response.data) {
+          response.data = filterModelsByProfile(response.data, activeProfile)
           if (type) {
             response.data = response.data.filter((item: ModelConfig) => item.type === type);
           }

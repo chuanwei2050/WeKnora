@@ -106,8 +106,11 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	go func() {
 		answerID := fmt.Sprintf("%s-answer", uuid.New().String()[:8])
 		var finalContent string
+		var verifiedDraft string
+		var initialUsage types.TokenUsage
 		var thinkingStarted bool
 		var thinkingEnded bool
+		verifiedMode := chatManage.VerifiedAnswer.Enabled
 
 		for {
 			select {
@@ -130,6 +133,13 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 
 			case response, ok := <-responseChan:
 				if !ok {
+					if verifiedMode {
+						p.emitVerifiedResult(ctx, eventBus, answerID, chatManage, verifiedDraft, initialUsage)
+						pipelineInfo(ctx, "Stream", "channel_close_verified", map[string]interface{}{
+							"session_id": chatManage.SessionID,
+						})
+						return
+					}
 					if thinkingStarted && !thinkingEnded {
 						finalContent += "</think>"
 						eventBus.Emit(ctx, types.Event{
@@ -146,6 +156,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 						"session_id": chatManage.SessionID,
 					})
 					return
+				}
+				if response.Usage != nil {
+					initialUsage = *response.Usage
 				}
 
 				if response.ResponseType == types.ResponseTypeError {
@@ -167,6 +180,11 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				}
 
 				if response.ResponseType == types.ResponseTypeThinking {
+					if verifiedMode {
+						// Thinking is an internal draft and is never sent to the
+						// client when verification is enabled.
+						continue
+					}
 					content := response.Content
 					if !thinkingStarted {
 						content = "<think>" + content
@@ -190,6 +208,10 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				}
 
 				if response.ResponseType == types.ResponseTypeAnswer {
+					if verifiedMode {
+						verifiedDraft += response.Content
+						continue
+					}
 					if thinkingStarted && !thinkingEnded {
 						thinkingEnded = true
 						finalContent += "</think>"
@@ -219,4 +241,39 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	}()
 
 	return next()
+}
+
+func (p *PluginChatCompletionStream) emitVerifiedResult(ctx context.Context, eventBus types.EventBusInterface, answerID string, chatManage *types.ChatManage, draft string, usages ...types.TokenUsage) {
+	var usage types.TokenUsage
+	if len(usages) > 0 {
+		usage = usages[0]
+	}
+	chatManage.ChatResponse = &types.ChatResponse{Content: draft, FinishReason: "stop", Usage: usage}
+	if usage.PromptTokens == 0 && usage.CompletionTokens == 0 {
+		chatManage.ChatResponse.Usage = types.TokenUsage{
+			PromptTokens:     estimateVerificationTokens(chatManage.Query, chatManage.RenderedContexts, chatManage.UserContent),
+			CompletionTokens: estimateVerificationTokens(draft),
+		}
+		chatManage.ChatResponse.Usage.TotalTokens = chatManage.ChatResponse.Usage.PromptTokens + chatManage.ChatResponse.Usage.CompletionTokens
+	}
+	answer, err := (&PluginVerifiedAnswer{modelService: p.modelService}).execute(ctx, chatManage)
+	content := "验证未完成，暂无法确认该回答。"
+	isFallback := true
+	if err == nil && answer != nil {
+		content = verifiedVisibleText(answer)
+		isFallback = answer.Degraded
+	}
+	if content == "" {
+		content = "验证未完成，暂无法确认该回答。"
+	}
+	_ = eventBus.Emit(ctx, types.Event{
+		ID:        answerID,
+		Type:      types.EventType(event.EventAgentFinalAnswer),
+		SessionID: chatManage.SessionID,
+		Data: event.AgentFinalAnswerData{
+			Content:    content,
+			Done:       true,
+			IsFallback: isFallback,
+		},
+	})
 }

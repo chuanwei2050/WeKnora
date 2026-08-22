@@ -1,0 +1,180 @@
+# =============================================================================
+# 内网离线模型部署配置示例（全容器）
+# 用法: cp config.yaml.example config.yaml 后按需修改
+# 密钥仅通过环境变量注入（HF_TOKEN / MODELSCOPE_TOKEN / MODEL_API_KEY）
+#
+# 量化策略: 对比「量化 vs 非量化」——能明显省盘/显存/加速且当前栈可加载时，优先量化。
+#   Embedding  AWQ-INT4  ≈2.7GB（官方 bf16 ≈7.5GB）→ 优先 AWQ
+#   Rerank     ONNX INT8 ≈0.5GB（官方 fp ≈2GB）    → 优先 ONNX
+#   ASR        ONNX INT8 ≈0.23GB（官方 ≈0.9GB）    → 优先 ONNX
+#   TTS        无可用 CosyVoice2 INT8 制品可被本容器加载 → 保持 fp16
+#   Verifier   AWQ；Chat/VLM 预置 FP8（默认 enabled:false 不下载，启用即下 FP8）
+# =============================================================================
+
+bundle:
+  name: offline-model-bundle
+  output_dir: ./offline-bundle
+  checksum_algo: sha256
+  download_source: auto
+  download_retries: 3
+  download_retry_delay_sec: 5
+  # Hub 缓存落项目盘（默认 model-scripts/.cache）；勿指向 C:\Users\...
+  # hub_cache_dir: ./.cache
+
+deploy:
+  data_dir: /mnt/models
+  host: 192.168.10.232
+  scheme: http
+  compose_project: weknora-models
+  auto_start: true
+  install_systemd: false
+
+# 统一 HTTPS 网关。prepare/gen-config 始终生成配置；install=true 时 deploy 会安装并重载 Nginx。
+# 公网使用时 server_name 应填写公网 IP 或域名，且由上级网关做端口映射。
+gateway:
+  enabled: true
+  install: false
+  listen_port: 8006
+  server_name: null  # 留空时使用 deploy.host；公网部署建议显式填写公网 IP 或域名
+  config_path: /etc/nginx/conf.d/weknora-model-gateway.conf
+  certificate_path: /etc/nginx/ssl/weknora-model-gateway.crt
+  certificate_key_path: /etc/nginx/ssl/weknora-model-gateway.key
+  generate_self_signed_certificate: true
+
+docker:
+  vllm_image: vllm/vllm-openai:latest
+  vllm_image_tar: images/vllm-openai.tar
+  vllm_min_version_hint: "0.19.0"
+  # 默认每个 GPU 服务申请一张卡，不绑定具体编号；部署时可按目标服务器显式设置 device_ids。
+  gpu_count: 1
+  shm_size: 16gb
+  service_images:
+    rerank: weknora-rerank:airgap
+    asr: weknora-asr:airgap
+    tts: weknora-tts:airgap
+  service_image_tars:
+    rerank: images/weknora-rerank.tar
+    asr: images/weknora-asr.tar
+    tts: images/weknora-tts.tar
+
+models:
+  embedding:
+    enabled: true
+    role: embedding
+    model_id: Qwen/Qwen3-Embedding-4B
+    revision: null
+    quant: awq-int4
+    download_id: drawais/Qwen3-Embedding-4B-AWQ-INT4
+    download_id_hf: drawais/Qwen3-Embedding-4B-AWQ-INT4
+    engine: vllm
+    port: 8001
+    served_model_name: qwen3-embedding-4b
+    max_model_len: 8192
+    # 单卡默认与 verifier 共享一张 GPU；显存充足时可提高到 0.45+
+    gpu_memory_utilization: 0.28
+    dtype: auto
+    extra_vllm_args:
+      - "--quantization"
+      - "compressed-tensors"
+      - "--trust-remote-code"
+    allowed_uses: [embedding, model]
+    forbidden_uses: [object-storage, data-connector, search]
+
+  rerank:
+    enabled: true
+    role: rerank
+    model_id: BAAI/bge-reranker-v2-m3
+    revision: null
+    quant: onnx-int8
+    download_id: jiangnanboy/bge-reranker-v2-m3-ONNX-int8
+    download_id_hf: jiangnanboy/bge-reranker-v2-m3-ONNX-int8
+    engine: container
+    needs_gpu: false
+    port: 8002
+    served_model_name: bge-reranker-v2-m3
+    allowed_uses: [rerank, model]
+    forbidden_uses: [object-storage, data-connector]
+
+  verifier:
+    enabled: true
+    role: verifier
+    roles: [evaluation_judge]
+    model_id: Qwen/Qwen3.5-9B
+    revision: null
+    quant: awq
+    download_id: tclf90/Qwen3.5-9B-AWQ
+    download_id_hf: QuantTrio/Qwen3.5-9B-AWQ
+    engine: vllm
+    port: 8003
+    served_model_name: qwen3.5-9b
+    max_model_len: 32768
+    # 单卡默认与 embedding 同卡；多卡部署可显式设置 device_ids 并提高到 0.55+
+    gpu_memory_utilization: 0.45
+    dtype: auto
+    extra_vllm_args:
+      - "--trust-remote-code"
+      - "--reasoning-parser"
+      - "qwen3"
+    allowed_uses: [verifier, evaluation_judge, chat, model]
+    forbidden_uses: [object-storage, data-connector]
+
+  # 主 Chat；VLM 共用（roles: [vlm]）。默认 enabled:false 不下载，
+  # 但量化已固定为 FP8（download_id=Qwen/Qwen3.8-27B-FP8）；以后启用无需再改 quant。
+  # 对齐 .env：OFFLINE_LLM_MODEL_NAME / OFFLINE_VLM（建议 FP8，优于全精度）。
+  chat:
+    enabled: false
+    role: chat
+    roles: [vlm]
+    model_id: Qwen/Qwen3.8-27B
+    revision: null
+    quant: fp8
+    download_id: Qwen/Qwen3.8-27B-FP8
+    download_id_hf: Qwen/Qwen3.8-27B-FP8
+    engine: vllm
+    port: 8000
+    served_model_name: Qwen3.8-27B-FP8
+    max_model_len: 32768
+    gpu_memory_utilization: 0.90
+    dtype: fp8
+    limit_mm_per_prompt: '{"image": 5}'
+    extra_vllm_args:
+      - "--trust-remote-code"
+    allowed_uses: [chat, vlm, model]
+    forbidden_uses: [object-storage, data-connector]
+
+  asr:
+    enabled: true
+    role: asr
+    model_id: FunAudioLLM/SenseVoiceSmall
+    revision: null
+    quant: onnx-int8
+    # ModelScope 官方 ONNX INT8 导出；HF 镜像见 download_id_hf
+    download_id: iic/SenseVoiceSmall-onnx
+    download_id_hf: DennisHuang648/SenseVoiceSmall-onnx
+    engine: container
+    needs_gpu: false
+    port: 8004
+    served_model_name: sensevoice-small
+    # ONNX 推理依赖原始 SenseVoice 仓库中的 tokenizer sidecar；随模型包一起导入。
+    extra_files:
+      - model_id: iic/SenseVoiceSmall
+        source: modelscope
+        path: chn_jpn_yue_eng_ko_spectok.bpe.model
+    allowed_uses: [asr, model]
+    forbidden_uses: [object-storage]
+
+  tts:
+    enabled: true
+    role: tts
+    model_id: FunAudioLLM/CosyVoice2-0.5B
+    revision: null
+    # 暂无 CosyVoice2 官方/社区 INT8 可被本容器 CosyVoice 加载器直接使用 → 保持 fp16
+    quant: fp16
+    download_id: iic/CosyVoice2-0.5B
+    download_id_hf: FunAudioLLM/CosyVoice2-0.5B
+    engine: container
+    needs_gpu: true
+    port: 8005
+    served_model_name: cosyvoice2-0.5b
+    allowed_uses: [tts, model]
+    forbidden_uses: [object-storage]

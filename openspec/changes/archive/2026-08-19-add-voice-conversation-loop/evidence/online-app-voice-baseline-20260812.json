@@ -1,0 +1,39 @@
+{
+  "schema_version": "voice-conversation-online-baseline/v1",
+  "profile": "online-app",
+  "status": "passed",
+  "endpoint": "http://127.0.0.1:8081",
+  "protocol": "OpenAI-compatible ASR/TTS through WeKnora session APIs",
+  "asr_model": "FunAudioLLM/SenseVoiceSmall",
+  "chat_model": "Qwen/Qwen3.6-27B",
+  "tts_model": "FunAudioLLM/CosyVoice2-0.5B",
+  "voice": "FunAudioLLM/CosyVoice2-0.5B:alex",
+  "fixture": "internal/assets/asr_test.wav",
+  "first_turn": {
+    "asr": "passed",
+    "transcript_chars": 22,
+    "chat": "passed",
+    "assistant_message_persisted": true,
+    "tts": "passed",
+    "tts_audio_bytes": 113407
+  },
+  "followup_turn": {
+    "same_session": true,
+    "asr": "passed",
+    "transcript_chars": 22,
+    "chat": "passed",
+    "sse_data_lines": 17,
+    "assistant_message_persisted": true,
+    "tts": "passed",
+    "tts_audio_bytes": 125695
+  },
+  "persistence_check": {
+    "audio_attachment_created": false,
+    "tts_audio_persisted": false,
+    "text_answer_preserved": true
+  },
+  "notes": [
+    "The run used a dedicated local test tenant and the app container backed by SiliconFlow online endpoints.",
+    "The audio responses were consumed in memory; no TTS output file was created by the app-level run."
+  ]
+}

@@ -1,8 +1,11 @@
 package types
 
 import (
+	"crypto/sha256"
 	"database/sql/driver"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -16,6 +19,31 @@ const (
 	KnowledgeBaseTypeFAQ      = "faq"
 	KnowledgeBaseTypeWiki     = "wiki"
 )
+
+type ContributionMode string
+
+const (
+	ContributionModeClosed    ContributionMode = "closed"
+	ContributionModeMembers   ContributionMode = "members"
+	ContributionModeAllowlist ContributionMode = "allowlist"
+)
+
+func IsContributionMode(mode ContributionMode) bool {
+	return mode == ContributionModeClosed || mode == ContributionModeMembers || mode == ContributionModeAllowlist
+}
+
+func (kb *KnowledgeBase) ValidateContributionPolicy() error {
+	if kb == nil {
+		return fmt.Errorf("knowledge base is required")
+	}
+	if !IsContributionMode(kb.ContributionMode) {
+		return fmt.Errorf("contribution_mode must be closed, members or allowlist")
+	}
+	if kb.ContributionMode != ContributionModeClosed && !kb.Governance.Enabled {
+		return fmt.Errorf("member contributions require knowledge governance to be enabled")
+	}
+	return nil
+}
 
 // FAQIndexMode represents the FAQ index mode: only index questions or index questions and answers
 type FAQIndexMode string
@@ -65,7 +93,7 @@ type KnowledgeBase struct {
 	VLMConfig VLMConfig `yaml:"vlm_config"              json:"vlm_config"              gorm:"type:json"`
 	// ASR config (Automatic Speech Recognition)
 	ASRConfig ASRConfig `yaml:"asr_config"              json:"asr_config"              gorm:"type:json"`
-	// Storage provider config (new): only stores provider selection; credentials from tenant StorageEngineConfig
+	// Deprecated: legacy knowledge-base storage selection. Runtime storage follows platform settings.
 	StorageProviderConfig *StorageProviderConfig `yaml:"storage_provider_config" json:"storage_provider_config"  gorm:"column:storage_provider_config;type:jsonb"`
 	// Deprecated: legacy COS config column. Kept for backward compatibility with old data.
 	StorageConfig StorageConfig `yaml:"-" json:"storage_config" gorm:"column:cos_config;type:json"`
@@ -78,6 +106,12 @@ type KnowledgeBase struct {
 	VectorStoreID *string `yaml:"vector_store_id"         json:"vector_store_id,omitempty" gorm:"column:vector_store_id;type:varchar(36);<-:create"`
 	// Extract config
 	ExtractConfig *ExtractConfig `yaml:"extract_config"          json:"extract_config"          gorm:"column:extract_config;type:json"`
+	// Governance configures immutable-version review; new document KBs default on via UI/create path.
+	Governance KnowledgeGovernanceConfig `yaml:"governance" json:"governance" gorm:"column:governance;type:json"`
+	// ContributionMode controls whether tenant members may submit governed drafts.
+	ContributionMode ContributionMode `yaml:"contribution_mode" json:"contribution_mode" gorm:"column:contribution_mode;type:varchar(20);not null;default:'closed'"`
+	ContributorIDs   StringArray      `yaml:"contributor_ids" json:"contributor_ids" gorm:"column:contributor_ids;type:json"`
+	ReviewerIDs      StringArray      `yaml:"reviewer_ids" json:"reviewer_ids" gorm:"column:reviewer_ids;type:json"`
 	// FAQConfig stores FAQ specific configuration such as indexing strategy
 	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"              gorm:"column:faq_config;type:json"`
 	// QuestionGenerationConfig stores question generation configuration for document knowledge bases
@@ -122,9 +156,15 @@ type KnowledgeBaseConfig struct {
 	// IndexingStrategy controls which indexing pipelines are active.
 	// nil means "no change" when updating (preserves existing strategy).
 	IndexingStrategy *IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"`
+	// Governance enables immutable-version review and publication for the KB.
+	Governance       *KnowledgeGovernanceConfig `yaml:"governance" json:"governance"`
+	ContributionMode *ContributionMode          `yaml:"contribution_mode" json:"contribution_mode"`
+	ContributorIDs   *StringArray               `yaml:"contributor_ids" json:"contributor_ids"`
+	ReviewerIDs      *StringArray               `yaml:"reviewer_ids" json:"reviewer_ids"`
 }
 
-// ParserEngineRule maps a set of file types to a specific parser engine.
+// ParserEngineRule decodes legacy knowledge-base parser configuration.
+// Deprecated: parser selection is platform-managed.
 type ParserEngineRule struct {
 	FileTypes []string `yaml:"file_types" json:"file_types"`
 	Engine    string   `yaml:"engine"     json:"engine"`
@@ -140,8 +180,8 @@ type ChunkingConfig struct {
 	Separators []string `yaml:"separators"    json:"separators"`
 	// EnableMultimodal (deprecated, kept for backward compatibility with old data)
 	EnableMultimodal bool `yaml:"enable_multimodal,omitempty" json:"enable_multimodal,omitempty"`
-	// ParserEngineRules configures which parser engine to use for each file type.
-	// When empty, the builtin engine is used for all types.
+	// ParserEngineRules is kept only for backward-compatible data decoding.
+	// Parser selection is platform-managed and runtime code ignores this field.
 	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty"`
 	// EnableParentChild enables two-level parent-child chunking strategy.
 	// When enabled, large parent chunks provide context while small child chunks
@@ -155,22 +195,8 @@ type ChunkingConfig struct {
 	ChildChunkSize int `yaml:"child_chunk_size,omitempty" json:"child_chunk_size,omitempty"`
 }
 
-// ResolveParserEngine returns the engine name for the given file type
-// based on the configured rules. Returns empty string (builtin) when
-// no rule matches.
-func (c ChunkingConfig) ResolveParserEngine(fileType string) string {
-	for _, rule := range c.ParserEngineRules {
-		for _, ft := range rule.FileTypes {
-			if ft == fileType {
-				return rule.Engine
-			}
-		}
-	}
-	return ""
-}
-
-// StorageProviderConfig stores the KB-level storage provider selection.
-// Credentials are managed at the tenant level (StorageEngineConfig).
+// StorageProviderConfig is the legacy KB-level storage provider selection.
+// Runtime storage is managed by the platform StorageEngineConfig.
 type StorageProviderConfig struct {
 	Provider string `yaml:"provider" json:"provider"` // "local", "minio", "cos", "tos", "s3", "oss"
 }
@@ -191,7 +217,7 @@ func (c *StorageProviderConfig) Scan(value interface{}) error {
 }
 
 // Deprecated: StorageConfig is the legacy COS configuration stored in the cos_config column.
-// New code should use StorageProviderConfig. Kept for backward compatibility with old data.
+// Kept for backward compatibility with old data.
 type StorageConfig struct {
 	SecretID   string `yaml:"secret_id"   json:"secret_id"`
 	SecretKey  string `yaml:"secret_key"  json:"secret_key"`
@@ -241,8 +267,8 @@ func (kb *KnowledgeBase) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// GetStorageProvider returns the effective storage provider for this KB.
-// Priority: StorageProviderConfig (new) > StorageConfig.Provider (legacy cos_config).
+// GetStorageProvider returns the legacy storage provider persisted on this KB.
+// Runtime storage resolution must use the platform StorageEngineConfig instead.
 func (kb *KnowledgeBase) GetStorageProvider() string {
 	if kb == nil {
 		return ""
@@ -351,11 +377,10 @@ type VLMConfig struct {
 }
 
 // IsEnabled 判断多模态是否启用（兼容新老版本）
-// 新版本：Enabled && ModelID != ""
+// 新版本的模型由平台统一解析，知识库只保留启用开关。
 // 老版本：ModelName != "" && BaseURL != ""
 func (c VLMConfig) IsEnabled() bool {
-	// 新版本配置
-	if c.Enabled && c.ModelID != "" {
+	if c.Enabled {
 		return true
 	}
 	// 兼容老版本配置
@@ -415,9 +440,9 @@ type ASRConfig struct {
 	Language string `yaml:"language" json:"language"` // optional: language hint for transcription
 }
 
-// IsASREnabled checks if ASR is enabled with a valid model
+// IsASREnabled checks whether ASR is enabled. The model is resolved from platform settings.
 func (c ASRConfig) IsASREnabled() bool {
-	return c.Enabled && c.ModelID != ""
+	return c.Enabled
 }
 
 // Value implements the driver.Valuer interface, used to convert ASRConfig to database value
@@ -439,11 +464,133 @@ func (c *ASRConfig) Scan(value interface{}) error {
 
 // ExtractConfig represents the extract configuration for a knowledge base
 type ExtractConfig struct {
-	Enabled   bool             `yaml:"enabled"   json:"enabled"`
-	Text      string           `yaml:"text"      json:"text,omitempty"`
-	Tags      []string         `yaml:"tags"      json:"tags,omitempty"`
-	Nodes     []*GraphNode     `yaml:"nodes"     json:"nodes,omitempty"`
-	Relations []*GraphRelation `yaml:"relations" json:"relations,omitempty"`
+	Enabled             bool                          `yaml:"enabled"       json:"enabled"`
+	Mode                GraphExtractionMode           `yaml:"mode"          json:"mode,omitempty"`
+	TemplateKey         string                        `yaml:"template_key"  json:"template_key,omitempty"`
+	ModelID             string                        `yaml:"model_id"      json:"model_id,omitempty"`
+	IngestionMode       GraphIngestionMode            `yaml:"ingestion_mode" json:"ingestion_mode,omitempty"`
+	MaxEntities         int                           `yaml:"max_entities"  json:"max_entities,omitempty"`
+	MaxRelations        int                           `yaml:"max_relations" json:"max_relations,omitempty"`
+	MinConfidence       float64                       `yaml:"min_confidence" json:"min_confidence,omitempty"`
+	Text                string                        `yaml:"text"          json:"text,omitempty"`
+	Tags                []string                      `yaml:"tags"          json:"tags,omitempty"`
+	EntityTypes         []string                      `yaml:"entity_types"  json:"entity_types,omitempty"`
+	EntitySchema        []GraphEntityTypeDefinition   `yaml:"entity_schema" json:"entity_schema,omitempty"`
+	RelationSchema      []GraphRelationTypeDefinition `yaml:"relation_schema" json:"relation_schema,omitempty"`
+	StrictSchema        bool                          `yaml:"strict_schema" json:"strict_schema,omitempty"`
+	RequireTripleReview bool                          `yaml:"require_triple_review" json:"require_triple_review,omitempty"`
+	Nodes               []*GraphNode                  `yaml:"nodes"         json:"nodes,omitempty"`
+	Relations           []*GraphRelation              `yaml:"relations"     json:"relations,omitempty"`
+}
+
+type GraphExtractionMode string
+
+const (
+	GraphExtractionGeneral  GraphExtractionMode = "general"
+	GraphExtractionTemplate GraphExtractionMode = "template"
+	GraphExtractionCustom   GraphExtractionMode = "custom"
+)
+
+func (e *ExtractConfig) NormalizeMode() {
+	if e == nil {
+		return
+	}
+	if len(e.EntitySchema) == 0 && len(e.EntityTypes) > 0 {
+		e.EntitySchema = make([]GraphEntityTypeDefinition, 0, len(e.EntityTypes))
+		for _, entityType := range e.EntityTypes {
+			e.EntitySchema = append(e.EntitySchema, GraphEntityTypeDefinition{Type: entityType})
+		}
+	}
+	if len(e.RelationSchema) == 0 && len(e.Tags) > 0 {
+		e.RelationSchema = make([]GraphRelationTypeDefinition, 0, len(e.Tags))
+		for _, tag := range e.Tags {
+			e.RelationSchema = append(e.RelationSchema, GraphRelationTypeDefinition{Type: tag})
+		}
+	}
+	if len(e.EntitySchema) > 0 {
+		e.EntityTypes = make([]string, 0, len(e.EntitySchema))
+		for _, definition := range e.EntitySchema {
+			e.EntityTypes = append(e.EntityTypes, definition.Type)
+		}
+	}
+	if len(e.RelationSchema) > 0 {
+		e.Tags = make([]string, 0, len(e.RelationSchema))
+		for _, definition := range e.RelationSchema {
+			e.Tags = append(e.Tags, definition.Type)
+		}
+	}
+	switch e.Mode {
+	case GraphExtractionGeneral, GraphExtractionTemplate, GraphExtractionCustom:
+	default:
+		if len(e.Tags) == 0 && len(e.EntityTypes) == 0 {
+			e.Mode = GraphExtractionGeneral
+		} else {
+			e.Mode = GraphExtractionCustom
+		}
+	}
+	if e.Mode == GraphExtractionGeneral {
+		e.TemplateKey, e.Tags, e.EntityTypes, e.EntitySchema, e.RelationSchema, e.StrictSchema = "", nil, nil, nil, nil, false
+	} else {
+		e.StrictSchema = true
+	}
+}
+
+func (e *ExtractConfig) GraphConfigFingerprint() string {
+	if e == nil {
+		return ""
+	}
+	copy := *e
+	copy.NormalizeMode()
+	payload, _ := json.Marshal(struct {
+		Mode           GraphExtractionMode           `json:"mode"`
+		IngestionMode  GraphIngestionMode            `json:"ingestion_mode"`
+		MaxEntities    int                           `json:"max_entities"`
+		MaxRelations   int                           `json:"max_relations"`
+		MinConfidence  float64                       `json:"min_confidence"`
+		Tags           []string                      `json:"tags"`
+		EntityTypes    []string                      `json:"entity_types"`
+		EntitySchema   []GraphEntityTypeDefinition   `json:"entity_schema"`
+		RelationSchema []GraphRelationTypeDefinition `json:"relation_schema"`
+		StrictSchema   bool                          `json:"strict_schema"`
+		Text           string                        `json:"text"`
+		Nodes          []*GraphNode                  `json:"nodes"`
+		Relations      []*GraphRelation              `json:"relations"`
+	}{copy.Mode, copy.IngestionMode.Normalize(), copy.MaxEntities, copy.MaxRelations, copy.MinConfidence, copy.Tags, copy.EntityTypes, copy.EntitySchema, copy.RelationSchema, copy.StrictSchema, copy.Text, copy.Nodes, copy.Relations})
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
+}
+
+// GraphIngestionMode controls the recall/cost trade-off before LLM extraction.
+type GraphIngestionMode string
+
+const (
+	GraphIngestionAll         GraphIngestionMode = "all"
+	GraphIngestionSignal      GraphIngestionMode = "signal"
+	DefaultGraphMaxEntities                      = 12
+	DefaultGraphMaxRelations                     = 15
+	DefaultGraphMinConfidence                    = 0.5
+	MaxGraphEntities                             = 100
+	MaxGraphRelations                            = 200
+)
+
+// Normalize defaults legacy empty values to the high-recall ingestion mode.
+func (m GraphIngestionMode) Normalize() GraphIngestionMode {
+	if m == GraphIngestionSignal {
+		return GraphIngestionSignal
+	}
+	return GraphIngestionAll
+}
+
+// GraphExtractionModelID returns the dedicated graph model when configured,
+// otherwise it preserves the historical summary-model fallback.
+func (kb *KnowledgeBase) GraphExtractionModelID() string {
+	if kb == nil {
+		return ""
+	}
+	if kb.ExtractConfig != nil && strings.TrimSpace(kb.ExtractConfig.ModelID) != "" {
+		return strings.TrimSpace(kb.ExtractConfig.ModelID)
+	}
+	return kb.SummaryModelID
 }
 
 // Value implements the driver.Valuer interface, used to convert ExtractConfig to database value
@@ -494,6 +641,9 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	if kb.Type == "" {
 		kb.Type = KnowledgeBaseTypeDocument
 	}
+	if !IsContributionMode(kb.ContributionMode) {
+		kb.ContributionMode = ContributionModeClosed
+	}
 	// Clear type-specific configs that don't belong
 	if kb.Type != KnowledgeBaseTypeFAQ {
 		kb.FAQConfig = nil
@@ -525,6 +675,10 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	// Sync legacy ExtractConfig.Enabled → IndexingStrategy.GraphEnabled
 	if kb.ExtractConfig != nil && kb.ExtractConfig.Enabled && !kb.IndexingStrategy.GraphEnabled {
 		kb.IndexingStrategy.GraphEnabled = true
+	}
+	if kb.ExtractConfig != nil {
+		kb.ExtractConfig.Enabled = kb.IndexingStrategy.GraphEnabled
+		kb.ExtractConfig.NormalizeMode()
 	}
 }
 
@@ -597,8 +751,7 @@ func (kb *KnowledgeBase) IsKeywordEnabled() bool {
 // IsGraphEnabled checks if knowledge graph extraction is enabled.
 // Requires both the IndexingStrategy flag and a valid ExtractConfig.
 func (kb *KnowledgeBase) IsGraphEnabled() bool {
-	return kb != nil && kb.IndexingStrategy.GraphEnabled &&
-		kb.ExtractConfig != nil && kb.ExtractConfig.Enabled
+	return kb != nil && kb.IndexingStrategy.GraphEnabled
 }
 
 // NeedsEmbeddingModel returns true if any enabled pipeline requires an embedding model.

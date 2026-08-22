@@ -61,6 +61,10 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		logger.Debugf(ctx, "skipping extract entity, neo4j is disabled")
 		return next()
 	}
+	if !ShouldUseGraph(chatManage) {
+		logger.Debugf(ctx, "skipping extract entity, entity relation not needed")
+		return next()
+	}
 
 	query := chatManage.Query
 
@@ -104,10 +108,10 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		return next()
 	}
 
-	// Check if any knowledge base has ExtractConfig enabled and collect their IDs
+	// Check if any knowledge base has graph indexing enabled and collect their IDs
 	enabledKBSet := make(map[string]struct{})
 	for _, kb := range kbs {
-		if kb.ExtractConfig != nil && kb.ExtractConfig.Enabled {
+		if kb.IsGraphEnabled() {
 			enabledKBSet[kb.ID] = struct{}{}
 		}
 	}
@@ -151,6 +155,18 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	return next()
 }
 
+// ShouldUseGraph reports layer-1 graph search allowance (relation need ∧ routing budget).
+// Open-graph KB availability is checked at the execution layer, not here.
+func ShouldUseGraph(chatManage *types.ChatManage) bool {
+	if chatManage == nil {
+		return false
+	}
+	if chatManage.RoutingDecision != nil {
+		return chatManage.RoutingDecision.Budget.GraphEnabled && chatManage.RoutingDecision.Classification.NeedsEntityRelation
+	}
+	return types.NeedsEntityRelation(chatManage.Query) || types.NeedsEntityRelation(chatManage.RewriteQuery)
+}
+
 // Extractor is a struct for extracting entities
 type Extractor struct {
 	chat     chat.Chat
@@ -158,6 +174,14 @@ type Extractor struct {
 	template *types.PromptTemplateStructured
 	chatOpt  *chat.ChatOptions
 }
+
+const (
+	defaultGraphMaxEntities   = types.DefaultGraphMaxEntities
+	defaultGraphMaxRelations  = types.DefaultGraphMaxRelations
+	defaultGraphMinConfidence = types.DefaultGraphMinConfidence
+	maxGraphEntities          = types.MaxGraphEntities
+	maxGraphRelations         = types.MaxGraphRelations
+)
 
 // NewExtractor creates a new extractor
 func NewExtractor(
@@ -173,6 +197,7 @@ func NewExtractor(
 			Temperature: 0.3,
 			MaxTokens:   4096,
 			Thinking:    &think,
+			Format:      graphExtractionFormatSchema(),
 		},
 	}
 }
@@ -195,26 +220,91 @@ func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphDa
 		logger.Errorf(ctx, "failed to parse graph: %v", err)
 		return nil, err
 	}
-	// e.RemoveUnknownRelation(ctx, graph)
+	e.ApplySchemaFilter(ctx, graph)
+	e.ApplyExtractionPolicy(ctx, graph)
 	return graph, nil
 }
 
-// RemoveUnknownRelation removes unknown relations from graph
-func (e *Extractor) RemoveUnknownRelation(ctx context.Context, graph *types.GraphData) {
-	relationType := make(map[string]bool)
-	for _, tag := range e.template.Tags {
-		relationType[tag] = true
+// ApplyExtractionPolicy enforces deterministic limits after schema filtering
+// and before persistence.
+func (e *Extractor) ApplyExtractionPolicy(ctx context.Context, graph *types.GraphData) {
+	maxEntities := e.template.MaxEntities
+	if maxEntities <= 0 {
+		maxEntities = defaultGraphMaxEntities
+	} else if maxEntities > maxGraphEntities {
+		maxEntities = maxGraphEntities
 	}
+	maxRelations := e.template.MaxRelations
+	if maxRelations <= 0 {
+		maxRelations = defaultGraphMaxRelations
+	} else if maxRelations > maxGraphRelations {
+		maxRelations = maxGraphRelations
+	}
+	minConfidence := e.template.MinConfidence
+	if minConfidence <= 0 || minConfidence > 1 {
+		minConfidence = defaultGraphMinConfidence
+	}
+	ApplyGraphExtractionPolicy(ctx, graph, maxEntities, maxRelations, minConfidence)
+}
 
-	relationNew := make([]*types.GraphRelation, 0)
-	for _, relation := range graph.Relation {
-		if _, ok := relationType[relation.Type]; ok {
-			relationNew = append(relationNew, relation)
-		} else {
-			logger.Infof(ctx, "Unknown relation type %s with %v, ignore it", relation.Type, e.template.Tags)
+// ApplyGraphExtractionPolicy caps graph growth and rejects relations whose
+// endpoints are absent from the accepted entity set.
+func ApplyGraphExtractionPolicy(ctx context.Context, graph *types.GraphData, maxEntities, maxRelations int, minConfidence float64) {
+	if graph == nil {
+		return
+	}
+	if len(graph.Node) > maxEntities {
+		graph.Node = graph.Node[:maxEntities]
+	}
+	validNodes := make(map[string]struct{}, len(graph.Node))
+	for _, node := range graph.Node {
+		if node != nil {
+			validNodes[node.Name] = struct{}{}
 		}
 	}
-	graph.Relation = relationNew
+	relations := make([]*types.GraphRelation, 0, min(len(graph.Relation), maxRelations))
+	for _, relation := range graph.Relation {
+		if relation == nil || relation.Confidence < minConfidence {
+			continue
+		}
+		if _, ok := validNodes[relation.Node1]; !ok {
+			logger.Infof(ctx, "drop relation %s-%s: source entity was not extracted", relation.Node1, relation.Node2)
+			continue
+		}
+		if _, ok := validNodes[relation.Node2]; !ok {
+			logger.Infof(ctx, "drop relation %s-%s: target entity was not extracted", relation.Node1, relation.Node2)
+			continue
+		}
+		relations = append(relations, relation)
+		if len(relations) == maxRelations {
+			break
+		}
+	}
+	graph.Relation = relations
+}
+
+func graphExtractionFormatSchema() json.RawMessage {
+	return json.RawMessage(`{
+  "type":"object",
+  "properties":{"items":{"type":"array","items":{"oneOf":[
+    {"type":"object","additionalProperties":false,"properties":{"entity":{"type":"string","minLength":1},"entity_type":{"type":"string"},"entity_attributes":{"type":"array","items":{"type":"string"}},"aliases":{"type":"array","items":{"type":"string","minLength":1}}},"required":["entity"]},
+    {"type":"object","additionalProperties":false,"properties":{"entity1":{"type":"string","minLength":1},"entity2":{"type":"string","minLength":1},"relation":{"type":"string","minLength":1},"confidence":{"type":"number","minimum":0,"maximum":1}},"required":["entity1","entity2","relation","confidence"]}
+  ]}}},
+  "required":["items"],
+  "additionalProperties":false
+}`)
+}
+
+// ApplySchemaFilter applies the unified schema filter using template options.
+func (e *Extractor) ApplySchemaFilter(ctx context.Context, graph *types.GraphData) SchemaFilterResult {
+	return ApplyGraphSchemaFilter(ctx, graph, SchemaFilterOptionsFromTemplate(e.template))
+}
+
+// RemoveUnknownRelation removes unknown relations from graph.
+// Deprecated for direct use: prefer ApplySchemaFilter / ApplyGraphSchemaFilter so empty Tags
+// no longer wipe all relations under non-strict mode.
+func (e *Extractor) RemoveUnknownRelation(ctx context.Context, graph *types.GraphData) {
+	e.ApplySchemaFilter(ctx, graph)
 }
 
 // QAPromptGenerator is a struct for generating QA prompts
@@ -249,6 +339,41 @@ func (qa *QAPromptGenerator) System(ctx context.Context) string {
 		tags, _ := json.Marshal(qa.Template.Tags)
 		promptLines = append(promptLines, fmt.Sprintf(qa.Template.Description, string(tags)))
 	}
+	if len(qa.Template.EntityTypes) > 0 || qa.Template.StrictSchema {
+		entityTypes, _ := json.Marshal(qa.Template.EntityTypes)
+		promptLines = append(promptLines,
+			"Entity types whitelist (entity_type must be chosen from this list when provided): "+string(entityTypes)+".",
+			"Each entity object MUST include entity_type. Do not invent types outside the whitelist when it is non-empty.",
+		)
+	}
+	if len(qa.Template.EntitySchema) > 0 {
+		entitySchema, _ := json.Marshal(qa.Template.EntitySchema)
+		promptLines = append(promptLines, "Entity schema definitions (business name, base type and meaning): "+string(entitySchema)+".")
+	}
+	if len(qa.Template.RelationSchema) > 0 {
+		relationSchema, _ := json.Marshal(qa.Template.RelationSchema)
+		promptLines = append(promptLines, "Directed relation schema (type, source_type, target_type and meaning): "+string(relationSchema)+". Every extracted relation MUST follow the configured source-to-target direction.")
+	}
+	maxEntities := qa.Template.MaxEntities
+	if maxEntities <= 0 {
+		maxEntities = defaultGraphMaxEntities
+	} else if maxEntities > maxGraphEntities {
+		maxEntities = maxGraphEntities
+	}
+	maxRelations := qa.Template.MaxRelations
+	if maxRelations <= 0 {
+		maxRelations = defaultGraphMaxRelations
+	} else if maxRelations > maxGraphRelations {
+		maxRelations = maxGraphRelations
+	}
+	minConfidence := qa.Template.MinConfidence
+	if minConfidence <= 0 || minConfidence > 1 {
+		minConfidence = defaultGraphMinConfidence
+	}
+	promptLines = append(promptLines,
+		fmt.Sprintf("Return one JSON object with an items array. Extract at most %d entities and %d relationships.", maxEntities, maxRelations),
+		fmt.Sprintf("Entity items use entity, entity_type, entity_attributes and aliases. Relationship items use entity1, entity2, relation and confidence (0-1); omit relationships below confidence %.2f. Relationship endpoints must exactly match extracted entity names.", minConfidence),
+	)
 	if len(qa.Template.Examples) > 0 {
 		promptLines = append(promptLines, qa.ExamplesHeading)
 		for _, example := range qa.Template.Examples {
@@ -343,26 +468,42 @@ func NewFormater() *Formater {
 func (f *Formater) formatExtraction(nodes []*types.GraphNode, relations []*types.GraphRelation) (string, error) {
 	items := make([]map[string]interface{}, 0)
 	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
 		item := map[string]interface{}{
 			f.nodePrefix: node.Name,
+		}
+		if strings.TrimSpace(node.EntityType) != "" {
+			item[f.nodePrefix+"_type"] = node.EntityType
+			item["entity_type"] = node.EntityType
 		}
 		if len(node.Attributes) > 0 {
 			item[fmt.Sprintf("%s%s", f.nodePrefix, f.attributeSuffix)] = node.Attributes
 		}
+		if len(node.Aliases) > 0 {
+			item["aliases"] = node.Aliases
+		}
 		items = append(items, item)
 	}
 	for _, relation := range relations {
+		if relation == nil {
+			continue
+		}
 		item := map[string]interface{}{
 			f.relationSource: relation.Node1,
 			f.relationTarget: relation.Node2,
 			f.relationPrefix: relation.Type,
+		}
+		if relation.Confidence > 0 {
+			item["confidence"] = relation.Confidence
 		}
 		items = append(items, item)
 	}
 	formatted := ""
 	switch f.formatType {
 	default:
-		formattedBytes, err := json.MarshalIndent(items, "", "  ")
+		formattedBytes, err := json.MarshalIndent(map[string]interface{}{"items": items}, "", "  ")
 		if err != nil {
 			return "", err
 		}
@@ -398,7 +539,11 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 
 	var items []interface{}
 	if parsedMap, ok := parsed.(map[string]interface{}); ok {
-		items = []interface{}{parsedMap}
+		if nested, ok := parsedMap["items"].([]interface{}); ok {
+			items = nested
+		} else {
+			items = []interface{}{parsedMap}
+		}
 	} else if parsedList, ok := parsed.([]interface{}); ok {
 		items = parsedList
 	} else {
@@ -441,15 +586,28 @@ func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphDat
 					attributes = append(attributes, fmt.Sprintf("%v", v))
 				}
 			}
+			entityType := ""
+			for _, key := range []string{"entity_type", f.nodePrefix + "_type", "type"} {
+				if v := group[key]; v != nil {
+					entityType = strings.TrimSpace(fmt.Sprintf("%v", v))
+					if entityType != "" {
+						break
+					}
+				}
+			}
+			aliases := stringSliceFromGraphValue(group["aliases"])
 			nodes = append(nodes, &types.GraphNode{
 				Name:       fmt.Sprintf("%v", group[f.nodePrefix]),
+				EntityType: entityType,
+				Aliases:    aliases,
 				Attributes: attributes,
 			})
 		case group[f.relationSource] != nil && group[f.relationTarget] != nil:
 			relations = append(relations, &types.GraphRelation{
-				Node1: fmt.Sprintf("%v", group[f.relationSource]),
-				Node2: fmt.Sprintf("%v", group[f.relationTarget]),
-				Type:  fmt.Sprintf("%v", group[f.relationPrefix]),
+				Node1:      fmt.Sprintf("%v", group[f.relationSource]),
+				Node2:      fmt.Sprintf("%v", group[f.relationTarget]),
+				Type:       fmt.Sprintf("%v", group[f.relationPrefix]),
+				Confidence: graphConfidence(group["confidence"]),
 			})
 		default:
 			logger.Warnf(ctx, "Unsupported graph group: %v", group)
@@ -464,18 +622,54 @@ func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphDat
 	return graph, nil
 }
 
+func stringSliceFromGraphValue(value interface{}) []string {
+	values, ok := value.([]interface{})
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		item := strings.TrimSpace(fmt.Sprintf("%v", value))
+		if item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func graphConfidence(value interface{}) float64 {
+	if value == nil {
+		return defaultGraphMinConfidence
+	}
+	number, ok := value.(float64)
+	if !ok {
+		return 0
+	}
+	if number < 0 || number > 1 {
+		return 0
+	}
+	return number
+}
+
 func (f *Formater) rebuildGraph(ctx context.Context, graph *types.GraphData) {
 	nodeMap := make(map[string]*types.GraphNode)
 	nodes := make([]*types.GraphNode, 0, len(graph.Node))
 	for _, node := range graph.Node {
+		if node == nil {
+			continue
+		}
+		node.Name = strings.TrimSpace(node.Name)
+		node.EntityType = strings.TrimSpace(node.EntityType)
+		if node.Name == "" {
+			logger.Infof(ctx, "Drop entity with empty name")
+			continue
+		}
 		if prenode, ok := nodeMap[node.Name]; ok {
 			logger.Infof(ctx, "Duplicate node ID: %s, merge attribute", node.Name)
-			// 修复panic：检查Attributes是否为nil
-			if node.Attributes == nil {
-				node.Attributes = make([]string, 0)
-			}
-			if prenode.Attributes != nil {
-				node.Attributes = append(node.Attributes, prenode.Attributes...)
+			prenode.Attributes = mergeGraphStrings(prenode.Attributes, node.Attributes)
+			prenode.Aliases = mergeGraphStrings(prenode.Aliases, node.Aliases)
+			if prenode.EntityType == "" {
+				prenode.EntityType = node.EntityType
 			}
 			continue
 		}
@@ -485,22 +679,28 @@ func (f *Formater) rebuildGraph(ctx context.Context, graph *types.GraphData) {
 
 	relations := make([]*types.GraphRelation, 0, len(graph.Relation))
 	for _, relation := range graph.Relation {
+		if relation == nil {
+			continue
+		}
+		relation.Node1 = strings.TrimSpace(relation.Node1)
+		relation.Node2 = strings.TrimSpace(relation.Node2)
+		relation.Type = strings.TrimSpace(relation.Type)
+		if relation.Node1 == "" || relation.Node2 == "" || relation.Type == "" {
+			logger.Infof(ctx, "Drop relation with empty endpoint or type")
+			continue
+		}
 		if relation.Node1 == relation.Node2 {
 			logger.Infof(ctx, "Duplicate relation, ignore it")
 			continue
 		}
 
 		if _, ok := nodeMap[relation.Node1]; !ok {
-			node := &types.GraphNode{Name: relation.Node1}
-			nodes = append(nodes, node)
-			nodeMap[relation.Node1] = node
-			logger.Infof(ctx, "Add unknown source node ID: %s", relation.Node1)
+			logger.Infof(ctx, "Drop relation with unknown source node ID: %s", relation.Node1)
+			continue
 		}
 		if _, ok := nodeMap[relation.Node2]; !ok {
-			node := &types.GraphNode{Name: relation.Node2}
-			nodes = append(nodes, node)
-			nodeMap[relation.Node2] = node
-			logger.Infof(ctx, "Add unknown target node ID: %s", relation.Node2)
+			logger.Infof(ctx, "Drop relation with unknown target node ID: %s", relation.Node2)
+			continue
 		}
 
 		relations = append(relations, relation)
@@ -509,6 +709,23 @@ func (f *Formater) rebuildGraph(ctx context.Context, graph *types.GraphData) {
 		Node:     nodes,
 		Relation: relations,
 	}
+}
+
+func mergeGraphStrings(left, right []string) []string {
+	seen := make(map[string]struct{}, len(left)+len(right))
+	result := make([]string, 0, len(left)+len(right))
+	for _, value := range append(append([]string(nil), left...), right...) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func (f *Formater) extractContent(ctx context.Context, text string) string {

@@ -108,7 +108,9 @@ type Session struct {
 }
 
 func (s *Session) BeforeCreate(tx *gorm.DB) (err error) {
-	s.ID = uuid.New().String()
+	if s.ID == "" {
+		s.ID = uuid.New().String()
+	}
 	return nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	apputils "github.com/Tencent/WeKnora/internal/utils"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -98,7 +99,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 
 		// Use concurrent batch saving for better performance
 		// Limit concurrency to avoid overwhelming the backend
-		const maxConcurrency = 5
+		maxConcurrency := apputils.ConcurrencyPoolSize()
 		if len(chunks) <= maxConcurrency {
 			// For small number of batches, use simple concurrency
 			return v.concurrentBatchSave(ctx, chunks, embeddings, batchSize)
@@ -110,7 +111,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 
 	// For non-vector retrieval, use concurrent batch saving as well
 	chunks := utils.ChunkSlice(indexInfoList, 10)
-	const maxConcurrency = 5
+	maxConcurrency := apputils.ConcurrencyPoolSize()
 	if len(chunks) <= maxConcurrency {
 		return v.concurrentBatchSaveNoEmbedding(ctx, chunks)
 	}
@@ -126,6 +127,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) concurrentBatchSave(
 ) error {
 	g, ctx := errgroup.WithContext(ctx)
 	for i, indexChunk := range chunks {
+		i, indexChunk := i, indexChunk
 		g.Go(func() error {
 			params := make(map[string]any)
 			embeddingMap := make(map[string][]float32)
@@ -151,6 +153,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) boundedConcurrentBatchSave(
 	sem := make(chan struct{}, maxConcurrency)
 
 	for i, indexChunk := range chunks {
+		i, indexChunk := i, indexChunk
 		g.Go(func() error {
 			select {
 			case sem <- struct{}{}:
@@ -178,6 +181,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) concurrentBatchSaveNoEmbeddi
 ) error {
 	g, ctx := errgroup.WithContext(ctx)
 	for _, indexChunk := range chunks {
+		indexChunk := indexChunk
 		g.Go(func() error {
 			params := make(map[string]any)
 			return v.indexRepository.BatchSave(ctx, indexChunk, params)
@@ -196,6 +200,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) boundedConcurrentBatchSaveNo
 	sem := make(chan struct{}, maxConcurrency)
 
 	for _, indexChunk := range chunks {
+		indexChunk := indexChunk
 		g.Go(func() error {
 			select {
 			case sem <- struct{}{}:

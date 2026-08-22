@@ -1,0 +1,12 @@
+{
+  "schema": "graph-triple-review-neo4j-validation/v1",
+  "run_at": "2026-08-13T15:19:00+08:00",
+  "candidate_id": "c59f0e96-17e6-4ef0-b1e9-e117a664e913",
+  "cypher": "MATCH (n) WHERE n.name STARTS WITH 'ApproveEntity' RETURN n.name, labels(n) LIMIT 10;",
+  "nodes_observed": [
+    {"name": "ApproveEntityA", "labels_include": ["CanonicalEntity", "DocumentEntityInstance"]},
+    {"name": "ApproveEntityB", "labels_include": ["CanonicalEntity", "DocumentEntityInstance"]}
+  ],
+  "neo4j_write_validated": true,
+  "related_smoke": "smoke-triple-review-approve-20260813.json"
+}

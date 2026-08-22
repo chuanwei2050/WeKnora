@@ -27,7 +27,7 @@ require (
 	github.com/hibiken/asynq v0.25.1
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/joho/godotenv v1.5.1
-	github.com/larksuite/oapi-sdk-go/v3 v3.5.3
+	github.com/larksuite/oapi-sdk-go/v3 v3.5.4
 	github.com/longbridgeapp/opencc v0.3.13
 	github.com/mark3labs/mcp-go v0.43.0
 	github.com/milvus-io/milvus/client/v2 v2.6.2
@@ -39,7 +39,7 @@ require (
 	github.com/parquet-go/parquet-go v0.25.0
 	github.com/pganalyze/pg_query_go/v6 v6.1.0
 	github.com/pgvector/pgvector-go v0.3.0
-	github.com/qdrant/go-client v1.16.1
+	github.com/qdrant/go-client v1.16.2
 	github.com/redis/go-redis/v9 v9.14.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/sashabaranov/go-openai v1.40.5

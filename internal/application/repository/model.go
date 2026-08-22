@@ -28,7 +28,7 @@ func (r *modelRepository) Create(ctx context.Context, m *types.Model) error {
 func (r *modelRepository) GetByID(ctx context.Context, tenantID uint64, id string) (*types.Model, error) {
 	var m types.Model
 	if err := r.db.WithContext(ctx).Where("id = ?", id).Where(
-		"tenant_id = ? OR is_builtin = true", tenantID,
+		"tenant_id = ? OR is_builtin = true", types.PlatformModelTenantID,
 	).First(&m).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -44,7 +44,7 @@ func (r *modelRepository) List(
 ) ([]*types.Model, error) {
 	var models []*types.Model
 	query := r.db.WithContext(ctx).Where(
-		"tenant_id = ? OR is_builtin = true", tenantID,
+		"tenant_id = ? OR is_builtin = true", types.PlatformModelTenantID,
 	)
 
 	if modelType != "" {
@@ -66,14 +66,14 @@ func (r *modelRepository) List(
 func (r *modelRepository) Update(ctx context.Context, m *types.Model) error {
 	// Use Select to explicitly update all fields, including zero values like false
 	return r.db.WithContext(ctx).Debug().Model(&types.Model{}).Where(
-		"id = ? AND tenant_id = ?", m.ID, m.TenantID,
+		"id = ? AND tenant_id = ?", m.ID, types.PlatformModelTenantID,
 	).Select("*").Updates(m).Error
 }
 
 // Delete deletes a model
 func (r *modelRepository) Delete(ctx context.Context, tenantID uint64, id string) error {
 	return r.db.WithContext(ctx).Where(
-		"id = ? AND tenant_id = ?", id, tenantID,
+		"id = ? AND tenant_id = ?", id, types.PlatformModelTenantID,
 	).Delete(&types.Model{}).Error
 }
 
@@ -83,11 +83,19 @@ func (r *modelRepository) ClearDefaultByType(
 	ctx context.Context,
 	tenantID uint,
 	modelType types.ModelType,
+	profile types.ModelProfile,
+	profileRole string,
 	excludeID string,
 ) error {
 	query := r.db.WithContext(ctx).Model(&types.Model{}).Where(
-		"tenant_id = ? AND type = ? AND is_default = ?", tenantID, modelType, true,
+		"tenant_id = ? AND type = ? AND is_default = ?", types.PlatformModelTenantID, modelType, true,
 	)
+	if profile != "" {
+		query = query.Where("profile = ?", profile)
+	}
+	if profileRole != "" {
+		query = query.Where("profile_role = ?", profileRole)
+	}
 
 	// If excludeID is provided, exclude that model from the update
 	if excludeID != "" {

@@ -54,13 +54,20 @@ func NewBingProvider(params types.WebSearchProviderParameters) (interfaces.WebSe
 	if params.APIKey == "" {
 		return nil, fmt.Errorf("API key is required for Bing provider")
 	}
-	client, err := NewSearchHTTPClient(defaultBingTimeout, params.ProxyURL)
+	client, err := newSearchHTTPClientForParameters(defaultBingTimeout, params)
 	if err != nil {
 		return nil, err
 	}
+	baseURL, err := approvedSearchEndpointURL(params.ApprovedEndpoint, "/v7.0/search")
+	if err != nil {
+		return nil, err
+	}
+	if baseURL == "" {
+		baseURL = defaultBingSearchURL
+	}
 	return &BingProvider{
 		client:  client,
-		baseURL: defaultBingSearchURL, // Hardcoded — not tenant-configurable
+		baseURL: baseURL,
 		apiKey:  params.APIKey,
 	}, nil
 }

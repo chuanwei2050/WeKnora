@@ -1,0 +1,3 @@
+# TTS 构建上下文说明：
+# prepare 会把 CosyVoice clone 到 services/tts/vendor/CosyVoice 后再 docker build。
+vendor/

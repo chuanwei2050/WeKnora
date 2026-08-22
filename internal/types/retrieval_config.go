@@ -12,13 +12,13 @@ import (
 // Stored as a JSONB column on the tenants table, managed via the settings UI
 // at /tenants/kv/retrieval-config.
 type RetrievalConfig struct {
-	// EmbeddingTopK is the maximum number of chunks returned by vector search (default: 50)
+	// EmbeddingTopK is the maximum number of chunks returned by hybrid search (default: 30)
 	EmbeddingTopK int `json:"embedding_top_k"`
 	// VectorThreshold is the minimum vector similarity score (0-1, default: 0.15)
 	VectorThreshold float64 `json:"vector_threshold"`
 	// KeywordThreshold is the minimum keyword match score (0-1, default: 0.3)
 	KeywordThreshold float64 `json:"keyword_threshold"`
-	// RerankTopK is the maximum number of results after reranking (default: 10)
+	// RerankTopK is the maximum number of results after reranking (default: 5)
 	RerankTopK int `json:"rerank_top_k"`
 	// RerankThreshold is the minimum rerank score (-10 to 10, default: 0.2)
 	RerankThreshold float64 `json:"rerank_threshold"`
@@ -29,7 +29,7 @@ type RetrievalConfig struct {
 // GetEffectiveEmbeddingTopK returns EmbeddingTopK with a fallback default.
 func (c *RetrievalConfig) GetEffectiveEmbeddingTopK() int {
 	if c == nil || c.EmbeddingTopK <= 0 {
-		return 50
+		return 30
 	}
 	return c.EmbeddingTopK
 }
@@ -53,7 +53,7 @@ func (c *RetrievalConfig) GetEffectiveKeywordThreshold() float64 {
 // GetEffectiveRerankTopK returns RerankTopK with a fallback default.
 func (c *RetrievalConfig) GetEffectiveRerankTopK() int {
 	if c == nil || c.RerankTopK <= 0 {
-		return 10
+		return 5
 	}
 	return c.RerankTopK
 }

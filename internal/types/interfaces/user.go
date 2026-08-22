@@ -8,6 +8,8 @@ import (
 
 // UserService defines the user service interface
 type UserService interface {
+	// EnsureDefaultAdmin ensures the configured bootstrap administrator exists.
+	EnsureDefaultAdmin(ctx context.Context) error
 	// Register creates a new user account
 	Register(ctx context.Context, req *types.RegisterRequest) (*types.User, error)
 	// Login authenticates a user and returns tokens
@@ -46,6 +48,15 @@ type UserService interface {
 	GetCurrentUser(ctx context.Context) (*types.User, error)
 	// SearchUsers searches users by username or email
 	SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error)
+	ListTenantUsers(ctx context.Context, actor *types.User, tenantID uint64, query string, offset, limit int) ([]*types.User, int64, error)
+	CreateTenantUser(ctx context.Context, actor *types.User, tenantID uint64, req *types.CreateTenantUserRequest) (*types.User, error)
+	UpdateTenantUser(ctx context.Context, actor *types.User, tenantID uint64, userID string, req *types.UpdateTenantUserRequest) (*types.User, error)
+	CanDeleteTenantUser(ctx context.Context, actor *types.User, tenantID uint64, userID string) (bool, error)
+	DeleteTenantUser(ctx context.Context, actor *types.User, tenantID uint64, userID string) error
+	SetTenantAdminCredentials(ctx context.Context, actor *types.User, tenantID uint64, username, password string) (*types.User, error)
+	ResetTenantUserPassword(ctx context.Context, actor *types.User, tenantID uint64, userID, password string) error
+	UpdateTenantUserRole(ctx context.Context, actor *types.User, tenantID uint64, userID string, role types.UserRole) (*types.User, error)
+	UpdateTenantUserStatus(ctx context.Context, actor *types.User, tenantID uint64, userID string, active bool) (*types.User, error)
 }
 
 // UserRepository defines the user repository interface
@@ -68,6 +79,9 @@ type UserRepository interface {
 	ListUsers(ctx context.Context, offset, limit int) ([]*types.User, error)
 	// SearchUsers searches users by username or email
 	SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error)
+	ListUsersByTenant(ctx context.Context, tenantID uint64, query string, offset, limit int) ([]*types.User, int64, error)
+	CountActiveTenantAdmins(ctx context.Context, tenantID uint64, excludeUserID string) (int64, error)
+	HasUserDocumentActivity(ctx context.Context, userID string) (bool, error)
 }
 
 // AuthTokenRepository defines the auth token repository interface

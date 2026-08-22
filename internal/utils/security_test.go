@@ -249,6 +249,37 @@ func TestIsRestrictedIP_IPv6(t *testing.T) {
 	}
 }
 
+func TestValidateURLForSSRFAllowPrivateNetworks(t *testing.T) {
+	t.Setenv("SSRF_ALLOW_PRIVATE_NETWORKS", "true")
+	t.Cleanup(func() {
+		os.Unsetenv("SSRF_ALLOW_PRIVATE_NETWORKS")
+	})
+
+	ip := parseIPForTest(t, "198.18.0.46")
+	blocked, _ := isRestrictedIP(ip)
+	if blocked {
+		t.Fatalf("expected 198.18.0.46 to be allowed when SSRF_ALLOW_PRIVATE_NETWORKS=true")
+	}
+
+	if err := ValidateURLForSSRF("http://192.168.1.10:8080/v1"); err != nil {
+		t.Fatalf("expected private IP endpoint to be allowed: %v", err)
+	}
+}
+
+func TestValidateURLForSSRFStrictAirGapRejectsPublicEndpoint(t *testing.T) {
+	t.Setenv("AIR_GAPPED_MODE", "true")
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	resetSSRFWhitelistForTest()
+	t.Cleanup(resetSSRFWhitelistForTest)
+
+	if err := ValidateURLForSSRF("https://8.8.8.8/dns-query"); err == nil {
+		t.Fatal("expected strict air-gapped mode to reject a public endpoint")
+	}
+	if err := ValidateURLForSSRF("http://127.0.0.1:8080/health"); err != nil {
+		t.Fatalf("expected allowlisted same-host endpoint to remain available: %v", err)
+	}
+}
+
 func parseIPForTest(t *testing.T, s string) net.IP {
 	t.Helper()
 	ip := net.ParseIP(s)

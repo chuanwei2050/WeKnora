@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -13,6 +14,21 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
+
+// ShouldEnqueueGraphExtract reports whether a chunk should enqueue graph extraction
+// for the given knowledge base. Graph must be enabled and the chunk must show relation signals.
+func ShouldEnqueueGraphExtract(kb *types.KnowledgeBase, chunkContent string) bool {
+	if kb == nil || !kb.IsGraphEnabled() {
+		return false
+	}
+	if strings.TrimSpace(chunkContent) == "" {
+		return false
+	}
+	if kb.ExtractConfig != nil && kb.ExtractConfig.IngestionMode.Normalize() == types.GraphIngestionSignal {
+		return types.NeedsEntityRelation(chunkContent)
+	}
+	return true
+}
 
 // KnowledgePostProcessService acts as an orchestrator for all post-processing tasks
 // after a document has been parsed and split into chunks (including multimodal OCR/Caption).
@@ -87,11 +103,10 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	// (Except if it's already completed or if it was marked as failed/deleting, but we'll just set it to completed if it's processing)
 	if knowledge.ParseStatus == types.ParseStatusProcessing {
 		knowledge.ParseStatus = types.ParseStatusCompleted
+		knowledge.ErrorMessage = ""
 		knowledge.UpdatedAt = time.Now()
 
-		// Setup summary status. Keyword-only knowledge bases may not have a
-		// summary model configured; those documents are ready after parsing.
-		if len(textChunks) > 0 && kb.SummaryModelID != "" {
+		if shouldGenerateDocumentSummary(textChunks) {
 			knowledge.SummaryStatus = types.SummaryStatusPending
 		} else {
 			knowledge.SummaryStatus = types.SummaryStatusNone
@@ -105,7 +120,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	}
 
 	// 4. Spawn Summary and Question Tasks
-	if len(textChunks) > 0 && kb.SummaryModelID != "" {
+	if shouldGenerateDocumentSummary(textChunks) {
 		s.enqueueSummaryGenerationTask(ctx, payload)
 	}
 	if len(textChunks) > 0 {
@@ -118,13 +133,18 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 
 	// 5. Spawn Graph RAG Tasks — only when graph indexing is enabled in IndexingStrategy
 	if kb.IsGraphEnabled() {
-		logger.Infof(ctx, "[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d text-like chunks", len(textChunks))
+		graphCandidates := 0
 		for _, chunk := range textChunks {
-			err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.SummaryModelID)
+			if !ShouldEnqueueGraphExtract(kb, chunk.Content) {
+				continue
+			}
+			graphCandidates++
+			err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.GraphExtractionModelID())
 			if err != nil {
 				logger.Errorf(ctx, "[KnowledgePostProcess] Failed to create chunk extract task for %s: %v", chunk.ID, err)
 			}
 		}
+		logger.Infof(ctx, "[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d/%d eligible text-like chunks", graphCandidates, len(textChunks))
 	}
 
 	// 6. Spawn Wiki Ingest Task if wiki indexing is enabled in IndexingStrategy
@@ -132,7 +152,24 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		EnqueueWikiIngest(ctx, s.taskEnqueuer, s.redisClient, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID)
 		logger.Infof(ctx, "[KnowledgePostProcess] Enqueued wiki ingest task for %s", payload.KnowledgeID)
 	}
+
+	if kb.Governance.Enabled && knowledge.PendingVersionID != "" {
+		publishPayload := types.KnowledgePublishPayload{
+			TenantID: payload.TenantID, KnowledgeID: knowledge.ID, VersionID: knowledge.PendingVersionID,
+		}
+		langfuse.InjectTracing(ctx, &publishPayload)
+		if payloadBytes, marshalErr := json.Marshal(publishPayload); marshalErr == nil {
+			publishTask := asynq.NewTask(types.TypeKnowledgePublish, payloadBytes, asynq.Queue("low"), asynq.ProcessIn(8*time.Second), asynq.MaxRetry(12))
+			if _, enqueueErr := s.taskEnqueuer.Enqueue(publishTask); enqueueErr != nil {
+				logger.Errorf(ctx, "[KnowledgePostProcess] Failed to enqueue governed publication for %s: %v", knowledge.ID, enqueueErr)
+			}
+		}
+	}
 	return nil
+}
+
+func shouldGenerateDocumentSummary(textChunks []*types.Chunk) bool {
+	return len(textChunks) > 0
 }
 
 func (s *KnowledgePostProcessService) enqueueSummaryGenerationTask(ctx context.Context, payload types.KnowledgePostProcessPayload) {

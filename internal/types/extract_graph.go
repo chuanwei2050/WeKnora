@@ -10,22 +10,49 @@ type ChunkContext struct {
 
 // PromptTemplateStructured represents the prompt template structured
 type PromptTemplateStructured struct {
-	Description string      `json:"description"`
-	Tags        []string    `json:"tags"`
-	Examples    []GraphData `json:"examples"`
+	Description    string                        `json:"description"`
+	Tags           []string                      `json:"tags"`
+	EntityTypes    []string                      `json:"entity_types,omitempty"`
+	EntitySchema   []GraphEntityTypeDefinition   `json:"entity_schema,omitempty"`
+	RelationSchema []GraphRelationTypeDefinition `json:"relation_schema,omitempty"`
+	StrictSchema   bool                          `json:"strict_schema,omitempty"`
+	MaxEntities    int                           `json:"max_entities,omitempty"`
+	MaxRelations   int                           `json:"max_relations,omitempty"`
+	MinConfidence  float64                       `json:"min_confidence,omitempty"`
+	Examples       []GraphData                   `json:"examples"`
+}
+
+// GraphEntityTypeDefinition is an actual extraction schema entry, not a few-shot entity instance.
+type GraphEntityTypeDefinition struct {
+	Type        string `json:"type"`
+	BaseType    string `json:"base_type,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// GraphRelationTypeDefinition defines a directed semantic relation allowed by the extractor.
+type GraphRelationTypeDefinition struct {
+	Type        string `json:"type"`
+	SourceType  string `json:"source_type"`
+	TargetType  string `json:"target_type"`
+	Description string `json:"description,omitempty"`
 }
 
 type GraphNode struct {
-	Name       string   `json:"name,omitempty"`
-	Chunks     []string `json:"chunks,omitempty"`
-	Attributes []string `json:"attributes,omitempty"`
+	Name        string   `json:"name,omitempty"`
+	EntityType  string   `json:"entity_type,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Aliases     []string `json:"aliases,omitempty"`
+	Chunks      []string `json:"chunks,omitempty"`
+	Attributes  []string `json:"attributes,omitempty"`
 }
 
 // GraphRelation represents the relation of the graph
 type GraphRelation struct {
-	Node1 string `json:"node1,omitempty"`
-	Node2 string `json:"node2,omitempty"`
-	Type  string `json:"type,omitempty"`
+	Node1       string  `json:"node1,omitempty"`
+	Node2       string  `json:"node2,omitempty"`
+	Type        string  `json:"type,omitempty"`
+	Confidence  float64 `json:"confidence,omitempty"`
+	Description string  `json:"description,omitempty"`
 }
 
 type GraphData struct {
@@ -36,8 +63,9 @@ type GraphData struct {
 
 // NameSpace represents the name space of the knowledge base and knowledge
 type NameSpace struct {
-	KnowledgeBase string `json:"knowledge_base"`
-	Knowledge     string `json:"knowledge"`
+	KnowledgeBase      string `json:"knowledge_base"`
+	Knowledge          string `json:"knowledge"`
+	KnowledgeVersionID string `json:"knowledge_version_id,omitempty"`
 }
 
 // Labels returns the labels of the name space
@@ -48,6 +76,9 @@ func (n NameSpace) Labels() []string {
 	}
 	if n.Knowledge != "" {
 		res = append(res, n.Knowledge)
+	}
+	if n.KnowledgeVersionID != "" {
+		res = append(res, n.KnowledgeVersionID)
 	}
 	return res
 }

@@ -1,0 +1,1082 @@
+[
+  {
+    "path": "airgap-operations.md",
+    "sha256": "61672f772a73813933c758ceb1a22bec161cb5c81ab7530c9235705d11c6e42a",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "docker-compose.yml",
+    "sha256": "a9373fcb1166d44227e5c6265e365cb1b7889a6b13ec41a3a46e0f18a0e44a4d",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm-values-airgap.lock.yaml",
+    "sha256": "cff568e06a98a1858d0c0e45d870c51b83b8c0731b5157562882d6be844ddc42",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm-values-airgap.yaml",
+    "sha256": "4c0b28ea74dd43bcb206babb3bf9e04c08610adf98c602dd040100f4b927be0c",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "manifest.json",
+    "sha256": "e102447c809196f154cfedf079b30479c93c1e5a9603c0ed8a98d152e98b881e",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "manifest.schema.json",
+    "sha256": "9b7f2b1c9f1ec3b5a53d99f32757e84df0decbf270f83d32605199c544657b9a",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "rollback-airgap.ps1",
+    "sha256": "be8909e7e085487d4751d6c49b72f29941b68878e3a8457b87ad79d45f57edf4",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "config\\agent_type_presets.yaml",
+    "sha256": "7a40ff1cc6a908fbffc94fcbe9c9734e734934d033ba940d7b37585d20bd727c",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "config\\builtin_agents.yaml",
+    "sha256": "bcbdda40eebe8a578151275b12e7a8de07186ecebbcb2718dc99525d582e43da",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "config\\config.yaml",
+    "sha256": "40e9b881e103cf5fe13f7c4ee4036f9ee85afe8ab756dc101dc53ef01d14b060",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "config\\knowledge_profiles\\software-testing.yaml",
+    "sha256": "4cdd7f7ba82e5588e46ad4e0463a2d35728d1a2262fea3fb27c2ed4ca88be17f",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "config\\prompt_templates\\agent_system_prompt.yaml",
+    "sha256": "3eed35ff2eadfdfd131a3132aefbf58a3681a0b62a29c65163ac27c283a27e3d",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "config\\prompt_templates\\context_template.yaml",
+    "sha256": "8857dc5edb7ae88fbd878ebeb036ecdda4e8967d447ada7a37453ecbadeea8be",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "config\\prompt_templates\\fallback.yaml",
+    "sha256": "0268acaac5d8ba1cc4b64cd6f3bfd149ffac0a6c338078e7832591bbd3a51878",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "config\\prompt_templates\\generate_questions.yaml",
+    "sha256": "8c7386d219bb1f2bf9669340f7e02eacd9b208c8278f401376531fc31ad71665",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "config\\prompt_templates\\generate_session_title.yaml",
+    "sha256": "a5316b4db3442cd111606ee0071a8bd19c0f91ff9afa4af064fe8f5481449f3b",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "config\\prompt_templates\\generate_summary.yaml",
+    "sha256": "f8f3aa802e5ac6ac7a23fd35ab3a33a20524677332fdaaeeeba04556c44b0e39",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "config\\prompt_templates\\graph_extraction.yaml",
+    "sha256": "43b13573b14522c46c88364f93fb21aef2347d9261d22c8fb21bd28d5dfea73e",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "config\\prompt_templates\\intent_prompts.yaml",
+    "sha256": "1418dc120305b5ac00a19fc960a37e03d51f689fcdecb950491bd9df0985bd7b",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "config\\prompt_templates\\keywords_extraction.yaml",
+    "sha256": "5823dd00ec2fa0dc6cf9d42c6692b2cdc25ea9e16ff0ad76cd1f7c0ff84ee0d7",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "config\\prompt_templates\\rewrite.yaml",
+    "sha256": "968d85292e2208cdad178d0cf63563577ef471810d8616841be1a216b1430dd7",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "config\\prompt_templates\\system_prompt.yaml",
+    "sha256": "cfc5430a70f22bede36b9ac5999fc43453a59f167f09735a3544251cd31d1a57",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "deploy\\docker-compose.airgap.override.yml",
+    "sha256": "e8ce90064325edb568bfc97ace6324a4239255d1f062583aadfac83e60ba9297",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "deploy\\manifest.schema.json",
+    "sha256": "9b7f2b1c9f1ec3b5a53d99f32757e84df0decbf270f83d32605199c544657b9a",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "deploy\\README.md",
+    "sha256": "539c90bc99b2831a33f19afaf08ea9bb844feae2f6df782477679573a0f1668c",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\.helmignore",
+    "sha256": "c38d21d86a69352c5f2f5af89de08e5ed02f6745c503c031502f5bff614e44db",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\Chart.yaml",
+    "sha256": "5f0a0aa8c8d0430ab86c6a646c3c139ea8b275ff354e493956bfbbe6e19ce434",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\README.md",
+    "sha256": "b9db28b707510e0d2e682e952f04681724474ef358fd7645f330160d88c3da0c",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\values-airgap.lock.yaml",
+    "sha256": "cff568e06a98a1858d0c0e45d870c51b83b8c0731b5157562882d6be844ddc42",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\values-airgap.yaml",
+    "sha256": "4c0b28ea74dd43bcb206babb3bf9e04c08610adf98c602dd040100f4b927be0c",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\values.yaml",
+    "sha256": "576d3a208e8724c0d74392d24936298073bc5a963c76964bb9ccfc15cd3c62c1",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\templates\\_helpers.tpl",
+    "sha256": "cdd97dd49d3d7acbd3b3e9a9e33543269b06ac9f5adb78042d2ae5c983da441c",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\templates\\app.yaml",
+    "sha256": "2d2678f0085faaffe7737b5c0221f3b33fa1e1c1a48a08784a3b082a38a05841",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\templates\\docreader.yaml",
+    "sha256": "5984a6fe53a759a9b6c33ab03e51bd8d80b6fa2e9531381aa63d3b0926f21336",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\templates\\frontend.yaml",
+    "sha256": "b5089d7cc3680b656924470ee41f2bd7428a18732f659c3d228e5c6c8ee9cd16",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\templates\\ingress.yaml",
+    "sha256": "b44f727efacf66cf5d87a780b59eb000cfd9db34f6ac3f9b69ed99e6e3c92efe",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\templates\\neo4j.yaml",
+    "sha256": "ef40ae0df1043beca17bc5652cfc4f5f849ad74020bba25fa8bb1127c9e2fd20",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\templates\\NOTES.txt",
+    "sha256": "e518add58429fa4df72fa298d5b12aab97c8bc3dded51544172da1ed1e2f3968",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\templates\\postgres.yaml",
+    "sha256": "0865aa181757c97186d51bd360deb583edf836083313d0900516b316ca7b2b05",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\templates\\pvc.yaml",
+    "sha256": "0f54f3face1b300aa8aaefc251573581090db7a65a21948bcf794d60d78413da",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\templates\\redis.yaml",
+    "sha256": "61cce02f1c3bdda6e50b13ccb82de82d308a6b030dc7a9d380f5020ef94a93ee",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\templates\\secrets.yaml",
+    "sha256": "9706717b2fbbc8152216907f7ed848a4c5ae87081f727b4e8f660e7e2bb2a3fc",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "helm\\templates\\serviceaccount.yaml",
+    "sha256": "7e444659c5a0b016937e397e4a94621a4c877032cbcf9c9eafb561382be9e0e1",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\mysql\\00-init-db.sql",
+    "sha256": "ad139d3675227c26a0f5cc41c4e19ec2b857f23978ca764c6a3fdf48bb604340",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\paradedb\\00-init-db.sql",
+    "sha256": "5b11ade50b1e38684467c3081e13617d4ee476cb6d0e1f761c085ef803b2d3ac",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\paradedb\\01-migrate-to-paradedb.sql",
+    "sha256": "c397ddfa276a1e3a1f3cd905746d903dbd1fd4ace73692464735c6a4fff7fca2",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000000_init.down.sql",
+    "sha256": "eecec9972428b5ab86d30131eb45695f9c4b16f940902b2e4bf3d50bd9195239",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000000_init.up.sql",
+    "sha256": "1d3c1712c112ea8ae89b47f582455fd740d624a3caa2b685c0d9ab90342bd398",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000001_kb_creator_bidreview_role.down.sql",
+    "sha256": "c2194106fa2b28ef288704ef1e4c8e888b7e893587eae80752d1814b805de1dd",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000001_kb_creator_bidreview_role.up.sql",
+    "sha256": "5c7cd7baa65045661e5bd06229a233c40bb3a636122ae3e2c4e7300956557d16",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000002_knowledge_governance.down.sql",
+    "sha256": "f0e8b090ffc27df8b8be6f780efe640c2ac378a47f57a7cf4ea7da3a27a9cdc9",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000002_knowledge_governance.up.sql",
+    "sha256": "c36981a52d21cc461d4a32adde3ea838b579d1306f4b42edac68a3bdc9f10e8a",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000003_approved_endpoints.down.sql",
+    "sha256": "4852eb1c6a6964c095297c96016ed0267ff7acb1d0c3017df0a63786ac801648",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000003_approved_endpoints.up.sql",
+    "sha256": "0051237895b1269f4344a09c5994fbc85c3355ae2b870403c073fafbb49ffd7a",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000004_acceptance_benchmark.down.sql",
+    "sha256": "8ba17f4b9b29a4f118ba0d3dc92fa51eddd3f04c48267e24f5e8f1eb6aab786c",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000004_acceptance_benchmark.up.sql",
+    "sha256": "fa23eea0394458097fd39533872a067091da5d3790d53f355d2b489bfc80b950",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000005_answer_feedback.down.sql",
+    "sha256": "57d52d50913b2599d24d35b9897c9bea1a01d409bf22d46efe0374554b8b370d",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000005_answer_feedback.up.sql",
+    "sha256": "03df27f3800d9b0b6c9d6bb5512dc7d392ce68d4356cc28a7f34630b5a6b5a83",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000006_feedback_candidates.down.sql",
+    "sha256": "f1b60c85090a240e8815975ec5281ed8d888d8ec01a8d8bdaaf4fe3546f1456c",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000006_feedback_candidates.up.sql",
+    "sha256": "a4300b83d6da97bff95df1d210ee412a2821cea0984648c9e67253240fee6bbc",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000007_voice_metadata.down.sql",
+    "sha256": "17d0b25e00a0c6ed430794487b855d28e8e3e480c675a37d995315658dcd53fe",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000007_voice_metadata.up.sql",
+    "sha256": "ea96895bfb8a2510c23bfd483aae368720789233ec3c57d4b621459a913bba98",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000008_verified_answer_config.down.sql",
+    "sha256": "05e3740341e750a698911f2fab73c7a2faf5cdc2cdb0544fa117104b1dab125d",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000008_verified_answer_config.up.sql",
+    "sha256": "fe195826c984952243116da9827655897e6c5c533654339917b6c3bd20aca405",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000009_model_deployment_metadata.down.sql",
+    "sha256": "4bef6c623257b475794d34567912b42cb9d956f32bf8dc2414e07aa25d805572",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000009_model_deployment_metadata.up.sql",
+    "sha256": "304746c82a9a9a000cc1381ca2f48d13427a268be0cdc1fad1917148c15b5f2e",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000010_acceptance_artifacts.down.sql",
+    "sha256": "ed19be5e915a67f93c036c6396339a2f556ad859e356ad40723b1d716f7018c6",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000010_acceptance_artifacts.up.sql",
+    "sha256": "fb011293f881ea53bdbdbdaa6f81fa3ff9c1a0dd370431690a273a54a33d4d51",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000011_knowledge_governance_pending_version.up.sql",
+    "sha256": "55f951fb0e6d883690a14d6165bcf744ce25d798f9770386a9b32ad9e86e8e5a",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000012_response_timing.down.sql",
+    "sha256": "c8683c87103ff42f08fde8626cac0d44744aa455d4aad040395f542963a7e087",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000012_response_timing.up.sql",
+    "sha256": "5e3bba4a046c6468cabe4c5dc26f2e7aa469ed8e0f92326f0e9859a0aadf9b54",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000013_acceptance_artifact_kind.down.sql",
+    "sha256": "d06656de342de198c98e9f2f5a92eb0a1115677619dc224c67c3ea55cce0b8a2",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000013_acceptance_artifact_kind.up.sql",
+    "sha256": "2796f0724e360cbe11f9d490557a1cc832f7367b569976f8a6011a0c5e118afb",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000014_wiki_and_indexing.down.sql",
+    "sha256": "3ef0eb744865b17ec78ee53951f7a7505f934733bf69cb9a2f2448ecec5ca50c",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000014_wiki_and_indexing.up.sql",
+    "sha256": "cc2f6e436313d87f153a442ed6e76c12a3e2dbd31290f346d190083981023658",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000015_message_attachments.down.sql",
+    "sha256": "c81df8d1698134d71d939ea36d8a2e64247f84a77d8ddcb6b25382fbacc726b2",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\sqlite\\000015_message_attachments.up.sql",
+    "sha256": "9c9545ef47a2c93517a49709eb47d951f45d74562f22c383f35d2e53d892e672",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000000_init.down.sql",
+    "sha256": "bf626604b11087738020e4e2f6760f7b645e0215815b71c3bd3cb87b238c4ec5",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000000_init.up.sql",
+    "sha256": "2e417d0f5aa8b944994771418213aae67979cb05ad8a414f0d20821b7bf56715",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000001_agent.down.sql",
+    "sha256": "a82553b9fadf99eef84f4ee150f250d5325151efe046a418daaedbc7bbcd3ca8",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000001_agent.up.sql",
+    "sha256": "c3966b1a2b72857f468857cee1de242d44961d1e43ea916df0a699e41007155d",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000002_embeddings.down.sql",
+    "sha256": "7e9ad69aab076ed29f1965c73c8c905a96af0130a643d2bbf96b58982c740ecd",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000002_embeddings.up.sql",
+    "sha256": "159001ba91d2bff235ae2891cc1a21704f0ce6368cfd0d9114c165afd73a0d41",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000003_chunk_flags.down.sql",
+    "sha256": "7cd145c701c0d4afff258181a2f6c9e6fc9b8bc5a80e01aa746ce01174bfeb03",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000003_chunk_flags.up.sql",
+    "sha256": "1c3b73217650f31af537306210cf9c7c8c5fa03ebc50742037ee17bb73c486b0",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000004_drop_vlm_model_id.down.sql",
+    "sha256": "78ba5bb7903fa67d10ae8a0f7de043185e55ccc359dd5b2ba4a32921bf7aed38",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000004_drop_vlm_model_id.up.sql",
+    "sha256": "73427958464515a8bb56bc2b6dbe618d2b5d80947e2d249a91c609c0d099ee50",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000005_mentioned_items.down.sql",
+    "sha256": "48363784b43eb1ac612fb9f734f7d30cc03ae80a918e1e4a40c663effde9a212",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000005_mentioned_items.up.sql",
+    "sha256": "814f399f71823a199666fb71269b54484ccad1e675aa431665ed197df05ae1b5",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000006_custom_agents.down.sql",
+    "sha256": "5589268e1eb509aa5ea090f1d144f30c54fec59f41bb7b872f71cc4c5ed32f8f",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000006_custom_agents.up.sql",
+    "sha256": "0b1cdd5e5d4a74e184a8892018d9c2441105a40f720b1dbfae71b104bba660e4",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000007_embeddings_tag_id.down.sql",
+    "sha256": "6c5a19490a1a23fcdf10b2a5da6b66a53a77f32592cf31e7d519e973e1645e96",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000007_embeddings_tag_id.up.sql",
+    "sha256": "63b3050dca045d11d2c24733ee2e9d294d0464befc4758443270759fa774ae1e",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000008_migrate_untagged_faq.down.sql",
+    "sha256": "01d83d66aa248647e86dae5d678984866c7ce3af0fd25010a0c673a473033352",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000008_migrate_untagged_faq.up.sql",
+    "sha256": "ce6adc96c538cda95cb2d86a095bf73b5fd19a3e6a1290bf9cae78485ad37b30",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000009_add_last_faq_import_result.down.sql",
+    "sha256": "a39594b9f2e505267dfcc93987a8102f47a3207558741c17a8391f2e356c9f19",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000009_add_last_faq_import_result.up.sql",
+    "sha256": "64fba32727d21607325a35e048ba57d8a65db6e7c9206f435f25e603c89d4cfe",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000010_add_seq_id.down.sql",
+    "sha256": "b97d6b3efdb9f80f26a7a3fd8381c85edefddd2b8627cc2849270684408834b5",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000010_add_seq_id.up.sql",
+    "sha256": "f8db5e5d539c919509fcfb26b77e5c3e6c3579894390315c7a2d0f957ccb27af",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000011_pg_search_update.down.sql",
+    "sha256": "5dfc36e8f70b58aed662a8b525051e08b681ee6c90392ea016ebe7467df06b52",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000011_pg_search_update.up.sql",
+    "sha256": "498b3f1616ad6b3dab96515dbbcea3062c47a32b4c093dcb190c9bbe0b19b4e2",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000012_organizations.down.sql",
+    "sha256": "d511b8d05bd054b62093fb288d6b16d78d0387fa867812fce7911711c491f9c0",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000012_organizations.up.sql",
+    "sha256": "e82639281c569a95a35b9c65aa9f1006d412b0e7329c197653896d81cfe1f891",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000013_engine_configs.down.sql",
+    "sha256": "ee85d66bc395a4df75c31d6a6f106fe739a9a6c1dc47b35d991a65821175fdf8",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000013_engine_configs.up.sql",
+    "sha256": "e8964022a5128158c5fb10fd0bc68f7efc433ee5c99b47d5fed0aa6372b70bb1",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000014_storage_provider_config.down.sql",
+    "sha256": "293cd68b42217ead5453fe63367f18afc34b10ab891058fd37a67c691ffb3cb6",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000014_storage_provider_config.up.sql",
+    "sha256": "28744fcc641d458a0b9c278fdaca72a702d441b66bbf4b67a2130d15d782b259",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000015_add_is_fallback.down.sql",
+    "sha256": "b1739b9b2e925417ce0ad872683f2649109f10a9304022251b5ac57b0f80578f",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000015_add_is_fallback.up.sql",
+    "sha256": "64e7a2fcb00ef51f9bd2936937c076b8dd58eb4dca094fb0423a2cb93a00ae93",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000016_add_kb_pinned.down.sql",
+    "sha256": "4496747e3ef5d6e79ec765616db16e7e36ccc8d5586fca7b94ff7c1e255770c5",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000016_add_kb_pinned.up.sql",
+    "sha256": "ecf5378d139d7fd7723cde9402d6f3fe71ad07de594758fa65814a0184f35857",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000017_mcp_builtin.down.sql",
+    "sha256": "e4d9a0e86aafaf354e7c294d181092ac1f9ae0beaba5a47297b1de0e0e16f268",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000017_mcp_builtin.up.sql",
+    "sha256": "2debb677220d1a243055bf33f2d5f15c27023143c058b5fbb4f13583c4a4321f",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000018_extend_tenant_api_key.down.sql",
+    "sha256": "93c281c8fde06c4e60d83c6aebaf9d6b63f3d151b7bb15d1c88086e01a69ed81",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000018_extend_tenant_api_key.up.sql",
+    "sha256": "fbfce3e87c3b3b932864a41b89438da7d809aaf215ac754c8e725b5925de03b6",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000019_add_agent_duration_ms.down.sql",
+    "sha256": "e18a5dd1492131e737996439359d026fe67a279ba1fca4e9e97ab1ea47c0ed3e",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000019_add_agent_duration_ms.up.sql",
+    "sha256": "d2dd507b2f70ada8b5666e4a39064efa99371e90fba43ad3b22bbaf97decaa65",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000020_add_message_knowledge_id.down.sql",
+    "sha256": "2ffa8466ca1958555ac2a25800fa1c4a093a34ce52f877e7b7ef6c85925d3c04",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000020_add_message_knowledge_id.up.sql",
+    "sha256": "50da66637999283895f309db2abfe57b55c5e431130b9909fdc9b3ca2eb0e697",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000021_im_channel.down.sql",
+    "sha256": "26c207a3dd658ae39f066bcbe7324e76dfe7210cff1eeb5e5b5f3efcf0e95877",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000021_im_channel.up.sql",
+    "sha256": "838497f30cf2b0ac6aa8d28f39847fa4498341e2b7138ca27cceeab39892daed",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000022_message_images.down.sql",
+    "sha256": "29e8a8de1cc87406a37804fa844e93d03762ab88b6ecce7d0cf3a33fa2508778",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000022_message_images.up.sql",
+    "sha256": "2881c00bb3b185227a4c626d04c4a3ffe2a6c3b19114ae67aba506a25aa5a639",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000023_im_channel_kb_id.down.sql",
+    "sha256": "59788b905e69a04bf8127571b89e372ac54b8726ef4023ac1cdcf749cd9ae02e",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000023_im_channel_kb_id.up.sql",
+    "sha256": "5a8765284a3a605644f5144e69a7edf478a244c22d91aa936f0aa2b64ef0375b",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000024_im_channel_bot_identity.down.sql",
+    "sha256": "356e34c29d60763633dbff7f867fc31a445e05949ec35b27b86856ba99f19c4b",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000024_im_channel_bot_identity.up.sql",
+    "sha256": "6c8cb63189edd6849e8821a2affa6573a8ea8ecc4907a6e7095e11af644ae3b6",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000025_message_channel.down.sql",
+    "sha256": "992f693fdf1c61a58140f2d31b89cc65ddb9316d8e8096ee31fda7b1667e364e",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000025_message_channel.up.sql",
+    "sha256": "93b83ce29f3bad89ba492c4a488335b5fe7f90fe57b01b0afc8f233de5ef0e6e",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000026_chunks_query_indexes.down.sql",
+    "sha256": "c344505e97ef6f6b2d8166f8cce7b8f11a38039a2ea582485e5721409c9e5833",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000026_chunks_query_indexes.up.sql",
+    "sha256": "1ecdab456f32442f56adbfdc0fb22ea19caef30dc3ef68ec6610c883a1d98ad7",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000027_message_rendered_content.down.sql",
+    "sha256": "4ad498678040cbb0e5972ba5b93f232fc6bbb3ca3c7f9191aa9ad174c834607a",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000027_message_rendered_content.up.sql",
+    "sha256": "272ffddf6c37a6e8c134ef8fe5ad5f355e8fbdd5857a1ce4e6ee997b74bdd285",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000028_im_thread_session.down.sql",
+    "sha256": "121c184293aef3a7be6aa3ca03cf4768823636b0f21a55ef1fd22d8ba8a8c220",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000028_im_thread_session.up.sql",
+    "sha256": "c6c176f4e61a9716102309a56b97f8bcc1ecea2132f098d40a5b43c19154ca67",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000029_datasource_tables.down.sql",
+    "sha256": "6e5d7285c4842343495eaecda9ef2a0e53734037458b387011540baf887ad7bf",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000029_datasource_tables.up.sql",
+    "sha256": "3557cb6c60e5fda9851b6e3e06a2fa61e6549cde1ce1a0d26b835eb680e6292c",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000030_web_search_providers.down.sql",
+    "sha256": "c30bec007213d0328e0a20acbdf7eb8f42373c09bce145e32e55cfd21952a449",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000030_web_search_providers.up.sql",
+    "sha256": "d545f40db4ea3a526ba1be3c2b4a065ffcd7ced22f509b2359e0b6f456841d8e",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000031_add_asr_config.down.sql",
+    "sha256": "e583287f42f93240eefed3f4e56d7bd241ce4521dd380fd131ea6f38a489f9c9",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000031_add_asr_config.up.sql",
+    "sha256": "a728465515f23f3f776f8b5a482c37ea6b6a84538e4ec0a4de3032b5c70ce861",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000032_vector_stores.down.sql",
+    "sha256": "f48c9e7e01bea7c5dcbebf196088216c8a3f054319a003d774bba044fa57c351",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000032_vector_stores.up.sql",
+    "sha256": "aa364f0edfc8313fde15c69ae7fbfeb548f9de8714ff8c1120c330d7b0bc5306",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000033_add_video_info_to_chunks.down.sql",
+    "sha256": "e90f778b4cf2fb18d4c60061ec9556a5db8e74f720fc342ef53013f715e7ae1b",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000033_add_video_info_to_chunks.up.sql",
+    "sha256": "6e83fa821229818f3a173af2c6ba91b63ffe842193cbef6e231cf4f41d2774d9",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000034_add_attachments.down.sql",
+    "sha256": "73e0fbad5e28265074fd28dc21cb0eb178f5e115a76c4c9b972d6960516e9220",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000034_add_attachments.up.sql",
+    "sha256": "cfe65e8c1cb2902ddede93c3162d88c2977c1e719a7f527c6c0edbac8b0f4951",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000035_add_credentials.down.sql",
+    "sha256": "7ffa1cca0cef1274dc4193dbbd1003ad65a26af4d75811eede07e79d95aacb47",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000035_add_credentials.up.sql",
+    "sha256": "bc7f3b0765bb4dfab9049583985ef4645014f130956dab31cc17f272eec196e1",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000036_kb_vector_store_id.down.sql",
+    "sha256": "ed8800a19d91b897e71c82858c265c912e3c7ba7cac6ca9313f0894796068dbf",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000036_kb_vector_store_id.up.sql",
+    "sha256": "8d93a75798416bd4b56c5ce8afc64839bba0efeeb21e83d0829b55e285896a75",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000037_wiki_and_indexing.down.sql",
+    "sha256": "e53b8dae462b83a7e8876dbbe9f0bb64206242bbff5650f3d2c321183bf6c370",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000037_wiki_and_indexing.up.sql",
+    "sha256": "6f1d8010f46eb2b9dbf21f145f9336a53c8730ac3f7388417d5f159568d5912d",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000038_im_session_agent_id.down.sql",
+    "sha256": "0e4c92022a64f76890cedf1376f5845e7d955301d74061a3bc0a4e1f1d2e0982",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000038_im_session_agent_id.up.sql",
+    "sha256": "73e2e466f83e6b660611bb61570de57d2703af39fc0d56f5b6b988ca77f2ae81",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000039_kb_creator_bidreview_role.down.sql",
+    "sha256": "1fd713484e2f263c91bb87d541cee052898ba137385171aef24fad0d57144b95",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000039_kb_creator_bidreview_role.up.sql",
+    "sha256": "c3206558dbbdf041cc04da6f4b23c5d27c6bc3f7ed29ce2189f0368d915f867d",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000040_knowledge_governance.down.sql",
+    "sha256": "d0902f43438d8cb38741bfee4e1ae5dccb368223d77ab6452f856d8ea4c10c26",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000040_knowledge_governance.up.sql",
+    "sha256": "ed4708531ad94fc51635c0ea60a8923c699f79d9f897b1c79428926d341dbf4b",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000041_approved_endpoints.down.sql",
+    "sha256": "4852eb1c6a6964c095297c96016ed0267ff7acb1d0c3017df0a63786ac801648",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000041_approved_endpoints.up.sql",
+    "sha256": "fc8bf24afbcd655dc423ee098e2545e06937aad2f517e650c930a097b235d0e9",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000042_acceptance_benchmark.down.sql",
+    "sha256": "8ba17f4b9b29a4f118ba0d3dc92fa51eddd3f04c48267e24f5e8f1eb6aab786c",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000042_acceptance_benchmark.up.sql",
+    "sha256": "f864a64ff5eafaad100f65714905b179dab7a894b61e58aa76cd58dd141ec9ff",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000043_answer_feedback.down.sql",
+    "sha256": "57d52d50913b2599d24d35b9897c9bea1a01d409bf22d46efe0374554b8b370d",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000043_answer_feedback.up.sql",
+    "sha256": "6fa1c20ff15b628e206fd50494d9d424dd16ed03b2d94bbf2477ff4317987492",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000044_feedback_candidates.down.sql",
+    "sha256": "f1b60c85090a240e8815975ec5281ed8d888d8ec01a8d8bdaaf4fe3546f1456c",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000044_feedback_candidates.up.sql",
+    "sha256": "a83e46d2b0761b0702a514ef97aff163f1fbec0e9f77e91188d973cb0797310e",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000045_voice_metadata.down.sql",
+    "sha256": "4b26d7f5155e63c395b2217cd93cda2871e2f7f6d24f99ff62ca1843cab781e8",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000045_voice_metadata.up.sql",
+    "sha256": "537cce4f29abafcd8d889cf5e4f560aece4e8007c3a450c8c85c151383bc28de",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000046_verified_answer_config.down.sql",
+    "sha256": "d5c22dfe832bc7cb732e20dd1e09f36b42a1b134c11942c1d897aae3823bad56",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000046_verified_answer_config.up.sql",
+    "sha256": "23055892c476f39844626d478ef03c6ebbf449c472326bae450f271a055f0dc3",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000047_model_deployment_metadata.down.sql",
+    "sha256": "4f6bf73cf89048c7273f6d867f4e27649de4974188c4297bedbb57f4ae2c7e8b",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000047_model_deployment_metadata.up.sql",
+    "sha256": "9a2136435bf28845fcad38cb204bcc32721829a6c46eefdd60a045b98b834542",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000048_acceptance_artifacts.down.sql",
+    "sha256": "ed19be5e915a67f93c036c6396339a2f556ad859e356ad40723b1d716f7018c6",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000048_acceptance_artifacts.up.sql",
+    "sha256": "053762b22cde8d04056b99a0d7b898363d20c6568459205a92c068d11fcc022f",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000049_knowledge_governance_pending_version.up.sql",
+    "sha256": "9e59f6c230ebc91379d0c7e1c6771ba1fbec97a29f27813f18425e498f66367e",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000050_response_timing.down.sql",
+    "sha256": "0109f50d8ce7a48fc2e56c7d1673fff7b450b9b1e0ceff668b6d17875b5e3c5f",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000050_response_timing.up.sql",
+    "sha256": "ad16da301864b046c693d967ef04927c2be96ba2df2db91ff6f1bc64da717a04",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000051_acceptance_artifact_kind.down.sql",
+    "sha256": "b4ffd5ff847c5894639ea56292e242d2fd8efe42d79aa7039c42fd3db083e2d8",
+    "architecture": "amd64",
+    "source": "repository"
+  },
+  {
+    "path": "migrations\\versioned\\000051_acceptance_artifact_kind.up.sql",
+    "sha256": "5b1ad42917268b71a2ccd6687e8b8ce3854b5840a379b94a3ad9578518c74890",
+    "architecture": "amd64",
+    "source": "repository"
+  }
+]

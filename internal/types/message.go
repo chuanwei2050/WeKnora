@@ -211,7 +211,9 @@ type Message struct {
 	// Empty for non-retrieval intents or assistant messages.
 	RenderedContent string `json:"-" gorm:"type:text;column:rendered_content;default:''"`
 	// Channel indicates the source channel of this message (e.g., "web", "api", "im")
-	Channel string `json:"channel,omitempty" gorm:"type:varchar(50);default:''"` 
+	Channel        string `json:"channel,omitempty" gorm:"type:varchar(50);default:''"`
+	VoiceMetadata  JSON   `json:"voice_metadata,omitempty" gorm:"type:jsonb;column:voice_metadata"`
+	ResponseTiming JSON   `json:"response_timing,omitempty" gorm:"type:jsonb;column:response_timing"`
 	// KnowledgeID links this message to a Knowledge entry in the chat history knowledge base
 	// Used for vector search indexing: when set, the message content has been indexed as a Knowledge passage
 	KnowledgeID string `json:"knowledge_id,omitempty" gorm:"type:varchar(36);index"`
@@ -262,7 +264,9 @@ func (a *AgentSteps) Scan(value interface{}) error {
 // Returns:
 //   - error: Any error encountered during the hook execution
 func (m *Message) BeforeCreate(tx *gorm.DB) (err error) {
-	m.ID = uuid.New().String()
+	if m.ID == "" {
+		m.ID = uuid.New().String()
+	}
 	if m.KnowledgeReferences == nil {
 		m.KnowledgeReferences = make(References, 0)
 	}
@@ -277,6 +281,12 @@ func (m *Message) BeforeCreate(tx *gorm.DB) (err error) {
 	}
 	if m.Attachments == nil {
 		m.Attachments = make(MessageAttachments, 0)
+	}
+	if m.VoiceMetadata == nil {
+		m.VoiceMetadata = JSON([]byte("{}"))
+	}
+	if m.ResponseTiming == nil {
+		m.ResponseTiming = JSON([]byte("{}"))
 	}
 	return nil
 }

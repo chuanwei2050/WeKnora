@@ -1,4 +1,5 @@
 import { get, post, put, del, postChat } from "../../utils/request";
+import { getRuntimeMode } from '@/utils/embedded-runtime';
 
 
 
@@ -34,6 +35,9 @@ export async function agentChat(data: {
 }
 
 export async function getMessageList(data: { session_id: string; limit: number, created_at: string }) {
+  if (getRuntimeMode() === 'embedded-widget') {
+    return get(`/api/integration/v1/chat/sessions/${data.session_id}/messages?limit=${data.limit}`);
+  }
   if (data.created_at) {
     return get(`/api/v1/messages/${data.session_id}/load?before_time=${encodeURIComponent(data.created_at)}&limit=${data.limit}`);
   } else {
@@ -54,10 +58,12 @@ export async function deleteAllSessions() {
 }
 
 export async function getSession(session_id: string) {
+  if (getRuntimeMode() === 'embedded-widget') return get(`/api/integration/v1/chat/sessions/${session_id}`);
   return get(`/api/v1/sessions/${session_id}`);
 }
 
 export async function stopSession(session_id: string, message_id: string) {
+  if (getRuntimeMode() === 'embedded-widget') return post(`/api/integration/v1/chat/sessions/${session_id}/messages/${message_id}/cancel`, {});
   return post(`/api/v1/sessions/${session_id}/stop`, { message_id });
 }
 

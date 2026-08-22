@@ -2,13 +2,13 @@
     <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed }">
         <!-- 展开时：Logo + 折叠按钮同行 -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
-            <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
+            <div class="logo_box" @click="goHome" style="cursor: pointer;">
                 <template v-if="isBidReviewEmbedded">
                     <span class="bidreview-logo-mark">知</span>
                     <span class="bidreview-logo-text">知识库</span>
                 </template>
                 <template v-else>
-                    <img class="logo" src="@/assets/img/weknora.png" alt="">
+                    <span class="brand-logo-text">知识问答智能体</span>
                     <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
                 </template>
             </div>
@@ -48,18 +48,6 @@
         
         <!-- 上半部分：知识库和对话 -->
         <div class="menu_top">
-            <div v-if="isBidReviewEmbedded" class="menu_box">
-                <t-tooltip content="返回主系统" placement="right" :disabled="!uiStore.sidebarCollapsed">
-                    <div class="menu_item" @click="handleReturnToBidReview">
-                        <div class="menu_item-box">
-                            <div class="menu_icon">
-                                <t-icon name="rollback" class="icon return-icon" />
-                            </div>
-                            <span v-if="!uiStore.sidebarCollapsed" class="menu_title">返回主系统</span>
-                        </div>
-                    </div>
-                </t-tooltip>
-            </div>
             <div class="menu_box" :class="{ 'has-submenu': item.children }" v-for="(item, index) in topMenuItems" :key="index">
                 <t-tooltip :content="item.title" placement="right" :disabled="!uiStore.sidebarCollapsed">
                 <div @click="handleMenuClick(item.path)"
@@ -165,7 +153,7 @@ import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
 import { getSystemInfo } from '@/api/system';
-import { isBidReviewEmbeddedMode, returnToBidReview } from '@/utils/bidreview-sso';
+import { isBidReviewEmbeddedMode } from '@/utils/bidreview-sso';
 
 const { t } = useI18n();
 const usemenuStore = useMenuStore();
@@ -190,9 +178,7 @@ const isLiteEdition = ref(false);
 const isBidReviewEmbedded = computed(() => isBidReviewEmbeddedMode());
 const bidReviewHiddenMenuPaths = new Set(['agents', 'organizations', 'creatChat']);
 
-const handleReturnToBidReview = () => {
-    returnToBidReview()
-}
+const goHome = () => router.push(authStore.user?.role === 'platform_admin' && authStore.workspaceMode === 'platform' ? '/platform/admin/tenants' : '/platform/knowledge-bases')
 
 // 批量管理状态
 const batchMode = ref(false)
@@ -265,6 +251,10 @@ const isMenuItemActive = (itemPath: string): boolean => {
             return currentRoute === 'kbCreatChat' || currentRoute === 'globalCreatChat';
         case 'settings':
             return currentRoute === 'settings';
+        case 'admin/tenants':
+            return currentRoute === 'tenantAdmin';
+        case 'admin/users':
+            return currentRoute === 'userAdmin';
         default:
             return itemPath === currentpath.value;
     }
@@ -289,14 +279,14 @@ const getIconActiveState = (itemPath: string) => {
 // 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
 const topMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => 
-        (item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat')
+        (item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat' || item.path === 'admin/tenants' || item.path === 'admin/users')
         && !(isBidReviewEmbedded.value && bidReviewHiddenMenuPaths.has(item.path))
     );
 });
 
 const bottomMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => {
-        if (item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat') {
+        if (item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat' || item.path === 'admin/tenants' || item.path === 'admin/users') {
             return false;
         }
         return true;
@@ -889,6 +879,15 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
             height: auto;
         }
 
+        .brand-logo-text {
+            color: var(--td-text-color-primary);
+            font-size: 16px;
+            font-weight: 600;
+            line-height: 1.2;
+            white-space: nowrap;
+            letter-spacing: 0.02em;
+        }
+
         .bidreview-logo-mark {
             width: 30px;
             height: 30px;
@@ -1349,10 +1348,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 </style>
 <style lang="less">
 // Dark mode: invert dark logo to light
-html[theme-mode="dark"] .aside_box .logo_box .logo {
-    filter: invert(1) hue-rotate(180deg);
-}
-
 // Dark mode: make SVG icons match text color (loaded via <img>, currentColor won't work)
 html[theme-mode="dark"] .aside_box .menu_icon img.icon {
     filter: invert(1);

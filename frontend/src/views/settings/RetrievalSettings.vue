@@ -6,24 +6,6 @@
     </div>
 
     <div class="settings-group">
-      <!-- Rerank Model -->
-      <div class="setting-item">
-        <div class="setting-label">
-          <span>{{ t('retrievalSettings.rerankModelLabel') }} <span class="required-mark">*</span></span>
-        </div>
-        <p class="setting-desc">{{ t('retrievalSettings.rerankModelDescription') }}</p>
-        <p v-if="!localConfig.rerank_model_id" class="setting-desc warning-text">
-          {{ t('retrievalSettings.rerankModelRequired') }}
-        </p>
-        <div class="setting-control-full">
-          <ModelSelector
-            model-type="Rerank"
-            :selected-model-id="localConfig.rerank_model_id"
-            @update:selected-model-id="handleModelChange"
-          />
-        </div>
-      </div>
-
       <!-- Embedding Top K -->
       <div class="setting-item">
         <div class="setting-label-row">
@@ -106,7 +88,6 @@
 import { reactive, onMounted, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
-import ModelSelector from '@/components/ModelSelector.vue'
 import {
   getTenantRetrievalConfig,
   updateTenantRetrievalConfig,

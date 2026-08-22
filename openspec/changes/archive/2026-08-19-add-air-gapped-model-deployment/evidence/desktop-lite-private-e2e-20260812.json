@@ -1,0 +1,51 @@
+{
+  "schema": "weknora-desktop-lite-private-e2e/v1",
+  "profile": "desktop-lite",
+  "package": "WeKnora-lite portable package",
+  "runtime": {
+    "database": "sqlite",
+    "storage": "local",
+    "stream_manager": "memory",
+    "model_endpoint_scope": "private-network only"
+  },
+  "functional_checks": {
+    "health": "passed",
+    "native_registration_bidreview_role": "",
+    "chat_model": {
+      "name": "qwen3.5:0.8b",
+      "protocol": "ollama",
+      "location": "private-network",
+      "artifact_policy": "preloaded-only",
+      "preflight": "passed",
+      "observed_model": "qwen3.5:0.8b"
+    },
+    "embedding_model": {
+      "name": "bge-m3:latest",
+      "protocol": "ollama",
+      "location": "private-network",
+      "artifact_policy": "preloaded-only",
+      "preflight": "passed",
+      "observed_model": "bge-m3:latest",
+      "dimension": 1024
+    },
+    "knowledge_base_creation": "passed",
+    "manual_knowledge_indexing": "passed",
+    "knowledge_search": "passed"
+  },
+  "single_node_gate": {
+    "status": "failed_as_expected",
+    "reason": "single-node 要求组件或模型 model:internal/chat-fixture 为 same-host，实际为 private-network",
+    "non_same_host": [
+      {
+        "name": "model:internal/chat-fixture",
+        "location": "private-network"
+      }
+    ]
+  },
+  "acceptance_report": {
+    "profile": "desktop-lite",
+    "airgap_preflight": "passed",
+    "single_node_gate": "passed_expected_failure",
+    "path": "C:/Users/86150/AppData/Local/Temp/weknora-airgap-private-e2e-report-20260812/openspec-acceptance.json"
+  }
+}

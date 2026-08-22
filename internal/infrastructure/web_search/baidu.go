@@ -39,12 +39,20 @@ func NewBaiduProvider(params types.WebSearchProviderParameters) (interfaces.WebS
 	if params.APIKey == "" {
 		return nil, fmt.Errorf("API key is required for Baidu provider")
 	}
-	client := &http.Client{
-		Timeout: defaultBaiduTimeout,
+	client, err := newSearchHTTPClientForParameters(defaultBaiduTimeout, params)
+	if err != nil {
+		return nil, err
+	}
+	baseURL, err := approvedSearchEndpointURL(params.ApprovedEndpoint, "/v2/ai_search/web_search")
+	if err != nil {
+		return nil, err
+	}
+	if baseURL == "" {
+		baseURL = defaultBaiduWebSearchURL
 	}
 	return &BaiduProvider{
 		client:  client,
-		baseURL: defaultBaiduWebSearchURL, // Hardcoded — not tenant-configurable
+		baseURL: baseURL,
 		apiKey:  params.APIKey,
 	}, nil
 }

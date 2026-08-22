@@ -35,12 +35,22 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
   const canAccessAllTenants = computed(() => {
-    return user.value?.can_access_all_tenants || false
+    return user.value?.role === 'platform_admin'
+  })
+
+  const canManageTenant = computed(() => {
+    return user.value?.role === 'platform_admin' || user.value?.role === 'tenant_admin'
+  })
+
+  const workspaceMode = computed<'platform' | 'tenant'>(() => {
+    return user.value?.role === 'platform_admin' && selectedTenantId.value === null ? 'platform' : 'tenant'
   })
 
   const effectiveTenantId = computed(() => {
-    // 如果选择了其他租户，使用选择的租户ID，否则使用用户默认租户ID
-    return selectedTenantId.value || (tenant.value?.id ? Number(tenant.value.id) : null)
+    // Integration 嵌入会话只返回 user.tenant_id，不返回完整 tenant 对象。
+    return selectedTenantId.value
+      || (tenant.value?.id ? Number(tenant.value.id) : null)
+      || (user.value?.tenant_id ? Number(user.value.tenant_id) : null)
   })
 
   // 操作方法
@@ -234,6 +244,8 @@ export const useAuthStore = defineStore('auth', () => {
     currentTenantId,
     currentUserId,
     canAccessAllTenants,
+    canManageTenant,
+    workspaceMode,
     effectiveTenantId,
     isLiteMode,
     

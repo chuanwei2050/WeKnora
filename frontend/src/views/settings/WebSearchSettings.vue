@@ -109,6 +109,21 @@
             </template>
           </t-form-item>
 
+          <t-form-item :label="t('webSearchSettings.approvedEndpointLabel')" name="parameters.approved_endpoint_id">
+            <t-select v-model="providerForm.parameters.approved_endpoint_id" clearable :placeholder="t('webSearchSettings.approvedEndpointPlaceholder')">
+              <t-option :value="''" :label="t('webSearchSettings.publicEndpointOption')" />
+              <t-option
+                v-for="endpoint in approvedSearchEndpoints"
+                :key="endpoint.id"
+                :value="endpoint.id"
+                :label="`${endpoint.scheme}://${endpoint.host}:${endpoint.port}`"
+              />
+            </t-select>
+            <template #help>
+              <span class="switch-help">{{ t('webSearchSettings.approvedEndpointHelp') }}</span>
+            </template>
+          </t-form-item>
+
           <div class="form-divider"></div>
 
           <t-form-item :label="t('webSearchSettings.setAsDefault')" name="is_default">
@@ -158,6 +173,7 @@ import {
   type WebSearchProviderEntity,
   type WebSearchProviderTypeInfo,
 } from '@/api/web-search-provider'
+import { listApprovedEndpoints, type ApprovedEndpoint } from '@/api/approved-endpoint'
 
 const { t } = useI18n()
 
@@ -169,12 +185,13 @@ const editingProvider = ref<WebSearchProviderEntity | null>(null)
 const testing = ref(false)
 const testingId = ref<string | null>(null)
 const saving = ref(false)
+const approvedSearchEndpoints = ref<ApprovedEndpoint[]>([])
 
 const providerForm = ref<{
   name: string
   provider: string
   description: string
-  parameters: { api_key?: string; engine_id?: string; proxy_url?: string }
+  parameters: { api_key?: string; engine_id?: string; proxy_url?: string; approved_endpoint_id?: string }
   is_default: boolean
 }>({
   name: '',
@@ -195,7 +212,7 @@ const isProviderFree = (providerType: WebSearchProviderTypeInfo) => {
 
 // ===== Methods =====
 const onProviderTypeChange = () => {
-  providerForm.value.parameters = {}
+  providerForm.value.parameters = { approved_endpoint_id: '' }
 }
 
 const loadProviderEntities = async () => {
@@ -217,13 +234,23 @@ const loadProviderTypes = async () => {
   }
 }
 
+const loadApprovedSearchEndpoints = async () => {
+  try {
+    const response = await listApprovedEndpoints('search')
+    approvedSearchEndpoints.value = Array.isArray(response.data) ? response.data : []
+  } catch (error) {
+    console.error('Failed to load approved search endpoints:', error)
+    approvedSearchEndpoints.value = []
+  }
+}
+
 const openAddDialog = () => {
   editingProvider.value = null
   providerForm.value = { 
     name: '', 
     provider: providerTypes.value[0]?.id || 'duckduckgo', 
     description: '', 
-    parameters: {}, 
+    parameters: { approved_endpoint_id: '' },
     is_default: providerEntities.value.length === 0 
   }
   showAddProviderDialog.value = true
@@ -239,6 +266,7 @@ const editProvider = (entity: WebSearchProviderEntity) => {
       api_key: '',
       engine_id: entity.parameters?.engine_id || '',
       proxy_url: entity.parameters?.proxy_url || '',
+      approved_endpoint_id: entity.parameters?.approved_endpoint_id || '',
     },
     is_default: entity.is_default || false,
   }
@@ -339,7 +367,7 @@ const testExistingConnection = async (entity: WebSearchProviderEntity) => {
 
 // ===== Init =====
 onMounted(async () => {
-  await Promise.all([loadProviderTypes(), loadProviderEntities()])
+  await Promise.all([loadProviderTypes(), loadProviderEntities(), loadApprovedSearchEndpoints()])
 })
 </script>
 

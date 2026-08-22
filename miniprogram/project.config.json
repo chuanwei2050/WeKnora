@@ -1,5 +1,5 @@
 {
-  "description": "WeKnora Mini Program plugin",
+  "description": "Knowledge QA Agent Mini Program plugin",
   "setting": {
     "urlCheck": true,
     "es6": true,
@@ -9,6 +9,6 @@
   },
   "compileType": "miniprogram",
   "libVersion": "latest",
-  "projectname": "WeKnora Mini Program",
+  "projectname": "知识问答智能体",
   "condition": {}
 }

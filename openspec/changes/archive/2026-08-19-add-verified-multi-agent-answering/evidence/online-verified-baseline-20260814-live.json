@@ -1,0 +1,54 @@
+﻿{
+    "schema_version":  "verified-answer-online-baseline/v1",
+    "profile":  "online-app",
+    "status":  "passed",
+    "started_at":  "\/Date(1786686517138)\/",
+    "completed_at":  "\/Date(1786686555354)\/",
+    "model_contract_smoke":  {
+                                 "status":  "passed",
+                                 "main_model":  "Qwen/Qwen3.6-27B",
+                                 "verifier_1":  "Qwen/Qwen2.5-14B-Instruct",
+                                 "verifier_2":  "deepseek-ai/DeepSeek-V3.1-Terminus",
+                                 "distinct_model_count":  3,
+                                 "endpoint":  "https://api.siliconflow.cn/v1"
+                             },
+    "application_pipeline":  {
+                                 "status":  "passed",
+                                 "live_attempt":  {
+                                                      "status":  "passed",
+                                                      "session_id":  "f6f64407-9ddc-4fb5-a8cf-932bcc803cca",
+                                                      "agent_id":  "bf4fe98f-cc35-4aaa-9b1c-4919245c2f50",
+                                                      "knowledge_base_id":  "2fb51638-3691-435d-8fb0-ab6a71985f27",
+                                                      "knowledge_id":  "4113f113-749b-4da4-99ba-5a7622dc8a5f",
+                                                      "question":  "According to the knowledge base, which step must verified answering finish before generating a draft? Can an unverified draft be sent to users? Cite knowledge-base evidence.",
+                                                      "execution_path":  "verified_agent",
+                                                      "completed":  true,
+                                                      "retrieval_count":  1,
+                                                      "validator_model_count":  3,
+                                                      "validator_models":  [
+                                                                               "Qwen/Qwen2.5-14B-Instruct",
+                                                                               "deepseek-ai/DeepSeek-V3.1-Terminus"
+                                                                           ],
+                                                      "runtime_validator_models":  [
+                                                                                       "Qwen/Qwen3.6-27B",
+                                                                                       "Qwen/Qwen2.5-14B-Instruct",
+                                                                                       "deepseek-ai/DeepSeek-V3.1-Terminus"
+                                                                                   ],
+                                                      "verification_decision":  "passed",
+                                                      "verification_degraded":  false,
+                                                      "reflection_actions":  [
+
+                                                                             ],
+                                                      "first_visible_ms":  34925,
+                                                      "answer_chars":  979,
+                                                      "answer_preview":  "According to the knowledge base:\n\n## Step Required Before Generating a Draft\n\n**Verified answering must complete the retrieval (检索) step before generating a draft.**\n\nThe process is: **retrieval first → then generate draft → then verification by two independent models** (checking facts, logic, and c",
+                                                      "event_count":  41,
+                                                      "notes":  [
+                                                                    "Agent budget raised to 180s / 16 calls for dual online validators and reflection.",
+                                                                    "Pass requires verified_agent path, decision=passed, non-degraded, and runtime validator_model_count\u003e=2."
+                                                                ]
+                                                  }
+                             },
+    "gate":  "passed",
+    "integrity_sha256":  "766ae2af7911ce6b0d97046246c39d0ecc5ca0e7ffb64e10eb9c715c76cf9012"
+}

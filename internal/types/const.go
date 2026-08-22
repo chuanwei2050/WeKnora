@@ -16,6 +16,10 @@ const (
 	UserContextKey ContextKey = "User"
 	// UserIDContextKey is the context key for user ID
 	UserIDContextKey ContextKey = "UserID"
+	// AuthenticationMethodContextKey identifies the credential validated at the HTTP boundary.
+	AuthenticationMethodContextKey ContextKey = "AuthenticationMethod"
+	// IntegrationKnowledgeBaseScopeContextKey carries a client-bound KB allowlist.
+	IntegrationKnowledgeBaseScopeContextKey ContextKey = "IntegrationKnowledgeBaseScope"
 	// SessionTenantIDContextKey is the context key for session owner's tenant ID.
 	// When set (e.g. in pipeline with shared agent), session/message lookups use this instead of TenantIDContextKey.
 	SessionTenantIDContextKey ContextKey = "SessionTenantID"
@@ -23,10 +27,23 @@ const (
 	EmbedQueryContextKey ContextKey = "EmbedQuery"
 	// LanguageContextKey is the context key for user language preference (e.g. "zh-CN", "en-US")
 	LanguageContextKey ContextKey = "Language"
+	// GraphQueryAllowedContextKey controls whether the current request needs graph traversal.
+	GraphQueryAllowedContextKey ContextKey = "GraphQueryAllowed"
+	// RetrievalTopKContextKey carries a request-scoped retrieval budget into Agent tools.
+	RetrievalTopKContextKey ContextKey = "RetrievalTopK"
+	// GraphRelationTypesContextKey carries the allowlisted relation types into Agent tools.
+	GraphRelationTypesContextKey ContextKey = "GraphRelationTypes"
 	// LangfuseTraceContextKey carries the active Langfuse *Trace across the
 	// request lifecycle. Defined here (not inside the langfuse package) so
 	// that logger.CloneContext can preserve it without importing langfuse.
 	LangfuseTraceContextKey ContextKey = "LangfuseTrace"
+)
+
+type AuthenticationMethod string
+
+const (
+	AuthenticationMethodBearer AuthenticationMethod = "bearer"
+	AuthenticationMethodAPIKey AuthenticationMethod = "api_key"
 )
 
 // String returns the string representation of the context key

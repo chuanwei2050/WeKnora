@@ -1,0 +1,20 @@
+{
+  "schema": "graph-triple-review-smoke/v1",
+  "run_at": "2026-08-13T14:06:21.0201570+08:00",
+  "target": "http://127.0.0.1:18080",
+  "candidate_id": "3bac03b4-c538-47da-bc69-34b164a8b87e",
+  "tenant_id": 10000,
+  "knowledge_base_id": "cc7662ad-4960-443f-9b4e-fb57bfa6d52d",
+  "knowledge_id": "2adb5611-3fcf-44ea-8e4c-9fb4569f3f43",
+  "chunk_id": "78d7333d-7467-42fd-9139-c82bde7c3c9d",
+  "steps": {
+    "login": "pass",
+    "insert_pending": "pass",
+    "list_pending": "pass",
+    "get_by_id": "pass",
+    "post_reject": "pass",
+    "verify_rejected": "pass"
+  },
+  "final_status": "rejected",
+  "gate": "passed"
+}

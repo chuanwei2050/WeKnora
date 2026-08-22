@@ -7,8 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -88,11 +88,6 @@ func (s *LocalSandbox) Execute(ctx context.Context, config *ExecuteConfig) (*Exe
 	// Setup minimal environment
 	cmd.Env = s.buildEnvironment(config.Env)
 
-	// Setup process group for cleanup
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-	}
-
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -102,7 +97,22 @@ func (s *LocalSandbox) Execute(ctx context.Context, config *ExecuteConfig) (*Exe
 	}
 
 	startTime := time.Now()
-	err := cmd.Run()
+	stopProcess, cleanupProcess, err := startProcess(cmd)
+	if err != nil {
+		result := &ExecuteResult{Error: err.Error(), ExitCode: -1}
+		return result, nil
+	}
+	defer cleanupProcess()
+	processDone := make(chan struct{})
+	defer close(processDone)
+	go func() {
+		select {
+		case <-execCtx.Done():
+			stopProcess()
+		case <-processDone:
+		}
+	}()
+	err = cmd.Wait()
 	duration := time.Since(startTime)
 
 	result := &ExecuteResult{
@@ -113,10 +123,7 @@ func (s *LocalSandbox) Execute(ctx context.Context, config *ExecuteConfig) (*Exe
 
 	if err != nil {
 		if execCtx.Err() == context.DeadlineExceeded {
-			// Kill the process group
-			if cmd.Process != nil {
-				syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			}
+			stopProcess()
 			result.Killed = true
 			result.Error = ErrTimeout.Error()
 			result.ExitCode = -1
@@ -175,8 +182,19 @@ func (s *LocalSandbox) getInterpreter(scriptPath string) string {
 	ext := strings.ToLower(filepath.Ext(scriptPath))
 	switch ext {
 	case ".py":
+		if runtime.GOOS == "windows" {
+			return "python"
+		}
 		return "python3"
 	case ".sh", ".bash":
+		if runtime.GOOS == "windows" {
+			if gitPath, err := exec.LookPath("git.exe"); err == nil {
+				gitBash := filepath.Join(filepath.Dir(filepath.Dir(gitPath)), "bin", "bash.exe")
+				if _, err := os.Stat(gitBash); err == nil {
+					return gitBash
+				}
+			}
+		}
 		return "bash"
 	case ".js":
 		return "node"
@@ -193,11 +211,13 @@ func (s *LocalSandbox) getInterpreter(scriptPath string) string {
 
 // isAllowedCommand checks if a command is in the allowed list
 func (s *LocalSandbox) isAllowedCommand(cmd string) bool {
+	commandName := strings.TrimSuffix(strings.ToLower(filepath.Base(cmd)), ".exe")
+	cmd = strings.ToLower(cmd)
 	if len(s.config.AllowedCommands) == 0 {
 		// Use default allowed commands
 		defaults := defaultAllowedCommands()
 		for _, allowed := range defaults {
-			if cmd == allowed {
+			if cmd == strings.ToLower(allowed) || commandName == strings.TrimSuffix(strings.ToLower(allowed), ".exe") {
 				return true
 			}
 		}
@@ -205,7 +225,7 @@ func (s *LocalSandbox) isAllowedCommand(cmd string) bool {
 	}
 
 	for _, allowed := range s.config.AllowedCommands {
-		if cmd == allowed {
+		if cmd == strings.ToLower(allowed) || commandName == strings.TrimSuffix(strings.ToLower(allowed), ".exe") {
 			return true
 		}
 	}
@@ -215,11 +235,13 @@ func (s *LocalSandbox) isAllowedCommand(cmd string) bool {
 // buildEnvironment creates a safe environment for script execution
 func (s *LocalSandbox) buildEnvironment(extra map[string]string) []string {
 	// Start with minimal environment
-	env := []string{
-		"PATH=/usr/local/bin:/usr/bin:/bin",
-		"HOME=/tmp",
-		"LANG=en_US.UTF-8",
-		"LC_ALL=en_US.UTF-8",
+	pathValue := "/usr/local/bin:/usr/bin:/bin"
+	if runtime.GOOS == "windows" {
+		pathValue = os.Getenv("PATH")
+	}
+	env := []string{"PATH=" + pathValue, "HOME=/tmp", "LANG=en_US.UTF-8", "LC_ALL=en_US.UTF-8"}
+	if runtime.GOOS == "windows" {
+		env = append(env, "SystemRoot="+os.Getenv("SystemRoot"))
 	}
 
 	// Dangerous environment variables to exclude

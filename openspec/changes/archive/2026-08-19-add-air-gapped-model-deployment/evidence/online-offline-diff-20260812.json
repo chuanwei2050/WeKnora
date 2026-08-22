@@ -1,0 +1,606 @@
+{
+  "schema": "weknora-online-offline-diff/v1",
+  "online_baseline": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\online-baseline-v5\\online-model-baseline.json",
+  "frozen_inputs": {
+    "path": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\frozen-inputs-v1.json",
+    "freeze_sha256": "1495129bc2187950b905f36843c2fe2e2111f1288cf0abcde001cd9c69b27fd9"
+  },
+  "model_identity_diff": [],
+  "profiles": [
+    "desktop-lite",
+    "compose-airgap",
+    "helm-airgap"
+  ],
+  "package_integrity": [
+    {
+      "profile": "desktop-lite",
+      "manifest_sha256": "c07d5f786722f027e772a0ccedcb5f52b3271f924fd64240eb7daa5ec62f3945",
+      "checksums_sha256": "92c99cf89457f14a45e378ae5868ec422f0fed689d205c89f00709a3fc3b4982",
+      "declared_profile": "desktop-lite",
+      "declared_architecture": "amd64",
+      "missing_model_roles": [
+        "chat",
+        "vlm",
+        "verifier_1",
+        "verifier_2",
+        "judge",
+        "embedding",
+        "rerank",
+        "asr",
+        "tts"
+      ]
+    },
+    {
+      "profile": "compose-airgap",
+      "manifest_sha256": "01cbf3013832e4c98543d2d9485d7c096f085d35b4062c0ee3f0cdd8b7113042",
+      "checksums_sha256": "770e1efd83eef480b8a4ddb0b8f78135eb1f02a6a1b157f98f520df3db0c5de2",
+      "declared_profile": "compose-airgap",
+      "declared_architecture": "amd64",
+      "missing_model_roles": [
+        "chat",
+        "vlm",
+        "verifier_1",
+        "verifier_2",
+        "judge",
+        "embedding",
+        "rerank",
+        "asr",
+        "tts"
+      ]
+    },
+    {
+      "profile": "helm-airgap",
+      "manifest_sha256": "5f23648b52301dbe9c7d7b7f76a4252e68510a7c1789ae36fd2fab94d698d038",
+      "checksums_sha256": "6d5336e71c373a867631ac596794d8ccf583201561e6ec5658b403d512a07b7e",
+      "declared_profile": "helm-airgap",
+      "declared_architecture": "amd64",
+      "missing_model_roles": [
+        "chat",
+        "vlm",
+        "verifier_1",
+        "verifier_2",
+        "judge",
+        "embedding",
+        "rerank",
+        "asr",
+        "tts"
+      ]
+    }
+  ],
+  "outbound_audit": [],
+  "checks": [
+    {
+      "name": "frozen_inputs_schema",
+      "status": "passed",
+      "details": "冻结输入 schema 和 hash 存在。",
+      "data": null
+    },
+    {
+      "name": "online_baseline",
+      "status": "passed",
+      "details": "线上模型工程基线 gate 通过，但 formal acceptance 仍按报告声明为 blocked。",
+      "data": {
+        "schema": "weknora-online-baseline/v1",
+        "status": "engineering_online_model_baseline",
+        "started_at": "2026-08-12T17:00:16.5883743+08:00",
+        "endpoint": "https://api.siliconflow.cn/v1",
+        "models": {
+          "chat": "Qwen/Qwen3.6-27B",
+          "verifier_1": "deepseek-ai/DeepSeek-V3.1-Terminus",
+          "verifier_2": "Qwen/Qwen3.5-9B",
+          "judge": "Qwen/Qwen3-32B",
+          "embedding": "Qwen/Qwen3-Embedding-4B",
+          "rerank": "BAAI/bge-reranker-v2-m3",
+          "asr": "FunAudioLLM/SenseVoiceSmall",
+          "tts": "FunAudioLLM/CosyVoice2-0.5B"
+        },
+        "model_endpoints": {
+          "chat": {
+            "model": "Qwen/Qwen3.6-27B",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          },
+          "verifier_1": {
+            "model": "deepseek-ai/DeepSeek-V3.1-Terminus",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          },
+          "verifier_2": {
+            "model": "Qwen/Qwen3.5-9B",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          },
+          "judge": {
+            "model": "Qwen/Qwen3-32B",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          },
+          "embedding": {
+            "model": "Qwen/Qwen3-Embedding-4B",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          },
+          "rerank": {
+            "model": "BAAI/bge-reranker-v2-m3",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          },
+          "asr": {
+            "model": "FunAudioLLM/SenseVoiceSmall",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          },
+          "tts": {
+            "model": "FunAudioLLM/CosyVoice2-0.5B",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          }
+        },
+        "probes": [
+          {
+            "name": "model_catalog",
+            "model": null,
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 479,
+            "details": {
+              "model_count": 91,
+              "selected": [
+                {
+                  "role": "chat",
+                  "model": "Qwen/Qwen3.6-27B",
+                  "available": true
+                },
+                {
+                  "role": "verifier_1",
+                  "model": "deepseek-ai/DeepSeek-V3.1-Terminus",
+                  "available": true
+                },
+                {
+                  "role": "verifier_2",
+                  "model": "Qwen/Qwen3.5-9B",
+                  "available": true
+                },
+                {
+                  "role": "judge",
+                  "model": "Qwen/Qwen3-32B",
+                  "available": true
+                },
+                {
+                  "role": "embedding",
+                  "model": "Qwen/Qwen3-Embedding-4B",
+                  "available": true
+                },
+                {
+                  "role": "rerank",
+                  "model": "BAAI/bge-reranker-v2-m3",
+                  "available": true
+                },
+                {
+                  "role": "asr",
+                  "model": "FunAudioLLM/SenseVoiceSmall",
+                  "available": true
+                },
+                {
+                  "role": "tts",
+                  "model": "FunAudioLLM/CosyVoice2-0.5B",
+                  "available": true
+                }
+              ]
+            },
+            "error": null
+          },
+          {
+            "name": "chat_chat",
+            "model": "Qwen/Qwen3.6-27B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 1733,
+            "details": {
+              "first_visible_ms": 251,
+              "chunk_count": 74,
+              "answer_chars": 128,
+              "answer_preview": "离线环境缺乏网络连通性，无法实时获取或更新资源，因此必须通过镜像摘要和权重校验和确保部署内容的完整性与一致性，防止因数据损坏或篡改导致服务异常。同时，验证模型端点位置能确保服务路由正确指向已验证的本地资源，从而在隔离环境中实现安全、可靠且可追溯的模型运行。"
+            },
+            "error": null
+          },
+          {
+            "name": "chat_verifier_1",
+            "model": "deepseek-ai/DeepSeek-V3.1-Terminus",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 26505,
+            "details": {
+              "first_visible_ms": 23121,
+              "chunk_count": 61,
+              "answer_chars": 106,
+              "answer_preview": "离线部署必须验证模型端点位置、镜像摘要和模型权重校验和，以确保部署的模型与预期版本完全一致，避免因环境差异或文件损坏导致运行错误。这三项验证共同保障了模型的可复现性、安全性和稳定性，防止潜在的数据泄露或性能异常。"
+            },
+            "error": null
+          },
+          {
+            "name": "chat_verifier_2",
+            "model": "Qwen/Qwen3.5-9B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 1045,
+            "details": {
+              "first_visible_ms": 489,
+              "chunk_count": 43,
+              "answer_chars": 79,
+              "answer_preview": "验证模型端点位置确保服务在正确的网络环境中运行，防止连接错误。校验镜像摘要和模型权重则分别保障部署环境的完整性与模型文件未被篡改，共同构建可信的离线安全防线。"
+            },
+            "error": null
+          },
+          {
+            "name": "chat_judge",
+            "model": "Qwen/Qwen3-32B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 19165,
+            "details": {
+              "first_visible_ms": 15201,
+              "chunk_count": 64,
+              "answer_chars": 99,
+              "answer_preview": "离线部署必须验证模型端点位置，以确保模型文件存储在正确且可访问的路径中。同时验证镜像摘要和模型权重校验和，是为了保证所使用的镜像和模型文件在传输和存储过程中未被篡改或损坏，确保部署的一致性和安全性。"
+            },
+            "error": null
+          },
+          {
+            "name": "embedding",
+            "model": "Qwen/Qwen3-Embedding-4B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 268,
+            "details": {
+              "dimension": 2560,
+              "expected_dimension": 2560
+            },
+            "error": null
+          },
+          {
+            "name": "rerank",
+            "model": "BAAI/bge-reranker-v2-m3",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 116,
+            "details": {
+              "result_count": 2,
+              "top_index": 0
+            },
+            "error": null
+          },
+          {
+            "name": "verification_verifier_1",
+            "model": "deepseek-ai/DeepSeek-V3.1-Terminus",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 14285,
+            "details": {
+              "first_visible_ms": 12425,
+              "chunk_count": 31,
+              "answer_chars": 46,
+              "answer_preview": "结论：不完整缺失项：未提及性能指标（如延迟、吞吐量）、量化精度损失、资源使用率（如显存占用）"
+            },
+            "error": null
+          },
+          {
+            "name": "verification_verifier_2",
+            "model": "Qwen/Qwen3.5-9B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 9206,
+            "details": {
+              "first_visible_ms": 3477,
+              "chunk_count": 131,
+              "answer_chars": 238,
+              "answer_preview": "结论：回答未覆盖问题要求，缺失关键指标。缺失项：1. **性能指标**：未提及延迟（Latency）、吞吐量（Throughput）或 QPS等核心性能验收口径。2. **资源指标**：未提及显存占用（VRAM Usage）或内存占用等量化部署特有的资源验收口径。3. **精度指标**：未提及量化后的模型精度（Accuracy/Top-1）与基线的一致性验收口径。4. **检查项缺失**：未给出具体的可操作检查项（如：对比基准测试脚本、显存监控命令、精度回归测试方法等）。"
+            },
+            "error": null
+          },
+          {
+            "name": "asr",
+            "model": "FunAudioLLM/SenseVoiceSmall",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 905,
+            "details": {
+              "transcript_chars": 22,
+              "transcript": "Hello, this is a test.",
+              "audio_bytes": 43088
+            },
+            "error": null
+          },
+          {
+            "name": "tts",
+            "model": "FunAudioLLM/CosyVoice2-0.5B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 404,
+            "details": {
+              "voice": "FunAudioLLM/CosyVoice2-0.5B:alex",
+              "format": "mp3",
+              "audio_bytes": 47743,
+              "output_file": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\online-baseline-v5\\online-tts-smoke.mp3"
+            },
+            "error": null
+          },
+          {
+            "name": "voice_answer",
+            "model": "Qwen/Qwen3.6-27B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 1117,
+            "details": {
+              "first_visible_ms": 974,
+              "chunk_count": 7,
+              "answer_chars": 22,
+              "answer_preview": "Hello! This is a test."
+            },
+            "error": null
+          },
+          {
+            "name": "voice_followup",
+            "model": "Qwen/Qwen3.6-27B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 750,
+            "details": {
+              "first_visible_ms": 216,
+              "chunk_count": 15,
+              "answer_chars": 26,
+              "answer_preview": "上一轮对话仅为简单的问候与测试确认，无实质信息重点。"
+            },
+            "error": null
+          }
+        ],
+        "verified_baseline": {
+          "status": "passed",
+          "scope": "online_model_contract_smoke",
+          "question": "比较线上模型基线与后续 2×48GB 内网量化部署时，哪些指标必须保持同一验收口径？请给出可操作的检查项。",
+          "distinct_model_count": 3,
+          "results": [
+            {
+              "name": "verification_verifier_1",
+              "model": "deepseek-ai/DeepSeek-V3.1-Terminus",
+              "endpoint": "https://api.siliconflow.cn/v1",
+              "status": "passed",
+              "elapsed_ms": 14285,
+              "details": {
+                "first_visible_ms": 12425,
+                "chunk_count": 31,
+                "answer_chars": 46,
+                "answer_preview": "结论：不完整缺失项：未提及性能指标（如延迟、吞吐量）、量化精度损失、资源使用率（如显存占用）"
+              },
+              "error": null
+            },
+            {
+              "name": "verification_verifier_2",
+              "model": "Qwen/Qwen3.5-9B",
+              "endpoint": "https://api.siliconflow.cn/v1",
+              "status": "passed",
+              "elapsed_ms": 9206,
+              "details": {
+                "first_visible_ms": 3477,
+                "chunk_count": 131,
+                "answer_chars": 238,
+                "answer_preview": "结论：回答未覆盖问题要求，缺失关键指标。缺失项：1. **性能指标**：未提及延迟（Latency）、吞吐量（Throughput）或 QPS等核心性能验收口径。2. **资源指标**：未提及显存占用（VRAM Usage）或内存占用等量化部署特有的资源验收口径。3. **精度指标**：未提及量化后的模型精度（Accuracy/Top-1）与基线的一致性验收口径。4. **检查项缺失**：未给出具体的可操作检查项（如：对比基准测试脚本、显存监控命令、精度回归测试方法等）。"
+              },
+              "error": null
+            }
+          ]
+        },
+        "voice_baseline": {
+          "status": "passed",
+          "scope": "online_model_endpoint_chain",
+          "asr_model": "FunAudioLLM/SenseVoiceSmall",
+          "tts_model": "FunAudioLLM/CosyVoice2-0.5B",
+          "voice": "FunAudioLLM/CosyVoice2-0.5B:alex",
+          "audio_file": "F:\\AI-Project\\WeKnora-development\\internal\\assets\\asr_test.wav",
+          "asr": {
+            "name": "asr",
+            "model": "FunAudioLLM/SenseVoiceSmall",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 905,
+            "details": {
+              "transcript_chars": 22,
+              "transcript": "Hello, this is a test.",
+              "audio_bytes": 43088
+            },
+            "error": null
+          },
+          "answer": {
+            "name": "voice_answer",
+            "model": "Qwen/Qwen3.6-27B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 1117,
+            "details": {
+              "first_visible_ms": 974,
+              "chunk_count": 7,
+              "answer_chars": 22,
+              "answer_preview": "Hello! This is a test."
+            },
+            "error": null
+          },
+          "tts": {
+            "name": "tts",
+            "model": "FunAudioLLM/CosyVoice2-0.5B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 404,
+            "details": {
+              "voice": "FunAudioLLM/CosyVoice2-0.5B:alex",
+              "format": "mp3",
+              "audio_bytes": 47743,
+              "output_file": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\online-baseline-v5\\online-tts-smoke.mp3"
+            },
+            "error": null
+          },
+          "followup": {
+            "name": "voice_followup",
+            "model": "Qwen/Qwen3.6-27B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 750,
+            "details": {
+              "first_visible_ms": 216,
+              "chunk_count": 15,
+              "answer_chars": 26,
+              "answer_preview": "上一轮对话仅为简单的问候与测试确认，无实质信息重点。"
+            },
+            "error": null
+          }
+        },
+        "formal_acceptance": {
+          "status": "blocked",
+          "reason": "应用级知识库、50 个独立会话、正式专家标注和线上目标仍需专用 WeKnora 测试环境。"
+        },
+        "completed_at": "2026-08-12T17:01:33.0799172+08:00",
+        "gate": "passed",
+        "integrity_sha256": "dc6a624f86924a71f22d3e94935d68411ef0b4d9d8e19b5b178beeb8ce194e8b"
+      }
+    },
+    {
+      "name": "model_identity_diff",
+      "status": "passed",
+      "details": "线上基线模型身份与冻结清单一致。",
+      "data": null
+    },
+    {
+      "name": "profile_desktop-lite",
+      "status": "blocked",
+      "details": "未提供 profile 报告。",
+      "data": null
+    },
+    {
+      "name": "profile_compose-airgap",
+      "status": "blocked",
+      "details": "未提供 profile 报告。",
+      "data": null
+    },
+    {
+      "name": "profile_helm-airgap",
+      "status": "blocked",
+      "details": "未提供 profile 报告。",
+      "data": null
+    },
+    {
+      "name": "frozen_input_consistency",
+      "status": "blocked",
+      "details": "三个 profile 报告尚未全部提供。",
+      "data": null
+    },
+    {
+      "name": "package_model_coverage",
+      "status": "blocked",
+      "details": "desktop-lite 缺少冻结清单中的模型角色：chat, vlm, verifier_1, verifier_2, judge, embedding, rerank, asr, tts。",
+      "data": [
+        "chat",
+        "vlm",
+        "verifier_1",
+        "verifier_2",
+        "judge",
+        "embedding",
+        "rerank",
+        "asr",
+        "tts"
+      ]
+    },
+    {
+      "name": "package_model_coverage",
+      "status": "blocked",
+      "details": "compose-airgap 缺少冻结清单中的模型角色：chat, vlm, verifier_1, verifier_2, judge, embedding, rerank, asr, tts。",
+      "data": [
+        "chat",
+        "vlm",
+        "verifier_1",
+        "verifier_2",
+        "judge",
+        "embedding",
+        "rerank",
+        "asr",
+        "tts"
+      ]
+    },
+    {
+      "name": "package_model_coverage",
+      "status": "blocked",
+      "details": "helm-airgap 缺少冻结清单中的模型角色：chat, vlm, verifier_1, verifier_2, judge, embedding, rerank, asr, tts。",
+      "data": [
+        "chat",
+        "vlm",
+        "verifier_1",
+        "verifier_2",
+        "judge",
+        "embedding",
+        "rerank",
+        "asr",
+        "tts"
+      ]
+    },
+    {
+      "name": "package_integrity",
+      "status": "passed",
+      "details": "三个 profile 均提供 manifest/checksums 摘要。",
+      "data": [
+        {
+          "profile": "desktop-lite",
+          "manifest_sha256": "c07d5f786722f027e772a0ccedcb5f52b3271f924fd64240eb7daa5ec62f3945",
+          "checksums_sha256": "92c99cf89457f14a45e378ae5868ec422f0fed689d205c89f00709a3fc3b4982",
+          "declared_profile": "desktop-lite",
+          "declared_architecture": "amd64",
+          "missing_model_roles": [
+            "chat",
+            "vlm",
+            "verifier_1",
+            "verifier_2",
+            "judge",
+            "embedding",
+            "rerank",
+            "asr",
+            "tts"
+          ]
+        },
+        {
+          "profile": "compose-airgap",
+          "manifest_sha256": "01cbf3013832e4c98543d2d9485d7c096f085d35b4062c0ee3f0cdd8b7113042",
+          "checksums_sha256": "770e1efd83eef480b8a4ddb0b8f78135eb1f02a6a1b157f98f520df3db0c5de2",
+          "declared_profile": "compose-airgap",
+          "declared_architecture": "amd64",
+          "missing_model_roles": [
+            "chat",
+            "vlm",
+            "verifier_1",
+            "verifier_2",
+            "judge",
+            "embedding",
+            "rerank",
+            "asr",
+            "tts"
+          ]
+        },
+        {
+          "profile": "helm-airgap",
+          "manifest_sha256": "5f23648b52301dbe9c7d7b7f76a4252e68510a7c1789ae36fd2fab94d698d038",
+          "checksums_sha256": "6d5336e71c373a867631ac596794d8ccf583201561e6ec5658b403d512a07b7e",
+          "declared_profile": "helm-airgap",
+          "declared_architecture": "amd64",
+          "missing_model_roles": [
+            "chat",
+            "vlm",
+            "verifier_1",
+            "verifier_2",
+            "judge",
+            "embedding",
+            "rerank",
+            "asr",
+            "tts"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "outbound_audit_diff",
+      "status": "blocked",
+      "details": "profile 报告未携带出站审计。",
+      "data": null
+    }
+  ],
+  "gate": "blocked",
+  "generated_at": "2026-08-12T09:28:07.7373587+00:00",
+  "integrity_sha256": "01c31f0499da494aff21a87920cce8aedda4e52168ced130c7dc1d4c7c73da5b"
+}

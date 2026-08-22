@@ -51,26 +51,42 @@ class ParserEngineRegistry:
     def get_parser_class(self, engine: str, file_type: str) -> Type[BaseParser]:
         """Resolve parser class for the given engine and file type.
 
-        Falls back to builtin engine when the requested engine doesn't
-        support the file type.
+        Falls back to the builtin engine when the requested engine doesn't
+        support the file type. If builtin also lacks support, searches other
+        registered engines (e.g. markitdown for pptx).
         """
         ft = file_type.lower()
+        requested = engine or BUILTIN_ENGINE
 
-        if engine and engine in self._engines:
-            cls = self._engines[engine].get(ft)
+        if requested in self._engines:
+            cls = self._engines[requested].get(ft)
             if cls:
-                logger.info("Using engine '%s' for file type '%s'", engine, ft)
+                logger.info("Using engine '%s' for file type '%s'", requested, ft)
                 return cls
-            logger.info(
-                "Engine '%s' does not support '%s', falling back to builtin",
-                engine,
-                ft,
-            )
+            if requested != BUILTIN_ENGINE:
+                logger.info(
+                    "Engine '%s' does not support '%s', falling back to builtin",
+                    requested,
+                    ft,
+                )
 
         builtin = self._engines.get(BUILTIN_ENGINE, {})
         cls = builtin.get(ft)
         if cls:
             return cls
+
+        for name, parsers in self._engines.items():
+            if name in {requested, BUILTIN_ENGINE}:
+                continue
+            cls = parsers.get(ft)
+            if cls:
+                logger.info(
+                    "File type '%s' not supported by '%s', using engine '%s'",
+                    ft,
+                    requested,
+                    name,
+                )
+                return cls
 
         raise ValueError(f"Unsupported file type: {file_type}")
 
@@ -149,10 +165,9 @@ def _build_default_registry() -> ParserEngineRegistry:
         description="MarkItDown 解析引擎（微软 MarkItDown 库）",
     )
 
-    # NOTE: Engine listing is managed by Go-side engine registry
-    # (docparser.ListAllEngines). The Python list_engines method is kept for
-    # backward compatibility with the gRPC ListEngines RPC but the Go app
-    # no longer calls it. MinerU engines are handled natively by Go.
+    # NOTE: builtin and markitdown are also registered in Go (docparser.ListAllEngines).
+    # list_engines remains for gRPC ListEngines RPC compatibility. MinerU engines
+    # are handled natively by Go.
 
     return reg
 

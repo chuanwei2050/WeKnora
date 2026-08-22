@@ -34,6 +34,10 @@ const (
 
 // Knowledge parse status constants
 const (
+	// ParseStatusDraft indicates governed knowledge has not been submitted for review
+	ParseStatusDraft = "draft"
+	// ParseStatusPendingReview indicates governed knowledge is waiting for approval
+	ParseStatusPendingReview = "pending_review"
 	// ParseStatusPending indicates the knowledge is waiting to be processed
 	ParseStatusPending = "pending"
 	// ParseStatusProcessing indicates the knowledge is being processed
@@ -42,6 +46,8 @@ const (
 	ParseStatusCompleted = "completed"
 	// ParseStatusFailed indicates the knowledge processing failed
 	ParseStatusFailed = "failed"
+	// ParseStatusRejected indicates the governed knowledge version was rejected
+	ParseStatusRejected = "rejected"
 	// ParseStatusDeleting indicates the knowledge is being deleted (used to prevent async task conflicts)
 	ParseStatusDeleting = "deleting"
 )
@@ -77,6 +83,8 @@ type Knowledge struct {
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id"`
+	// CreatedBy is the original contributor. It is immutable after creation.
+	CreatedBy string `json:"created_by" gorm:"type:varchar(36);index"`
 	// Optional tag ID for categorization within a knowledge base
 	TagID string `json:"tag_id"             gorm:"type:varchar(36);index"`
 	// Type of the knowledge
@@ -97,6 +105,9 @@ type Knowledge struct {
 	EnableStatus string `json:"enable_status"`
 	// ID of the embedding model
 	EmbeddingModelID string `json:"embedding_model_id"`
+	// EmbeddingCompatibilityID and EmbeddingDimension snapshot the vector space used to index this document.
+	EmbeddingCompatibilityID string `json:"embedding_compatibility_id" gorm:"type:varchar(128);not null;default:''"`
+	EmbeddingDimension       int    `json:"embedding_dimension" gorm:"not null;default:0"`
 	// File name of the knowledge
 	FileName string `json:"file_name"`
 	// File type of the knowledge
@@ -105,6 +116,10 @@ type Knowledge struct {
 	FileSize int64 `json:"file_size"`
 	// File hash of the knowledge
 	FileHash string `json:"file_hash"`
+	// Current governed version. Empty for legacy, non-governed knowledge bases.
+	CurrentVersionID string `json:"current_version_id,omitempty" gorm:"type:varchar(36);index"`
+	// Pending governed version receives parsed chunks without replacing the current version.
+	PendingVersionID string `json:"pending_version_id,omitempty" gorm:"type:varchar(36);index"`
 	// File path of the knowledge
 	FilePath string `json:"file_path"`
 	// Storage size of the knowledge

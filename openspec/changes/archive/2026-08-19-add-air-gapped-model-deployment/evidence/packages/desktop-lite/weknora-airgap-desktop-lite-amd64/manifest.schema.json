@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "weknora-airgap/v1",
+  "type": "object",
+  "required": ["schema", "profile", "architecture", "components", "models", "artifacts", "checksums"],
+  "properties": {
+    "schema": { "const": "weknora-airgap/v1" },
+    "profile": { "enum": ["desktop-lite", "compose-airgap", "helm-airgap"] },
+    "architecture": { "enum": ["amd64", "arm64"] },
+    "components": { "type": "array", "items": { "$ref": "#/$defs/component" } },
+    "models": { "type": "array", "items": { "$ref": "#/$defs/model" } },
+    "artifacts": { "type": "array", "items": { "$ref": "#/$defs/artifact" } },
+    "checksums": { "type": "array", "items": { "$ref": "#/$defs/checksum" } },
+    "secrets": { "type": "object", "additionalProperties": false, "properties": { "injected": { "type": "boolean" }, "excluded": { "type": "boolean" } } }
+  },
+  "$defs": {
+    "component": { "type": "object", "required": ["name", "location", "source", "license"], "properties": { "name": { "type": "string" }, "location": { "enum": ["same-host", "private-network", "unknown"] }, "source": { "type": "string" }, "license": { "type": "string" } } },
+    "model": { "type": "object", "required": ["role", "protocol", "location", "artifact_policy", "model_name", "license", "redistributable", "import_steps"], "properties": { "role": { "type": "string" }, "protocol": { "type": "string" }, "location": { "enum": ["same-host", "private-network", "public", "unknown"] }, "artifact_policy": { "enum": ["preloaded-only", "allow-download"] }, "model_name": { "type": "string" }, "license": { "type": "string" }, "redistributable": { "type": "boolean" }, "artifact_included": { "type": "boolean" }, "artifact_path": { "type": "string" }, "artifact_sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" }, "import_steps": { "type": "array", "items": { "type": "string" } } } },
+    "artifact": { "type": "object", "required": ["path", "source", "architecture", "sha256"], "properties": { "path": { "type": "string" }, "source": { "type": "string" }, "architecture": { "type": "string" }, "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" } } },
+    "checksum": { "type": "object", "required": ["path", "sha256"], "properties": { "path": { "type": "string" }, "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" } } }
+  }
+}

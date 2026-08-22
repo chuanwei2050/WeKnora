@@ -51,6 +51,7 @@ type CreateKnowledgeQARequest struct {
 	Images            []ImageAttachment      `json:"images"`                                // Attached images for multimodal chat
 	AttachmentUploads []AttachmentUpload     `json:"attachment_uploads,omitempty"`          // Attached files (documents, audio, etc.)
 	Channel           string                 `json:"channel"`                               // Source channel: "web", "api", "im", etc.
+	VoiceMetadata     map[string]string      `json:"voice_metadata,omitempty"`
 }
 
 // AttachmentUpload represents a file attachment upload from the client

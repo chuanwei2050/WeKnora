@@ -75,6 +75,11 @@ type WebSearchProviderParameters struct {
 	ProxyURL string `yaml:"proxy_url" json:"proxy_url,omitempty"`
 	// Provider-specific extra configuration for future extensibility
 	ExtraConfig map[string]string `yaml:"extra_config" json:"extra_config,omitempty"`
+	// ApprovedEndpointID selects an administrator-approved search endpoint for
+	// private deployments. The resolved endpoint is injected at runtime and is
+	// never persisted in the provider parameters.
+	ApprovedEndpointID string            `yaml:"approved_endpoint_id,omitempty" json:"approved_endpoint_id,omitempty"`
+	ApprovedEndpoint   *ApprovedEndpoint `yaml:"-" json:"-" gorm:"-"`
 }
 
 // Value implements the driver.Valuer interface.

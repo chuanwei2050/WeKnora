@@ -2,7 +2,9 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +31,11 @@ type AgentStreamHandler struct {
 	knowledgeRefs   []*types.SearchResult
 	finalAnswer     string
 	eventStartTimes map[string]time.Time // Track start time for duration calculation
+	acceptedAt      time.Time
+	firstVisibleAt  *time.Time
+	completedAt     *time.Time
+	timingError     string
+	timedOut        bool
 	mu              sync.Mutex
 }
 
@@ -50,6 +57,22 @@ func NewAgentStreamHandler(
 		eventBus:           eventBus,
 		knowledgeRefs:      make([]*types.SearchResult, 0),
 		eventStartTimes:    make(map[string]time.Time),
+		acceptedAt:         time.Now().UTC(),
+	}
+}
+
+func (h *AgentStreamHandler) persistResponseTimingLocked() {
+	if h.assistantMessage == nil {
+		return
+	}
+	timing := types.AcceptanceRequestTiming{
+		AcceptedAt: h.acceptedAt, FirstVisibleAt: h.firstVisibleAt, CompletedAt: h.completedAt,
+		TimedOut: h.timedOut, Error: h.timingError,
+	}
+	timing.TTFTMS, _ = timing.TTFTMillis()
+	data, err := json.Marshal(timing)
+	if err == nil {
+		h.assistantMessage.ResponseTiming = types.JSON(data)
 	}
 }
 
@@ -269,6 +292,7 @@ func (h *AgentStreamHandler) handleReferences(ctx context.Context, evt event.Eve
 		Timestamp: time.Now(),
 		Data: map[string]interface{}{
 			"references": types.References(h.knowledgeRefs),
+			"extra":      data.Extra,
 		},
 	}); err != nil {
 		logger.GetLogger(h.ctx).Error("Append references event to stream failed", "error", err)
@@ -292,6 +316,10 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 
 	// Accumulate final answer locally for assistant message (database)
 	h.finalAnswer += data.Content
+	if h.firstVisibleAt == nil && strings.TrimSpace(data.Content) != "" {
+		now := time.Now().UTC()
+		h.firstVisibleAt = &now
+	}
 	if data.IsFallback {
 		h.assistantMessage.IsFallback = true
 	}
@@ -337,6 +365,26 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 
 // handleReflection handles agent reflection events
 func (h *AgentStreamHandler) handleReflection(ctx context.Context, evt event.Event) error {
+	if data, ok := evt.Data.(types.VerificationStageEvent); ok {
+		encoded, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		var metadata map[string]interface{}
+		if err := json.Unmarshal(encoded, &metadata); err != nil {
+			return err
+		}
+		if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+			ID:        evt.ID,
+			Type:      types.ResponseTypeReflection,
+			Done:      data.Status == "completed" || data.Status == "degraded",
+			Timestamp: time.Now(),
+			Data:      metadata,
+		}); err != nil {
+			logger.GetLogger(h.ctx).Error("Append verification stage event to stream failed", "error", err)
+		}
+		return nil
+	}
 	data, ok := evt.Data.(event.AgentReflectionData)
 	if !ok {
 		return nil
@@ -368,6 +416,11 @@ func (h *AgentStreamHandler) handleError(ctx context.Context, evt event.Event) e
 		"stage": data.Stage,
 		"error": data.Error,
 	}
+	h.mu.Lock()
+	h.timingError = data.Error
+	h.timedOut = strings.Contains(strings.ToLower(data.Error), "timeout") || strings.Contains(strings.ToLower(data.Error), "deadline exceeded")
+	h.persistResponseTimingLocked()
+	h.mu.Unlock()
 
 	// Append error event to stream
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
@@ -421,6 +474,9 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	now := time.Now().UTC()
+	h.completedAt = &now
+	h.persistResponseTimingLocked()
 
 	// Update assistant message with final data
 	if data.MessageID == h.assistantMessageID {
@@ -499,6 +555,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		Data: map[string]interface{}{
 			"total_steps":       data.TotalSteps,
 			"total_duration_ms": data.TotalDurationMs,
+			"extra":             data.Extra,
 		},
 	}); err != nil {
 		logger.GetLogger(h.ctx).Errorf("Append complete event to stream failed: %v", err)

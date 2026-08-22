@@ -1,3 +1,5 @@
+import { getRuntimeMode, hasEmbeddedScope } from './embedded-runtime'
+
 type BidReviewSession = {
   user?: unknown
   tenant?: unknown
@@ -42,6 +44,7 @@ export function isBidReviewEmbeddedMode(): boolean {
 }
 
 export function canManageBidReviewKnowledge(): boolean {
+  if (getRuntimeMode() === 'embedded-page') return hasEmbeddedScope('knowledge:write')
   if (!isBidReviewEmbeddedMode()) return true
   const role = localStorage.getItem(BIDREVIEW_ROLE_KEY)
   return role === 'tenant_admin' || role === 'platform_admin'

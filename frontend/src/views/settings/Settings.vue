@@ -42,19 +42,6 @@
                       <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                       <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                     </svg>
-                    <!-- WeKnora Cloud 使用自定义 W 图标 -->
-                    <svg
-                      v-else-if="item.key === 'weknoracloud'"
-                      width="18"
-                      height="18"
-                      viewBox="0 0 18 18"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      class="nav-icon"
-                    >
-                      <rect x="1.5" y="1.5" width="15" height="15" rx="3.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
-                      <path d="M4.5 5.5L6.5 12.5L9 7.5L11.5 12.5L13.5 5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                    </svg>
                     <t-icon v-else :name="item.icon" class="nav-icon" />
                     <span class="nav-label">{{ item.label }}</span>
                     <t-icon 
@@ -86,7 +73,7 @@
 
             <!-- 右侧内容区域 -->
             <div class="settings-content">
-              <div class="content-wrapper">
+              <div class="content-wrapper" :class="{ 'content-wrapper--review': currentSection === 'graph-triples' }">
                 <!-- 常规设置 -->
                 <div v-if="currentSection === 'general'" class="section">
                   <GeneralSettings />
@@ -95,11 +82,6 @@
                 <!-- Ollama 设置 -->
                 <div v-if="currentSection === 'ollama'" class="section">
                   <OllamaSettings />
-                </div>
-
-                <!-- WeKnora Cloud -->
-                <div v-if="currentSection === 'weknoracloud'" class="section">
-                  <WeKnoraCloudSettings />
                 </div>
 
                 <!-- 模型配置 -->
@@ -151,6 +133,21 @@
                 <div v-if="currentSection === 'mcp'" class="section">
                   <McpSettings />
                 </div>
+
+                <!-- 回答反馈审核 -->
+                <div v-if="currentSection === 'feedback'" class="section">
+                  <FeedbackReview />
+                </div>
+
+                <!-- 图三元组审核（独立于知识版本治理） -->
+                <div v-if="currentSection === 'graph-triples'" class="section">
+                  <GraphTripleReview />
+                </div>
+
+                <!-- 验收评测 -->
+                <div v-if="currentSection === 'acceptance'" class="section">
+                  <AcceptanceReview />
+                </div>
               </div>
             </div>
           </div>
@@ -164,6 +161,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
+import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 import SystemInfo from './SystemInfo.vue'
 import TenantInfo from './TenantInfo.vue'
@@ -177,12 +175,15 @@ import ChatHistorySettings from './ChatHistorySettings.vue'
 import VectorStoreSettings from './VectorStoreSettings.vue'
 import ParserEngineSettings from './ParserEngineSettings.vue'
 import StorageEngineSettings from './StorageEngineSettings.vue'
-import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
 import { isBidReviewEmbeddedMode } from '@/utils/bidreview-sso'
+import FeedbackReview from './FeedbackReview.vue'
+import GraphTripleReview from './GraphTripleReview.vue'
+import AcceptanceReview from './AcceptanceReview.vue'
 
 const route = useRoute()
 const router = useRouter()
 const uiStore = useUIStore()
+const authStore = useAuthStore()
 const { t } = useI18n()
 
 const currentSection = ref<string>('general')
@@ -190,11 +191,16 @@ const currentSubSection = ref<string>('')
 const expandedMenus = ref<string[]>([])
 const isBidReviewEmbedded = computed(() => isBidReviewEmbeddedMode())
 
-const navItems = computed(() => {
-  const items = [
+type SettingsNavItem = {
+  key: string
+  icon: string
+  label: string
+  children?: Array<{ key: string; label: string }>
+}
+
+const navItems = computed<SettingsNavItem[]>(() => {
+  const items: SettingsNavItem[] = [
     { key: 'general', icon: 'setting', label: t('general.title') },
-    { key: 'ollama', icon: 'server', label: 'Ollama' },
-    { key: 'weknoracloud', icon: '', label: 'WeKnora Cloud' },
     { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
     { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig')  },
     { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
@@ -204,9 +210,27 @@ const navItems = computed(() => {
     { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
     { key: 'system', icon: 'info-circle', label: t('settings.systemSettings') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
-    { key: 'api', icon: 'secured', label: t('settings.apiInfo') }
+    { key: 'api', icon: 'secured', label: t('settings.apiInfo') },
+    { key: 'feedback', icon: 'check-circle', label: t('settings.graphTripleReview.feedbackNav') },
+    { key: 'graph-triples', icon: 'relation', label: t('settings.graphTripleReview.nav') },
+    { key: 'acceptance', icon: 'chart-line', label: t('settings.graphTripleReview.acceptanceNav') }
   ]
-  return items
+  const role = authStore.user?.role === 'platform_admin' && authStore.workspaceMode === 'tenant'
+    ? 'tenant_admin'
+    : authStore.user?.role || 'member'
+  if (role === 'platform_admin') {
+    const platformSections = new Set(['general', 'ollama', 'models', 'websearch', 'vectorstore', 'parser', 'storage', 'mcp', 'system'])
+    return items.filter(item => platformSections.has(item.key))
+  }
+  if (role === 'tenant_admin') {
+    const tenantAdminSections = new Set(['general', 'tenant', 'api', 'feedback', 'graph-triples', 'acceptance'])
+    return items.filter(item => tenantAdminSections.has(item.key))
+  }
+  // Chat history indexing depends on tenant-owned hidden knowledge bases and
+  // is not a platform infrastructure setting; do not expose its legacy
+  // tenant-level editor while system settings are platform-owned.
+  const memberSections = new Set(['general'])
+  return items.filter(item => memberSections.has(item.key))
 })
 
 // 导航项点击处理
@@ -263,8 +287,13 @@ const handleClose = () => {
 // 监听初始导航设置
 watch(() => uiStore.settingsInitialSection, (section) => {
   if (section && visible.value) {
-    currentSection.value = section
     const navItem = (navItems.value as any[]).find((item) => item.key === section)
+    if (!navItem) {
+      currentSection.value = navItems.value[0]?.key || 'general'
+      currentSubSection.value = ''
+      return
+    }
+    currentSection.value = section
     if (navItem && navItem.children && navItem.children.length > 0) {
       if (!expandedMenus.value.includes(section)) {
         expandedMenus.value.push(section)
@@ -294,7 +323,7 @@ const handleEscape = (e: KeyboardEvent) => {
 // 处理快捷导航事件
 const handleSettingsNav = (e: CustomEvent) => {
   const { section, subsection } = e.detail
-  if (section) {
+  if (section && navItems.value.some(item => item.key === section)) {
     currentSection.value = section
     // 如果有子菜单，自动展开
     const navItem = (navItems.value as any[]).find((item: any) => item.key === section)
@@ -309,6 +338,9 @@ const handleSettingsNav = (e: CustomEvent) => {
 }
 
 onMounted(() => {
+  if (!navItems.value.some(item => item.key === currentSection.value)) {
+    currentSection.value = navItems.value[0]?.key || 'general'
+  }
   window.addEventListener('keydown', handleEscape)
   window.addEventListener('settings-nav', handleSettingsNav as EventListener)
 })
@@ -519,6 +551,11 @@ onUnmounted(() => {
 .content-wrapper {
   max-width: 600px;
   padding: 40px 48px;
+}
+
+.content-wrapper--review {
+  max-width: none;
+  padding: 32px 32px 40px;
 }
 
 .section {

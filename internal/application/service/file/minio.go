@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -26,11 +27,15 @@ type minioFileService struct {
 // newMinioClient creates a bare minioFileService with just the SDK client initialised.
 // Shared by NewMinioFileService (which also ensures the bucket exists) and
 // CheckMinioConnectivity (read-only probe).
-func newMinioClient(endpoint, accessKeyID, secretAccessKey, bucketName string, useSSL bool) (*minioFileService, error) {
-	client, err := minio.New(endpoint, &minio.Options{
+func newMinioClient(endpoint, accessKeyID, secretAccessKey, bucketName string, useSSL bool, httpClients ...*http.Client) (*minioFileService, error) {
+	options := &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
 		Secure: useSSL,
-	})
+	}
+	if len(httpClients) > 0 && httpClients[0] != nil {
+		options.Transport = httpClients[0].Transport
+	}
+	client, err := minio.New(endpoint, options)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize MinIO client: %w", err)
 	}
@@ -41,8 +46,9 @@ func newMinioClient(endpoint, accessKeyID, secretAccessKey, bucketName string, u
 // It verifies that the bucket exists and creates it if missing.
 func NewMinioFileService(endpoint,
 	accessKeyID, secretAccessKey, bucketName string, useSSL bool,
+	httpClients ...*http.Client,
 ) (interfaces.FileService, error) {
-	svc, err := newMinioClient(endpoint, accessKeyID, secretAccessKey, bucketName, useSSL)
+	svc, err := newMinioClient(endpoint, accessKeyID, secretAccessKey, bucketName, useSSL, httpClients...)
 	if err != nil {
 		return nil, err
 	}

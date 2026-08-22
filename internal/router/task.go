@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	apputils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/hibiken/asynq"
 	"go.uber.org/dig"
 )
@@ -27,6 +28,7 @@ type AsynqTaskParams struct {
 	DataTableSummary     interfaces.TaskHandler `name:"dataTableSummary"`
 	ImageMultimodal      interfaces.TaskHandler `name:"imageMultimodal"`
 	KnowledgePostProcess interfaces.TaskHandler `name:"knowledgePostProcess"`
+	KnowledgePublish     interfaces.TaskHandler `name:"knowledgePublish"`
 	WikiIngest           interfaces.TaskHandler `name:"wikiIngest"`
 }
 
@@ -86,6 +88,7 @@ func NewAsynqServer() *asynq.Server {
 	srv := asynq.NewServer(
 		opt,
 		asynq.Config{
+			Concurrency: apputils.AsynqConcurrency(),
 			Queues: map[string]int{
 				"critical": 6, // Highest priority queue
 				"default":  3, // Default priority queue
@@ -148,6 +151,7 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 
 	// Register knowledge post process handler
 	mux.HandleFunc(types.TypeKnowledgePostProcess, params.KnowledgePostProcess.Handle)
+	mux.HandleFunc(types.TypeKnowledgePublish, params.KnowledgePublish.Handle)
 
 	// Register data source sync handler
 	mux.HandleFunc(types.TypeDataSourceSync, params.DataSourceService.ProcessSync)

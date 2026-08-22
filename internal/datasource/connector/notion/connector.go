@@ -40,7 +40,10 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 		return err
 	}
 
-	client := newClient(notionCfg.APIKey, extractBaseURL(config))
+	client, err := newClientWithEndpoint(notionCfg.APIKey, extractBaseURL(config), config.ApprovedEndpoint)
+	if err != nil {
+		return fmt.Errorf("notion approved endpoint: %w", err)
+	}
 	return client.Ping(ctx)
 }
 
@@ -53,7 +56,10 @@ func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceC
 		return nil, err
 	}
 
-	client := newClient(notionCfg.APIKey, extractBaseURL(config))
+	client, err := newClientWithEndpoint(notionCfg.APIKey, extractBaseURL(config), config.ApprovedEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("notion approved endpoint: %w", err)
+	}
 	pages, err := client.SearchPages(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("search notion pages: %w", err)
@@ -113,7 +119,10 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 		return nil, err
 	}
 
-	client := newClient(notionCfg.APIKey, extractBaseURL(config))
+	client, err := newClientWithEndpoint(notionCfg.APIKey, extractBaseURL(config), config.ApprovedEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("notion approved endpoint: %w", err)
+	}
 	visited := c.excludedSetFromListResources(ctx, config, resourceIDs)
 	var allItems []types.FetchedItem
 
@@ -149,7 +158,10 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		return nil, nil, fmt.Errorf("no resource IDs configured")
 	}
 
-	client := newClient(notionCfg.APIKey, extractBaseURL(config))
+	client, err := newClientWithEndpoint(notionCfg.APIKey, extractBaseURL(config), config.ApprovedEndpoint)
+	if err != nil {
+		return nil, nil, fmt.Errorf("notion approved endpoint: %w", err)
+	}
 
 	// Parse previous cursor
 	var prevCursor notionCursor

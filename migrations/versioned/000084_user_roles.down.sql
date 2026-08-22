@@ -1,0 +1,3 @@
+ALTER TABLE users DROP CONSTRAINT IF EXISTS chk_users_role;
+DROP INDEX IF EXISTS idx_users_role;
+ALTER TABLE users DROP COLUMN IF EXISTS role;

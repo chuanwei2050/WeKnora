@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/transport"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -54,6 +56,13 @@ type NvidiaEmbedResponse struct {
 func NewNvidiaEmbedder(apiKey, baseURL, modelName string,
 	dimensions int, modelID string, pooler EmbedderPooler,
 ) (*NvidiaEmbedder, error) {
+	return NewNvidiaEmbedderWithValidation(apiKey, baseURL, modelName, dimensions, modelID, pooler, nil)
+}
+
+func NewNvidiaEmbedderWithValidation(apiKey, baseURL, modelName string,
+	dimensions int, modelID string, pooler EmbedderPooler,
+	validateIP func(net.IP) error,
+) (*NvidiaEmbedder, error) {
 	if baseURL == "" {
 		baseURL = "https://integrate.api.nvidia.com/v1"
 	}
@@ -65,8 +74,9 @@ func NewNvidiaEmbedder(apiKey, baseURL, modelName string,
 	timeout := 60 * time.Second
 
 	// Create HTTP client
-	client := &http.Client{
-		Timeout: timeout,
+	client, err := transport.NewEndpointHTTPClientWithValidation(baseURL, timeout, validateIP)
+	if err != nil {
+		return nil, fmt.Errorf("invalid embedding endpoint: %w", err)
 	}
 
 	return &NvidiaEmbedder{

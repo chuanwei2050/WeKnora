@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/transport"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -54,6 +56,13 @@ type JinaEmbedResponse struct {
 func NewJinaEmbedder(apiKey, baseURL, modelName string,
 	truncatePromptTokens int, dimensions int, modelID string, pooler EmbedderPooler,
 ) (*JinaEmbedder, error) {
+	return NewJinaEmbedderWithValidation(apiKey, baseURL, modelName, truncatePromptTokens, dimensions, modelID, pooler, nil)
+}
+
+func NewJinaEmbedderWithValidation(apiKey, baseURL, modelName string,
+	truncatePromptTokens int, dimensions int, modelID string, pooler EmbedderPooler,
+	validateIP func(net.IP) error,
+) (*JinaEmbedder, error) {
 	if baseURL == "" {
 		baseURL = "https://api.jina.ai/v1"
 	}
@@ -65,8 +74,9 @@ func NewJinaEmbedder(apiKey, baseURL, modelName string,
 	timeout := 60 * time.Second
 
 	// Create HTTP client
-	client := &http.Client{
-		Timeout: timeout,
+	client, err := transport.NewEndpointHTTPClientWithValidation(baseURL, timeout, validateIP)
+	if err != nil {
+		return nil, fmt.Errorf("invalid embedding endpoint: %w", err)
 	}
 
 	return &JinaEmbedder{

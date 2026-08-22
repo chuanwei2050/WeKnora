@@ -2,6 +2,7 @@ package asr
 
 import (
 	"context"
+	"net"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -28,6 +29,30 @@ type ASR interface {
 	GetModelID() string
 }
 
+// StreamingASR is optional. Batch-only providers continue to implement ASR.
+type StreamingASR interface {
+	ASR
+	SupportsStreaming() bool
+}
+
+// StreamingSession is deliberately small so a provider can add true
+// incremental decoding without changing the WebSocket protocol.
+type StreamingSession interface {
+	Write([]byte) error
+	Finalize(context.Context) (*TranscriptionResult, error)
+	Close() error
+}
+
+type PartialStreamingSession interface {
+	StreamingSession
+	Partial(context.Context) (*TranscriptionResult, error)
+}
+
+type StreamingSessionFactory interface {
+	StreamingASR
+	NewStreamingSession(context.Context) (StreamingSession, error)
+}
+
 // Config holds the configuration needed to create an ASR instance.
 type Config struct {
 	Source    types.ModelSource
@@ -38,6 +63,8 @@ type Config struct {
 	Language  string // optional: specify language for transcription
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
+	Streaming     bool
+	ValidateIP    func(net.IP) error
 }
 
 // ConfigFromModel 根据 types.Model 构造 asr.Config。
@@ -54,6 +81,7 @@ func ConfigFromModel(m *types.Model) *Config {
 		ModelName:     m.Name,
 		Source:        m.Source,
 		CustomHeaders: m.Parameters.CustomHeaders,
+		Streaming:     m.Parameters.Capabilities.Streaming,
 	}
 }
 

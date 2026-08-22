@@ -4,18 +4,19 @@ services:
     build:
       context: ./frontend
       args:
-        - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+        - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-2047}
     container_name: WeKnora-frontend
     ports:
       - "${FRONTEND_PORT:-80}:80"
     environment:
-      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-2047}
       - APP_HOST=${APP_HOST:-app}
       # APP_BACKEND_PORT: the port NGINX proxies to (default 8080).
       # For local deployment this is the App container's listening port, independent of host-mapped APP_PORT.
       # For remote deployment, set this to the remote App's service port.
       - APP_PORT=${APP_BACKEND_PORT:-8080}
       - APP_SCHEME=${APP_SCHEME:-http}
+      - FRAME_ANCESTORS=${FRAME_ANCESTORS:-'self'}
     # NOTE: If using a remote App backend, comment out or remove the depends_on
     # block below and set APP_HOST/APP_BACKEND_PORT/APP_SCHEME in your .env file.
     depends_on:
@@ -32,6 +33,9 @@ services:
       dockerfile: docker/Dockerfile.app
       args:
         - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
+        - APT_MIRROR_ARG=${APT_MIRROR:-}
+        - GOPROXY_ARG=${GOPROXY_ARG:-https://proxy.golang.org,direct}
+        - UV_IMAGE=${UV_IMAGE:-ghcr.io/astral-sh/uv@sha256:75bc2f1d328b6d5bf38bf7120dcfebf619b932bd78570c8ea1ae93db25b25ace}
     container_name: WeKnora-app
     ports:
       - "${APP_PORT:-8080}:8080"
@@ -57,7 +61,11 @@ services:
       - COS_PATH_PREFIX=${COS_PATH_PREFIX:-}
       - COS_ENABLE_OLD_DOMAIN=${COS_ENABLE_OLD_DOMAIN:-}
       - GIN_MODE=${GIN_MODE:-release}
-      - DISABLE_REGISTRATION=${DISABLE_REGISTRATION:-false}
+      - DISABLE_REGISTRATION=${DISABLE_REGISTRATION:-true}
+      - DEFAULT_ADMIN_ENABLED=${DEFAULT_ADMIN_ENABLED:-true}
+      - DEFAULT_ADMIN_USERNAME=${DEFAULT_ADMIN_USERNAME:-admin}
+      - DEFAULT_ADMIN_EMAIL=${DEFAULT_ADMIN_EMAIL:-admin@weknora.local}
+      - DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD:-Admin@123456}
       - DB_DRIVER=postgres
       - DB_HOST=postgres
       - DB_PORT=5432
@@ -66,6 +74,93 @@ services:
       - DB_NAME=${DB_NAME:-}
       - TZ=${TZ:-Asia/Shanghai}
       - WEKNORA_LANGUAGE=${WEKNORA_LANGUAGE:-zh-CN}
+      # Default online/offline model profiles seeded on first deployment.
+      - MODEL_PROFILE=${MODEL_PROFILE:-online}
+      - ONLINE_MODEL_PROVIDER=${ONLINE_MODEL_PROVIDER:-}
+      - ONLINE_MODEL_BASE_URL=${ONLINE_MODEL_BASE_URL:-}
+      - ONLINE_MODEL_API_KEY=${ONLINE_MODEL_API_KEY:-}
+      - ONLINE_LLM_MODEL_NAME=${ONLINE_LLM_MODEL_NAME:-}
+      - ONLINE_LLM_MODEL_SOURCE=${ONLINE_LLM_MODEL_SOURCE:-}
+      - ONLINE_LLM_MODEL_BASE_URL=${ONLINE_LLM_MODEL_BASE_URL:-}
+      - ONLINE_LLM_MODEL_API_KEY=${ONLINE_LLM_MODEL_API_KEY:-}
+      - ONLINE_VERIFIER_MODEL_1_NAME=${ONLINE_VERIFIER_MODEL_1_NAME:-}
+      - ONLINE_VERIFIER_MODEL_1_SOURCE=${ONLINE_VERIFIER_MODEL_1_SOURCE:-}
+      - ONLINE_VERIFIER_MODEL_1_BASE_URL=${ONLINE_VERIFIER_MODEL_1_BASE_URL:-}
+      - ONLINE_VERIFIER_MODEL_1_API_KEY=${ONLINE_VERIFIER_MODEL_1_API_KEY:-}
+      - ONLINE_VERIFIER_MODEL_2_NAME=${ONLINE_VERIFIER_MODEL_2_NAME:-}
+      - ONLINE_VERIFIER_MODEL_2_SOURCE=${ONLINE_VERIFIER_MODEL_2_SOURCE:-}
+      - ONLINE_VERIFIER_MODEL_2_BASE_URL=${ONLINE_VERIFIER_MODEL_2_BASE_URL:-}
+      - ONLINE_VERIFIER_MODEL_2_API_KEY=${ONLINE_VERIFIER_MODEL_2_API_KEY:-}
+      - ONLINE_EVALUATION_JUDGE_MODEL_NAME=${ONLINE_EVALUATION_JUDGE_MODEL_NAME:-}
+      - ONLINE_EVALUATION_JUDGE_MODEL_SOURCE=${ONLINE_EVALUATION_JUDGE_MODEL_SOURCE:-}
+      - ONLINE_EVALUATION_JUDGE_MODEL_BASE_URL=${ONLINE_EVALUATION_JUDGE_MODEL_BASE_URL:-}
+      - ONLINE_EVALUATION_JUDGE_MODEL_API_KEY=${ONLINE_EVALUATION_JUDGE_MODEL_API_KEY:-}
+      - ONLINE_EMBEDDING_MODEL_NAME=${ONLINE_EMBEDDING_MODEL_NAME:-}
+      - ONLINE_EMBEDDING_MODEL_SOURCE=${ONLINE_EMBEDDING_MODEL_SOURCE:-}
+      - ONLINE_EMBEDDING_MODEL_BASE_URL=${ONLINE_EMBEDDING_MODEL_BASE_URL:-}
+      - ONLINE_EMBEDDING_MODEL_API_KEY=${ONLINE_EMBEDDING_MODEL_API_KEY:-}
+      - ONLINE_EMBEDDING_MODEL_DIMENSION=${ONLINE_EMBEDDING_MODEL_DIMENSION:-}
+      - ONLINE_EMBEDDING_MODEL_COMPATIBILITY_ID=${ONLINE_EMBEDDING_MODEL_COMPATIBILITY_ID:-}
+      - ONLINE_RERANK_MODEL_NAME=${ONLINE_RERANK_MODEL_NAME:-}
+      - ONLINE_RERANK_MODEL_SOURCE=${ONLINE_RERANK_MODEL_SOURCE:-}
+      - ONLINE_RERANK_MODEL_BASE_URL=${ONLINE_RERANK_MODEL_BASE_URL:-}
+      - ONLINE_RERANK_MODEL_API_KEY=${ONLINE_RERANK_MODEL_API_KEY:-}
+      - ONLINE_VLM_MODEL_NAME=${ONLINE_VLM_MODEL_NAME:-}
+      - ONLINE_VLM_MODEL_SOURCE=${ONLINE_VLM_MODEL_SOURCE:-}
+      - ONLINE_VLM_MODEL_BASE_URL=${ONLINE_VLM_MODEL_BASE_URL:-}
+      - ONLINE_VLM_MODEL_API_KEY=${ONLINE_VLM_MODEL_API_KEY:-}
+      - ONLINE_ASR_MODEL_NAME=${ONLINE_ASR_MODEL_NAME:-}
+      - ONLINE_ASR_MODEL_SOURCE=${ONLINE_ASR_MODEL_SOURCE:-}
+      - ONLINE_ASR_MODEL_BASE_URL=${ONLINE_ASR_MODEL_BASE_URL:-}
+      - ONLINE_ASR_MODEL_API_KEY=${ONLINE_ASR_MODEL_API_KEY:-}
+      - ONLINE_TTS_MODEL_NAME=${ONLINE_TTS_MODEL_NAME:-}
+      - ONLINE_TTS_MODEL_SOURCE=${ONLINE_TTS_MODEL_SOURCE:-}
+      - ONLINE_TTS_MODEL_BASE_URL=${ONLINE_TTS_MODEL_BASE_URL:-}
+      - ONLINE_TTS_MODEL_API_KEY=${ONLINE_TTS_MODEL_API_KEY:-}
+      - ONLINE_TTS_FORMAT=${ONLINE_TTS_FORMAT:-}
+      - ONLINE_TTS_VOICE=${ONLINE_TTS_VOICE:-}
+      - OFFLINE_MODEL_PROVIDER=${OFFLINE_MODEL_PROVIDER:-}
+      - OFFLINE_MODEL_API_KEY=${OFFLINE_MODEL_API_KEY:-}
+      - OFFLINE_LLM_MODEL_NAME=${OFFLINE_LLM_MODEL_NAME:-}
+      - OFFLINE_LLM_MODEL_SOURCE=${OFFLINE_LLM_MODEL_SOURCE:-}
+      - OFFLINE_LLM_MODEL_BASE_URL=${OFFLINE_LLM_MODEL_BASE_URL:-}
+      - OFFLINE_LLM_MODEL_API_KEY=${OFFLINE_LLM_MODEL_API_KEY:-}
+      - OFFLINE_VERIFIER_MODEL_1_NAME=${OFFLINE_VERIFIER_MODEL_1_NAME:-}
+      - OFFLINE_VERIFIER_MODEL_1_SOURCE=${OFFLINE_VERIFIER_MODEL_1_SOURCE:-}
+      - OFFLINE_VERIFIER_MODEL_1_BASE_URL=${OFFLINE_VERIFIER_MODEL_1_BASE_URL:-}
+      - OFFLINE_VERIFIER_MODEL_1_API_KEY=${OFFLINE_VERIFIER_MODEL_1_API_KEY:-}
+      - OFFLINE_VERIFIER_MODEL_2_NAME=${OFFLINE_VERIFIER_MODEL_2_NAME:-}
+      - OFFLINE_VERIFIER_MODEL_2_SOURCE=${OFFLINE_VERIFIER_MODEL_2_SOURCE:-}
+      - OFFLINE_VERIFIER_MODEL_2_BASE_URL=${OFFLINE_VERIFIER_MODEL_2_BASE_URL:-}
+      - OFFLINE_VERIFIER_MODEL_2_API_KEY=${OFFLINE_VERIFIER_MODEL_2_API_KEY:-}
+      - OFFLINE_EVALUATION_JUDGE_MODEL_NAME=${OFFLINE_EVALUATION_JUDGE_MODEL_NAME:-}
+      - OFFLINE_EVALUATION_JUDGE_MODEL_SOURCE=${OFFLINE_EVALUATION_JUDGE_MODEL_SOURCE:-}
+      - OFFLINE_EVALUATION_JUDGE_MODEL_BASE_URL=${OFFLINE_EVALUATION_JUDGE_MODEL_BASE_URL:-}
+      - OFFLINE_EVALUATION_JUDGE_MODEL_API_KEY=${OFFLINE_EVALUATION_JUDGE_MODEL_API_KEY:-}
+      - OFFLINE_EMBEDDING_MODEL_NAME=${OFFLINE_EMBEDDING_MODEL_NAME:-}
+      - OFFLINE_EMBEDDING_MODEL_SOURCE=${OFFLINE_EMBEDDING_MODEL_SOURCE:-}
+      - OFFLINE_EMBEDDING_MODEL_BASE_URL=${OFFLINE_EMBEDDING_MODEL_BASE_URL:-}
+      - OFFLINE_EMBEDDING_MODEL_API_KEY=${OFFLINE_EMBEDDING_MODEL_API_KEY:-}
+      - OFFLINE_EMBEDDING_MODEL_DIMENSION=${OFFLINE_EMBEDDING_MODEL_DIMENSION:-}
+      - OFFLINE_EMBEDDING_MODEL_COMPATIBILITY_ID=${OFFLINE_EMBEDDING_MODEL_COMPATIBILITY_ID:-}
+      - OFFLINE_RERANK_MODEL_NAME=${OFFLINE_RERANK_MODEL_NAME:-}
+      - OFFLINE_RERANK_MODEL_SOURCE=${OFFLINE_RERANK_MODEL_SOURCE:-}
+      - OFFLINE_RERANK_MODEL_BASE_URL=${OFFLINE_RERANK_MODEL_BASE_URL:-}
+      - OFFLINE_RERANK_MODEL_API_KEY=${OFFLINE_RERANK_MODEL_API_KEY:-}
+      - OFFLINE_VLM_MODEL_NAME=${OFFLINE_VLM_MODEL_NAME:-}
+      - OFFLINE_VLM_MODEL_SOURCE=${OFFLINE_VLM_MODEL_SOURCE:-}
+      - OFFLINE_VLM_MODEL_BASE_URL=${OFFLINE_VLM_MODEL_BASE_URL:-}
+      - OFFLINE_VLM_MODEL_API_KEY=${OFFLINE_VLM_MODEL_API_KEY:-}
+      - OFFLINE_ASR_MODEL_NAME=${OFFLINE_ASR_MODEL_NAME:-}
+      - OFFLINE_ASR_MODEL_SOURCE=${OFFLINE_ASR_MODEL_SOURCE:-}
+      - OFFLINE_ASR_MODEL_BASE_URL=${OFFLINE_ASR_MODEL_BASE_URL:-}
+      - OFFLINE_ASR_MODEL_API_KEY=${OFFLINE_ASR_MODEL_API_KEY:-}
+      - OFFLINE_TTS_MODEL_NAME=${OFFLINE_TTS_MODEL_NAME:-}
+      - OFFLINE_TTS_MODEL_SOURCE=${OFFLINE_TTS_MODEL_SOURCE:-}
+      - OFFLINE_TTS_MODEL_BASE_URL=${OFFLINE_TTS_MODEL_BASE_URL:-}
+      - OFFLINE_TTS_MODEL_API_KEY=${OFFLINE_TTS_MODEL_API_KEY:-}
+      - OFFLINE_TTS_FORMAT=${OFFLINE_TTS_FORMAT:-}
+      - OFFLINE_TTS_VOICE=${OFFLINE_TTS_VOICE:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
       - OTEL_SERVICE_NAME=WeKnora
       - OTEL_TRACES_EXPORTER=otlp
@@ -88,6 +183,8 @@ services:
       - LANGFUSE_SAMPLE_RATE=${LANGFUSE_SAMPLE_RATE:-}
       - LANGFUSE_DEBUG=${LANGFUSE_DEBUG:-}
       - RETRIEVE_DRIVER=${RETRIEVE_DRIVER:-}
+      - KEYWORD_RETRIEVE_DRIVER=${KEYWORD_RETRIEVE_DRIVER:-}
+      - VECTOR_RETRIEVE_DRIVER=${VECTOR_RETRIEVE_DRIVER:-}
       - ELASTICSEARCH_ADDR=${ELASTICSEARCH_ADDR:-}
       - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-}
       - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
@@ -129,15 +226,18 @@ services:
       - TENANT_AES_KEY=${TENANT_AES_KEY:-}
       - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}
-      - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
+      - SSRF_ALLOW_PRIVATE_NETWORKS=${SSRF_ALLOW_PRIVATE_NETWORKS:-true}
+      - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-10}
+      - BATCH_EMBED_SIZE=${BATCH_EMBED_SIZE:-24}
+      - ASYNQ_CONCURRENCY=${ASYNQ_CONCURRENCY:-16}
       - JWT_SECRET=${JWT_SECRET:-}
       # Crypto: 主密钥和盐值，用于 AppSecret 等敏感字段的 AES-256 加密
       # 若不设置则自动生成并持久化到 data-files volume（/data/files/.crypto_state.json）
       # 重启时自动从文件恢复，保证已加密数据可继续解密
       - CRYPTO_MASTER_KEY=${CRYPTO_MASTER_KEY:-}
       - CRYPTO_SALT=${CRYPTO_SALT:-}
-      # File size limit (in MB)
-      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+      # File size limit (in MB). Default 2047 (~2GB, gRPC int32 safe max). 0 uses default.
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-2047}
       # Agent Skills Sandbox
       - WEKNORA_SANDBOX_MODE=${WEKNORA_SANDBOX_MODE:-docker}
       - WEKNORA_SANDBOX_TIMEOUT=${WEKNORA_SANDBOX_TIMEOUT:-60}
@@ -149,6 +249,10 @@ services:
       redis:
         condition: service_started
       postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      milvus:
         condition: service_healthy
       docreader:
         condition: service_healthy
@@ -165,6 +269,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.sandbox
+      args:
+        - APT_MIRROR_ARG=${APT_MIRROR:-}
     profiles:
       - full
     command: ["true"]
@@ -177,6 +283,7 @@ services:
       dockerfile: docker/Dockerfile.docreader
       args:
         - APT_MIRROR=${APT_MIRROR:-}
+        - PYPI_INDEX_URL=${PYPI_INDEX_URL:-}
     container_name: WeKnora-docreader
     ports:
       - "${DOCREADER_PORT:-50051}:50051"
@@ -184,7 +291,7 @@ services:
       - docreader-tmp:/tmp/docreader
     environment:
       - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
-      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-2047}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
       interval: 30s
@@ -201,6 +308,9 @@ services:
   postgres:
     image: paradedb/paradedb:v0.22.2-pg17
     container_name: WeKnora-postgres
+    ports:
+      # Bind localhost only — avoid exposing DB on all interfaces.
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     environment:
       - POSTGRES_USER=${DB_USER}
       - POSTGRES_PASSWORD=${DB_PASSWORD}
@@ -219,9 +329,38 @@ services:
     # 添加停机时的优雅退出时间
     stop_grace_period: 1m
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.17
+    container_name: WeKnora-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - xpack.security.autoconfiguration.enabled=false
+      - xpack.license.self_generated.type=basic
+      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD must be set}
+      - ES_JAVA_OPTS=${ELASTICSEARCH_JAVA_OPTS:--Xms1g -Xmx1g}
+    ports:
+      - "127.0.0.1:${ELASTICSEARCH_PORT:-9200}:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - WeKnora-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -u \"elastic:$${ELASTIC_PASSWORD}\" 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+
   redis:
     image: redis:7.0-alpine
     container_name: WeKnora-redis
+    ports:
+      # Bind localhost only — avoid exposing Redis on all interfaces.
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     restart: always
     networks:
@@ -285,10 +424,21 @@ services:
       - NEO4J_apoc_export_file_enabled=true
       - NEO4J_apoc_import_file_enabled=true
       - NEO4J_apoc_import_file_use__neo4j__config=true
-      - NEO4JLABS_PLUGINS=["apoc"]
+      # Prefer NEO4J_PLUGINS (Neo4j 5+). Keep NEO4JLABS_PLUGINS for older images.
+      # Quote the whole assignment so YAML/Windows shells do not strip JSON quotes.
+      - 'NEO4J_PLUGINS=["apoc"]'
+      - 'NEO4JLABS_PLUGINS=["apoc"]'
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*
     ports:
       - "7474:7474"
       - "7687:7687"
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u \"$${NEO4J_AUTH%%/*}\" -p \"$${NEO4J_AUTH#*/}\" 'RETURN apoc.version() AS v;' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
     restart: always
     networks:
       - WeKnora-network
@@ -336,8 +486,6 @@ services:
     networks:
       - WeKnora-network
     restart: unless-stopped
-    profiles:
-      - milvus
 
   weaviate:
     image: semitechnologies/weaviate:1.28.4
@@ -369,6 +517,8 @@ services:
       - "5556:5556"
     volumes:
       - ./misc/dex-config.yaml:/etc/dex/config.yaml
+    environment:
+      WEKNORA_DEX_CLIENT_SECRET: ${WEKNORA_DEX_CLIENT_SECRET:?WEKNORA_DEX_CLIENT_SECRET must be set}
     command: ["dex", "serve", "/etc/dex/config.yaml"]
     profiles:
       - dex
@@ -599,6 +749,8 @@ networks:
 
 volumes:
   postgres-data:
+  elasticsearch-data:
+  redis-data:
   data-files:
   docreader-tmp:
   jaeger_data:

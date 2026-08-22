@@ -19,7 +19,7 @@ type CustomAgentService interface {
 	//   - Possible errors such as insufficient permissions, validation errors, etc.
 	CreateAgent(ctx context.Context, agent *types.CustomAgent) (*types.CustomAgent, error)
 
-	// GetAgentByID retrieves agent information by ID (uses tenant from context)
+	// GetAgentByID retrieves a platform-managed agent by ID.
 	// Parameters:
 	//   - ctx: Context information
 	//   - id: Unique identifier of the agent
@@ -31,7 +31,7 @@ type CustomAgentService interface {
 	// GetAgentByIDAndTenant retrieves agent by ID and tenant (for shared agents; skips built-in resolution)
 	GetAgentByIDAndTenant(ctx context.Context, id string, tenantID uint64) (*types.CustomAgent, error)
 
-	// ListAgents lists all agents under the current tenant (including built-in agents)
+	// ListAgents lists all platform-managed agents shared by every tenant.
 	// Parameters:
 	//   - ctx: Context information, containing tenant information
 	// Returns:

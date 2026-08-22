@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -12,18 +13,23 @@ import (
 
 // webSearchProviderService implements interfaces.WebSearchProviderService
 type webSearchProviderService struct {
-	repo interfaces.WebSearchProviderRepository
+	repo              interfaces.WebSearchProviderRepository
+	approvedEndpoints interfaces.ApprovedEndpointRepository
 }
 
 // NewWebSearchProviderService creates a new web search provider service
-func NewWebSearchProviderService(repo interfaces.WebSearchProviderRepository) interfaces.WebSearchProviderService {
-	return &webSearchProviderService{repo: repo}
+func NewWebSearchProviderService(repo interfaces.WebSearchProviderRepository, approvedEndpoints interfaces.ApprovedEndpointRepository) interfaces.WebSearchProviderService {
+	return &webSearchProviderService{repo: repo, approvedEndpoints: approvedEndpoints}
 }
 
 // CreateProvider creates a new web search provider configuration.
 func (s *webSearchProviderService) CreateProvider(ctx context.Context, provider *types.WebSearchProviderEntity) error {
-	if provider.TenantID == 0 {
-		return fmt.Errorf("tenant ID is required")
+	if !isPlatformAdmin(ctx) {
+		return fmt.Errorf("only platform administrators can manage web search providers")
+	}
+	validationTenantID := provider.TenantID
+	if validationTenantID == 0 {
+		return fmt.Errorf("tenant ID is required for endpoint validation")
 	}
 
 	if !isValidProviderType(provider.Provider) {
@@ -33,9 +39,13 @@ func (s *webSearchProviderService) CreateProvider(ctx context.Context, provider 
 	if err := validateProviderParameters(provider.Provider, provider.Parameters); err != nil {
 		return err
 	}
+	if err := s.validateApprovedEndpoint(ctx, validationTenantID, &provider.Parameters); err != nil {
+		return err
+	}
 
+	provider.TenantID = types.PlatformScopeTenantID
 	if provider.IsDefault {
-		if err := s.repo.ClearDefault(ctx, provider.TenantID, ""); err != nil {
+		if err := s.repo.ClearDefault(ctx, types.PlatformScopeTenantID, ""); err != nil {
 			logger.Warnf(ctx, "Failed to clear default providers: %v", err)
 		}
 	}
@@ -46,8 +56,12 @@ func (s *webSearchProviderService) CreateProvider(ctx context.Context, provider 
 
 // UpdateProvider updates an existing provider.
 func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider *types.WebSearchProviderEntity) error {
-	if provider.TenantID == 0 {
-		return fmt.Errorf("tenant ID is required")
+	if !isPlatformAdmin(ctx) {
+		return fmt.Errorf("only platform administrators can manage web search providers")
+	}
+	validationTenantID := provider.TenantID
+	if validationTenantID == 0 {
+		return fmt.Errorf("tenant ID is required for endpoint validation")
 	}
 
 	// Validate provider type if set
@@ -55,8 +69,9 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 		return fmt.Errorf("invalid provider type: %s", provider.Provider)
 	}
 
+	provider.TenantID = types.PlatformScopeTenantID
 	if provider.IsDefault {
-		if err := s.repo.ClearDefault(ctx, provider.TenantID, provider.ID); err != nil {
+		if err := s.repo.ClearDefault(ctx, types.PlatformScopeTenantID, provider.ID); err != nil {
 			logger.Warnf(ctx, "Failed to clear default providers: %v", err)
 		}
 	}
@@ -66,15 +81,54 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 			return err
 		}
 	}
+	if err := s.validateApprovedEndpoint(ctx, validationTenantID, &provider.Parameters); err != nil {
+		return err
+	}
+	provider.TenantID = types.PlatformScopeTenantID
 
 	logger.Infof(ctx, "Updating web search provider: tenant=%d, id=%s", provider.TenantID, provider.ID)
 	return s.repo.Update(ctx, provider)
 }
 
+func (s *webSearchProviderService) validateApprovedEndpoint(ctx context.Context, tenantID uint64, params *types.WebSearchProviderParameters) error {
+	if params == nil {
+		return fmt.Errorf("web search parameters are required")
+	}
+	endpointID := strings.TrimSpace(params.ApprovedEndpointID)
+	if endpointID == "" {
+		if airGappedMode() {
+			return fmt.Errorf("strict air-gapped mode requires approved_endpoint_id for web search")
+		}
+		return nil
+	}
+	if s.approvedEndpoints == nil {
+		return fmt.Errorf("approved endpoint registry is unavailable")
+	}
+	endpoint, err := s.approvedEndpoints.GetByID(ctx, tenantID, endpointID)
+	if err != nil {
+		return fmt.Errorf("load approved search endpoint: %w", err)
+	}
+	if endpoint == nil {
+		return fmt.Errorf("approved search endpoint not found: %s", endpointID)
+	}
+	if err := validateApprovedEndpointForUse(ctx, endpoint, types.EndpointCategorySearch, "query"); err != nil {
+		return err
+	}
+	return nil
+}
+
 // DeleteProvider deletes a provider by tenant + id.
 func (s *webSearchProviderService) DeleteProvider(ctx context.Context, tenantID uint64, id string) error {
+	if !isPlatformAdmin(ctx) {
+		return fmt.Errorf("only platform administrators can manage web search providers")
+	}
 	logger.Infof(ctx, "Deleting web search provider: tenant=%d, id=%s", tenantID, id)
-	return s.repo.Delete(ctx, tenantID, id)
+	return s.repo.Delete(ctx, types.PlatformScopeTenantID, id)
+}
+
+func isPlatformAdmin(ctx context.Context) bool {
+	user, ok := types.UserFromContext(ctx)
+	return ok && user.IsPlatformAdmin()
 }
 
 // isValidProviderType checks if the given provider type is supported

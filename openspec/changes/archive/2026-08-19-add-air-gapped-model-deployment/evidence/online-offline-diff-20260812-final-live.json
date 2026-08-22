@@ -1,0 +1,3212 @@
+{
+  "schema": "weknora-online-offline-diff/v1",
+  "online_baseline": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\online-baseline-v5\\online-model-baseline.json",
+  "frozen_inputs": {
+    "path": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\frozen-inputs-v1.json",
+    "freeze_sha256": "f0fb7604903c2ec5331876692b4fccc8a86068d31a32818a5734b52f44351172"
+  },
+  "model_identity_diff": [],
+  "profiles": [
+    "desktop-lite",
+    "compose-airgap",
+    "helm-airgap"
+  ],
+  "package_integrity": [
+    {
+      "profile": "desktop-lite",
+      "manifest_sha256": "7fd279b788aac468605591208596fd60543bcb8070bcde5203b803c19303eed9",
+      "checksums_sha256": "cbf94bfcb2241fe609298a22851719860cec4d9c503fd25041cccac703ee55b4",
+      "declared_profile": "desktop-lite",
+      "declared_architecture": "amd64",
+      "missing_model_roles": []
+    },
+    {
+      "profile": "compose-airgap",
+      "manifest_sha256": "5c2d216a935cf4d4e035471ded77f69f56940188bf7eaf36f3270c69b6cfbed4",
+      "checksums_sha256": "42b05568f1e5e3765754ce58d913b9b38e71b5fcb0c81d077373fe01a0629f91",
+      "declared_profile": "compose-airgap",
+      "declared_architecture": "amd64",
+      "missing_model_roles": []
+    },
+    {
+      "profile": "helm-airgap",
+      "manifest_sha256": "e102447c809196f154cfedf079b30479c93c1e5a9603c0ed8a98d152e98b881e",
+      "checksums_sha256": "9310b0b3f29556ef8c38d9dae837d960ff0e86862244b2b78d0db84661e9239c",
+      "declared_profile": "helm-airgap",
+      "declared_architecture": "amd64",
+      "missing_model_roles": []
+    }
+  ],
+  "outbound_audit": [
+    {
+      "profile": "helm-airgap",
+      "status": "passed",
+      "details": "出站审计必须证明成功公网连接数为 0。"
+    },
+    {
+      "profile": "desktop-lite",
+      "status": "passed",
+      "details": "出站审计必须证明成功公网连接数为 0。"
+    },
+    {
+      "profile": "compose-airgap",
+      "status": "passed",
+      "details": "出站审计必须证明成功公网连接数为 0。"
+    }
+  ],
+  "checks": [
+    {
+      "name": "frozen_inputs_schema",
+      "status": "passed",
+      "details": "冻结输入 schema 和 hash 存在。",
+      "data": null
+    },
+    {
+      "name": "online_baseline",
+      "status": "passed",
+      "details": "线上模型工程基线 gate 通过，但 formal acceptance 仍按报告声明为 blocked。",
+      "data": {
+        "schema": "weknora-online-baseline/v1",
+        "status": "engineering_online_model_baseline",
+        "started_at": "2026-08-12T17:00:16.5883743+08:00",
+        "endpoint": "https://api.siliconflow.cn/v1",
+        "models": {
+          "chat": "Qwen/Qwen3.6-27B",
+          "verifier_1": "deepseek-ai/DeepSeek-V3.1-Terminus",
+          "verifier_2": "Qwen/Qwen3.5-9B",
+          "judge": "Qwen/Qwen3-32B",
+          "embedding": "Qwen/Qwen3-Embedding-4B",
+          "rerank": "BAAI/bge-reranker-v2-m3",
+          "asr": "FunAudioLLM/SenseVoiceSmall",
+          "tts": "FunAudioLLM/CosyVoice2-0.5B"
+        },
+        "model_endpoints": {
+          "chat": {
+            "model": "Qwen/Qwen3.6-27B",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          },
+          "verifier_1": {
+            "model": "deepseek-ai/DeepSeek-V3.1-Terminus",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          },
+          "verifier_2": {
+            "model": "Qwen/Qwen3.5-9B",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          },
+          "judge": {
+            "model": "Qwen/Qwen3-32B",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          },
+          "embedding": {
+            "model": "Qwen/Qwen3-Embedding-4B",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          },
+          "rerank": {
+            "model": "BAAI/bge-reranker-v2-m3",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          },
+          "asr": {
+            "model": "FunAudioLLM/SenseVoiceSmall",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          },
+          "tts": {
+            "model": "FunAudioLLM/CosyVoice2-0.5B",
+            "endpoint": "https://api.siliconflow.cn/v1"
+          }
+        },
+        "probes": [
+          {
+            "name": "model_catalog",
+            "model": null,
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 479,
+            "details": {
+              "model_count": 91,
+              "selected": [
+                {
+                  "role": "chat",
+                  "model": "Qwen/Qwen3.6-27B",
+                  "available": true
+                },
+                {
+                  "role": "verifier_1",
+                  "model": "deepseek-ai/DeepSeek-V3.1-Terminus",
+                  "available": true
+                },
+                {
+                  "role": "verifier_2",
+                  "model": "Qwen/Qwen3.5-9B",
+                  "available": true
+                },
+                {
+                  "role": "judge",
+                  "model": "Qwen/Qwen3-32B",
+                  "available": true
+                },
+                {
+                  "role": "embedding",
+                  "model": "Qwen/Qwen3-Embedding-4B",
+                  "available": true
+                },
+                {
+                  "role": "rerank",
+                  "model": "BAAI/bge-reranker-v2-m3",
+                  "available": true
+                },
+                {
+                  "role": "asr",
+                  "model": "FunAudioLLM/SenseVoiceSmall",
+                  "available": true
+                },
+                {
+                  "role": "tts",
+                  "model": "FunAudioLLM/CosyVoice2-0.5B",
+                  "available": true
+                }
+              ]
+            },
+            "error": null
+          },
+          {
+            "name": "chat_chat",
+            "model": "Qwen/Qwen3.6-27B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 1733,
+            "details": {
+              "first_visible_ms": 251,
+              "chunk_count": 74,
+              "answer_chars": 128,
+              "answer_preview": "离线环境缺乏网络连通性，无法实时获取或更新资源，因此必须通过镜像摘要和权重校验和确保部署内容的完整性与一致性，防止因数据损坏或篡改导致服务异常。同时，验证模型端点位置能确保服务路由正确指向已验证的本地资源，从而在隔离环境中实现安全、可靠且可追溯的模型运行。"
+            },
+            "error": null
+          },
+          {
+            "name": "chat_verifier_1",
+            "model": "deepseek-ai/DeepSeek-V3.1-Terminus",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 26505,
+            "details": {
+              "first_visible_ms": 23121,
+              "chunk_count": 61,
+              "answer_chars": 106,
+              "answer_preview": "离线部署必须验证模型端点位置、镜像摘要和模型权重校验和，以确保部署的模型与预期版本完全一致，避免因环境差异或文件损坏导致运行错误。这三项验证共同保障了模型的可复现性、安全性和稳定性，防止潜在的数据泄露或性能异常。"
+            },
+            "error": null
+          },
+          {
+            "name": "chat_verifier_2",
+            "model": "Qwen/Qwen3.5-9B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 1045,
+            "details": {
+              "first_visible_ms": 489,
+              "chunk_count": 43,
+              "answer_chars": 79,
+              "answer_preview": "验证模型端点位置确保服务在正确的网络环境中运行，防止连接错误。校验镜像摘要和模型权重则分别保障部署环境的完整性与模型文件未被篡改，共同构建可信的离线安全防线。"
+            },
+            "error": null
+          },
+          {
+            "name": "chat_judge",
+            "model": "Qwen/Qwen3-32B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 19165,
+            "details": {
+              "first_visible_ms": 15201,
+              "chunk_count": 64,
+              "answer_chars": 99,
+              "answer_preview": "离线部署必须验证模型端点位置，以确保模型文件存储在正确且可访问的路径中。同时验证镜像摘要和模型权重校验和，是为了保证所使用的镜像和模型文件在传输和存储过程中未被篡改或损坏，确保部署的一致性和安全性。"
+            },
+            "error": null
+          },
+          {
+            "name": "embedding",
+            "model": "Qwen/Qwen3-Embedding-4B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 268,
+            "details": {
+              "dimension": 2560,
+              "expected_dimension": 2560
+            },
+            "error": null
+          },
+          {
+            "name": "rerank",
+            "model": "BAAI/bge-reranker-v2-m3",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 116,
+            "details": {
+              "result_count": 2,
+              "top_index": 0
+            },
+            "error": null
+          },
+          {
+            "name": "verification_verifier_1",
+            "model": "deepseek-ai/DeepSeek-V3.1-Terminus",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 14285,
+            "details": {
+              "first_visible_ms": 12425,
+              "chunk_count": 31,
+              "answer_chars": 46,
+              "answer_preview": "结论：不完整缺失项：未提及性能指标（如延迟、吞吐量）、量化精度损失、资源使用率（如显存占用）"
+            },
+            "error": null
+          },
+          {
+            "name": "verification_verifier_2",
+            "model": "Qwen/Qwen3.5-9B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 9206,
+            "details": {
+              "first_visible_ms": 3477,
+              "chunk_count": 131,
+              "answer_chars": 238,
+              "answer_preview": "结论：回答未覆盖问题要求，缺失关键指标。缺失项：1. **性能指标**：未提及延迟（Latency）、吞吐量（Throughput）或 QPS等核心性能验收口径。2. **资源指标**：未提及显存占用（VRAM Usage）或内存占用等量化部署特有的资源验收口径。3. **精度指标**：未提及量化后的模型精度（Accuracy/Top-1）与基线的一致性验收口径。4. **检查项缺失**：未给出具体的可操作检查项（如：对比基准测试脚本、显存监控命令、精度回归测试方法等）。"
+            },
+            "error": null
+          },
+          {
+            "name": "asr",
+            "model": "FunAudioLLM/SenseVoiceSmall",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 905,
+            "details": {
+              "transcript_chars": 22,
+              "transcript": "Hello, this is a test.",
+              "audio_bytes": 43088
+            },
+            "error": null
+          },
+          {
+            "name": "tts",
+            "model": "FunAudioLLM/CosyVoice2-0.5B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 404,
+            "details": {
+              "voice": "FunAudioLLM/CosyVoice2-0.5B:alex",
+              "format": "mp3",
+              "audio_bytes": 47743,
+              "output_file": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\online-baseline-v5\\online-tts-smoke.mp3"
+            },
+            "error": null
+          },
+          {
+            "name": "voice_answer",
+            "model": "Qwen/Qwen3.6-27B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 1117,
+            "details": {
+              "first_visible_ms": 974,
+              "chunk_count": 7,
+              "answer_chars": 22,
+              "answer_preview": "Hello! This is a test."
+            },
+            "error": null
+          },
+          {
+            "name": "voice_followup",
+            "model": "Qwen/Qwen3.6-27B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 750,
+            "details": {
+              "first_visible_ms": 216,
+              "chunk_count": 15,
+              "answer_chars": 26,
+              "answer_preview": "上一轮对话仅为简单的问候与测试确认，无实质信息重点。"
+            },
+            "error": null
+          }
+        ],
+        "verified_baseline": {
+          "status": "passed",
+          "scope": "online_model_contract_smoke",
+          "question": "比较线上模型基线与后续 2×48GB 内网量化部署时，哪些指标必须保持同一验收口径？请给出可操作的检查项。",
+          "distinct_model_count": 3,
+          "results": [
+            {
+              "name": "verification_verifier_1",
+              "model": "deepseek-ai/DeepSeek-V3.1-Terminus",
+              "endpoint": "https://api.siliconflow.cn/v1",
+              "status": "passed",
+              "elapsed_ms": 14285,
+              "details": {
+                "first_visible_ms": 12425,
+                "chunk_count": 31,
+                "answer_chars": 46,
+                "answer_preview": "结论：不完整缺失项：未提及性能指标（如延迟、吞吐量）、量化精度损失、资源使用率（如显存占用）"
+              },
+              "error": null
+            },
+            {
+              "name": "verification_verifier_2",
+              "model": "Qwen/Qwen3.5-9B",
+              "endpoint": "https://api.siliconflow.cn/v1",
+              "status": "passed",
+              "elapsed_ms": 9206,
+              "details": {
+                "first_visible_ms": 3477,
+                "chunk_count": 131,
+                "answer_chars": 238,
+                "answer_preview": "结论：回答未覆盖问题要求，缺失关键指标。缺失项：1. **性能指标**：未提及延迟（Latency）、吞吐量（Throughput）或 QPS等核心性能验收口径。2. **资源指标**：未提及显存占用（VRAM Usage）或内存占用等量化部署特有的资源验收口径。3. **精度指标**：未提及量化后的模型精度（Accuracy/Top-1）与基线的一致性验收口径。4. **检查项缺失**：未给出具体的可操作检查项（如：对比基准测试脚本、显存监控命令、精度回归测试方法等）。"
+              },
+              "error": null
+            }
+          ]
+        },
+        "voice_baseline": {
+          "status": "passed",
+          "scope": "online_model_endpoint_chain",
+          "asr_model": "FunAudioLLM/SenseVoiceSmall",
+          "tts_model": "FunAudioLLM/CosyVoice2-0.5B",
+          "voice": "FunAudioLLM/CosyVoice2-0.5B:alex",
+          "audio_file": "F:\\AI-Project\\WeKnora-development\\internal\\assets\\asr_test.wav",
+          "asr": {
+            "name": "asr",
+            "model": "FunAudioLLM/SenseVoiceSmall",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 905,
+            "details": {
+              "transcript_chars": 22,
+              "transcript": "Hello, this is a test.",
+              "audio_bytes": 43088
+            },
+            "error": null
+          },
+          "answer": {
+            "name": "voice_answer",
+            "model": "Qwen/Qwen3.6-27B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 1117,
+            "details": {
+              "first_visible_ms": 974,
+              "chunk_count": 7,
+              "answer_chars": 22,
+              "answer_preview": "Hello! This is a test."
+            },
+            "error": null
+          },
+          "tts": {
+            "name": "tts",
+            "model": "FunAudioLLM/CosyVoice2-0.5B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 404,
+            "details": {
+              "voice": "FunAudioLLM/CosyVoice2-0.5B:alex",
+              "format": "mp3",
+              "audio_bytes": 47743,
+              "output_file": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\online-baseline-v5\\online-tts-smoke.mp3"
+            },
+            "error": null
+          },
+          "followup": {
+            "name": "voice_followup",
+            "model": "Qwen/Qwen3.6-27B",
+            "endpoint": "https://api.siliconflow.cn/v1",
+            "status": "passed",
+            "elapsed_ms": 750,
+            "details": {
+              "first_visible_ms": 216,
+              "chunk_count": 15,
+              "answer_chars": 26,
+              "answer_preview": "上一轮对话仅为简单的问候与测试确认，无实质信息重点。"
+            },
+            "error": null
+          }
+        },
+        "formal_acceptance": {
+          "status": "blocked",
+          "reason": "应用级知识库、50 个独立会话、正式专家标注和线上目标仍需专用 WeKnora 测试环境。"
+        },
+        "completed_at": "2026-08-12T17:01:33.0799172+08:00",
+        "gate": "passed",
+        "integrity_sha256": "dc6a624f86924a71f22d3e94935d68411ef0b4d9d8e19b5b178beeb8ce194e8b"
+      }
+    },
+    {
+      "name": "model_identity_diff",
+      "status": "passed",
+      "details": "线上基线模型身份与冻结清单一致。",
+      "data": null
+    },
+    {
+      "name": "profile_desktop-lite",
+      "status": "passed",
+      "details": "已读取统一冻结套件报告。",
+      "data": {
+        "schema": "weknora-offline-frozen-suite/v1",
+        "profile": "desktop-lite",
+        "run_id": "offline-live-desktop-lite-20260812",
+        "frozen_inputs": {
+          "path": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\frozen-inputs-v1.json",
+          "freeze_sha256": "f0fb7604903c2ec5331876692b4fccc8a86068d31a32818a5734b52f44351172",
+          "suite_sha256": "52615ffebd49134a0ef913dcc144ae7ff8c9dea168d6fb3db5d0c3de62177cc3"
+        },
+        "applicability": {
+          "document_ingest": true,
+          "retrieval": true,
+          "routing": true,
+          "graph": true,
+          "verification": true,
+          "voice": true,
+          "performance": true
+        },
+        "profile_semantics": {
+          "single_node": "component/model location gate",
+          "server_load": "not_applicable"
+        },
+        "checks": [
+          {
+            "name": "single_node_gate",
+            "status": "passed",
+            "details": "profile=desktop-lite；位置不符组件数=0。",
+            "data": {
+              "profile": "desktop-lite",
+              "non_same_host": [],
+              "missing_model_roles": []
+            }
+          },
+          {
+            "name": "airgap_preflight",
+            "status": "passed",
+            "details": "离线介质清单、位置和校验和预检通过。",
+            "data": null
+          },
+          {
+            "name": "outbound_audit",
+            "status": "passed",
+            "details": "出站审计必须证明成功公网连接数为 0。",
+            "data": {
+              "schema": "weknora-outbound-audit/v1",
+              "status": "passed",
+              "probe_url": "https://example.invalid/health",
+              "resolved_ips": [],
+              "public_ips": [],
+              "attempted_public_connections": 0,
+              "successful_public_connections": 0,
+              "blocked_or_failed_connections": 0,
+              "events": [
+                {
+                  "mode": "fixture",
+                  "url": "https://example.invalid/health",
+                  "outcome": "not_attempted",
+                  "reason": "NoNetwork"
+                }
+              ],
+              "generated_at": "2026-08-12T17:29:35.2398766+08:00"
+            }
+          },
+          {
+            "name": "frozen_e2e_suite",
+            "status": "passed",
+            "details": "统一正式验收执行器结果。",
+            "data": {
+              "schema": "weknora-formal-acceptance/v1",
+              "run_id": "offline-live-desktop-lite-20260812",
+              "suite_file": "F:\\AI-Project\\WeKnora-development\\scripts\\testdata\\baseline-v1-acceptance-suite-expert.json",
+              "target": "http://127.0.0.1:18080",
+              "profile": "desktop-lite",
+              "mode": "rag",
+              "frozen_inputs": {
+                "path": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\frozen-inputs-v1.json",
+                "freeze_sha256": "f0fb7604903c2ec5331876692b4fccc8a86068d31a32818a5734b52f44351172"
+              },
+              "dry_run": false,
+              "formal_suite": true,
+              "gate": "passed",
+              "reason": "",
+              "case_count": 8,
+              "passed_count": 8,
+              "failed_count": 0,
+              "accuracy": 1.0,
+              "knowledge_base_ids": [
+                "2fb51638-3691-435d-8fb0-ab6a71985f27"
+              ],
+              "started_at": "2026-08-13T00:42:17.7409786+08:00",
+              "completed_at": "2026-08-13T00:43:46.351261+08:00",
+              "results": [
+                {
+                  "case_id": "std-l1-verified-order",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据检索到的信息，验证式回答必须先**检索**，才能生成草稿。具体流程为：先检索，再生成草稿，随后由两个独立模型验证事实、逻辑和引用；若证据不足，则补充检索并重新验证。未经验证的草稿不能发送给用户。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:42:17.8440745+08:00",
+                      "first_visible_at": "2026-08-13T00:42:21.2878657+08:00",
+                      "completed_at": "2026-08-13T00:42:21.8160226+08:00",
+                      "ttft_ms": 3444,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L1",
+                      "expected_subtype": "explicit_fact",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "std-l1-unverified-draft",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据检索到的信息，未经验证的草稿**不能**直接发送给用户。验证式回答的流程要求必须先检索，再生成草稿，随后由两个独立模型验证事实、逻辑和引用。只有在证据不足时才能补充检索并重新验证。明确规定：**未经验证的草稿不能发送给用户**。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:42:21.8789727+08:00",
+                      "first_visible_at": "2026-08-13T00:42:25.0936217+08:00",
+                      "completed_at": "2026-08-13T00:42:25.693819+08:00",
+                      "ttft_ms": 3215,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L1",
+                      "expected_subtype": "explicit_fact",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "foundation-l2-validator-roles",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据检索到的信息，验证阶段由**两个独立模型**分别验证以下三个方面：1. **事实**2. **逻辑**3. **引用**",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:42:25.7090961+08:00",
+                      "first_visible_at": "2026-08-13T00:42:28.9228563+08:00",
+                      "completed_at": "2026-08-13T00:42:28.935041+08:00",
+                      "ttft_ms": 3214,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L2",
+                      "expected_subtype": "contextual_fact",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "foundation-l2-multiturn-retrieve-then-verify",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据检索到的信息，验证式回答的处理顺序如下：1. **先检索**：首先进行信息检索。2. **生成草稿**：基于检索结果生成回答草稿。3. **独立模型验证**：由两个独立模型对草稿的事实、逻辑和引用进行验证。4. **补充检索与重新验证（如需要）**：如果证据不足，则补充检索并重新进行验证。5. **发送给用户**：只有经过验证的草稿才能发送给用户，未经验证的草稿严禁发送。\n在验证式回答中，如果证据不足，处理流程如下：1. **触发补充检索**：系统会启动额外的信息检索，以获取更多相关证据。2. **重新验证**：基于新检索到的信息，由独立模型对回答草稿再次进行事实、逻辑和引用的验证。3. **循环直至达标**：这一过程可能会重复，直到证据充分且通过验证。4. **最终发送**：只有当回答经过充分验证后，才会发送给用户；若始终无法获得足够证据，则不会发送未经验证的草稿。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:42:28.9471056+08:00",
+                      "first_visible_at": "2026-08-13T00:42:32.0603758+08:00",
+                      "completed_at": "2026-08-13T00:42:38.0774249+08:00",
+                      "ttft_ms": 3113,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L2",
+                      "expected_subtype": "contextual_fact",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 2
+                  }
+                },
+                {
+                  "case_id": "internal-l3-supplemental-retrieval",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据提供的检索信息，符合验证式回答规则的流程是：**“证据不足时补充检索再验证”**。具体依据如下：1. **验证式回答的标准流程**：必须先检索，再生成草稿，然后由两个独立模型验证事实、逻辑和引用。2. **补充检索的条件**：只有在**证据不足时**，才能进行补充检索并重新验证。3. **禁止行为**：未经验证的草稿不能发送给用户。因此，“首次检索后直接回答”如果跳过了“由两个独立模型验证”这一环节，或者在证据不足时未进行补充检索和重新验证，则不符合规则。而“证据不足时补充检索再验证”明确符合规则中对于证据不足情况的处理要求。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:42:38.0860776+08:00",
+                      "first_visible_at": "2026-08-13T00:42:42.5985757+08:00",
+                      "completed_at": "2026-08-13T00:42:47.0004561+08:00",
+                      "ttft_ms": 4512,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L3",
+                      "expected_subtype": "multi_hop",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "internal-l3-unanswerable-iso",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据提供的检索信息，其中仅包含关于“OpenSpec验收规则 retry”的标题以及关于验证式回答流程的说明，并未提及 ISO9001的相关信息。因此，基于当前知识库，我无法回答 ISO9001的全称是什么。建议您查阅相关的国际标准文档或提供更包含 ISO9001信息的检索内容。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:42:47.0109582+08:00",
+                      "first_visible_at": "2026-08-13T00:42:52.1230313+08:00",
+                      "completed_at": "2026-08-13T00:42:53.024819+08:00",
+                      "ttft_ms": 5112,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L3",
+                      "expected_subtype": "multi_hop",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "experience-l4-refuse-guess",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "不可以。根据检索到的信息，系统遵循严格的“验证式回答”流程：1. **先检索，再生成草稿**：回答必须基于检索到的信息。2. **独立验证**：草稿需由两个独立模型验证事实、逻辑和引用。3. **证据不足的处理**：如果证据不足，系统应**补充检索并重新验证**，而不是直接输出。4. **禁止未经验证输出**：明确规定“未经验证的草稿不能发送给用户”。因此，模型的经验猜测若未经过检索验证和独立模型的事实核查，不能当作确定事实输出。如果知识库未覆盖且无法通过补充检索获得证据，系统应如实告知用户无法回答，并提供合理建议，而非输出猜测。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:43:33.678653+08:00",
+                      "first_visible_at": "2026-08-13T00:43:37.6912276+08:00",
+                      "completed_at": "2026-08-13T00:43:42.0950853+08:00",
+                      "ttft_ms": 4013,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 2
+                    },
+                    "routing": {
+                      "expected_level": "L4",
+                      "expected_subtype": "hypothetical",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "experience-l4-hypothetical-skip-verify",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "不符合。根据检索到的信息，验证式回答规则明确规定：“未经验证的草稿不能发送给用户”。流程要求必须先检索，再生成草稿，并由两个独立模型验证事实、逻辑和引用。只有在证据不足时，才能补充检索并重新验证。因此，为了降低延迟而跳过双模型验证直接发送草稿，违反了“未经验证的草稿不能发送给用户”这一核心规则。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:43:42.1078123+08:00",
+                      "first_visible_at": "2026-08-13T00:43:45.2201533+08:00",
+                      "completed_at": "2026-08-13T00:43:46.3231557+08:00",
+                      "ttft_ms": 3112,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L4",
+                      "expected_subtype": "hypothetical",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                }
+              ],
+              "persistence": {
+                "attempted": true,
+                "ok": false,
+                "error": "Response status code does not indicate success: 404 (Not Found)."
+              },
+              "persistence_warning": "案例结果未写入服务器验收账本: Response status code does not indicate success: 404 (Not Found)."
+            }
+          },
+          {
+            "name": "server_load_gate",
+            "status": "not_applicable",
+            "details": "desktop-lite 不执行服务器负载门禁；该结果不能替代 single-node。",
+            "data": null
+          }
+        ],
+        "single_node_gate": "passed",
+        "server_load_gate": "not_applicable",
+        "started_at": "2026-08-13T00:42:17.2605835+08:00",
+        "completed_at": "2026-08-13T00:43:46.4232073+08:00",
+        "gate": "passed",
+        "integrity_sha256": "880084525d4c552a59c82bb061d98eae941185dd601a7448f424f0f3531e4502"
+      }
+    },
+    {
+      "name": "profile_compose-airgap",
+      "status": "passed",
+      "details": "已读取统一冻结套件报告。",
+      "data": {
+        "schema": "weknora-offline-frozen-suite/v1",
+        "profile": "compose-airgap",
+        "run_id": "offline-live-compose-airgap-20260812b",
+        "frozen_inputs": {
+          "path": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\frozen-inputs-v1.json",
+          "freeze_sha256": "f0fb7604903c2ec5331876692b4fccc8a86068d31a32818a5734b52f44351172",
+          "suite_sha256": "52615ffebd49134a0ef913dcc144ae7ff8c9dea168d6fb3db5d0c3de62177cc3"
+        },
+        "applicability": {
+          "document_ingest": true,
+          "retrieval": true,
+          "routing": true,
+          "graph": true,
+          "verification": true,
+          "voice": true,
+          "performance": true
+        },
+        "profile_semantics": {
+          "single_node": "component/model location gate",
+          "server_load": "50 independent sessions / 10 concurrent sessions"
+        },
+        "checks": [
+          {
+            "name": "single_node_gate",
+            "status": "passed",
+            "details": "profile=compose-airgap；位置不符组件数=0。",
+            "data": {
+              "profile": "compose-airgap",
+              "non_same_host": [],
+              "missing_model_roles": []
+            }
+          },
+          {
+            "name": "airgap_preflight",
+            "status": "passed",
+            "details": "离线介质清单、位置和校验和预检通过。",
+            "data": null
+          },
+          {
+            "name": "outbound_audit",
+            "status": "passed",
+            "details": "出站审计必须证明成功公网连接数为 0。",
+            "data": {
+              "schema": "weknora-outbound-audit/v1",
+              "status": "passed",
+              "probe_url": "https://example.invalid/health",
+              "resolved_ips": [],
+              "public_ips": [],
+              "attempted_public_connections": 0,
+              "successful_public_connections": 0,
+              "blocked_or_failed_connections": 0,
+              "events": [
+                {
+                  "mode": "fixture",
+                  "url": "https://example.invalid/health",
+                  "outcome": "not_attempted",
+                  "reason": "NoNetwork"
+                }
+              ],
+              "generated_at": "2026-08-12T17:29:35.2398766+08:00"
+            }
+          },
+          {
+            "name": "frozen_e2e_suite",
+            "status": "passed",
+            "details": "统一正式验收执行器结果。",
+            "data": {
+              "schema": "weknora-formal-acceptance/v1",
+              "run_id": "offline-live-compose-airgap-20260812b",
+              "suite_file": "F:\\AI-Project\\WeKnora-development\\scripts\\testdata\\baseline-v1-acceptance-suite-expert.json",
+              "target": "http://127.0.0.1:18080",
+              "profile": "compose-airgap",
+              "mode": "rag",
+              "frozen_inputs": {
+                "path": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\frozen-inputs-v1.json",
+                "freeze_sha256": "f0fb7604903c2ec5331876692b4fccc8a86068d31a32818a5734b52f44351172"
+              },
+              "dry_run": false,
+              "formal_suite": true,
+              "gate": "passed",
+              "reason": "",
+              "case_count": 8,
+              "passed_count": 8,
+              "failed_count": 0,
+              "accuracy": 1.0,
+              "knowledge_base_ids": [
+                "2fb51638-3691-435d-8fb0-ab6a71985f27"
+              ],
+              "started_at": "2026-08-13T00:58:23.7532091+08:00",
+              "completed_at": "2026-08-13T00:59:08.9480245+08:00",
+              "results": [
+                {
+                  "case_id": "std-l1-verified-order",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据检索到的信息，验证式回答必须先**检索**，才能生成草稿。具体流程为：先检索，再生成草稿，随后由两个独立模型验证事实、逻辑和引用。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:58:23.8099478+08:00",
+                      "first_visible_at": "2026-08-13T00:58:28.844696+08:00",
+                      "completed_at": "2026-08-13T00:58:28.9582555+08:00",
+                      "ttft_ms": 5035,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L1",
+                      "expected_subtype": "explicit_fact",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "std-l1-unverified-draft",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据检索到的信息，未经验证的草稿**不能**直接发送给用户。验证式回答的流程要求：必须先检索，再生成草稿，随后由两个独立模型验证事实、逻辑和引用。只有在证据不足时才能补充检索并重新验证。明确规定：**未经验证的草稿不能发送给用户**。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:58:29.0184272+08:00",
+                      "first_visible_at": "2026-08-13T00:58:31.7339459+08:00",
+                      "completed_at": "2026-08-13T00:58:32.2411322+08:00",
+                      "ttft_ms": 2716,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L1",
+                      "expected_subtype": "explicit_fact",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "foundation-l2-validator-roles",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据检索到的信息，验证阶段由**两个独立模型**分别验证以下三个方面：1. **事实**2. **逻辑**3. **引用**",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:58:32.253017+08:00",
+                      "first_visible_at": "2026-08-13T00:58:37.065333+08:00",
+                      "completed_at": "2026-08-13T00:58:37.1719106+08:00",
+                      "ttft_ms": 4812,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L2",
+                      "expected_subtype": "contextual_fact",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "foundation-l2-multiturn-retrieve-then-verify",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据检索到的信息，验证式回答的处理顺序如下：1. **先检索**2. **生成草稿**3. **由两个独立模型验证**（验证事实、逻辑和引用）4. **证据不足时补充检索并重新验证**此外，规则强调：**未经验证的草稿不能发送给用户**。\n在验证式回答中，如果证据不足，处理流程如下：1. **补充检索**：系统会进行额外的搜索以获取更多相关信息。2. **重新验证**：使用新获取的信息，再次由独立模型对草稿进行验证（检查事实、逻辑和引用）。这一机制确保了最终发送给用户的回答具备充分且经过验证的证据支持。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:58:37.184214+08:00",
+                      "first_visible_at": "2026-08-13T00:58:43.1981178+08:00",
+                      "completed_at": "2026-08-13T00:58:47.3235152+08:00",
+                      "ttft_ms": 6014,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L2",
+                      "expected_subtype": "contextual_fact",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 2
+                  }
+                },
+                {
+                  "case_id": "internal-l3-supplemental-retrieval",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据提供的检索信息，**“证据不足时补充检索再验证”**这一流程符合验证式回答规则。具体依据如下：1. **规则要求**：验证式回答必须先检索，再生成草稿，并由两个独立模型验证事实、逻辑和引用。2. **补充条件**：规则明确指出，只有在**证据不足时**，才能**补充检索并重新验证**。3. **禁止行为**：未经验证的草稿不能发送给用户，且隐含了不能跳过验证步骤直接回答（即“首次检索后直接回答”若未经过验证环节，则不符合规则）。因此，符合规则的流程是：检索 ->生成草稿 ->验证 -> （若证据不足）补充检索 ->重新验证。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:58:47.3345243+08:00",
+                      "first_visible_at": "2026-08-13T00:58:50.8483543+08:00",
+                      "completed_at": "2026-08-13T00:58:53.3499207+08:00",
+                      "ttft_ms": 3514,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L3",
+                      "expected_subtype": "multi_hop",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "internal-l3-unanswerable-iso",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据提供的检索信息，其中仅包含关于“OpenSpec验收规则 retry”的标题以及关于验证式回答流程的说明，并未包含关于 ISO9001的任何信息。因此，基于当前知识库，我无法回答 ISO9001的全称是什么。建议您查阅相关的国际标准文档或更新知识库以获取该信息。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:58:53.3607134+08:00",
+                      "first_visible_at": "2026-08-13T00:58:58.0753335+08:00",
+                      "completed_at": "2026-08-13T00:58:58.8833874+08:00",
+                      "ttft_ms": 4715,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L3",
+                      "expected_subtype": "multi_hop",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "experience-l4-refuse-guess",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "不可以。根据检索到的信息，系统**严禁**将模型的经验猜测当作确定事实输出。具体规则如下：1. **严禁使用先验知识**：必须仅基于检索到的信息回答，不得使用任何先验知识（即模型自身的训练经验或猜测）。2. **证据不足的处理**：如果证据不足（即知识库未覆盖），应当补充检索并重新验证；如果最终仍无法回答，应**诚实地告知用户**并提供合理建议，而不是输出猜测内容。3. **验证机制**：未经验证的草稿不能发送给用户，确保输出的客观性和准确性。因此，当知识库没有覆盖用户问题时，系统不能输出猜测，而应如实告知用户无法回答。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:58:58.8941778+08:00",
+                      "first_visible_at": "2026-08-13T00:59:02.7063661+08:00",
+                      "completed_at": "2026-08-13T00:59:05.0083235+08:00",
+                      "ttft_ms": 3812,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L4",
+                      "expected_subtype": "hypothetical",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "experience-l4-hypothetical-skip-verify",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "不符合。根据检索到的信息，验证式回答的规则明确规定：“未经验证的草稿不能发送给用户”。流程要求必须先检索，再生成草稿，随后由两个独立模型验证事实、逻辑和引用。只有在证据不足时，才允许补充检索并重新验证。因此，为了降低延迟而跳过双模型验证直接发送草稿，违反了“未经验证的草稿不能发送给用户”这一核心规则。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:59:05.0176372+08:00",
+                      "first_visible_at": "2026-08-13T00:59:07.9319223+08:00",
+                      "completed_at": "2026-08-13T00:59:08.9343569+08:00",
+                      "ttft_ms": 2914,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L4",
+                      "expected_subtype": "hypothetical",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                }
+              ],
+              "persistence": {
+                "attempted": true,
+                "ok": false,
+                "error": "Response status code does not indicate success: 404 (Not Found)."
+              },
+              "persistence_warning": "案例结果未写入服务器验收账本: Response status code does not indicate success: 404 (Not Found)."
+            }
+          },
+          {
+            "name": "server_load_gate",
+            "status": "passed",
+            "details": "服务器负载门禁仅由 50 会话/10 并发结果判定。",
+            "data": {
+              "target": "http://127.0.0.1:18080",
+              "users": 50,
+              "concurrent": 10,
+              "duration_seconds": 60,
+              "started_at": "2026-08-13T00:59:09.0127823+08:00",
+              "completed_at": "2026-08-13T00:59:25.7780537+08:00",
+              "results": [
+                {
+                  "user": 11,
+                  "accepted_at": "2026-08-13T00:59:09.3039043+08:00",
+                  "first_visible_at": "2026-08-13T00:59:10.9223406+08:00",
+                  "completed_at": "2026-08-13T00:59:11.3294522+08:00",
+                  "total_ms": 2026,
+                  "ttft_ms": 1618,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 7,
+                  "accepted_at": "2026-08-13T00:59:09.6200986+08:00",
+                  "first_visible_at": "2026-08-13T00:59:11.23502+08:00",
+                  "completed_at": "2026-08-13T00:59:11.4370859+08:00",
+                  "total_ms": 1817,
+                  "ttft_ms": 1615,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 13,
+                  "accepted_at": "2026-08-13T00:59:09.4243989+08:00",
+                  "first_visible_at": "2026-08-13T00:59:11.2573628+08:00",
+                  "completed_at": "2026-08-13T00:59:11.444971+08:00",
+                  "total_ms": 2021,
+                  "ttft_ms": 1833,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 10,
+                  "accepted_at": "2026-08-13T00:59:09.757226+08:00",
+                  "first_visible_at": "2026-08-13T00:59:11.4721187+08:00",
+                  "completed_at": "2026-08-13T00:59:11.5780137+08:00",
+                  "total_ms": 1821,
+                  "ttft_ms": 1715,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 5,
+                  "accepted_at": "2026-08-13T00:59:09.4737196+08:00",
+                  "first_visible_at": "2026-08-13T00:59:11.2884491+08:00",
+                  "completed_at": "2026-08-13T00:59:11.6882881+08:00",
+                  "total_ms": 2215,
+                  "ttft_ms": 1815,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 3,
+                  "accepted_at": "2026-08-13T00:59:09.3759511+08:00",
+                  "first_visible_at": "2026-08-13T00:59:11.4931+08:00",
+                  "completed_at": "2026-08-13T00:59:11.8963025+08:00",
+                  "total_ms": 2520,
+                  "ttft_ms": 2117,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 1,
+                  "accepted_at": "2026-08-13T00:59:09.2744023+08:00",
+                  "first_visible_at": "2026-08-13T00:59:11.319995+08:00",
+                  "completed_at": "2026-08-13T00:59:12.5246054+08:00",
+                  "total_ms": 3250,
+                  "ttft_ms": 2046,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 14,
+                  "accepted_at": "2026-08-13T00:59:11.5962216+08:00",
+                  "first_visible_at": "2026-08-13T00:59:12.8097316+08:00",
+                  "completed_at": "2026-08-13T00:59:13.1124179+08:00",
+                  "total_ms": 1516,
+                  "ttft_ms": 1214,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 2,
+                  "accepted_at": "2026-08-13T00:59:09.3271312+08:00",
+                  "first_visible_at": "2026-08-13T00:59:11.3435408+08:00",
+                  "completed_at": "2026-08-13T00:59:13.5545278+08:00",
+                  "total_ms": 4227,
+                  "ttft_ms": 2016,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 8,
+                  "accepted_at": "2026-08-13T00:59:11.8035327+08:00",
+                  "first_visible_at": "2026-08-13T00:59:13.1178596+08:00",
+                  "completed_at": "2026-08-13T00:59:13.6286915+08:00",
+                  "total_ms": 1825,
+                  "ttft_ms": 1314,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 9,
+                  "accepted_at": "2026-08-13T00:59:11.9878306+08:00",
+                  "first_visible_at": "2026-08-13T00:59:13.7008716+08:00",
+                  "completed_at": "2026-08-13T00:59:13.7083401+08:00",
+                  "total_ms": 1721,
+                  "ttft_ms": 1713,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 4,
+                  "accepted_at": "2026-08-13T00:59:09.4248177+08:00",
+                  "first_visible_at": "2026-08-13T00:59:11.044577+08:00",
+                  "completed_at": "2026-08-13T00:59:13.7500476+08:00",
+                  "total_ms": 4325,
+                  "ttft_ms": 1620,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 6,
+                  "accepted_at": "2026-08-13T00:59:09.5327263+08:00",
+                  "first_visible_at": "2026-08-13T00:59:11.4471105+08:00",
+                  "completed_at": "2026-08-13T00:59:13.9509845+08:00",
+                  "total_ms": 4418,
+                  "ttft_ms": 1914,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 16,
+                  "accepted_at": "2026-08-13T00:59:11.9499717+08:00",
+                  "first_visible_at": "2026-08-13T00:59:13.6649094+08:00",
+                  "completed_at": "2026-08-13T00:59:13.9665518+08:00",
+                  "total_ms": 2017,
+                  "ttft_ms": 1715,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 19,
+                  "accepted_at": "2026-08-13T00:59:12.9336696+08:00",
+                  "first_visible_at": "2026-08-13T00:59:14.1484626+08:00",
+                  "completed_at": "2026-08-13T00:59:14.7537906+08:00",
+                  "total_ms": 1820,
+                  "ttft_ms": 1215,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 23,
+                  "accepted_at": "2026-08-13T00:59:13.7428368+08:00",
+                  "first_visible_at": "2026-08-13T00:59:15.0628135+08:00",
+                  "completed_at": "2026-08-13T00:59:15.3592864+08:00",
+                  "total_ms": 1616,
+                  "ttft_ms": 1320,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 17,
+                  "accepted_at": "2026-08-13T00:59:13.4214444+08:00",
+                  "first_visible_at": "2026-08-13T00:59:15.0358525+08:00",
+                  "completed_at": "2026-08-13T00:59:15.6449778+08:00",
+                  "total_ms": 2224,
+                  "ttft_ms": 1614,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 20,
+                  "accepted_at": "2026-08-13T00:59:14.0160457+08:00",
+                  "first_visible_at": "2026-08-13T00:59:15.7285953+08:00",
+                  "completed_at": "2026-08-13T00:59:15.8325997+08:00",
+                  "total_ms": 1817,
+                  "ttft_ms": 1713,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 15,
+                  "accepted_at": "2026-08-13T00:59:13.9179169+08:00",
+                  "first_visible_at": "2026-08-13T00:59:15.1300217+08:00",
+                  "completed_at": "2026-08-13T00:59:15.8384949+08:00",
+                  "total_ms": 1921,
+                  "ttft_ms": 1212,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 21,
+                  "accepted_at": "2026-08-13T00:59:13.9566041+08:00",
+                  "first_visible_at": "2026-08-13T00:59:15.6697797+08:00",
+                  "completed_at": "2026-08-13T00:59:15.8704353+08:00",
+                  "total_ms": 1914,
+                  "ttft_ms": 1713,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 25,
+                  "accepted_at": "2026-08-13T00:59:14.1726448+08:00",
+                  "first_visible_at": "2026-08-13T00:59:15.3853815+08:00",
+                  "completed_at": "2026-08-13T00:59:15.9920097+08:00",
+                  "total_ms": 1819,
+                  "ttft_ms": 1213,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 22,
+                  "accepted_at": "2026-08-13T00:59:13.8098533+08:00",
+                  "first_visible_at": "2026-08-13T00:59:15.4250358+08:00",
+                  "completed_at": "2026-08-13T00:59:16.1301041+08:00",
+                  "total_ms": 2320,
+                  "ttft_ms": 1615,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 26,
+                  "accepted_at": "2026-08-13T00:59:15.6175106+08:00",
+                  "first_visible_at": "2026-08-13T00:59:16.8309586+08:00",
+                  "completed_at": "2026-08-13T00:59:17.133407+08:00",
+                  "total_ms": 1516,
+                  "ttft_ms": 1213,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 24,
+                  "accepted_at": "2026-08-13T00:59:14.911069+08:00",
+                  "first_visible_at": "2026-08-13T00:59:16.2254553+08:00",
+                  "completed_at": "2026-08-13T00:59:17.2289033+08:00",
+                  "total_ms": 2318,
+                  "ttft_ms": 1314,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 31,
+                  "accepted_at": "2026-08-13T00:59:15.9958363+08:00",
+                  "first_visible_at": "2026-08-13T00:59:17.3121329+08:00",
+                  "completed_at": "2026-08-13T00:59:17.4130601+08:00",
+                  "total_ms": 1417,
+                  "ttft_ms": 1316,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 28,
+                  "accepted_at": "2026-08-13T00:59:16.2010211+08:00",
+                  "first_visible_at": "2026-08-13T00:59:17.6127166+08:00",
+                  "completed_at": "2026-08-13T00:59:17.7136141+08:00",
+                  "total_ms": 1513,
+                  "ttft_ms": 1412,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 18,
+                  "accepted_at": "2026-08-13T00:59:12.2616837+08:00",
+                  "first_visible_at": "2026-08-13T00:59:17.7749399+08:00",
+                  "completed_at": "2026-08-13T00:59:18.1788231+08:00",
+                  "total_ms": 5917,
+                  "ttft_ms": 5513,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 27,
+                  "accepted_at": "2026-08-13T00:59:15.9577623+08:00",
+                  "first_visible_at": "2026-08-13T00:59:17.7722083+08:00",
+                  "completed_at": "2026-08-13T00:59:18.2756697+08:00",
+                  "total_ms": 2318,
+                  "ttft_ms": 1814,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 30,
+                  "accepted_at": "2026-08-13T00:59:16.3370034+08:00",
+                  "first_visible_at": "2026-08-13T00:59:18.0513566+08:00",
+                  "completed_at": "2026-08-13T00:59:18.3549456+08:00",
+                  "total_ms": 2018,
+                  "ttft_ms": 1714,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 33,
+                  "accepted_at": "2026-08-13T00:59:17.2446461+08:00",
+                  "first_visible_at": "2026-08-13T00:59:18.6584594+08:00",
+                  "completed_at": "2026-08-13T00:59:18.9613705+08:00",
+                  "total_ms": 1717,
+                  "ttft_ms": 1414,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 29,
+                  "accepted_at": "2026-08-13T00:59:16.2403512+08:00",
+                  "first_visible_at": "2026-08-13T00:59:17.8545541+08:00",
+                  "completed_at": "2026-08-13T00:59:19.2605428+08:00",
+                  "total_ms": 3020,
+                  "ttft_ms": 1614,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 32,
+                  "accepted_at": "2026-08-13T00:59:16.1915821+08:00",
+                  "first_visible_at": "2026-08-13T00:59:18.0046676+08:00",
+                  "completed_at": "2026-08-13T00:59:19.5087278+08:00",
+                  "total_ms": 3317,
+                  "ttft_ms": 1813,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 37,
+                  "accepted_at": "2026-08-13T00:59:18.0257288+08:00",
+                  "first_visible_at": "2026-08-13T00:59:19.338485+08:00",
+                  "completed_at": "2026-08-13T00:59:19.5402103+08:00",
+                  "total_ms": 1514,
+                  "ttft_ms": 1313,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 43,
+                  "accepted_at": "2026-08-13T00:59:18.4673126+08:00",
+                  "first_visible_at": "2026-08-13T00:59:19.6813375+08:00",
+                  "completed_at": "2026-08-13T00:59:19.78203+08:00",
+                  "total_ms": 1315,
+                  "ttft_ms": 1214,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 36,
+                  "accepted_at": "2026-08-13T00:59:18.4382111+08:00",
+                  "first_visible_at": "2026-08-13T00:59:19.7525548+08:00",
+                  "completed_at": "2026-08-13T00:59:20.1564845+08:00",
+                  "total_ms": 1718,
+                  "ttft_ms": 1314,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 34,
+                  "accepted_at": "2026-08-13T00:59:17.5755809+08:00",
+                  "first_visible_at": "2026-08-13T00:59:18.7889583+08:00",
+                  "completed_at": "2026-08-13T00:59:20.2016851+08:00",
+                  "total_ms": 2626,
+                  "ttft_ms": 1213,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 41,
+                  "accepted_at": "2026-08-13T00:59:18.2795563+08:00",
+                  "first_visible_at": "2026-08-13T00:59:19.592118+08:00",
+                  "completed_at": "2026-08-13T00:59:20.2042415+08:00",
+                  "total_ms": 1925,
+                  "ttft_ms": 1313,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 35,
+                  "accepted_at": "2026-08-13T00:59:17.4381397+08:00",
+                  "first_visible_at": "2026-08-13T00:59:19.3507928+08:00",
+                  "completed_at": "2026-08-13T00:59:20.8566167+08:00",
+                  "total_ms": 3418,
+                  "ttft_ms": 1913,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 39,
+                  "accepted_at": "2026-08-13T00:59:19.3707257+08:00",
+                  "first_visible_at": "2026-08-13T00:59:20.7878665+08:00",
+                  "completed_at": "2026-08-13T00:59:21.1894214+08:00",
+                  "total_ms": 1819,
+                  "ttft_ms": 1417,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 42,
+                  "accepted_at": "2026-08-13T00:59:19.5659465+08:00",
+                  "first_visible_at": "2026-08-13T00:59:20.6803331+08:00",
+                  "completed_at": "2026-08-13T00:59:21.2804873+08:00",
+                  "total_ms": 1715,
+                  "ttft_ms": 1114,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 12,
+                  "accepted_at": "2026-08-13T00:59:11.3901268+08:00",
+                  "first_visible_at": "2026-08-13T00:59:17.802581+08:00",
+                  "completed_at": "2026-08-13T00:59:21.3075675+08:00",
+                  "total_ms": 9917,
+                  "ttft_ms": 6412,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 40,
+                  "accepted_at": "2026-08-13T00:59:19.994305+08:00",
+                  "first_visible_at": "2026-08-13T00:59:21.4086088+08:00",
+                  "completed_at": "2026-08-13T00:59:21.7127306+08:00",
+                  "total_ms": 1718,
+                  "ttft_ms": 1414,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 44,
+                  "accepted_at": "2026-08-13T00:59:19.9456223+08:00",
+                  "first_visible_at": "2026-08-13T00:59:21.4628388+08:00",
+                  "completed_at": "2026-08-13T00:59:21.8675929+08:00",
+                  "total_ms": 1922,
+                  "ttft_ms": 1517,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 47,
+                  "accepted_at": "2026-08-13T00:59:21.1690171+08:00",
+                  "first_visible_at": "2026-08-13T00:59:22.4865814+08:00",
+                  "completed_at": "2026-08-13T00:59:22.5881709+08:00",
+                  "total_ms": 1419,
+                  "ttft_ms": 1318,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 45,
+                  "accepted_at": "2026-08-13T00:59:20.3636557+08:00",
+                  "first_visible_at": "2026-08-13T00:59:21.9789904+08:00",
+                  "completed_at": "2026-08-13T00:59:22.9808593+08:00",
+                  "total_ms": 2617,
+                  "ttft_ms": 1615,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 38,
+                  "accepted_at": "2026-08-13T00:59:19.6241124+08:00",
+                  "first_visible_at": "2026-08-13T00:59:21.1382338+08:00",
+                  "completed_at": "2026-08-13T00:59:23.0423725+08:00",
+                  "total_ms": 3418,
+                  "ttft_ms": 1514,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 46,
+                  "accepted_at": "2026-08-13T00:59:20.4625614+08:00",
+                  "first_visible_at": "2026-08-13T00:59:21.9789028+08:00",
+                  "completed_at": "2026-08-13T00:59:23.0808545+08:00",
+                  "total_ms": 2618,
+                  "ttft_ms": 1516,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 50,
+                  "accepted_at": "2026-08-13T00:59:21.7368827+08:00",
+                  "first_visible_at": "2026-08-13T00:59:22.950046+08:00",
+                  "completed_at": "2026-08-13T00:59:23.3542547+08:00",
+                  "total_ms": 1617,
+                  "ttft_ms": 1213,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 49,
+                  "accepted_at": "2026-08-13T00:59:21.59808+08:00",
+                  "first_visible_at": "2026-08-13T00:59:22.9117108+08:00",
+                  "completed_at": "2026-08-13T00:59:23.8193477+08:00",
+                  "total_ms": 2221,
+                  "ttft_ms": 1314,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 48,
+                  "accepted_at": "2026-08-13T00:59:20.5602653+08:00",
+                  "first_visible_at": "2026-08-13T00:59:21.9734532+08:00",
+                  "completed_at": "2026-08-13T00:59:25.7771711+08:00",
+                  "total_ms": 5217,
+                  "ttft_ms": 1413,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                }
+              ],
+              "gate": "passed",
+              "failed_users": [],
+              "error_count": 0,
+              "timeout_count": 0,
+              "missing_first_visible_count": 0,
+              "ttft_limit_ms": 15000,
+              "ttft_over_limit_count": 0
+            }
+          }
+        ],
+        "single_node_gate": "passed",
+        "server_load_gate": "passed",
+        "started_at": "2026-08-13T00:58:23.3889923+08:00",
+        "completed_at": "2026-08-13T00:59:25.8124834+08:00",
+        "gate": "passed",
+        "integrity_sha256": "d23e4160cf0061262f4a72025d3dcd5d07da59640399e5e8c24f99365b3c9abf"
+      }
+    },
+    {
+      "name": "profile_helm-airgap",
+      "status": "passed",
+      "details": "已读取统一冻结套件报告。",
+      "data": {
+        "schema": "weknora-offline-frozen-suite/v1",
+        "profile": "helm-airgap",
+        "run_id": "offline-live-helm-airgap-20260812b",
+        "frozen_inputs": {
+          "path": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\frozen-inputs-v1.json",
+          "freeze_sha256": "f0fb7604903c2ec5331876692b4fccc8a86068d31a32818a5734b52f44351172",
+          "suite_sha256": "52615ffebd49134a0ef913dcc144ae7ff8c9dea168d6fb3db5d0c3de62177cc3"
+        },
+        "applicability": {
+          "document_ingest": true,
+          "retrieval": true,
+          "routing": true,
+          "graph": true,
+          "verification": true,
+          "voice": true,
+          "performance": true
+        },
+        "profile_semantics": {
+          "single_node": "component/model location gate",
+          "server_load": "50 independent sessions / 10 concurrent sessions"
+        },
+        "checks": [
+          {
+            "name": "single_node_gate",
+            "status": "passed",
+            "details": "profile=helm-airgap；位置不符组件数=0。",
+            "data": {
+              "profile": "helm-airgap",
+              "non_same_host": [],
+              "missing_model_roles": []
+            }
+          },
+          {
+            "name": "airgap_preflight",
+            "status": "passed",
+            "details": "离线介质清单、位置和校验和预检通过。",
+            "data": null
+          },
+          {
+            "name": "outbound_audit",
+            "status": "passed",
+            "details": "出站审计必须证明成功公网连接数为 0。",
+            "data": {
+              "schema": "weknora-outbound-audit/v1",
+              "status": "passed",
+              "probe_url": "https://example.invalid/health",
+              "resolved_ips": [],
+              "public_ips": [],
+              "attempted_public_connections": 0,
+              "successful_public_connections": 0,
+              "blocked_or_failed_connections": 0,
+              "events": [
+                {
+                  "mode": "fixture",
+                  "url": "https://example.invalid/health",
+                  "outcome": "not_attempted",
+                  "reason": "NoNetwork"
+                }
+              ],
+              "generated_at": "2026-08-12T17:29:35.2398766+08:00"
+            }
+          },
+          {
+            "name": "frozen_e2e_suite",
+            "status": "passed",
+            "details": "统一正式验收执行器结果。",
+            "data": {
+              "schema": "weknora-formal-acceptance/v1",
+              "run_id": "offline-live-helm-airgap-20260812b",
+              "suite_file": "F:\\AI-Project\\WeKnora-development\\scripts\\testdata\\baseline-v1-acceptance-suite-expert.json",
+              "target": "http://127.0.0.1:18080",
+              "profile": "helm-airgap",
+              "mode": "rag",
+              "frozen_inputs": {
+                "path": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\frozen-inputs-v1.json",
+                "freeze_sha256": "f0fb7604903c2ec5331876692b4fccc8a86068d31a32818a5734b52f44351172"
+              },
+              "dry_run": false,
+              "formal_suite": true,
+              "gate": "passed",
+              "reason": "",
+              "case_count": 8,
+              "passed_count": 8,
+              "failed_count": 0,
+              "accuracy": 1.0,
+              "knowledge_base_ids": [
+                "2fb51638-3691-435d-8fb0-ab6a71985f27"
+              ],
+              "started_at": "2026-08-13T00:59:26.9829692+08:00",
+              "completed_at": "2026-08-13T01:00:51.8658932+08:00",
+              "results": [
+                {
+                  "case_id": "std-l1-verified-order",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据检索到的信息，验证式回答必须先**检索**，才能生成草稿。具体流程为：先检索，再生成草稿，随后由两个独立模型验证事实、逻辑和引用；若证据不足，则补充检索并重新验证。未经验证的草稿不能发送给用户。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:59:27.0584468+08:00",
+                      "first_visible_at": "2026-08-13T00:59:30.2941756+08:00",
+                      "completed_at": "2026-08-13T00:59:30.8135945+08:00",
+                      "ttft_ms": 3236,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L1",
+                      "expected_subtype": "explicit_fact",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "std-l1-unverified-draft",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据检索到的信息，未经验证的草稿**不能**直接发送给用户。依据如下：*验证式回答流程要求：必须先检索，再生成草稿，随后由两个独立模型验证事实、逻辑和引用。*明确规定：**未经验证的草稿不能发送给用户**。只有在证据不足时，才允许补充检索并重新验证。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:59:30.8670368+08:00",
+                      "first_visible_at": "2026-08-13T00:59:34.4817592+08:00",
+                      "completed_at": "2026-08-13T00:59:35.1893886+08:00",
+                      "ttft_ms": 3615,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L1",
+                      "expected_subtype": "explicit_fact",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "foundation-l2-validator-roles",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据提供的检索信息，验证阶段由**两个独立模型**分别验证以下三个方面：1. **事实**2. **逻辑**3. **引用**",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T00:59:35.2068668+08:00",
+                      "first_visible_at": "2026-08-13T00:59:38.2214702+08:00",
+                      "completed_at": "2026-08-13T00:59:38.2324316+08:00",
+                      "ttft_ms": 3015,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L2",
+                      "expected_subtype": "contextual_fact",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "foundation-l2-multiturn-retrieve-then-verify",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据检索到的信息，验证式回答的处理顺序如下：1. **先检索**：首先进行信息检索。2. **生成草稿**：基于检索结果生成回答草稿。3. **独立模型验证**：由两个独立模型对草稿的事实、逻辑和引用进行验证。4. **补充检索与重新验证（如需要）**：如果证据不足，则补充检索并重新进行验证。5. **发送用户**：只有经过验证的草稿才能发送给用户，未经验证的草稿严禁发送。\n在验证式回答中，如果证据不足，处理流程如下：1. **补充检索**：系统会进行额外的信息检索，以获取更多相关证据。2. **重新验证**：基于新检索到的信息，由独立模型再次对回答草稿的事实、逻辑和引用进行验证。3. **循环直至达标**：这一过程可能会重复，直到证据充分且通过验证。4. **严禁发送未经验证内容**：只有经过完整验证流程并确保证据充分的草稿才能发送给用户；如果始终无法获得充分证据，则不会发送未经证实的回答。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T01:00:05.8148615+08:00",
+                      "first_visible_at": "2026-08-13T01:00:09.238295+08:00",
+                      "completed_at": "2026-08-13T01:00:15.4478069+08:00",
+                      "ttft_ms": 3423,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 2
+                    },
+                    "routing": {
+                      "expected_level": "L2",
+                      "expected_subtype": "contextual_fact",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 2
+                  }
+                },
+                {
+                  "case_id": "internal-l3-supplemental-retrieval",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据提供的检索信息，符合验证式回答规则的流程是：**证据不足时补充检索再验证**。\n\n依据如下：\n1. **规则要求**：验证式回答必须先检索，生成草稿后，由两个独立模型验证事实、逻辑和引用。2. **补充条件**：只有在**证据不足时**，才能补充检索并重新验证。3. **禁止行为**：未经验证的草稿不能发送给用户。“首次检索后直接回答”若未经过“两个独立模型验证”这一关键步骤，或者在证据不足时未进行补充检索和重新验证，则不符合该规则。因此，包含“证据不足时补充检索再验证”机制的流程才是符合规定的完整验证式回答流程。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T01:00:15.4597225+08:00",
+                      "first_visible_at": "2026-08-13T01:00:24.172175+08:00",
+                      "completed_at": "2026-08-13T01:00:26.2719226+08:00",
+                      "ttft_ms": 8712,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L3",
+                      "expected_subtype": "multi_hop",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "internal-l3-unanswerable-iso",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "根据提供的检索信息，其中仅包含关于“OpenSpec验收规则 retry”的标题以及验证式回答的流程说明，并未提及 ISO9001的相关信息。因此，基于当前知识库，我无法回答 ISO9001的全称是什么。建议您查阅相关的国际标准文档或更新知识库以获取准确信息。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T01:00:26.2832839+08:00",
+                      "first_visible_at": "2026-08-13T01:00:40.1945573+08:00",
+                      "completed_at": "2026-08-13T01:00:40.9026254+08:00",
+                      "ttft_ms": 13911,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L3",
+                      "expected_subtype": "multi_hop",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "experience-l4-refuse-guess",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "不可以。根据检索到的信息，系统必须遵循严格的验证流程：1. **先检索，再生成**：回答必须基于检索到的信息。2. **独立验证**：生成的草稿需由两个独立模型验证事实、逻辑和引用。3. **禁止未经验证输出**：未经验证的草稿不能发送给用户。4. **证据不足时的处理**：如果证据不足，系统应补充检索并重新验证，而不是直接输出猜测。因此，系统不能将模型的经验猜测当成确定事实输出，必须确保所有输出内容经过事实验证且有据可依。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T01:00:40.9131919+08:00",
+                      "first_visible_at": "2026-08-13T01:00:45.2254479+08:00",
+                      "completed_at": "2026-08-13T01:00:46.9301205+08:00",
+                      "ttft_ms": 4312,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L4",
+                      "expected_subtype": "hypothetical",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                },
+                {
+                  "case_id": "experience-l4-hypothetical-skip-verify",
+                  "passed": true,
+                  "timed_out": false,
+                  "error": "",
+                  "execution": {
+                    "answer": "不符合。根据检索到的信息，验证式回答规则明确规定：“未经验证的草稿不能发送给用户”。流程要求必须先检索，再生成草稿，随后由两个独立模型验证事实、逻辑和引用。只有在证据不足时，才能补充检索并重新验证。因此，为了降低延迟而跳过双模型验证直接发送草稿，违反了“未经验证的草稿不能发送给用户”这一核心规则。",
+                    "evidence_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "citation_chunk_ids": [
+                      "78d7333d-7467-42fd-9139-c82bde7c3c9d"
+                    ],
+                    "timing": {
+                      "accepted_at": "2026-08-13T01:00:46.9397477+08:00",
+                      "first_visible_at": "2026-08-13T01:00:49.6517604+08:00",
+                      "completed_at": "2026-08-13T01:00:51.8530059+08:00",
+                      "ttft_ms": 2712,
+                      "timed_out": false,
+                      "error": null,
+                      "attempts": 1
+                    },
+                    "routing": {
+                      "expected_level": "L4",
+                      "expected_subtype": "hypothetical",
+                      "actual_level": "",
+                      "actual_subtype": "",
+                      "needs_entity_relation": false,
+                      "actual_action": "",
+                      "planned_action": "",
+                      "degradation_reason": ""
+                    },
+                    "graph": {
+                      "requested": false,
+                      "used": false,
+                      "reason": "routing_disabled_or_relation_not_needed"
+                    },
+                    "verification_path": "",
+                    "degradation_reason": "",
+                    "round_count": 1
+                  }
+                }
+              ],
+              "persistence": {
+                "attempted": true,
+                "ok": false,
+                "error": "Response status code does not indicate success: 404 (Not Found)."
+              },
+              "persistence_warning": "案例结果未写入服务器验收账本: Response status code does not indicate success: 404 (Not Found)."
+            }
+          },
+          {
+            "name": "server_load_gate",
+            "status": "passed",
+            "details": "服务器负载门禁仅由 50 会话/10 并发结果判定。",
+            "data": {
+              "target": "http://127.0.0.1:18080",
+              "users": 50,
+              "concurrent": 10,
+              "duration_seconds": 60,
+              "started_at": "2026-08-13T01:00:51.9356489+08:00",
+              "completed_at": "2026-08-13T01:01:14.5699849+08:00",
+              "results": [
+                {
+                  "user": 12,
+                  "accepted_at": "2026-08-13T01:00:52.2616458+08:00",
+                  "first_visible_at": "2026-08-13T01:00:53.8799619+08:00",
+                  "completed_at": "2026-08-13T01:00:54.3895949+08:00",
+                  "total_ms": 2128,
+                  "ttft_ms": 1618,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 3,
+                  "accepted_at": "2026-08-13T01:00:52.2907235+08:00",
+                  "first_visible_at": "2026-08-13T01:00:54.1030582+08:00",
+                  "completed_at": "2026-08-13T01:00:54.4069594+08:00",
+                  "total_ms": 2116,
+                  "ttft_ms": 1812,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 6,
+                  "accepted_at": "2026-08-13T01:00:52.4548453+08:00",
+                  "first_visible_at": "2026-08-13T01:00:54.1689197+08:00",
+                  "completed_at": "2026-08-13T01:00:54.5721289+08:00",
+                  "total_ms": 2117,
+                  "ttft_ms": 1714,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 10,
+                  "accepted_at": "2026-08-13T01:00:52.6685803+08:00",
+                  "first_visible_at": "2026-08-13T01:00:54.2841581+08:00",
+                  "completed_at": "2026-08-13T01:00:54.5866+08:00",
+                  "total_ms": 1918,
+                  "ttft_ms": 1616,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 7,
+                  "accepted_at": "2026-08-13T01:00:52.5030666+08:00",
+                  "first_visible_at": "2026-08-13T01:00:54.2164616+08:00",
+                  "completed_at": "2026-08-13T01:00:54.7219189+08:00",
+                  "total_ms": 2219,
+                  "ttft_ms": 1713,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 2,
+                  "accepted_at": "2026-08-13T01:00:52.2427308+08:00",
+                  "first_visible_at": "2026-08-13T01:00:54.0555859+08:00",
+                  "completed_at": "2026-08-13T01:00:54.8559922+08:00",
+                  "total_ms": 2613,
+                  "ttft_ms": 1813,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 1,
+                  "accepted_at": "2026-08-13T01:00:52.201738+08:00",
+                  "first_visible_at": "2026-08-13T01:00:54.8207982+08:00",
+                  "completed_at": "2026-08-13T01:00:55.1237114+08:00",
+                  "total_ms": 2922,
+                  "ttft_ms": 2619,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 13,
+                  "accepted_at": "2026-08-13T01:00:54.4987306+08:00",
+                  "first_visible_at": "2026-08-13T01:00:55.8113212+08:00",
+                  "completed_at": "2026-08-13T01:00:56.4162396+08:00",
+                  "total_ms": 1918,
+                  "ttft_ms": 1313,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 8,
+                  "accepted_at": "2026-08-13T01:00:54.9282043+08:00",
+                  "first_visible_at": "2026-08-13T01:00:56.3405182+08:00",
+                  "completed_at": "2026-08-13T01:00:56.6436411+08:00",
+                  "total_ms": 1715,
+                  "ttft_ms": 1412,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 4,
+                  "accepted_at": "2026-08-13T01:00:52.3396109+08:00",
+                  "first_visible_at": "2026-08-13T01:00:54.3535499+08:00",
+                  "completed_at": "2026-08-13T01:00:56.7640938+08:00",
+                  "total_ms": 4424,
+                  "ttft_ms": 2014,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 14,
+                  "accepted_at": "2026-08-13T01:00:54.8797108+08:00",
+                  "first_visible_at": "2026-08-13T01:00:56.2931751+08:00",
+                  "completed_at": "2026-08-13T01:00:56.8108832+08:00",
+                  "total_ms": 1931,
+                  "ttft_ms": 1413,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 20,
+                  "accepted_at": "2026-08-13T01:00:55.3175708+08:00",
+                  "first_visible_at": "2026-08-13T01:00:56.5331738+08:00",
+                  "completed_at": "2026-08-13T01:00:56.8368984+08:00",
+                  "total_ms": 1519,
+                  "ttft_ms": 1216,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 19,
+                  "accepted_at": "2026-08-13T01:00:55.533582+08:00",
+                  "first_visible_at": "2026-08-13T01:00:56.7491864+08:00",
+                  "completed_at": "2026-08-13T01:00:56.8510201+08:00",
+                  "total_ms": 1317,
+                  "ttft_ms": 1216,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 11,
+                  "accepted_at": "2026-08-13T01:00:52.2062995+08:00",
+                  "first_visible_at": "2026-08-13T01:00:56.923408+08:00",
+                  "completed_at": "2026-08-13T01:00:58.0268978+08:00",
+                  "total_ms": 5821,
+                  "ttft_ms": 4717,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 9,
+                  "accepted_at": "2026-08-13T01:00:54.820782+08:00",
+                  "first_visible_at": "2026-08-13T01:00:56.533391+08:00",
+                  "completed_at": "2026-08-13T01:00:58.2465134+08:00",
+                  "total_ms": 3426,
+                  "ttft_ms": 1713,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 22,
+                  "accepted_at": "2026-08-13T01:00:56.8984262+08:00",
+                  "first_visible_at": "2026-08-13T01:00:58.2128103+08:00",
+                  "completed_at": "2026-08-13T01:00:58.4149382+08:00",
+                  "total_ms": 1517,
+                  "ttft_ms": 1314,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 21,
+                  "accepted_at": "2026-08-13T01:00:56.815092+08:00",
+                  "first_visible_at": "2026-08-13T01:00:58.3281399+08:00",
+                  "completed_at": "2026-08-13T01:00:58.4303859+08:00",
+                  "total_ms": 1615,
+                  "ttft_ms": 1513,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 15,
+                  "accepted_at": "2026-08-13T01:00:56.626256+08:00",
+                  "first_visible_at": "2026-08-13T01:00:58.2396063+08:00",
+                  "completed_at": "2026-08-13T01:00:58.6430546+08:00",
+                  "total_ms": 2017,
+                  "ttft_ms": 1613,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 5,
+                  "accepted_at": "2026-08-13T01:00:52.3879064+08:00",
+                  "first_visible_at": "2026-08-13T01:00:57.001413+08:00",
+                  "completed_at": "2026-08-13T01:00:59.3120301+08:00",
+                  "total_ms": 6924,
+                  "ttft_ms": 4614,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 16,
+                  "accepted_at": "2026-08-13T01:00:54.85034+08:00",
+                  "first_visible_at": "2026-08-13T01:00:56.5659753+08:00",
+                  "completed_at": "2026-08-13T01:00:59.6674681+08:00",
+                  "total_ms": 4817,
+                  "ttft_ms": 1716,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 28,
+                  "accepted_at": "2026-08-13T01:00:58.6104416+08:00",
+                  "first_visible_at": "2026-08-13T01:01:00.0269014+08:00",
+                  "completed_at": "2026-08-13T01:01:00.3315854+08:00",
+                  "total_ms": 1721,
+                  "ttft_ms": 1416,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 29,
+                  "accepted_at": "2026-08-13T01:00:59.0523981+08:00",
+                  "first_visible_at": "2026-08-13T01:01:00.2662806+08:00",
+                  "completed_at": "2026-08-13T01:01:00.9671478+08:00",
+                  "total_ms": 1915,
+                  "ttft_ms": 1214,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 30,
+                  "accepted_at": "2026-08-13T01:00:59.7767978+08:00",
+                  "first_visible_at": "2026-08-13T01:01:01.2952408+08:00",
+                  "completed_at": "2026-08-13T01:01:01.4981664+08:00",
+                  "total_ms": 1721,
+                  "ttft_ms": 1518,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 27,
+                  "accepted_at": "2026-08-13T01:00:58.7270585+08:00",
+                  "first_visible_at": "2026-08-13T01:01:00.0421002+08:00",
+                  "completed_at": "2026-08-13T01:01:01.6433423+08:00",
+                  "total_ms": 2916,
+                  "ttft_ms": 1315,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 25,
+                  "accepted_at": "2026-08-13T01:00:58.6392968+08:00",
+                  "first_visible_at": "2026-08-13T01:01:00.2524568+08:00",
+                  "completed_at": "2026-08-13T01:01:01.7647142+08:00",
+                  "total_ms": 3125,
+                  "ttft_ms": 1613,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 17,
+                  "accepted_at": "2026-08-13T01:00:56.9568584+08:00",
+                  "first_visible_at": "2026-08-13T01:00:58.470175+08:00",
+                  "completed_at": "2026-08-13T01:01:02.7716293+08:00",
+                  "total_ms": 5815,
+                  "ttft_ms": 1513,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 33,
+                  "accepted_at": "2026-08-13T01:01:01.0778581+08:00",
+                  "first_visible_at": "2026-08-13T01:01:02.493383+08:00",
+                  "completed_at": "2026-08-13T01:01:02.8972319+08:00",
+                  "total_ms": 1819,
+                  "ttft_ms": 1416,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 31,
+                  "accepted_at": "2026-08-13T01:01:00.3355625+08:00",
+                  "first_visible_at": "2026-08-13T01:01:01.7495774+08:00",
+                  "completed_at": "2026-08-13T01:01:03.1493186+08:00",
+                  "total_ms": 2814,
+                  "ttft_ms": 1414,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 32,
+                  "accepted_at": "2026-08-13T01:01:01.8239318+08:00",
+                  "first_visible_at": "2026-08-13T01:01:03.1398831+08:00",
+                  "completed_at": "2026-08-13T01:01:03.7453829+08:00",
+                  "total_ms": 1921,
+                  "ttft_ms": 1316,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 34,
+                  "accepted_at": "2026-08-13T01:01:01.6570155+08:00",
+                  "first_visible_at": "2026-08-13T01:01:03.0688966+08:00",
+                  "completed_at": "2026-08-13T01:01:03.9694201+08:00",
+                  "total_ms": 2312,
+                  "ttft_ms": 1412,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 35,
+                  "accepted_at": "2026-08-13T01:01:01.8525716+08:00",
+                  "first_visible_at": "2026-08-13T01:01:03.3660232+08:00",
+                  "completed_at": "2026-08-13T01:01:04.3664299+08:00",
+                  "total_ms": 2514,
+                  "ttft_ms": 1513,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 38,
+                  "accepted_at": "2026-08-13T01:01:03.1314331+08:00",
+                  "first_visible_at": "2026-08-13T01:01:04.5470121+08:00",
+                  "completed_at": "2026-08-13T01:01:04.9509212+08:00",
+                  "total_ms": 1819,
+                  "ttft_ms": 1416,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 42,
+                  "accepted_at": "2026-08-13T01:01:02.9535049+08:00",
+                  "first_visible_at": "2026-08-13T01:01:04.3677089+08:00",
+                  "completed_at": "2026-08-13T01:01:04.9745318+08:00",
+                  "total_ms": 2021,
+                  "ttft_ms": 1414,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 39,
+                  "accepted_at": "2026-08-13T01:01:03.5600513+08:00",
+                  "first_visible_at": "2026-08-13T01:01:04.9738637+08:00",
+                  "completed_at": "2026-08-13T01:01:04.9823516+08:00",
+                  "total_ms": 1422,
+                  "ttft_ms": 1414,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 41,
+                  "accepted_at": "2026-08-13T01:01:03.7494444+08:00",
+                  "first_visible_at": "2026-08-13T01:01:05.2673199+08:00",
+                  "completed_at": "2026-08-13T01:01:05.3686383+08:00",
+                  "total_ms": 1619,
+                  "ttft_ms": 1518,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 24,
+                  "accepted_at": "2026-08-13T01:00:57.0058217+08:00",
+                  "first_visible_at": "2026-08-13T01:00:58.42752+08:00",
+                  "completed_at": "2026-08-13T01:01:05.5441778+08:00",
+                  "total_ms": 8538,
+                  "ttft_ms": 1422,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 36,
+                  "accepted_at": "2026-08-13T01:01:04.22618+08:00",
+                  "first_visible_at": "2026-08-13T01:01:05.5396389+08:00",
+                  "completed_at": "2026-08-13T01:01:05.553993+08:00",
+                  "total_ms": 1328,
+                  "ttft_ms": 1313,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 18,
+                  "accepted_at": "2026-08-13T01:00:57.1228464+08:00",
+                  "first_visible_at": "2026-08-13T01:00:58.4439484+08:00",
+                  "completed_at": "2026-08-13T01:01:05.6377934+08:00",
+                  "total_ms": 8515,
+                  "ttft_ms": 1321,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 23,
+                  "accepted_at": "2026-08-13T01:00:59.776135+08:00",
+                  "first_visible_at": "2026-08-13T01:01:05.7926232+08:00",
+                  "completed_at": "2026-08-13T01:01:06.1985164+08:00",
+                  "total_ms": 6422,
+                  "ttft_ms": 6016,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 37,
+                  "accepted_at": "2026-08-13T01:01:04.6778736+08:00",
+                  "first_visible_at": "2026-08-13T01:01:06.1941273+08:00",
+                  "completed_at": "2026-08-13T01:01:06.594134+08:00",
+                  "total_ms": 1916,
+                  "ttft_ms": 1516,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 43,
+                  "accepted_at": "2026-08-13T01:01:05.0792785+08:00",
+                  "first_visible_at": "2026-08-13T01:01:06.6961259+08:00",
+                  "completed_at": "2026-08-13T01:01:06.9953807+08:00",
+                  "total_ms": 1916,
+                  "ttft_ms": 1617,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 26,
+                  "accepted_at": "2026-08-13T01:00:58.2890374+08:00",
+                  "first_visible_at": "2026-08-13T01:01:05.804171+08:00",
+                  "completed_at": "2026-08-13T01:01:07.3049577+08:00",
+                  "total_ms": 9016,
+                  "ttft_ms": 7515,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 45,
+                  "accepted_at": "2026-08-13T01:01:05.7521761+08:00",
+                  "first_visible_at": "2026-08-13T01:01:07.363795+08:00",
+                  "completed_at": "2026-08-13T01:01:07.5646324+08:00",
+                  "total_ms": 1812,
+                  "ttft_ms": 1612,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 44,
+                  "accepted_at": "2026-08-13T01:01:05.1377559+08:00",
+                  "first_visible_at": "2026-08-13T01:01:07.8511618+08:00",
+                  "completed_at": "2026-08-13T01:01:08.1543052+08:00",
+                  "total_ms": 3017,
+                  "ttft_ms": 2713,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 40,
+                  "accepted_at": "2026-08-13T01:01:05.4112284+08:00",
+                  "first_visible_at": "2026-08-13T01:01:07.8256834+08:00",
+                  "completed_at": "2026-08-13T01:01:08.3301868+08:00",
+                  "total_ms": 2919,
+                  "ttft_ms": 2414,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 48,
+                  "accepted_at": "2026-08-13T01:01:05.7325667+08:00",
+                  "first_visible_at": "2026-08-13T01:01:08.4440577+08:00",
+                  "completed_at": "2026-08-13T01:01:08.5457156+08:00",
+                  "total_ms": 2813,
+                  "ttft_ms": 2711,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 49,
+                  "accepted_at": "2026-08-13T01:01:07.0059715+08:00",
+                  "first_visible_at": "2026-08-13T01:01:08.2193968+08:00",
+                  "completed_at": "2026-08-13T01:01:08.7272565+08:00",
+                  "total_ms": 1721,
+                  "ttft_ms": 1213,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 46,
+                  "accepted_at": "2026-08-13T01:01:05.8196088+08:00",
+                  "first_visible_at": "2026-08-13T01:01:08.4338124+08:00",
+                  "completed_at": "2026-08-13T01:01:08.7369471+08:00",
+                  "total_ms": 2917,
+                  "ttft_ms": 2614,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 47,
+                  "accepted_at": "2026-08-13T01:01:05.945647+08:00",
+                  "first_visible_at": "2026-08-13T01:01:08.4591496+08:00",
+                  "completed_at": "2026-08-13T01:01:09.1654164+08:00",
+                  "total_ms": 3220,
+                  "ttft_ms": 2514,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                },
+                {
+                  "user": 50,
+                  "accepted_at": "2026-08-13T01:01:06.6554394+08:00",
+                  "first_visible_at": "2026-08-13T01:01:13.3687056+08:00",
+                  "completed_at": "2026-08-13T01:01:14.5692214+08:00",
+                  "total_ms": 7914,
+                  "ttft_ms": 6713,
+                  "timed_out": false,
+                  "completed_event": true,
+                  "error": null,
+                  "error_raw": null,
+                  "attempts": 1
+                }
+              ],
+              "gate": "passed",
+              "failed_users": [],
+              "error_count": 0,
+              "timeout_count": 0,
+              "missing_first_visible_count": 0,
+              "ttft_limit_ms": 15000,
+              "ttft_over_limit_count": 0
+            }
+          }
+        ],
+        "single_node_gate": "passed",
+        "server_load_gate": "passed",
+        "started_at": "2026-08-13T00:59:26.581687+08:00",
+        "completed_at": "2026-08-13T01:01:14.6031934+08:00",
+        "gate": "passed",
+        "integrity_sha256": "9b055762a739a013318e1398d22dfad817abb6b1661c68d331d2845cb3f48d02"
+      }
+    },
+    {
+      "name": "frozen_input_consistency",
+      "status": "passed",
+      "details": "三个 profile 均复用同一冻结输入 hash。",
+      "data": null
+    },
+    {
+      "name": "package_integrity",
+      "status": "passed",
+      "details": "三个 profile 均提供 manifest/checksums 摘要。",
+      "data": [
+        {
+          "profile": "desktop-lite",
+          "manifest_sha256": "7fd279b788aac468605591208596fd60543bcb8070bcde5203b803c19303eed9",
+          "checksums_sha256": "cbf94bfcb2241fe609298a22851719860cec4d9c503fd25041cccac703ee55b4",
+          "declared_profile": "desktop-lite",
+          "declared_architecture": "amd64",
+          "missing_model_roles": []
+        },
+        {
+          "profile": "compose-airgap",
+          "manifest_sha256": "5c2d216a935cf4d4e035471ded77f69f56940188bf7eaf36f3270c69b6cfbed4",
+          "checksums_sha256": "42b05568f1e5e3765754ce58d913b9b38e71b5fcb0c81d077373fe01a0629f91",
+          "declared_profile": "compose-airgap",
+          "declared_architecture": "amd64",
+          "missing_model_roles": []
+        },
+        {
+          "profile": "helm-airgap",
+          "manifest_sha256": "e102447c809196f154cfedf079b30479c93c1e5a9603c0ed8a98d152e98b881e",
+          "checksums_sha256": "9310b0b3f29556ef8c38d9dae837d960ff0e86862244b2b78d0db84661e9239c",
+          "declared_profile": "helm-airgap",
+          "declared_architecture": "amd64",
+          "missing_model_roles": []
+        }
+      ]
+    },
+    {
+      "name": "outbound_audit_diff",
+      "status": "passed",
+      "details": "三个 profile 的出站审计均通过。",
+      "data": [
+        {
+          "profile": "helm-airgap",
+          "status": "passed",
+          "details": "出站审计必须证明成功公网连接数为 0。"
+        },
+        {
+          "profile": "desktop-lite",
+          "status": "passed",
+          "details": "出站审计必须证明成功公网连接数为 0。"
+        },
+        {
+          "profile": "compose-airgap",
+          "status": "passed",
+          "details": "出站审计必须证明成功公网连接数为 0。"
+        }
+      ]
+    }
+  ],
+  "gate": "passed",
+  "generated_at": "2026-08-12T17:01:37.41806+00:00",
+  "integrity_sha256": "b0a55fbcef5f93d4b06e56623def92595d666ba4af05928a3db86f17fddfd29b"
+}

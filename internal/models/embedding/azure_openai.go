@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/transport"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -46,6 +49,13 @@ func NewAzureOpenAIEmbedder(apiKey, baseURL, modelName string,
 	truncatePromptTokens int, dimensions int, modelID string,
 	apiVersion string, pooler EmbedderPooler,
 ) (*AzureOpenAIEmbedder, error) {
+	return NewAzureOpenAIEmbedderWithValidation(apiKey, baseURL, modelName, truncatePromptTokens, dimensions, modelID, apiVersion, pooler, nil)
+}
+
+func NewAzureOpenAIEmbedderWithValidation(apiKey, baseURL, modelName string,
+	truncatePromptTokens int, dimensions int, modelID string,
+	apiVersion string, pooler EmbedderPooler, validateIP func(net.IP) error,
+) (*AzureOpenAIEmbedder, error) {
 	if baseURL == "" {
 		return nil, fmt.Errorf("Azure resource endpoint (base URL) is required")
 	}
@@ -59,6 +69,10 @@ func NewAzureOpenAIEmbedder(apiKey, baseURL, modelName string,
 		truncatePromptTokens = 511
 	}
 
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid embedding endpoint: %w", err)
+	}
 	return &AzureOpenAIEmbedder{
 		apiKey:               apiKey,
 		baseURL:              baseURL,
@@ -67,7 +81,7 @@ func NewAzureOpenAIEmbedder(apiKey, baseURL, modelName string,
 		dimensions:           dimensions,
 		modelID:              modelID,
 		apiVersion:           apiVersion,
-		httpClient:           &http.Client{Timeout: 60 * time.Second},
+		httpClient:           transport.NewHTTPClient(transport.Config{Timeout: 60 * time.Second, ValidateIP: validateIP, AllowedHosts: []string{parsed.Hostname()}}),
 		maxRetries:           3,
 		EmbedderPooler:       pooler,
 	}, nil

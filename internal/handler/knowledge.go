@@ -34,6 +34,7 @@ type KnowledgeHandler struct {
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
 	asynqClient       interfaces.TaskEnqueuer
+	governanceRepo    interfaces.KnowledgeGovernanceRepository
 }
 
 // NewKnowledgeHandler creates a new knowledge handler instance
@@ -43,6 +44,7 @@ func NewKnowledgeHandler(
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
 	asynqClient interfaces.TaskEnqueuer,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
 		kgService:         kgService,
@@ -50,7 +52,25 @@ func NewKnowledgeHandler(
 		kbShareService:    kbShareService,
 		agentShareService: agentShareService,
 		asynqClient:       asynqClient,
+		governanceRepo:    governanceRepo,
 	}
+}
+
+func (h *KnowledgeHandler) canModifyOwnContribution(ctx context.Context, knowledge *types.Knowledge, kb *types.KnowledgeBase) bool {
+	userID, ok := types.UserIDFromContext(ctx)
+	if !ok || knowledge == nil || knowledge.CreatedBy != userID || !types.CanContributeKnowledge(ctx, kb) || knowledge.PendingVersionID == "" || h.governanceRepo == nil {
+		return false
+	}
+	version, err := h.governanceRepo.GetVersion(ctx, knowledge.TenantID, knowledge.PendingVersionID)
+	return err == nil && version != nil && (version.Status == types.KnowledgeVersionDraft || version.Status == types.KnowledgeVersionRejected)
+}
+
+func (h *KnowledgeHandler) canViewGovernedKnowledge(ctx context.Context, knowledge *types.Knowledge, kb *types.KnowledgeBase) bool {
+	if knowledge == nil || kb == nil || !kb.Governance.Enabled || knowledge.CurrentVersionID != "" {
+		return true
+	}
+	userID, ok := types.UserIDFromContext(ctx)
+	return types.CanManageKnowledgeBase(ctx, kb) || types.CanReviewKnowledge(ctx, kb) || (ok && knowledge.CreatedBy == userID)
 }
 
 // validateKnowledgeBaseAccess validates access permissions to a knowledge base
@@ -132,7 +152,13 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, k
 		if types.CanManageKnowledgeBase(ctx, kb) {
 			return knowledge, context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
 		}
+		if requiredPermission == types.OrgRoleEditor && h.canModifyOwnContribution(ctx, knowledge, kb) {
+			return knowledge, context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
+		}
 		if requiredPermission == types.OrgRoleViewer && types.CanReadKnowledgeBase(ctx, kb) {
+			if !h.canViewGovernedKnowledge(ctx, knowledge, kb) {
+				return nil, ctx, errors.NewForbiddenError("Unpublished contribution is not visible")
+			}
 			return knowledge, context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
 		}
 	}
@@ -246,7 +272,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	logger.Info(ctx, "Start creating knowledge from file")
 
 	// Validate access to the knowledge base (only owner or admin/editor can create)
-	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	kb, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -254,7 +280,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
 
 	// Check write permission
-	if permission != types.OrgRoleAdmin {
+	if permission != types.OrgRoleAdmin && !types.CanContributeKnowledge(ctx, kb) {
 		c.Error(errors.NewForbiddenError("No permission to create knowledge"))
 		return
 	}
@@ -267,9 +293,9 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		return
 	}
 
-	// Validate file size (configurable via MAX_FILE_SIZE_MB)
+	// Validate file size (configurable via MAX_FILE_SIZE_MB, default 2047 MB)
 	maxSize := secutils.GetMaxFileSize()
-	if file.Size > maxSize {
+	if maxSize > 0 && file.Size > maxSize {
 		logger.Error(ctx, "File size too large")
 		c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", secutils.GetMaxFileSizeMB())))
 		return
@@ -566,7 +592,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	logger.Info(ctx, "Start retrieving knowledge list")
 
 	// Validate access to the knowledge base (read access - any permission level)
-	_, kbID, effectiveTenantID, _, err := h.validateKnowledgeBaseAccess(c)
+	kb, kbID, effectiveTenantID, _, err := h.validateKnowledgeBaseAccess(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -605,6 +631,16 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
+	}
+	if items, ok := result.Data.([]*types.Knowledge); ok && kb.Governance.Enabled && !types.CanManageKnowledgeBase(ctx, kb) && !types.CanReviewKnowledge(ctx, kb) {
+		visible := make([]*types.Knowledge, 0, len(items))
+		for _, item := range items {
+			if h.canViewGovernedKnowledge(ctx, item, kb) {
+				visible = append(visible, item)
+			}
+		}
+		result.Data = visible
+		result.Total = int64(len(visible))
 	}
 
 	logger.Infof(
@@ -654,6 +690,10 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 	logger.Infof(ctx, "Deleting knowledge, ID: %s", secutils.SanitizeForLog(id))
 	err = h.kgService.DeleteKnowledge(effCtx, id)
 	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
@@ -739,10 +779,19 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
-	if len(knowledgeList) != len(ids) {
-		c.Error(errors.NewBadRequestError("One or more knowledge entries not found"))
+	if len(knowledgeList) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "Batch delete task submitted",
+			"data": gin.H{
+				"task_id":       "",
+				"deleted_count": 0,
+			},
+		})
 		return
 	}
+
+	deleteIDs := make([]string, 0, len(knowledgeList))
 	for _, k := range knowledgeList {
 		if k.KnowledgeBaseID != kbID {
 			c.Error(errors.NewBadRequestError(
@@ -750,9 +799,16 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 					secutils.SanitizeForLog(k.ID), secutils.SanitizeForLog(kbID))))
 			return
 		}
+		deleteIDs = append(deleteIDs, k.ID)
 	}
 
-	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, ids)
+	if err := h.kgService.MarkKnowledgeListDeleting(ctx, effectiveTenantID, deleteIDs); err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, deleteIDs)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue batch knowledge delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue batch delete task"))
@@ -760,14 +816,14 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Batch knowledge delete task enqueued: %s, kb_id: %s, count: %d",
-		taskID, secutils.SanitizeForLog(kbID), len(ids))
+		taskID, secutils.SanitizeForLog(kbID), len(deleteIDs))
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Batch delete task submitted",
 		"data": gin.H{
 			"task_id":       taskID,
-			"deleted_count": len(ids),
+			"deleted_count": len(deleteIDs),
 		},
 	})
 }

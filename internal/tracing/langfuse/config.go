@@ -8,10 +8,15 @@ package langfuse
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // Config holds the runtime configuration for the Langfuse client.
@@ -45,22 +50,33 @@ type Config struct {
 	SampleRate float64
 	// Debug enables verbose logging of batch send errors.
 	Debug bool
+	// ApprovedEndpointID and ApprovedEndpoint bind self-hosted telemetry to the
+	// tenant-scoped administrator approval registry.
+	ApprovedEndpointID string
+	ApprovedEndpoint   *types.ApprovedEndpoint
+	TenantID           uint64
 }
 
 // LoadConfigFromEnv builds a Config by reading the LANGFUSE_* environment
 // variables, mirroring the official Python / JS SDK conventions.
 func LoadConfigFromEnv() Config {
 	cfg := Config{
-		Host:           firstNonEmpty(os.Getenv("LANGFUSE_HOST"), "https://cloud.langfuse.com"),
-		PublicKey:      strings.TrimSpace(os.Getenv("LANGFUSE_PUBLIC_KEY")),
-		SecretKey:      strings.TrimSpace(os.Getenv("LANGFUSE_SECRET_KEY")),
-		Release:        strings.TrimSpace(os.Getenv("LANGFUSE_RELEASE")),
-		Environment:    strings.TrimSpace(os.Getenv("LANGFUSE_ENVIRONMENT")),
-		FlushAt:        15,
-		FlushInterval:  3 * time.Second,
-		QueueSize:      2048,
-		RequestTimeout: 10 * time.Second,
-		SampleRate:     1.0,
+		Host:               firstNonEmpty(os.Getenv("LANGFUSE_HOST"), "https://cloud.langfuse.com"),
+		PublicKey:          strings.TrimSpace(os.Getenv("LANGFUSE_PUBLIC_KEY")),
+		SecretKey:          strings.TrimSpace(os.Getenv("LANGFUSE_SECRET_KEY")),
+		Release:            strings.TrimSpace(os.Getenv("LANGFUSE_RELEASE")),
+		Environment:        strings.TrimSpace(os.Getenv("LANGFUSE_ENVIRONMENT")),
+		FlushAt:            15,
+		FlushInterval:      3 * time.Second,
+		QueueSize:          2048,
+		RequestTimeout:     10 * time.Second,
+		SampleRate:         1.0,
+		ApprovedEndpointID: strings.TrimSpace(os.Getenv("LANGFUSE_APPROVED_ENDPOINT_ID")),
+	}
+	if value := strings.TrimSpace(os.Getenv("LANGFUSE_TENANT_ID")); value != "" {
+		if tenantID, err := strconv.ParseUint(value, 10, 64); err == nil {
+			cfg.TenantID = tenantID
+		}
 	}
 
 	if v := strings.TrimSpace(os.Getenv("LANGFUSE_ENABLED")); v != "" {
@@ -118,6 +134,56 @@ func (c Config) Validate() error {
 	}
 	if c.PublicKey == "" || c.SecretKey == "" {
 		return fmt.Errorf("langfuse: public_key and secret_key are required when enabled")
+	}
+	airGapped := strings.EqualFold(strings.TrimSpace(os.Getenv("AIR_GAPPED_MODE")), "true")
+	if airGapped && strings.TrimSpace(c.ApprovedEndpointID) == "" {
+		return fmt.Errorf("langfuse: strict air-gapped mode requires approved_endpoint_id")
+	}
+	if strings.TrimSpace(c.ApprovedEndpointID) != "" {
+		if c.ApprovedEndpoint == nil {
+			return fmt.Errorf("langfuse: approved endpoint %q could not be resolved", c.ApprovedEndpointID)
+		}
+		if err := c.ApprovedEndpoint.Validate(); err != nil {
+			return fmt.Errorf("langfuse: approved endpoint: %w", err)
+		}
+		if err := c.ApprovedEndpoint.ValidateUse(types.EndpointCategoryTelemetry, "telemetry"); err != nil {
+			return fmt.Errorf("langfuse: approved endpoint: %w", err)
+		}
+	}
+	if airGapped {
+		parsed, err := url.Parse(c.Host)
+		if err != nil || parsed.Hostname() == "" {
+			return fmt.Errorf("langfuse: invalid host in strict air-gapped mode")
+		}
+		if parsed.Hostname() != "localhost" && parsed.Hostname() != "127.0.0.1" && parsed.Hostname() != "::1" {
+			ips, lookupErr := net.LookupIP(parsed.Hostname())
+			if lookupErr != nil || len(ips) == 0 {
+				return fmt.Errorf("langfuse: host must resolve to a private address in strict air-gapped mode")
+			}
+			for _, ip := range ips {
+				if err := c.ApprovedEndpoint.ValidateConnection(c.Host, types.EndpointCategoryTelemetry, "telemetry", ips, true); err != nil {
+					return fmt.Errorf("langfuse: telemetry endpoint validation failed: %w", err)
+				}
+				if err := c.ApprovedEndpoint.ValidateDeploymentAllowlist(secutils.IsSSRFWhitelisted, ips, true); err != nil {
+					return fmt.Errorf("langfuse: telemetry deployment allowlist: %w", err)
+				}
+				if !ip.IsPrivate() && !ip.IsLoopback() {
+					return fmt.Errorf("langfuse: public telemetry endpoint is not allowed in strict air-gapped mode")
+				}
+			}
+		}
+	} else if c.ApprovedEndpoint != nil {
+		parsed, err := url.Parse(c.Host)
+		if err != nil || parsed.Hostname() == "" {
+			return fmt.Errorf("langfuse: invalid host")
+		}
+		ips, err := net.LookupIP(parsed.Hostname())
+		if err != nil {
+			return fmt.Errorf("langfuse: resolve approved endpoint: %w", err)
+		}
+		if err := c.ApprovedEndpoint.ValidateConnection(c.Host, types.EndpointCategoryTelemetry, "telemetry", ips, false); err != nil {
+			return fmt.Errorf("langfuse: telemetry endpoint validation failed: %w", err)
+		}
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
+	"github.com/Tencent/WeKnora/internal/models/transport"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/sashabaranov/go-openai"
@@ -33,14 +35,15 @@ var rawHTTPClient = &http.Client{
 // RemoteAPIChat 实现了基于 OpenAI 兼容 API 的聊天
 // 这是一个通用实现，不包含任何 provider 特定的逻辑
 type RemoteAPIChat struct {
-	modelName string
-	client    *openai.Client
-	modelID   string
-	baseURL   string
-	apiKey    string
-	provider  provider.ProviderName
-	appID     string
-	appSecret string
+	modelName  string
+	client     *openai.Client
+	httpClient *http.Client
+	modelID    string
+	baseURL    string
+	apiKey     string
+	provider   provider.ProviderName
+	appID      string
+	appSecret  string
 	// customHeaders 为用户在模型配置中指定的自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	customHeaders map[string]string
 
@@ -87,6 +90,15 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 			config.BaseURL = baseURL
 		}
 	}
+	endpoint := chatConfig.BaseURL
+	if endpoint == "" {
+		endpoint = config.BaseURL
+	}
+	sharedClient, err := transport.NewEndpointHTTPClientWithValidation(endpoint, 5*time.Minute, chatConfig.ValidateIP)
+	if err != nil {
+		return nil, fmt.Errorf("invalid chat endpoint: %w", err)
+	}
+	config.HTTPClient = sharedClient
 
 	// 如果指定了 CustomHeaders，则给 SDK 使用的 HTTPClient 挂一层 RoundTripper，
 	// 在每个请求上自动注入这些 header（raw HTTP 路径会在发送前单独处理）。
@@ -117,6 +129,7 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 	return &RemoteAPIChat{
 		modelName:     modelName,
 		client:        openai.NewClientWithConfig(config),
+		httpClient:    sharedClient,
 		modelID:       chatConfig.ModelID,
 		baseURL:       chatConfig.BaseURL,
 		apiKey:        apiKey,
@@ -388,7 +401,11 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 	logger.Infof(ctx, "[LLM Request] Remote HTTP, endpoint=%s, model=%s",
 		endpoint, c.modelName)
 
-	resp, err := rawHTTPClient.Do(httpReq)
+	client := c.httpClient
+	if client == nil {
+		client = rawHTTPClient
+	}
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
@@ -499,6 +516,13 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	streamChan := make(chan types.StreamResponse)
 
 	stream, err := c.client.CreateChatCompletionStream(ctx, req)
+	if err != nil && isRetryableStreamError(err) {
+		// Some OpenAI-compatible gateways close an idle keep-alive connection
+		// after a long stream. Retry once with a fresh connection before
+		// surfacing a transient EOF to the caller.
+		c.httpClient.CloseIdleConnections()
+		stream, err = c.client.CreateChatCompletionStream(ctx, req)
+	}
 	if err != nil {
 		if isMultimodalNotSupportedError(err) {
 			logger.Warnf(ctx, "[LLM Stream] Model %s does not support multimodal, retrying without images", c.modelName)
@@ -515,6 +539,10 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	go c.processStream(ctx, stream, streamChan)
 
 	return streamChan, nil
+}
+
+func isRetryableStreamError(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // chatStreamWithRawHTTP 使用原始 HTTP 请求进行流式聊天
@@ -558,7 +586,11 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 	// 注入用户自定义 header（保留头会在工具内部自动跳过）
 	secutils.ApplyCustomHeaders(httpReq, c.customHeaders)
 
-	resp, err := rawHTTPClient.Do(httpReq)
+	client := c.httpClient
+	if client == nil {
+		client = rawHTTPClient
+	}
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}

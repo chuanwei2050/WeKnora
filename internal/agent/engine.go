@@ -256,6 +256,7 @@ func (e *AgentEngine) Execute(
 		imgs = imageURLs[0]
 	}
 	messages := e.buildMessagesWithLLMContext(systemPrompt, query, sessionID, llmContext, imgs)
+	messages = e.executeSubQuestionPlan(ctx, query, messages, state)
 
 	// Get tool definitions for function calling
 	tools := e.buildToolsForLLM()
@@ -606,6 +607,7 @@ func (e *AgentEngine) runReActIteration(
 	// 3. Act: Execute tool calls
 	e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID)
 	toolCallCount = len(step.ToolCalls)
+	state.KnowledgeRefs = appendKnowledgeRefs(state.KnowledgeRefs, step)
 
 	// 4. Observe: Add tool results to messages and write to context
 	state.RoundSteps = append(state.RoundSteps, step)

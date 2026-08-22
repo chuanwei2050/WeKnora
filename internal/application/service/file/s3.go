@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -29,7 +30,7 @@ type s3FileService struct {
 }
 
 // newS3Client creates a bare s3FileService with just the SDK client initialised.
-func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix string) (*s3FileService, error) {
+func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix string, httpClients ...*http.Client) (*s3FileService, error) {
 	var cfg aws.Config
 	var err error
 
@@ -52,6 +53,9 @@ func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix 
 		client = s3.NewFromConfig(cfg, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(endpoint)
 			o.UsePathStyle = usePathStyle
+			if len(httpClients) > 0 && httpClients[0] != nil {
+				o.HTTPClient = httpClients[0]
+			}
 		})
 	} else {
 		// Standard AWS S3
@@ -74,8 +78,9 @@ func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix 
 // It verifies that the bucket exists and creates it if missing.
 func NewS3FileService(endpoint,
 	accessKey, secretKey, bucketName, region, pathPrefix string,
+	httpClients ...*http.Client,
 ) (interfaces.FileService, error) {
-	svc, err := newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix)
+	svc, err := newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix, httpClients...)
 	if err != nil {
 		return nil, err
 	}

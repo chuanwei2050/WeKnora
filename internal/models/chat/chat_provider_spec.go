@@ -45,6 +45,14 @@ var chatProviderSpecs = []ProviderSpec{
 		ModelMatcher:      func(name string) bool { return provider.IsQwenThinkingModel(name) },
 		RequestCustomizer: qwenThinkingRequestCustomizer,
 	},
+	// SiliconFlow Qwen3 Thinking Models. SiliconFlow exposes Qwen3 through
+	// the OpenAI-compatible API but still emits reasoning_content unless the
+	// provider-specific enable_thinking flag is sent explicitly.
+	{
+		Provider:          provider.ProviderSiliconFlow,
+		ModelMatcher:      func(name string) bool { return strings.Contains(strings.ToLower(name), "qwen3") },
+		RequestCustomizer: qwenThinkingRequestCustomizer,
+	},
 	// LKEAP
 	{
 		Provider:          provider.ProviderLKEAP,

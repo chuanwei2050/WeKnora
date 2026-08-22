@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
@@ -89,6 +90,10 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	results, err := h.service.HybridSearch(ctx, id, req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
+		if stderrors.Is(err, service.ErrKnowledgeBaseAccessDenied) {
+			c.Error(apperrors.NewForbiddenError("Knowledge base is outside the authorized scope"))
+			return
+		}
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
@@ -529,6 +534,50 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	})
 }
 
+// RebuildIndex re-runs post-processing for every completed document using current settings.
+func (h *KnowledgeBaseHandler) RebuildIndex(c *gin.Context) {
+	ctx := c.Request.Context()
+	kb, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin {
+		c.Error(apperrors.NewForbiddenError("No permission to rebuild knowledge base"))
+		return
+	}
+	items, err := h.knowledgeService.ListKnowledgeByKnowledgeBaseID(ctx, id)
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+	enqueued, err := enqueueKnowledgePostProcessTasks(h.asynqClient, kb.TenantID, id, items)
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": gin.H{"document_count": enqueued}})
+}
+
+func enqueueKnowledgePostProcessTasks(enqueuer interfaces.TaskEnqueuer, tenantID uint64, kbID string, items []*types.Knowledge) (int, error) {
+	enqueued := 0
+	for _, item := range items {
+		if item == nil || item.ParseStatus != types.ParseStatusCompleted {
+			continue
+		}
+		payload, err := json.Marshal(types.KnowledgePostProcessPayload{TenantID: tenantID, KnowledgeID: item.ID, KnowledgeBaseID: kbID})
+		if err != nil {
+			return enqueued, err
+		}
+		task := asynq.NewTask(types.TypeKnowledgePostProcess, payload, asynq.Queue("default"), asynq.MaxRetry(3))
+		if _, err = enqueuer.Enqueue(task); err != nil {
+			return enqueued, err
+		}
+		enqueued++
+	}
+	return enqueued, nil
+}
+
 // DeleteKnowledgeBase godoc
 // @Summary      删除知识库
 // @Description  删除指定的知识库及其所有内容
@@ -765,29 +814,61 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		*config = types.ExtractConfig{Enabled: false}
 		return nil
 	}
-	// Validate text field
-	if config.Text == "" {
-		return apperrors.NewBadRequestError("text cannot be empty")
+	hasStructuredSchema := len(config.EntitySchema) > 0 || len(config.RelationSchema) > 0
+	config.NormalizeMode()
+	if err := validateGraphExtractionPolicy(config); err != nil {
+		return err
+	}
+	hasFewShot := strings.TrimSpace(config.Text) != "" || len(config.Nodes) > 0 || len(config.Relations) > 0
+	if hasFewShot && (strings.TrimSpace(config.Text) == "" || len(config.Nodes) == 0) {
+		return apperrors.NewBadRequestError("few-shot requires example text and entities")
+	}
+	if config.Mode != types.GraphExtractionGeneral && (len(config.Tags) == 0 || len(config.EntityTypes) == 0) {
+		return apperrors.NewBadRequestError("template and custom schema require entity and relation types")
+	}
+	if hasStructuredSchema && config.Mode != types.GraphExtractionGeneral {
+		entityTypes := make(map[string]struct{}, len(config.EntitySchema))
+		for i, definition := range config.EntitySchema {
+			if strings.TrimSpace(definition.Type) == "" || strings.TrimSpace(definition.BaseType) == "" || strings.TrimSpace(definition.Description) == "" {
+				return apperrors.NewBadRequestError("entity schema name, type and description are required at index " + strconv.Itoa(i))
+			}
+			if _, exists := entityTypes[definition.Type]; exists {
+				return apperrors.NewBadRequestError("duplicate entity schema type: " + definition.Type)
+			}
+			entityTypes[definition.Type] = struct{}{}
+		}
+		for i, definition := range config.RelationSchema {
+			if strings.TrimSpace(definition.Type) == "" || strings.TrimSpace(definition.SourceType) == "" || strings.TrimSpace(definition.TargetType) == "" || strings.TrimSpace(definition.Description) == "" {
+				return apperrors.NewBadRequestError("relation schema type, direction and description are required at index " + strconv.Itoa(i))
+			}
+			if _, exists := entityTypes[definition.SourceType]; !exists {
+				return apperrors.NewBadRequestError("relation schema references unknown source type: " + definition.SourceType)
+			}
+			if _, exists := entityTypes[definition.TargetType]; !exists {
+				return apperrors.NewBadRequestError("relation schema references unknown target type: " + definition.TargetType)
+			}
+		}
 	}
 
-	// Validate tags field
-	if len(config.Tags) == 0 {
-		return apperrors.NewBadRequestError("tags cannot be empty")
-	}
+	// Validate configured tags. An empty list intentionally enables exploratory
+	// relation extraction when strict_schema is disabled.
 	for i, tag := range config.Tags {
 		if tag == "" {
 			return apperrors.NewBadRequestError("tag cannot be empty at index " + strconv.Itoa(i))
 		}
 	}
 
-	// Validate nodes
-	if len(config.Nodes) == 0 {
-		return apperrors.NewBadRequestError("nodes cannot be empty")
-	}
+	// Nodes and relations are optional prompt examples, not schema sources.
 	nodeNames := make(map[string]bool)
 	for i, node := range config.Nodes {
+		if node == nil {
+			return apperrors.NewBadRequestError("node cannot be null at index " + strconv.Itoa(i))
+		}
 		if node.Name == "" {
 			return apperrors.NewBadRequestError("node name cannot be empty at index " + strconv.Itoa(i))
+		}
+		if hasFewShot && strings.TrimSpace(node.EntityType) == "" {
+			return apperrors.NewBadRequestError("node entity_type cannot be empty at index " + strconv.Itoa(i))
 		}
 		// Check for duplicate node names
 		if nodeNames[node.Name] {
@@ -796,11 +877,11 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		nodeNames[node.Name] = true
 	}
 
-	if len(config.Relations) == 0 {
-		return apperrors.NewBadRequestError("relations cannot be empty")
-	}
 	// Validate relations
 	for i, relation := range config.Relations {
+		if relation == nil {
+			return apperrors.NewBadRequestError("relation cannot be null at index " + strconv.Itoa(i))
+		}
 		if relation.Node1 == "" {
 			return apperrors.NewBadRequestError("relation node1 cannot be empty at index " + strconv.Itoa(i))
 		}
@@ -819,6 +900,30 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		}
 	}
 
+	return nil
+}
+
+func validateGraphExtractionPolicy(config *types.ExtractConfig) error {
+	if config.IngestionMode == "" {
+		config.IngestionMode = types.GraphIngestionAll
+	} else if config.IngestionMode != types.GraphIngestionAll && config.IngestionMode != types.GraphIngestionSignal {
+		return apperrors.NewBadRequestError("ingestion_mode must be all or signal")
+	}
+	if config.MaxEntities == 0 {
+		config.MaxEntities = types.DefaultGraphMaxEntities
+	} else if config.MaxEntities < 0 || config.MaxEntities > types.MaxGraphEntities {
+		return apperrors.NewBadRequestError("max_entities must be between 1 and " + strconv.Itoa(types.MaxGraphEntities))
+	}
+	if config.MaxRelations == 0 {
+		config.MaxRelations = types.DefaultGraphMaxRelations
+	} else if config.MaxRelations < 0 || config.MaxRelations > types.MaxGraphRelations {
+		return apperrors.NewBadRequestError("max_relations must be between 1 and " + strconv.Itoa(types.MaxGraphRelations))
+	}
+	if config.MinConfidence == 0 {
+		config.MinConfidence = types.DefaultGraphMinConfidence
+	} else if config.MinConfidence < 0 || config.MinConfidence > 1 {
+		return apperrors.NewBadRequestError("min_confidence must be between 0 and 1")
+	}
 	return nil
 }
 

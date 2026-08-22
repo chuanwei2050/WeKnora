@@ -31,6 +31,10 @@ func NewMCPServiceService(
 
 // CreateMCPService creates a new MCP service
 func (s *mcpServiceService) CreateMCPService(ctx context.Context, service *types.MCPService) error {
+	if !isPlatformAdmin(ctx) {
+		return fmt.Errorf("only platform administrators can manage MCP services")
+	}
+	service.TenantID = types.PlatformScopeTenantID
 	// Stdio transport is disabled for security reasons
 	if service.TransportType == types.MCPTransportStdio {
 		return fmt.Errorf("stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead")
@@ -113,6 +117,10 @@ func (s *mcpServiceService) ListMCPServicesByIDs(
 
 // UpdateMCPService updates an MCP service
 func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types.MCPService) error {
+	if !isPlatformAdmin(ctx) {
+		return fmt.Errorf("only platform administrators can manage MCP services")
+	}
+	service.TenantID = types.PlatformScopeTenantID
 	// Check if service exists
 	existing, err := s.mcpServiceRepo.GetByID(ctx, service.TenantID, service.ID)
 	if err != nil {
@@ -232,6 +240,9 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 
 // DeleteMCPService deletes an MCP service
 func (s *mcpServiceService) DeleteMCPService(ctx context.Context, tenantID uint64, id string) error {
+	if !isPlatformAdmin(ctx) {
+		return fmt.Errorf("only platform administrators can manage MCP services")
+	}
 	// Check if service exists
 	existing, err := s.mcpServiceRepo.GetByID(ctx, tenantID, id)
 	if err != nil {
@@ -249,7 +260,7 @@ func (s *mcpServiceService) DeleteMCPService(ctx context.Context, tenantID uint6
 	// Close client connection
 	s.mcpManager.CloseClient(id)
 
-	if err := s.mcpServiceRepo.Delete(ctx, tenantID, id); err != nil {
+	if err := s.mcpServiceRepo.Delete(ctx, types.PlatformScopeTenantID, id); err != nil {
 		logger.GetLogger(ctx).Errorf("Failed to delete MCP service: %v", err)
 		return fmt.Errorf("failed to delete MCP service: %w", err)
 	}

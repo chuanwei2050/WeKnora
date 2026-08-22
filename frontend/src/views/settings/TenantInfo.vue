@@ -44,17 +44,6 @@
         </div>
       </div>
 
-      <!-- Tenant description -->
-      <div v-if="tenantInfo?.description" class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('tenant.details.descriptionLabel') }}</label>
-          <p class="desc">{{ $t('tenant.details.descriptionDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <span class="info-value">{{ tenantInfo.description }}</span>
-        </div>
-      </div>
-
       <!-- Tenant business -->
       <div v-if="tenantInfo?.business" class="setting-row">
         <div class="setting-info">

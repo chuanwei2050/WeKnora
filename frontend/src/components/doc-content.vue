@@ -70,7 +70,7 @@ let page = 1;
 let loadingChunks = false;
 let pendingRequestedPage: number | null = null;
 let pendingChunksBeforeLoad = 0;
-let doc = null;
+let doc: Element | null = null;
 let down = ref()
 let mdContentWrap = ref()
 let url = ref('')
@@ -183,8 +183,8 @@ onUnmounted(() => {
     URL.revokeObjectURL(audioBlobUrl.value);
   }
 })
-const checkImage = (url) => {
-  return new Promise((resolve) => {
+const checkImage = (url: string): Promise<boolean> => {
+  return new Promise<boolean>((resolve) => {
     const img = new Image();
     img.onload = () => resolve(true);
     img.onerror = () => resolve(false);
@@ -252,8 +252,17 @@ const mergedContent = computed(() => {
 });
 
 // 计算处理后的分块数据，避免在模板中频繁调用方法和 JSON.parse
-const processedChunks = computed(() => {
-  return (props.details?.md || []).map((item: any, index: number) => {
+interface ProcessedChunk {
+  original: any;
+  processedContent: string;
+  questions: GeneratedQuestion[];
+  meta: string;
+  hasParent: boolean;
+  chunkClass: string;
+}
+
+const processedChunks = computed<ProcessedChunk[]>(() => {
+  return (props.details?.md || []).map((item: any, index: number): ProcessedChunk => {
     return {
       original: item,
       processedContent: processMarkdown(item.content),
@@ -405,7 +414,7 @@ const bindMermaidClickEvents = () => {
   // 绑定在 .mermaid div 上，而不是 SVG 上
   const mermaidDivs = mdContentWrap.value.querySelectorAll('.mermaid');
   console.log('[Mermaid] Found mermaid divs:', mermaidDivs.length);
-  mermaidDivs.forEach((div, index) => {
+  mermaidDivs.forEach((div: Element, index: number) => {
     const divEl = div as HTMLElement;
     divEl.style.cursor = 'pointer';
     // 移除旧的事件监听器（避免重复绑定）
@@ -416,7 +425,7 @@ const bindMermaidClickEvents = () => {
 };
 
 // 安全地处理 Markdown 内容（使用 marked）
-const processMarkdown = (markdownText) => {
+const processMarkdown = (markdownText: unknown): string => {
   if (!markdownText || typeof markdownText !== 'string') return '';
 
   // 去除 Markdown 头部的 YAML Frontmatter（例如 --- title: xxx ---）

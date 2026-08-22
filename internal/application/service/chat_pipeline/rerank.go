@@ -2,27 +2,45 @@ package chatpipeline
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"math"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 )
+
+const rerankCacheTTL = 10 * time.Minute
+
+type rerankRedisCache interface {
+	Get(ctx context.Context, key string) *redis.StringCmd
+	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.StatusCmd
+}
 
 // PluginRerank implements reranking functionality for chat pipeline
 type PluginRerank struct {
 	modelService interfaces.ModelService // Service to access rerank models
+	cache        rerankRedisCache
+	calls        singleflight.Group
 }
 
 // NewPluginRerank creates a new rerank plugin instance
-func NewPluginRerank(eventManager *EventManager, modelService interfaces.ModelService) *PluginRerank {
+func NewPluginRerank(
+	eventManager *EventManager,
+	modelService interfaces.ModelService,
+	redisClient *redis.Client,
+) *PluginRerank {
 	res := &PluginRerank{
 		modelService: modelService,
+		cache:        redisClient,
 	}
 	eventManager.Register(res)
 	return res
@@ -40,6 +58,16 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	if !chatManage.NeedsRetrieval() {
 		return next()
 	}
+	beforePrepare := len(chatManage.SearchResult)
+	candidateLimit := adaptiveRerankCandidateLimit(chatManage)
+	chatManage.SearchResult = prepareRerankCandidates(chatManage.SearchResult, candidateLimit)
+	if len(chatManage.SearchResult) != beforePrepare {
+		pipelineInfo(ctx, "Rerank", "prepare_candidates", map[string]interface{}{
+			"before": beforePrepare,
+			"after":  len(chatManage.SearchResult),
+			"limit":  candidateLimit,
+		})
+	}
 	pipelineInfo(ctx, "Rerank", "input", map[string]interface{}{
 		"session_id":    chatManage.SessionID,
 		"candidate_cnt": len(chatManage.SearchResult),
@@ -53,15 +81,8 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		})
 		return next()
 	}
-	if chatManage.RerankModelID == "" {
-		pipelineWarn(ctx, "Rerank", "skip", map[string]interface{}{
-			"reason": "empty_model_id",
-		})
-		return next()
-	}
-
 	// Get rerank model from service
-	rerankModel, err := p.modelService.GetRerankModel(ctx, chatManage.RerankModelID)
+	rerankModel, err := p.modelService.GetRerankModel(ctx, "")
 	if err != nil {
 		pipelineError(ctx, "Rerank", "get_model", map[string]interface{}{
 			"model_id": chatManage.RerankModelID,
@@ -205,6 +226,72 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	return next()
 }
 
+// prepareRerankCandidates removes duplicate chunks/content before model inference
+// and keeps the candidate count within the configured retrieval budget.
+func prepareRerankCandidates(results []*types.SearchResult, limit int) []*types.SearchResult {
+	results = removeDuplicateResults(results)
+	if limit > 0 && len(results) > limit {
+		return results[:limit]
+	}
+	return results
+}
+
+func adaptiveRerankCandidateLimit(chatManage *types.ChatManage) int {
+	configuredMax := chatManage.EmbeddingTopK
+	if configuredMax <= 0 {
+		configuredMax = 30
+	}
+
+	target := 25
+	if chatManage.RoutingDecision != nil {
+		switch chatManage.RoutingDecision.Classification.Level {
+		case types.ComplexityL1:
+			target = 20
+		case types.ComplexityL3, types.ComplexityL4:
+			target = 30
+		}
+	} else {
+		query := strings.TrimSpace(chatManage.RewriteQuery)
+		if query == "" {
+			query = strings.TrimSpace(chatManage.Query)
+		}
+		switch {
+		case isShortEntityQuery(query):
+			target = 20
+		case isComplexRerankQuery(query):
+			target = 30
+		}
+	}
+
+	return min(configuredMax, target)
+}
+
+func isShortEntityQuery(query string) bool {
+	if query == "" || len([]rune(query)) > 12 {
+		return false
+	}
+	questionMarkers := []string{"?", "？", "什么", "哪些", "怎么", "如何", "为什么", "是否", "请", "帮我"}
+	for _, marker := range questionMarkers {
+		if strings.Contains(query, marker) {
+			return false
+		}
+	}
+	return true
+}
+
+func isComplexRerankQuery(query string) bool {
+	if len([]rune(query)) >= 60 {
+		return true
+	}
+	complexMarkers := []string{"对比", "比较", "区别", "分别", "综合分析", "多方面", "因果", "优缺点"}
+	for _, marker := range complexMarkers {
+		if strings.Contains(query, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // rerank performs the actual reranking operation with given query and passages
 func (p *PluginRerank) rerank(ctx context.Context,
 	chatManage *types.ChatManage, rerankModel rerank.Reranker, query string, passages []string,
@@ -235,7 +322,7 @@ func (p *PluginRerank) rerank(ctx context.Context,
 	passages = cleanPassages
 	candidates = cleanCandidates
 
-	rerankResp, err := rerankModel.Rerank(ctx, query, passages)
+	rerankResp, err := p.rerankWithCache(ctx, rerankModel, query, passages, candidates)
 	if err != nil {
 		pipelineError(ctx, "Rerank", "model_call", map[string]interface{}{
 			"query_variant": query,
@@ -301,6 +388,112 @@ func (p *PluginRerank) rerank(ctx context.Context,
 	}
 
 	return rankFilter
+}
+
+func (p *PluginRerank) rerankWithCache(
+	ctx context.Context,
+	rerankModel rerank.Reranker,
+	query string,
+	passages []string,
+	candidates []*types.SearchResult,
+) ([]rerank.RankResult, error) {
+	cacheKey := buildRerankCacheKey(rerankModel.GetModelID(), query, passages, candidates)
+	if cached, ok := p.loadRerankCache(ctx, cacheKey); ok {
+		pipelineInfo(ctx, "Rerank", "cache_hit", map[string]interface{}{"candidates": len(passages)})
+		return cached, nil
+	}
+	pipelineInfo(ctx, "Rerank", "cache_miss", map[string]interface{}{"candidates": len(passages)})
+
+	value, err, shared := p.calls.Do(cacheKey, func() (interface{}, error) {
+		if cached, ok := p.loadRerankCache(ctx, cacheKey); ok {
+			return cached, nil
+		}
+		results, callErr := rerankModel.Rerank(ctx, query, passages)
+		if callErr != nil {
+			return nil, callErr
+		}
+		compact := compactRankResults(results)
+		p.storeRerankCache(ctx, cacheKey, compact)
+		return compact, nil
+	})
+	if shared {
+		pipelineInfo(ctx, "Rerank", "singleflight_shared", map[string]interface{}{"candidates": len(passages)})
+	}
+	if err != nil {
+		return nil, err
+	}
+	return value.([]rerank.RankResult), nil
+}
+
+func buildRerankCacheKey(
+	modelID string,
+	query string,
+	passages []string,
+	candidates []*types.SearchResult,
+) string {
+	type cacheCandidate struct {
+		ID      string `json:"id"`
+		Passage string `json:"passage"`
+	}
+	payload := struct {
+		Version    int              `json:"version"`
+		ModelID    string           `json:"model_id"`
+		Query      string           `json:"query"`
+		Candidates []cacheCandidate `json:"candidates"`
+	}{Version: 1, ModelID: modelID, Query: query, Candidates: make([]cacheCandidate, 0, len(passages))}
+	for index, passage := range passages {
+		candidateID := ""
+		if index < len(candidates) {
+			candidateID = candidates[index].ID
+		}
+		payload.Candidates = append(payload.Candidates, cacheCandidate{ID: candidateID, Passage: passage})
+	}
+	encoded, _ := json.Marshal(payload)
+	hash := sha256.Sum256(encoded)
+	return fmt.Sprintf("rerank:result:v1:%x", hash[:])
+}
+
+func compactRankResults(results []rerank.RankResult) []rerank.RankResult {
+	compact := make([]rerank.RankResult, len(results))
+	for index, result := range results {
+		compact[index] = rerank.RankResult{Index: result.Index, RelevanceScore: result.RelevanceScore}
+	}
+	return compact
+}
+
+func (p *PluginRerank) loadRerankCache(ctx context.Context, key string) ([]rerank.RankResult, bool) {
+	if p.cache == nil {
+		return nil, false
+	}
+	data, err := p.cache.Get(ctx, key).Bytes()
+	if err != nil {
+		if err != redis.Nil {
+			pipelineWarn(ctx, "Rerank", "cache_read", map[string]interface{}{"error": err.Error()})
+		}
+		return nil, false
+	}
+	var results []rerank.RankResult
+	if err := json.Unmarshal(data, &results); err != nil {
+		pipelineWarn(ctx, "Rerank", "cache_decode", map[string]interface{}{"error": err.Error()})
+		return nil, false
+	}
+	return results, true
+}
+
+func (p *PluginRerank) storeRerankCache(ctx context.Context, key string, results []rerank.RankResult) {
+	if p.cache == nil {
+		return
+	}
+	data, err := json.Marshal(results)
+	if err != nil {
+		pipelineWarn(ctx, "Rerank", "cache_encode", map[string]interface{}{"error": err.Error()})
+		return
+	}
+	if err := p.cache.Set(ctx, key, data, rerankCacheTTL).Err(); err != nil {
+		pipelineWarn(ctx, "Rerank", "cache_write", map[string]interface{}{"error": err.Error()})
+		return
+	}
+	pipelineInfo(ctx, "Rerank", "cache_store", map[string]interface{}{"results": len(results)})
 }
 
 // ensureMetadata ensures the metadata is not nil

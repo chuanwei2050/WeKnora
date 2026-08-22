@@ -19,6 +19,18 @@
                 </div>
                 <!-- 推荐问题卡片 - 仅在新会话（无消息）时展示 -->
                 <div v-if="messagesList.length === 0 && !loading" class="suggested-questions-container" :class="{ 'has-questions': suggestedQuestions.length > 0 || suggestedQuestionsLoading }">
+                    <div v-if="embeddedMode && !suggestedQuestionsLoading && suggestedQuestions.length === 0" class="embedded-welcome">
+                        <div class="embedded-welcome-icon" aria-hidden="true">
+                            <img src="/widget/icons/ai-assistant.png" alt="" />
+                        </div>
+                        <h2>你好，我是知识助手</h2>
+                        <p>我会基于当前授权知识库回答，并在答案中保留引用来源。</p>
+                        <div class="embedded-starters" aria-label="快捷问题">
+                            <button type="button" @click="handleSuggestedQuestionClick('总结当前知识库的主要内容')">总结知识库</button>
+                            <button type="button" @click="handleSuggestedQuestionClick('列出当前知识库中的关键事实')">提取关键事实</button>
+                            <button type="button" @click="handleSuggestedQuestionClick('帮我查找与当前项目相关的资料')">查找相关资料</button>
+                        </div>
+                    </div>
                     <!-- 骨架屏占位 -->
                     <div v-if="suggestedQuestionsLoading && suggestedQuestions.length === 0" class="suggested-questions-inner">
                         <div class="suggested-questions-title"><t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '18px' }]" /></div>
@@ -50,7 +62,7 @@
                         <usermsg :content="session.content" :mentioned_items="session.mentioned_items" :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"></usermsg>
                     </div>
                     <div v-if="session.role == 'assistant'">
-                        <botmsg :content="session.content" :session="session" :user-query="getUserQuery(id)" @scroll-bottom="scrollToBottom"
+                        <botmsg :content="session.content" :session="session" :session-id="session_id" :voice-config="voiceConfig" :user-query="getUserQuery(id)" @scroll-bottom="scrollToBottom"
                             :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"></botmsg>
                     </div>
                 </div>
@@ -72,16 +84,19 @@
         <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
             <InputField
                 ref="inputFieldRef"
-                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles)"
+                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, voiceMetadata) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, voiceMetadata)"
+                @voice-config="voiceConfig = $event"
                 @stop-generation="handleStopGeneration"
                 :isReplying="isReplying"
                 :sessionId="session_id"
                 :assistantMessageId="currentAssistantMessageId"
                 :embeddedMode="embeddedMode"
+                :agentId="agentId"
+                :kbIds="kbIds"
             ></InputField>
         </div>
     </div>
-    <KnowledgeBaseEditorModal 
+    <KnowledgeBaseEditorModal v-if="!embeddedMode"
         :visible="uiStore.showKBEditorModal"
         :mode="uiStore.kbEditorMode"
         :kb-id="uiStore.currentKBId || undefined"
@@ -107,6 +122,9 @@ import { useI18n } from 'vue-i18n';
 import { useUIStore } from '@/stores/ui';
 import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal.vue';
 import { useKnowledgeBaseCreationNavigation } from '@/hooks/useKnowledgeBaseCreationNavigation';
+import { notifyEmbeddedHost } from '@/utils/embedded-runtime';
+
+const emit = defineEmits(['answer-completed']);
 
 const props = defineProps({
   session_id: { type: String, default: '' },
@@ -126,6 +144,7 @@ const route = useRoute();
 const router = useRouter();
 const session_id = ref(props.session_id || route.params.chatid);
 const sessionData = ref(null);
+const voiceConfig = ref({});
 const inputFieldRef = ref();
 const created_at = ref('');
 const limit = ref(20);
@@ -479,7 +498,7 @@ const handleStopGeneration = () => {
     // API 调用成功后，后端的 stop 事件会清空它
 };
 
-const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = []) => {
+const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], voiceMetadata = undefined) => {
     userquery.value = value;
     isReplying.value = true;
     loading.value = true;
@@ -534,7 +553,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     }
 
     // 将@提及的知识库和文件信息存入用户消息
-     messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), channel: 'web' });
+     messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), voice_metadata: voiceMetadata, channel: 'web' });
     userHasScrolledUp.value = false;
     scrollToBottom(true);
     
@@ -586,6 +605,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         mentioned_items: mentionedItems,
         images: imageAttachments.length > 0 ? imageAttachments : undefined,
         attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,
+        voice_metadata: voiceMetadata,
         query: value, 
         method: 'POST', 
         url: endpoint
@@ -703,6 +723,8 @@ onChunk((data) => {
         }
         
         existingMessage.knowledge_references = data.knowledge_references || data.data?.references || [];
+        const extra = data.data?.extra || data.extra || {};
+        existingMessage.graph_paths = extra?.graph?.paths || [];
         console.log('[References] Saved to message, count:', existingMessage.knowledge_references.length);
         return;
     }
@@ -778,6 +800,10 @@ onChunk((data) => {
         fullContent.value = "";
         // 清空当前 assistant message ID
         currentAssistantMessageId.value = '';
+        if (props.embeddedMode && data.id) {
+            emit('answer-completed', { messageId: data.id });
+            notifyEmbeddedHost('answer-completed', { messageId: data.id });
+        }
     }
     updateAssistantSession(obj);
 })
@@ -1010,6 +1036,7 @@ const handleAgentChunk = (data) => {
                 // 兼容旧格式
                 message.knowledge_references = data.knowledge_references;
             }
+            message.graph_paths = data.data?.extra?.graph?.paths || data.extra?.graph?.paths || message.graph_paths || [];
             break;
             
         case 'answer':
@@ -1123,7 +1150,9 @@ const updateAssistantSession = (payload) => {
         message.thinking = payload.thinking;
         message.thinkContent = payload.thinkContent;
         message.showThink = payload.showThink;
-        message.knowledge_references = message.knowledge_references ? message.knowledge_references : payload.knowledge_references;
+        message.knowledge_references = payload.knowledge_references?.length
+            ? payload.knowledge_references
+            : (message.knowledge_references || payload.knowledge_references);
         // 更新 fallback 状态
         if (payload.is_fallback) {
             message.is_fallback = true;
@@ -1149,7 +1178,7 @@ onMounted(async () => {
     messagesList.splice(0);
     
     // 若从智能体列表点击共享智能体进入，URL 带 agent_id 与 source_tenant_id，同步到 store
-    const agentIdFromQuery = props.embeddedAgentId || (route.query.agent_id && String(route.query.agent_id));
+    const agentIdFromQuery = props.agentId || (route.query.agent_id && String(route.query.agent_id));
     const sourceTenantIdFromQuery = route.query.source_tenant_id && String(route.query.source_tenant_id);
     if (agentIdFromQuery && sourceTenantIdFromQuery) {
         useSettingsStoreInstance.selectAgent(agentIdFromQuery, sourceTenantIdFromQuery);
@@ -1157,8 +1186,8 @@ onMounted(async () => {
         useSettingsStoreInstance.selectAgent(agentIdFromQuery, null);
     }
     
-    if (props.embeddedKbIds && props.embeddedKbIds.length > 0) {
-        useSettingsStoreInstance.selectKnowledgeBases(props.embeddedKbIds);
+    if (props.kbIds && props.kbIds.length > 0) {
+        useSettingsStoreInstance.selectKnowledgeBases(props.kbIds);
     }
     
     // 初始化状态：加载历史消息时不应显示loading
@@ -1232,9 +1261,13 @@ onBeforeRouteUpdate((to, from, next) => {
 
     &.is-embedded {
         max-width: 100%;
-        min-width: 100%;
-        padding: 0;
+        min-width: 0;
+        width: 100%;
+        height: auto;
+        min-height: 0;
+        padding: 0 12px 12px;
         overflow-x: hidden;
+        background: #f4f8fb;
     }
 
     &.is-embedded :deep(.answers-input) {
@@ -1257,8 +1290,12 @@ onBeforeRouteUpdate((to, from, next) => {
 
 .chat_scroll_box {
     flex: 1;
+    min-width: 0;
+    min-height: 0;
     width: 100%;
     overflow-y: auto;
+    padding: 18px 4px 8px;
+    box-sizing: border-box;
 
     &::-webkit-scrollbar {
         width: 0;
@@ -1364,10 +1401,71 @@ onBeforeRouteUpdate((to, from, next) => {
 
     &.is-embedded {
         max-width: 100%;
+        min-width: 0;
         width: 100%;
         margin: 0;
         overflow-x: hidden;
     }
+}
+
+.embedded-welcome {
+    box-sizing: border-box;
+    width: min(100%, 460px);
+    margin: auto;
+    padding: 28px 20px 20px;
+    text-align: center;
+    color: var(--td-text-color-primary);
+
+    h2 { margin: 14px 0 8px; font-size: 20px; line-height: 1.35; }
+    p { margin: 0 auto; max-width: 360px; color: var(--td-text-color-secondary); font-size: 13px; line-height: 1.7; }
+}
+
+.embedded-welcome-icon {
+    display: grid;
+    width: 52px;
+    height: 52px;
+    margin: 0 auto;
+    place-items: center;
+    color: #0b5f8a;
+
+    img { width: 52px; height: 52px; object-fit: contain; filter: drop-shadow(0 4px 7px rgba(11, 37, 69, .16)); }
+}
+
+.embedded-starters {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    gap: 8px;
+    margin-top: 20px;
+
+    button {
+        box-sizing: border-box;
+        width: 100%;
+        min-width: 0;
+        min-height: 40px;
+        padding: 8px 14px;
+        border: 1px solid #d8e2e8;
+        border-radius: 10px;
+        color: #253442;
+        background: #fff;
+        font: inherit;
+        font-size: 13px;
+        text-align: left;
+        cursor: pointer;
+        transition: border-color .16s ease, background .16s ease;
+    }
+    button:hover { border-color: #77a9c1; background: #f1f8fb; }
+    button:focus-visible { outline: 2px solid #0b5f8a; outline-offset: 2px; }
+}
+
+@media (max-height: 560px) {
+    .chat_scroll_box { padding-top: 8px; }
+    .embedded-welcome { padding: 8px 12px 10px; }
+    .embedded-welcome-icon, .embedded-welcome-icon img { width: 42px; height: 42px; }
+    .embedded-welcome h2 { margin: 6px 0 4px; font-size: 18px; }
+    .embedded-welcome p { line-height: 1.45; }
+    .embedded-starters { gap: 5px; margin-top: 10px; }
+    .embedded-starters button { min-height: 34px; padding-block: 5px; }
 }
 
 .msg_list {
@@ -1378,6 +1476,7 @@ onBeforeRouteUpdate((to, from, next) => {
     flex: 1;
     margin: 0 auto;
     width: 100%;
+    min-width: 0;
 
     .botanswer_laoding_gif {
         width: 24px;

@@ -3,6 +3,7 @@ package embedding
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -52,6 +53,7 @@ type Config struct {
 	ExtraConfig          map[string]string `json:"extra_config"`
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string `json:"custom_headers"`
+	ValidateIP    func(net.IP) error
 	AppID         string
 	AppSecret     string // 加密值，工厂函数调用方传入，使用前已解密
 }
@@ -129,13 +131,13 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 					baseURL = strings.Replace(baseURL, "/compatible-mode/v1", "", 1)
 					baseURL = strings.Replace(baseURL, "/compatible-mode", "", 1)
 				}
-				aliyunEmb, aErr := NewAliyunEmbedder(config.APIKey,
+				aliyunEmb, aErr := NewAliyunEmbedderWithValidation(config.APIKey,
 					baseURL,
 					config.ModelName,
 					config.TruncatePromptTokens,
 					config.Dimensions,
 					config.ModelID,
-					pooler)
+					pooler, config.ValidateIP)
 				if aliyunEmb != nil {
 					aliyunEmb.SetCustomHeaders(config.CustomHeaders)
 				}
@@ -145,13 +147,13 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 				if baseURL == "" || !strings.Contains(baseURL, "/compatible-mode/") {
 					baseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 				}
-				openaiEmb, oErr := NewOpenAIEmbedder(config.APIKey,
+				openaiEmb, oErr := NewOpenAIEmbedderWithValidation(config.APIKey,
 					baseURL,
 					config.ModelName,
 					config.TruncatePromptTokens,
 					config.Dimensions,
 					config.ModelID,
-					pooler)
+					pooler, config.ValidateIP)
 				if openaiEmb != nil {
 					openaiEmb.SetCustomHeaders(config.CustomHeaders)
 				}
@@ -160,13 +162,13 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 			return embedder, err
 		case provider.ProviderVolcengine:
 			// Volcengine Ark uses multimodal embedding API
-			volcEmb, vErr := NewVolcengineEmbedder(config.APIKey,
+			volcEmb, vErr := NewVolcengineEmbedderWithValidation(config.APIKey,
 				config.BaseURL,
 				config.ModelName,
 				config.TruncatePromptTokens,
 				config.Dimensions,
 				config.ModelID,
-				pooler)
+				pooler, config.ValidateIP)
 			if volcEmb != nil {
 				volcEmb.SetCustomHeaders(config.CustomHeaders)
 			}
@@ -174,13 +176,13 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 			return embedder, err
 		case provider.ProviderJina:
 			// Jina AI uses different API format (truncate instead of truncate_prompt_tokens)
-			jinaEmb, jErr := NewJinaEmbedder(config.APIKey,
+			jinaEmb, jErr := NewJinaEmbedderWithValidation(config.APIKey,
 				config.BaseURL,
 				config.ModelName,
 				config.TruncatePromptTokens,
 				config.Dimensions,
 				config.ModelID,
-				pooler)
+				pooler, config.ValidateIP)
 			if jinaEmb != nil {
 				jinaEmb.SetCustomHeaders(config.CustomHeaders)
 			}
@@ -193,26 +195,26 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 					apiVersion = v
 				}
 			}
-			azureEmb, azErr := NewAzureOpenAIEmbedder(config.APIKey,
+			azureEmb, azErr := NewAzureOpenAIEmbedderWithValidation(config.APIKey,
 				config.BaseURL,
 				config.ModelName,
 				config.TruncatePromptTokens,
 				config.Dimensions,
 				config.ModelID,
 				apiVersion,
-				pooler)
+				pooler, config.ValidateIP)
 			if azureEmb != nil {
 				azureEmb.SetCustomHeaders(config.CustomHeaders)
 			}
 			embedder, err = azureEmb, azErr
 			return embedder, err
 		case provider.ProviderNvidia:
-			nvEmb, nErr := NewNvidiaEmbedder(config.APIKey,
+			nvEmb, nErr := NewNvidiaEmbedderWithValidation(config.APIKey,
 				config.BaseURL,
 				config.ModelName,
 				config.Dimensions,
 				config.ModelID,
-				pooler)
+				pooler, config.ValidateIP)
 			if nvEmb != nil {
 				nvEmb.SetCustomHeaders(config.CustomHeaders)
 			}
@@ -223,13 +225,13 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 			return embedder, err
 		default:
 			// Use OpenAI-compatible embedder for other providers
-			openaiEmb, oErr := NewOpenAIEmbedder(config.APIKey,
+			openaiEmb, oErr := NewOpenAIEmbedderWithValidation(config.APIKey,
 				config.BaseURL,
 				config.ModelName,
 				config.TruncatePromptTokens,
 				config.Dimensions,
 				config.ModelID,
-				pooler)
+				pooler, config.ValidateIP)
 			if openaiEmb != nil {
 				openaiEmb.SetCustomHeaders(config.CustomHeaders)
 			}

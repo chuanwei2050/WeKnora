@@ -62,6 +62,7 @@ import { defineProps, computed, ref, reactive } from "vue";
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { sanitizeHTML } from '@/utils/security';
+import { isCookieEmbeddedMode, notifyEmbeddedHost } from '@/utils/embedded-runtime';
 import ContentPopup from './tool-results/ContentPopup.vue';
 
 const router = useRouter();
@@ -75,6 +76,10 @@ const props = defineProps({
     session: {
         type: Object,
         required: false
+    },
+    embeddedMode: {
+        type: Boolean,
+        default: false
     }
 });
 
@@ -148,6 +153,13 @@ const truncateContent = (content, maxLen) => {
 
 const navigateToDocument = (group) => {
     if (!group.knowledgeBaseId) return;
+    if (props.embeddedMode || isCookieEmbeddedMode()) {
+        notifyEmbeddedHost('open-document', {
+            knowledgeBaseId: group.knowledgeBaseId,
+            knowledgeId: group.knowledgeId || undefined,
+        });
+        return;
+    }
     const query = {};
     if (group.knowledgeId) {
         query.knowledge_id = group.knowledgeId;

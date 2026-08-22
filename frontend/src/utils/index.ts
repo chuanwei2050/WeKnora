@@ -11,11 +11,11 @@ declare global {
 }
 
 // 从运行时配置获取最大文件大小(MB)，支持 Docker 环境动态配置
-// 优先级：运行时配置 > 构建时环境变量 > 默认值 50MB
-const MAX_FILE_SIZE_MB = window.__RUNTIME_CONFIG__?.MAX_FILE_SIZE_MB 
-  || Number(import.meta.env.VITE_MAX_FILE_SIZE_MB) 
-  || 50;
-const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+// 优先级：运行时配置 > 构建时环境变量 > 默认值 2047（约 2GB）
+const MAX_FILE_SIZE_MB = window.__RUNTIME_CONFIG__?.MAX_FILE_SIZE_MB
+  ?? Number(import.meta.env.VITE_MAX_FILE_SIZE_MB)
+  ?? 2047;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB > 0 ? MAX_FILE_SIZE_MB * 1024 * 1024 : 2047 * 1024 * 1024;
 
 export function generateRandomString(length: number) {
   let result = "";
@@ -58,7 +58,7 @@ export function kbFileTypeVerification(file: any, silent = false, validTypes?: S
     }
     return true;
   }
-  if (file.size > MAX_FILE_SIZE_BYTES) {
+  if (MAX_FILE_SIZE_BYTES > 0 && file.size > MAX_FILE_SIZE_BYTES) {
     if (!silent) {
       MessagePlugin.error(i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }));
     }

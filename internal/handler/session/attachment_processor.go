@@ -203,7 +203,7 @@ func (p *AttachmentProcessor) processAudioFile(
 		return nil
 	}
 
-	asrInstance, err := p.modelService.GetASRModel(ctx, asrModelID)
+	asrInstance, err := p.modelService.GetASRModel(ctx, "")
 	if err != nil {
 		return fmt.Errorf("failed to get ASR model: %w", err)
 	}

@@ -52,7 +52,9 @@ type agentService struct {
 	db                    *gorm.DB
 	webSearchService      interfaces.WebSearchService
 	knowledgeBaseService  interfaces.KnowledgeBaseService
+	graphRepo             interfaces.RetrieveGraphRepository
 	knowledgeService      interfaces.KnowledgeService
+	governanceRepo        interfaces.KnowledgeGovernanceRepository
 	fileService           interfaces.FileService
 	chunkService          interfaces.ChunkService
 	duckdb                *sql.DB
@@ -66,7 +68,9 @@ func NewAgentService(
 	cfg *config.Config,
 	modelService interfaces.ModelService,
 	knowledgeBaseService interfaces.KnowledgeBaseService,
+	graphRepo interfaces.RetrieveGraphRepository,
 	knowledgeService interfaces.KnowledgeService,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
 	fileService interfaces.FileService,
 	chunkService interfaces.ChunkService,
 	mcpServiceService interfaces.MCPServiceService,
@@ -83,7 +87,9 @@ func NewAgentService(
 		cfg:                   cfg,
 		modelService:          modelService,
 		knowledgeBaseService:  knowledgeBaseService,
+		graphRepo:             graphRepo,
 		knowledgeService:      knowledgeService,
+		governanceRepo:        governanceRepo,
 		fileService:           fileService,
 		chunkService:          chunkService,
 		mcpServiceService:     mcpServiceService,
@@ -150,7 +156,7 @@ func (s *agentService) CreateAgentEngine(
 	// and appends them to the tool result content (since Chat Completions API does not
 	// reliably support images in tool role messages across providers).
 	if config.VLMModelID != "" {
-		if vlmModel, err := s.modelService.GetVLMModel(ctx, config.VLMModelID); err == nil {
+		if vlmModel, err := s.modelService.GetVLMModel(ctx, ""); err == nil {
 			engine.SetImageDescriber(func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
 				return vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 			})
@@ -518,6 +524,7 @@ func (s *agentService) registerTools(
 				rerankModel,
 				chatModel,
 				s.cfg,
+				config.RerankTopK,
 			)
 		case tools.ToolGrepChunks:
 			toolToRegister = tools.NewGrepChunksTool(s.db, config.SearchTargets)
@@ -525,7 +532,7 @@ func (s *agentService) registerTools(
 		case tools.ToolListKnowledgeChunks:
 			toolToRegister = tools.NewListKnowledgeChunksTool(s.knowledgeService, s.chunkService, config.SearchTargets)
 		case tools.ToolQueryKnowledgeGraph:
-			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService)
+			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService, s.graphRepo, s.knowledgeService.GetRepository(), s.governanceRepo, config.SearchTargets)
 		case tools.ToolGetDocumentInfo:
 			toolToRegister = tools.NewGetDocumentInfoTool(s.knowledgeService, s.chunkService, config.SearchTargets)
 		case tools.ToolDatabaseQuery:
@@ -608,6 +615,17 @@ func (s *agentService) ValidateConfig(config *types.AgentConfig) error {
 
 	if config.MaxIterations > MAX_ITERATIONS {
 		return fmt.Errorf("max iterations too high: %d (max %d)", config.MaxIterations, MAX_ITERATIONS)
+	}
+	if config.ComplexityRouting.Enabled {
+		if err := config.ComplexityRouting.Validate(); err != nil {
+			return fmt.Errorf("complexity routing: %w", err)
+		}
+	}
+	if config.VerifiedAnswer.Enabled {
+		config.VerifiedAnswer.EnsureDefaults()
+		if config.VerifiedAnswer.MaxReflections > 2 {
+			return fmt.Errorf("verified answer max reflections too high")
+		}
 	}
 
 	return nil

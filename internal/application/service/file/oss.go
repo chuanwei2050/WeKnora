@@ -32,13 +32,16 @@ type ossFileService struct {
 const ossScheme = "oss://"
 
 // newOSSClient creates an OSS client using the official Aliyun SDK v2.
-func newOSSClient(endpoint, region, accessKey, secretKey string) (*oss.Client, error) {
+func newOSSClient(endpoint, region, accessKey, secretKey string, httpClients ...*http.Client) (*oss.Client, error) {
 	creds := credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")
 
 	cfg := oss.LoadDefaultConfig().
 		WithCredentialsProvider(creds).
 		WithRegion(region).
 		WithEndpoint(endpoint)
+	if len(httpClients) > 0 && httpClients[0] != nil {
+		cfg.WithHttpClient(httpClients[0])
+	}
 
 	return oss.NewClient(cfg), nil
 }
@@ -68,13 +71,21 @@ func ossEnsureBucket(client *oss.Client, bucketName string) error {
 
 // NewOssFileService creates an Aliyun OSS file service.
 // It verifies that the bucket exists and creates it if missing.
-func NewOssFileService(endpoint, region, accessKey, secretKey, bucketName, pathPrefix string) (interfaces.FileService, error) {
-	return NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, "", "")
+func NewOssFileService(endpoint, region, accessKey, secretKey, bucketName, pathPrefix string, httpClients ...*http.Client) (interfaces.FileService, error) {
+	return NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, "", "", httpClients...)
 }
 
 // NewOssFileServiceWithTempBucket creates an Aliyun OSS file service with optional temp bucket.
-func NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, tempBucketName, tempRegion string) (interfaces.FileService, error) {
-	client, err := newOSSClient(endpoint, region, accessKey, secretKey)
+func NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, tempBucketName, tempRegion string, httpClients ...*http.Client) (interfaces.FileService, error) {
+	var httpClient *http.Client
+	if len(httpClients) > 0 {
+		httpClient = httpClients[0]
+	}
+	return newOssFileServiceWithHTTPClient(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, tempBucketName, tempRegion, httpClient)
+}
+
+func newOssFileServiceWithHTTPClient(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, tempBucketName, tempRegion string, httpClient *http.Client) (interfaces.FileService, error) {
+	client, err := newOSSClient(endpoint, region, accessKey, secretKey, httpClient)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +99,7 @@ func NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, buc
 		if tempRegion == "" {
 			tempRegion = region
 		}
-		tempClient, err = newOSSClient(endpoint, tempRegion, accessKey, secretKey)
+		tempClient, err = newOSSClient(endpoint, tempRegion, accessKey, secretKey, httpClient)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize OSS temp client: %w", err)
 		}

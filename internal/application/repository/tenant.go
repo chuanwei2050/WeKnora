@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -54,12 +55,46 @@ func (r *tenantRepository) ListTenants(ctx context.Context) ([]*types.Tenant, er
 	return tenants, nil
 }
 
+// GetPlatformSettings loads the singleton system configuration row. An empty
+// value is returned when an older database has not created the row yet.
+func (r *tenantRepository) GetPlatformSettings(ctx context.Context) (*types.PlatformSettings, error) {
+	var settings types.PlatformSettings
+	if err := r.db.WithContext(ctx).Where("id = ?", 1).First(&settings).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return &types.PlatformSettings{ID: 1}, nil
+		}
+		return nil, err
+	}
+	return &settings, nil
+}
+
+// UpdatePlatformSettings persists the singleton system configuration row.
+func (r *tenantRepository) UpdatePlatformSettings(ctx context.Context, settings *types.PlatformSettings) error {
+	if settings == nil {
+		return errors.New("platform settings are required")
+	}
+	settings.ID = 1
+	settings.UpdatedAt = time.Now()
+	result := r.db.WithContext(ctx).Model(&types.PlatformSettings{}).Where("id = ?", 1).Select("*").Updates(settings)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		settings.CreatedAt = time.Now()
+		return r.db.WithContext(ctx).Create(settings).Error
+	}
+	return nil
+}
+
 // SearchTenants searches tenants with pagination and filters
-func (r *tenantRepository) SearchTenants(ctx context.Context, keyword string, tenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error) {
+func (r *tenantRepository) SearchTenants(ctx context.Context, keyword string, tenantID, excludeTenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error) {
 	var tenants []*types.Tenant
 	var total int64
 
 	query := r.db.WithContext(ctx).Model(&types.Tenant{})
+	if excludeTenantID > 0 {
+		query = query.Where("id <> ?", excludeTenantID)
+	}
 
 	// Build search conditions
 	if tenantID > 0 && keyword != "" {
@@ -116,6 +151,10 @@ func (r *tenantRepository) UpdateTenant(ctx context.Context, tenant *types.Tenan
 	err := r.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", tenant.ID).Updates(tenant).Error
 	tenant.APIKey = origAPIKey
 	return err
+}
+
+func (r *tenantRepository) UpdateStorageQuota(ctx context.Context, tenantID uint64, storageQuota int64) error {
+	return r.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", tenantID).Update("storage_quota", storageQuota).Error
 }
 
 // DeleteTenant deletes tenant

@@ -2,6 +2,7 @@ package file
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -193,7 +194,8 @@ func TestOssEnsureBucket_CreateFails(t *testing.T) {
 	}
 
 	// Should fail with invalid credentials
-	err = ossEnsureBucket(client, "test-bucket")
+	uniqueBucket := "weknora-invalid-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	err = ossEnsureBucket(client, uniqueBucket)
 	if err == nil {
 		t.Error("ossEnsureBucket with invalid credentials should return an error")
 	}

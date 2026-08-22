@@ -212,7 +212,7 @@ func (m *milvusRepository) EngineType() types.RetrieverEngineType {
 }
 
 func (m *milvusRepository) Support() []types.RetrieverType {
-	return []types.RetrieverType{types.KeywordsRetrieverType, types.VectorRetrieverType}
+	return []types.RetrieverType{types.VectorRetrieverType}
 }
 
 // EstimateStorageSize calculates the estimated storage size for a list of indices

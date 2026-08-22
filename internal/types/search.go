@@ -3,6 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"time"
 )
 
 // SearchTargetType represents the type of search target
@@ -78,6 +79,46 @@ func (st SearchTargets) ContainsKB(kbID string) bool {
 	return false
 }
 
+// KnowledgeIDsForKB returns the explicitly authorized document IDs for a KB.
+// A nil result means the whole authorized KB is in scope; an empty non-nil
+// result means the KB is not in scope.
+func (st SearchTargets) KnowledgeIDsForKB(kbID string) []string {
+	found := false
+	var result []string
+	for _, target := range st {
+		if target == nil || target.KnowledgeBaseID != kbID {
+			continue
+		}
+		found = true
+		if target.Type == SearchTargetTypeKnowledge {
+			result = append(result, target.KnowledgeIDs...)
+		}
+	}
+	if !found {
+		return []string{}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return deduplicateStrings(result)
+}
+
+func deduplicateStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
 // SearchResult represents the search result
 type SearchResult struct {
 	// ID
@@ -85,7 +126,11 @@ type SearchResult struct {
 	// Content
 	Content string `gorm:"column:content"         json:"content"`
 	// Knowledge ID
-	KnowledgeID string `gorm:"column:knowledge_id"    json:"knowledge_id"`
+	KnowledgeID        string         `gorm:"column:knowledge_id"    json:"knowledge_id"`
+	KnowledgeVersionID string         `gorm:"column:knowledge_version_id" json:"knowledge_version_id,omitempty"`
+	KnowledgeLayer     KnowledgeLayer `json:"knowledge_layer,omitempty"`
+	SourceCategory     string         `json:"source_category,omitempty"`
+	EffectiveAt        *time.Time     `json:"effective_at,omitempty"`
 	// Chunk index
 	ChunkIndex int `gorm:"column:chunk_index"     json:"chunk_index"`
 	// Knowledge title

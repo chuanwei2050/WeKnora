@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/transport"
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/google/uuid"
 )
@@ -39,6 +40,10 @@ func NewWeKnoraCloudReranker(config *RerankerConfig) (*WeKnoraCloudReranker, err
 	if config.ExtraConfig != nil {
 		remoteModelName = strings.TrimSpace(config.ExtraConfig["remote_model_name"])
 	}
+	client, err := transport.NewEndpointHTTPClientWithValidation(strings.TrimRight(config.BaseURL, "/"), 60*time.Second, config.ValidateIP)
+	if err != nil {
+		return nil, fmt.Errorf("invalid WeKnoraCloud rerank endpoint: %w", err)
+	}
 	return &WeKnoraCloudReranker{
 		modelName:       config.ModelName,
 		remoteModelName: remoteModelName,
@@ -46,7 +51,7 @@ func NewWeKnoraCloudReranker(config *RerankerConfig) (*WeKnoraCloudReranker, err
 		appID:           config.AppID,
 		apiKey:          config.AppSecret,
 		baseURL:         strings.TrimRight(config.BaseURL, "/"),
-		client:          &http.Client{Timeout: 60 * time.Second},
+		client:          client,
 	}, nil
 }
 

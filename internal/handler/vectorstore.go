@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -93,6 +94,10 @@ func envStoreReadonlyError() gin.H {
 // @Router       /vector-stores [post]
 func (h *VectorStoreHandler) CreateStore(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage vector stores"))
+		return
+	}
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
@@ -154,13 +159,16 @@ func (h *VectorStoreHandler) ListStores(c *gin.Context) {
 	}
 
 	// DB stores → VectorStoreResponse (masked)
-	maskedDBStores := make([]types.VectorStoreResponse, len(dbStores))
-	for i, s := range dbStores {
-		maskedDBStores[i] = types.NewVectorStoreResponse(s, "user", false)
+	maskedDBStores := make([]types.VectorStoreResponse, 0, len(dbStores))
+	for _, s := range dbStores {
+		if s.EngineType == types.MilvusRetrieverEngineType {
+			maskedDBStores = append(maskedDBStores, types.NewVectorStoreResponse(s, "user", false))
+		}
 	}
 
 	// env stores → VectorStore → VectorStoreResponse (masked)
-	envStores := types.BuildEnvVectorStores(os.Getenv("RETRIEVE_DRIVER"), os.Getenv)
+	vectorDrivers := strings.Join(types.GetDefaultRetrieverDrivers(types.VectorRetrieverType), ",")
+	envStores := types.BuildEnvVectorStores(vectorDrivers, os.Getenv)
 	maskedEnvStores := make([]types.VectorStoreResponse, len(envStores))
 	for i := range envStores {
 		maskedEnvStores[i] = types.NewVectorStoreResponse(&envStores[i], "env", true)
@@ -197,7 +205,8 @@ func (h *VectorStoreHandler) GetStore(c *gin.Context) {
 
 	// Handle env store
 	if types.IsEnvStoreID(id) {
-		envStore := types.FindEnvVectorStore(os.Getenv("RETRIEVE_DRIVER"), os.Getenv, id)
+		vectorDrivers := strings.Join(types.GetDefaultRetrieverDrivers(types.VectorRetrieverType), ",")
+		envStore := types.FindEnvVectorStore(vectorDrivers, os.Getenv, id)
 		if envStore == nil {
 			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "vector store not found"})
 			return
@@ -239,6 +248,10 @@ func (h *VectorStoreHandler) GetStore(c *gin.Context) {
 // @Router       /vector-stores/{id} [put]
 func (h *VectorStoreHandler) UpdateStore(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage vector stores"))
+		return
+	}
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
@@ -308,6 +321,10 @@ func (h *VectorStoreHandler) UpdateStore(c *gin.Context) {
 // @Router       /vector-stores/{id} [delete]
 func (h *VectorStoreHandler) DeleteStore(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can manage vector stores"))
+		return
+	}
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
@@ -366,6 +383,10 @@ func (h *VectorStoreHandler) ListStoreTypes(c *gin.Context) {
 // @Router       /vector-stores/{id}/test [post]
 func (h *VectorStoreHandler) TestStoreByID(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can test vector stores"))
+		return
+	}
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
@@ -377,7 +398,8 @@ func (h *VectorStoreHandler) TestStoreByID(c *gin.Context) {
 
 	// env store — test with unmasked config
 	if types.IsEnvStoreID(id) {
-		envStore := types.FindEnvVectorStore(os.Getenv("RETRIEVE_DRIVER"), os.Getenv, id)
+		vectorDrivers := strings.Join(types.GetDefaultRetrieverDrivers(types.VectorRetrieverType), ",")
+		envStore := types.FindEnvVectorStore(vectorDrivers, os.Getenv, id)
 		if envStore == nil {
 			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "vector store not found"})
 			return
@@ -431,6 +453,10 @@ func (h *VectorStoreHandler) TestStoreByID(c *gin.Context) {
 // @Router       /vector-stores/test [post]
 func (h *VectorStoreHandler) TestStoreRaw(c *gin.Context) {
 	ctx := c.Request.Context()
+	if !isPlatformAdmin(c) {
+		c.Error(errors.NewForbiddenError("Only platform administrators can test vector stores"))
+		return
+	}
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {

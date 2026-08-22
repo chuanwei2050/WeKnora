@@ -59,6 +59,7 @@ type ImageMultimodalService struct {
 	kbService      interfaces.KnowledgeBaseService
 	knowledgeRepo  interfaces.KnowledgeRepository
 	tenantRepo     interfaces.TenantRepository
+	tenantService  interfaces.TenantService
 	retrieveEngine interfaces.RetrieveEngineRegistry
 	ollamaService  *ollama.OllamaService
 	taskEnqueuer   interfaces.TaskEnqueuer
@@ -71,6 +72,7 @@ func NewImageMultimodalService(
 	kbService interfaces.KnowledgeBaseService,
 	knowledgeRepo interfaces.KnowledgeRepository,
 	tenantRepo interfaces.TenantRepository,
+	tenantService interfaces.TenantService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ollamaService *ollama.OllamaService,
 	taskEnqueuer interfaces.TaskEnqueuer,
@@ -82,6 +84,7 @@ func NewImageMultimodalService(
 		kbService:      kbService,
 		knowledgeRepo:  knowledgeRepo,
 		tenantRepo:     tenantRepo,
+		tenantService:  tenantService,
 		retrieveEngine: retrieveEngine,
 		ollamaService:  ollamaService,
 		taskEnqueuer:   taskEnqueuer,
@@ -159,7 +162,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			prompt = vlmOCRScannedPDFPrompt
 			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
 		}
-		
+
 		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
@@ -283,7 +286,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 		return
 	}
 
-	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get tenant for indexing: %v", err)
 		return
@@ -346,9 +349,10 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID string) (v
 		return nil, fmt.Errorf("VLM is not enabled for knowledge base %s", kbID)
 	}
 
-	// New-style: resolve model through ModelService
-	if vlmCfg.ModelID != "" {
-		return s.modelService.GetVLMModel(ctx, vlmCfg.ModelID)
+	// Platform-managed configs only need the feature toggle. Inline parameters
+	// are retained solely for legacy knowledge bases.
+	if vlmCfg.ModelID != "" || (vlmCfg.ModelName == "" && vlmCfg.BaseURL == "") {
+		return s.modelService.GetVLMModel(ctx, "")
 	}
 
 	// Legacy: create VLM from inline config
@@ -357,20 +361,15 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID string) (v
 
 // resolveFileServiceForPayload resolves tenant/KB scoped file service for reading provider:// URLs.
 func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Context, payload types.ImageMultimodalPayload) interfaces.FileService {
-	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenant, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil || tenant == nil {
 		logger.Warnf(ctx, "[ImageMultimodal] GetTenantByID failed: tenant=%d err=%v", payload.TenantID, err)
 		return nil
 	}
 
 	provider := types.ParseProviderScheme(payload.ImageURL)
-	if provider == "" {
-		kb, kbErr := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
-		if kbErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] GetKnowledgeBaseByIDOnly failed: kb=%s err=%v", payload.KnowledgeBaseID, kbErr)
-		} else if kb != nil {
-			provider = strings.ToLower(strings.TrimSpace(kb.GetStorageProvider()))
-		}
+	if provider == "" && tenant.StorageEngineConfig != nil {
+		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
 	}
 
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
@@ -394,7 +393,7 @@ func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, 
 	}
 
 	redisKey := fmt.Sprintf("multimodal:pending:%s", payload.KnowledgeID)
-	
+
 	pendingCount, err := s.redisClient.Decr(ctx, redisKey).Result()
 	if err != nil && err != redis.Nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to decrement pending count for %s: %v", payload.KnowledgeID, err)
@@ -413,7 +412,7 @@ func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(ctx context.Con
 	if s.taskEnqueuer == nil {
 		return
 	}
-	
+
 	taskPayload := types.KnowledgePostProcessPayload{
 		TenantID:        payload.TenantID,
 		KnowledgeID:     payload.KnowledgeID,

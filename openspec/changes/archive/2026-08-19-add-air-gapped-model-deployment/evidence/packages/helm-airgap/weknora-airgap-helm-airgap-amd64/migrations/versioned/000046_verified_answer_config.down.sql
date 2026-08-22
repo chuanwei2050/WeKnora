@@ -1,0 +1,2 @@
+-- Data migration is intentionally not reversible: the legacy flag remains
+-- available for one compatibility cycle and runtime normalization is retained.

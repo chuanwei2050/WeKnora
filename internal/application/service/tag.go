@@ -209,12 +209,21 @@ func (s *knowledgeTagService) UpdateTag(
 		if newName == "" {
 			return nil, werrors.NewBadRequestError("标签名称不能为空")
 		}
+		if tag.Name == types.UntaggedTagName && newName != types.UntaggedTagName {
+			return nil, werrors.NewBadRequestError("未分类文件夹不能重命名")
+		}
+		if tag.Name != types.UntaggedTagName && newName == types.UntaggedTagName {
+			return nil, werrors.NewBadRequestError("未分类是系统保留名称")
+		}
 		tag.Name = newName
 	}
 	if color != nil {
 		tag.Color = strings.TrimSpace(*color)
 	}
 	if sortOrder != nil {
+		if tag.Name == types.UntaggedTagName && *sortOrder != -1 {
+			return nil, werrors.NewBadRequestError("未分类文件夹不能排序")
+		}
 		tag.SortOrder = *sortOrder
 	}
 	tag.UpdatedAt = time.Now()
@@ -275,6 +284,9 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 	tag, err := s.repo.GetByID(ctx, tenantID, id)
 	if err != nil {
 		return err
+	}
+	if tag.Name == types.UntaggedTagName {
+		return werrors.NewBadRequestError("未分类文件夹不能删除")
 	}
 
 	// Get KB info for embedding model

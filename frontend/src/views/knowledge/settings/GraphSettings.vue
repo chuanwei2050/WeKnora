@@ -34,54 +34,120 @@
         </div>
       </div>
 
-      <!-- 关系类型配置 -->
-      <div v-if="localGraphExtract.enabled" class="setting-row vertical">
+      <div v-if="localGraphExtract.enabled" class="setting-row">
         <div class="setting-info">
-          <label>{{ t('graphSettings.tagsLabel') }}</label>
-          <p class="desc">{{ t('graphSettings.tagsDescription') }}</p>
+          <label>{{ t('graphSettings.requireTripleReviewLabel') }}</label>
+          <p class="desc">{{ t('graphSettings.requireTripleReviewDescription') }}</p>
         </div>
-        <div class="setting-control full-width">
-          <div class="tags-control-group">
-            <t-button
-              theme="default"
-              size="medium"
-              :disabled="!modelStatus.llm.available"
-              :loading="tagFabring"
-              @click="handleFabriTag"
-              class="gen-tags-btn"
-            >
-              {{ t('graphSettings.generateRandomTags') }}
-            </t-button>
-            <t-select
-              v-model="localGraphExtract.tags"
-              multiple
-              :placeholder="t('graphSettings.tagsPlaceholder')"
-              clearable
-              creatable
-              filterable
-              @change="handleTagsChange"
-              style="flex: 1; min-width: 400px;"
-            />
+        <div class="setting-control">
+          <t-switch v-model="localGraphExtract.require_triple_review" @change="handleConfigChange" />
+          <t-button v-if="localGraphExtract.require_triple_review" theme="default" variant="text" size="small" @click="openTripleReview">
+            {{ t('graphSettings.openTripleReview') }}
+          </t-button>
+        </div>
+      </div>
+
+      <div v-if="localGraphExtract.enabled" class="setting-row">
+        <div class="setting-info">
+          <label>抽取方式</label>
+          <p class="desc">按知识库内容选择，无需逐项配置。</p>
+        </div>
+        <div class="setting-control">
+          <t-select v-model="localGraphExtract.mode" @change="handleModeChange" class="preset-select">
+            <t-option value="general" label="通用抽取" />
+            <t-option value="template" label="使用模板" />
+            <t-option value="custom" label="自定义 Schema" />
+          </t-select>
+        </div>
+      </div>
+
+      <div v-if="localGraphExtract.enabled && localGraphExtract.mode === 'template'" class="setting-row">
+        <div class="setting-info"><label>配置模板</label></div>
+        <div class="setting-control preset-control">
+          <t-select v-model="selectedPresetKey" class="preset-select">
+            <t-option value="software-testing" :label="t('graphSettings.softwareTestingTemplate')" />
+          </t-select>
+          <t-button theme="default" @click="loadSelectedPreset">
+            {{ t('graphSettings.applyTemplate') }}
+          </t-button>
+        </div>
+      </div>
+
+      <div v-if="localGraphExtract.enabled && (localGraphExtract.mode === 'custom' || !!localGraphExtract.template_key)" class="schema-fields">
+        <div class="setting-row vertical">
+          <div class="list-section-header">
+            <div class="setting-info"><label>实体类型 Schema</label><p class="desc">定义模型实际允许抽取的实体类型及含义。</p></div>
+            <t-button v-if="localGraphExtract.mode === 'custom'" theme="primary" @click="addEntitySchema">添加实体类型</t-button>
           </div>
-          <div v-if="!modelStatus.llm.available" class="control-tip">
-            <t-icon name="info-circle" class="tip-icon" />
-            <span>{{ t('graphSettings.completeModelConfig') }}</span>
+          <div class="setting-control full-width schema-list">
+            <div v-for="(definition, index) in localGraphExtract.entity_schema" :key="index" class="schema-row entity-schema-row">
+              <t-input v-model="definition.type" placeholder="名称" @change="handleSchemaChange" />
+              <t-select v-model="definition.base_type" placeholder="类型" creatable filterable @change="handleSchemaChange">
+                <t-option v-for="baseType in BASE_ENTITY_TYPES" :key="baseType" :value="baseType" :label="baseType" />
+              </t-select>
+              <t-input v-model="definition.description" placeholder="说明" @change="handleSchemaChange" />
+              <t-button v-if="localGraphExtract.mode === 'custom'" theme="default" size="small" @click="removeEntitySchema(index)"><t-icon name="delete" /></t-button>
+            </div>
+          </div>
+        </div>
+        <div class="setting-row vertical">
+          <div class="list-section-header">
+            <div class="setting-info"><label>关系类型 Schema</label><p class="desc">定义语义关系、起点到终点的方向及含义。</p></div>
+            <t-button v-if="localGraphExtract.mode === 'custom'" theme="primary" @click="addRelationSchema">添加关系类型</t-button>
+          </div>
+          <div class="setting-control full-width schema-list">
+            <div v-for="(definition, index) in localGraphExtract.relation_schema" :key="index" class="schema-row relation-schema-row">
+              <t-select v-model="definition.source_type" placeholder="起点" @change="handleSchemaChange">
+                <t-option v-for="entityType in validEntitySchemaTypes" :key="entityType" :value="entityType" :label="entityType" />
+                <template #empty><span class="select-empty-tip">请先填写实体类型编码</span></template>
+              </t-select>
+              <t-icon name="arrow-right" class="relation-arrow" />
+              <t-input v-model="definition.type" placeholder="关系类型" @change="handleSchemaChange" />
+              <t-icon name="arrow-right" class="relation-arrow" />
+              <t-select v-model="definition.target_type" placeholder="终点" @change="handleSchemaChange">
+                <t-option v-for="entityType in validEntitySchemaTypes" :key="entityType" :value="entityType" :label="entityType" />
+                <template #empty><span class="select-empty-tip">请先填写实体类型编码</span></template>
+              </t-select>
+              <t-input v-model="definition.description" placeholder="说明" @change="handleSchemaChange" />
+              <t-button v-if="localGraphExtract.mode === 'custom'" theme="default" size="small" @click="removeRelationSchema(index)"><t-icon name="delete" /></t-button>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- 示例文本 -->
-      <div v-if="localGraphExtract.enabled" class="setting-row vertical">
-        <div class="setting-info">
-          <label>{{ t('graphSettings.sampleTextLabel') }}</label>
-          <p class="desc">{{ t('graphSettings.sampleTextDescription') }}</p>
-        </div>
-        <div class="setting-control full-width">
-          <div class="text-control-group">
+      <t-collapse v-if="localGraphExtract.enabled" :default-value="[]" borderless class="graph-config-collapse">
+        <t-collapse-panel value="advanced" header="调试与高级选项">
+          <div class="setting-row vertical">
+            <div class="setting-info">
+              <label>{{ t('graphSettings.ingestionModeLabel') }}</label>
+              <p class="desc">{{ t('graphSettings.ingestionModeDescription') }}</p>
+            </div>
+            <div class="setting-control full-width">
+              <t-select v-model="localGraphExtract.ingestion_mode" @change="handleConfigChange">
+                <t-option value="all" :label="t('graphSettings.ingestionModeAll')" />
+                <t-option value="signal" :label="t('graphSettings.ingestionModeSignal')" />
+              </t-select>
+            </div>
+          </div>
+
+          <div class="setting-row vertical">
+            <div class="setting-info"><label>{{ t('graphSettings.extractionLimitsLabel') }}</label></div>
+            <div class="setting-control full-width">
+              <div class="quality-grid">
+                <label><span>{{ t('graphSettings.maxEntitiesLabel') }}</span><t-input-number v-model="localGraphExtract.max_entities" :min="1" :max="100" @change="handleConfigChange" /></label>
+                <label><span>{{ t('graphSettings.maxRelationsLabel') }}</span><t-input-number v-model="localGraphExtract.max_relations" :min="1" :max="200" @change="handleConfigChange" /></label>
+                <label><span>{{ t('graphSettings.minConfidenceLabel') }}</span><t-input-number v-model="localGraphExtract.min_confidence" :min="0.1" :max="1" :step="0.1" :decimal-places="1" @change="handleConfigChange" /></label>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="localGraphExtract.mode === 'custom'" class="setting-row vertical few-shot-row">
+            <div class="setting-info"><label>Few-shot 示例文本（可选）</label><p class="desc">仅用于给模型示范，不是正式 Schema。</p></div>
+            <div class="setting-control full-width">
+              <div class="text-control-group">
             <t-button
               theme="default"
               size="medium"
-              :disabled="!modelStatus.llm.available"
               :loading="textFabring"
               @click="handleFabriText"
               class="gen-text-btn"
@@ -97,31 +163,50 @@
               @change="handleTextChange"
               style="width: 100%;"
             />
+              </div>
+            </div>
           </div>
-          <div v-if="!modelStatus.llm.available" class="control-tip">
-            <t-icon name="info-circle" class="tip-icon" />
-            <span>{{ t('graphSettings.completeModelConfig') }}</span>
-          </div>
-        </div>
-      </div>
 
-      <!-- 实体列表 -->
-      <div v-if="localGraphExtract.enabled && localGraphExtract.nodes.length > 0" class="setting-row vertical">
-        <div class="setting-info">
-          <label>{{ t('graphSettings.entityListLabel') }}</label>
-          <p class="desc">{{ t('graphSettings.entityListDescription') }}</p>
+          <div v-if="localGraphExtract.mode === 'custom'" class="setting-row vertical few-shot-row">
+        <div class="list-section-header">
+          <div class="setting-info">
+            <label>Few-shot 示例实体（可选）</label>
+            <p class="desc">示例实例，不会定义允许抽取的实体类型。</p>
+          </div>
+          <t-button
+            theme="primary"
+            @click="addNode"
+          >
+            {{ t('graphSettings.addEntity') }}
+          </t-button>
         </div>
-        <div class="setting-control full-width">
+        <div v-if="localGraphExtract.nodes.length > 0" class="setting-control full-width">
           <div class="node-list">
             <div v-for="(node, nodeIndex) in localGraphExtract.nodes" :key="nodeIndex" class="node-item">
               <div class="node-header">
-                <t-icon name="user" class="node-icon" />
                 <t-input
                   v-model="node.name"
-                  :placeholder="t('graphSettings.nodeNamePlaceholder')"
+                  placeholder="名称"
                   @change="handleNodesChange"
                   class="node-name-input"
                 />
+                <t-select
+                  v-model="node.entity_type"
+                  placeholder="类型"
+                  clearable
+                  creatable
+                  filterable
+                  @change="handleNodesChange"
+                  class="node-type-input"
+                >
+                  <t-option
+                    v-for="entityType in availableEntityTypes"
+                    :key="entityType"
+                    :value="entityType"
+                    :label="entityType"
+                  />
+                </t-select>
+                <t-input v-model="node.description" placeholder="说明" @change="handleNodesChange" />
                 <t-button
                   theme="default"
                   size="small"
@@ -130,64 +215,30 @@
                   <t-icon name="delete" />
                 </t-button>
               </div>
-              <div class="node-attributes">
-                <div v-for="(attribute, attrIndex) in node.attributes" :key="attrIndex" class="attribute-item">
-                  <t-input
-                    v-model="node.attributes[attrIndex]"
-                    :placeholder="t('graphSettings.attributePlaceholder')"
-                    @change="handleNodesChange"
-                    class="attribute-input"
-                  />
-                  <t-button
-                    theme="default"
-                    size="small"
-                    @click="removeAttribute(nodeIndex, attrIndex)"
-                  >
-                    <t-icon name="close" />
-                  </t-button>
-                </div>
-                <t-button
-                  theme="default"
-                  size="small"
-                  @click="addAttribute(nodeIndex)"
-                  class="add-attr-btn"
-                >
-                  {{ t('graphSettings.addAttribute') }}
-                </t-button>
-              </div>
             </div>
           </div>
         </div>
-      </div>
+          </div>
 
-      <!-- 添加实体按钮 -->
-      <div v-if="localGraphExtract.enabled" class="setting-row">
-        <div class="setting-info">
-          <label>{{ t('graphSettings.manageEntitiesLabel') }}</label>
-          <p class="desc">{{ t('graphSettings.manageEntitiesDescription') }}</p>
-        </div>
-        <div class="setting-control">
+          <div v-if="localGraphExtract.mode === 'custom'" class="setting-row vertical few-shot-row">
+        <div class="list-section-header">
+          <div class="setting-info">
+            <label>Few-shot 示例关系（可选）</label>
+            <p class="desc">示例答案，不会定义正式关系类型或方向。</p>
+          </div>
           <t-button
             theme="primary"
-            @click="addNode"
+            @click="addRelation"
           >
-            {{ t('graphSettings.addEntity') }}
+            {{ t('graphSettings.addRelation') }}
           </t-button>
         </div>
-      </div>
-
-      <!-- 关系列表 -->
-      <div v-if="localGraphExtract.enabled && localGraphExtract.relations.length > 0" class="setting-row vertical">
-        <div class="setting-info">
-          <label>{{ t('graphSettings.relationListLabel') }}</label>
-          <p class="desc">{{ t('graphSettings.relationListDescription') }}</p>
-        </div>
-        <div class="setting-control full-width">
+        <div v-if="localGraphExtract.relations.length > 0" class="setting-control full-width">
           <div class="relation-list">
             <div v-for="(relation, index) in localGraphExtract.relations" :key="index" class="relation-item">
               <t-select
                 v-model="relation.node1"
-                :placeholder="t('graphSettings.selectEntity')"
+                placeholder="起点"
                 @change="handleRelationsChange"
                 class="relation-select"
               >
@@ -201,7 +252,7 @@
               <t-icon name="arrow-right" class="relation-arrow" />
               <t-select
                 v-model="relation.type"
-                :placeholder="t('graphSettings.selectRelationType')"
+                placeholder="关系类型"
                 clearable
                 creatable
                 filterable
@@ -218,7 +269,7 @@
               <t-icon name="arrow-right" class="relation-arrow" />
               <t-select
                 v-model="relation.node2"
-                :placeholder="t('graphSettings.selectEntity')"
+                placeholder="终点"
                 @change="handleRelationsChange"
                 class="relation-select"
               >
@@ -229,6 +280,7 @@
                   :label="node.name"
                 />
               </t-select>
+              <t-input v-model="relation.description" placeholder="说明" @change="handleRelationsChange" class="relation-description" />
               <t-button
                 theme="default"
                 size="small"
@@ -239,26 +291,9 @@
             </div>
           </div>
         </div>
-      </div>
+          </div>
 
-      <!-- 添加关系按钮 -->
-      <div v-if="localGraphExtract.enabled" class="setting-row">
-        <div class="setting-info">
-          <label>{{ t('graphSettings.manageRelationsLabel') }}</label>
-          <p class="desc">{{ t('graphSettings.manageRelationsDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <t-button
-            theme="primary"
-            @click="addRelation"
-          >
-            {{ t('graphSettings.addRelation') }}
-          </t-button>
-        </div>
-      </div>
-
-      <!-- 提取操作按钮 -->
-      <div v-if="localGraphExtract.enabled" class="setting-row">
+          <div v-if="localGraphExtract.mode === 'custom'" class="setting-row few-shot-row">
         <div class="setting-info">
           <label>{{ t('graphSettings.extractActionsLabel') }}</label>
           <p class="desc">{{ t('graphSettings.extractActionsDescription') }}</p>
@@ -267,17 +302,11 @@
           <div class="action-buttons">
             <t-button
               theme="primary"
-              :disabled="!modelStatus.llm.available || !localGraphExtract.text"
+              :disabled="!localGraphExtract.text"
               :loading="extracting"
               @click="handleExtract"
             >
               {{ extracting ? t('graphSettings.extracting') : t('graphSettings.startExtraction') }}
-            </t-button>
-            <t-button
-              theme="default"
-              @click="defaultExtractExample"
-            >
-              {{ t('graphSettings.defaultExample') }}
             </t-button>
             <t-button
               theme="default"
@@ -286,8 +315,16 @@
               {{ t('graphSettings.clearExample') }}
             </t-button>
           </div>
+          <t-alert v-if="extractionSummary" theme="success" class="extraction-feedback">
+            {{ extractionSummary }}
+          </t-alert>
+          <t-alert v-if="extractionError" theme="error" class="extraction-feedback">
+            {{ extractionError }}
+          </t-alert>
         </div>
-      </div>
+          </div>
+        </t-collapse-panel>
+      </t-collapse>
     </div>
   </div>
 </template>
@@ -296,23 +333,45 @@
 import { ref, watch, onMounted, computed } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
-import { extractTextRelations, fabriText, fabriTag, type Node, type Relation } from '@/api/initialization'
+import { extractTextRelations, fabriText, type Node, type Relation } from '@/api/initialization'
 import { getSystemInfo } from '@/api/system'
+import { useUIStore } from '@/stores/ui'
+import { openExternalUrl } from '@/utils/open-external-url'
+import {
+  applyGraphPreset,
+  BASE_ENTITY_TYPES,
+  GRAPH_PRESETS,
+  resetGraphExtractForMode,
+  type GraphEntitySchemaDefinition,
+  type GraphPresetKey,
+  type GraphRelationSchemaDefinition,
+} from '@/constants/software-testing-graph-preset'
 
 const { t } = useI18n()
+const uiStore = useUIStore()
 
 interface GraphExtractConfig {
   enabled: boolean
+  mode: 'general' | 'template' | 'custom'
+  template_key: string
+  model_id: string
+  ingestion_mode: 'all' | 'signal'
+  max_entities: number
+  max_relations: number
+  min_confidence: number
   text: string
   tags: string[]
+  entity_types: string[]
+  entity_schema: GraphEntitySchemaDefinition[]
+  relation_schema: GraphRelationSchemaDefinition[]
+  strict_schema: boolean
+  require_triple_review: boolean
   nodes: Node[]
   relations: Relation[]
 }
 
 interface Props {
   graphExtract: GraphExtractConfig
-  modelId: string
-  allModels?: any[]
 }
 
 const props = defineProps<Props>()
@@ -321,23 +380,44 @@ const emit = defineEmits<{
   'update:graphExtract': [value: GraphExtractConfig]
 }>()
 
-const modelStatus = computed(() => ({
-  llm: {
-    available: !!props.modelId
-  }
-}))
-
 // 本地状态
 const localGraphExtract = ref<GraphExtractConfig>({
   ...props.graphExtract,
+  mode: props.graphExtract.mode || ((props.graphExtract.tags?.length || props.graphExtract.entity_types?.length) ? 'custom' : 'general'),
+  template_key: props.graphExtract.template_key || '',
+  model_id: props.graphExtract.model_id || '',
+  ingestion_mode: props.graphExtract.ingestion_mode || 'all',
+  max_entities: props.graphExtract.max_entities || 12,
+  max_relations: props.graphExtract.max_relations || 15,
+  min_confidence: props.graphExtract.min_confidence || 0.5,
+  tags: props.graphExtract.tags || [],
+  entity_types: props.graphExtract.entity_types || [],
+  entity_schema: props.graphExtract.entity_schema?.length
+    ? props.graphExtract.entity_schema.map((definition) => ({ ...definition }))
+    : (props.graphExtract.entity_types || []).map((type) => ({ type, base_type: '', description: '' })),
+  relation_schema: props.graphExtract.relation_schema?.length
+    ? props.graphExtract.relation_schema.map((definition) => ({ ...definition }))
+    : (props.graphExtract.tags || []).map((type) => ({ type, source_type: '', target_type: '', description: '' })),
+  strict_schema: !!props.graphExtract.strict_schema,
+  require_triple_review: !!props.graphExtract.require_triple_review,
   nodes: props.graphExtract.nodes || [],
   relations: props.graphExtract.relations || []
 })
 
 // 加载状态
-const tagFabring = ref(false)
 const textFabring = ref(false)
 const extracting = ref(false)
+const selectedPresetKey = ref<GraphPresetKey>('software-testing')
+const extractionSummary = ref('')
+const extractionError = ref('')
+const availableEntityTypes = computed(() => Array.from(new Set([
+  ...localGraphExtract.value.entity_types,
+  ...Object.values(GRAPH_PRESETS).flatMap((preset) => preset.entity_types),
+  ...Object.values(GRAPH_PRESETS).flatMap((preset) => preset.nodes.flatMap((node) => node.entity_type ? [node.entity_type] : [])),
+])))
+const validEntitySchemaTypes = computed(() => Array.from(new Set(
+  localGraphExtract.value.entity_schema.map(({ type }) => type.trim()).filter(Boolean),
+)))
 
 // 系统信息
 const systemInfo = ref<any>(null)
@@ -351,6 +431,23 @@ const isGraphDatabaseEnabled = computed(() => {
 watch(() => props.graphExtract, (newVal) => {
   localGraphExtract.value = {
     ...newVal,
+    mode: newVal.mode || ((newVal.tags?.length || newVal.entity_types?.length) ? 'custom' : 'general'),
+    template_key: newVal.template_key || '',
+    model_id: newVal.model_id || '',
+    ingestion_mode: newVal.ingestion_mode || 'all',
+    max_entities: newVal.max_entities || 12,
+    max_relations: newVal.max_relations || 15,
+    min_confidence: newVal.min_confidence || 0.5,
+    tags: newVal.tags || [],
+    entity_types: newVal.entity_types || [],
+    entity_schema: newVal.entity_schema?.length
+      ? newVal.entity_schema.map((definition) => ({ ...definition }))
+      : (newVal.entity_types || []).map((type) => ({ type, base_type: '', description: '' })),
+    relation_schema: newVal.relation_schema?.length
+      ? newVal.relation_schema.map((definition) => ({ ...definition }))
+      : (newVal.tags || []).map((type) => ({ type, source_type: '', target_type: '', description: '' })),
+    strict_schema: !!newVal.strict_schema,
+    require_triple_review: !!newVal.require_triple_review,
     nodes: newVal.nodes || [],
     relations: newVal.relations || []
   }
@@ -363,19 +460,67 @@ const handleConfigChange = () => {
 
 // 处理启用/禁用切换
 const handleEnabledChange = () => {
-  // 当关闭提取功能时，清空所有数据
-  if (!localGraphExtract.value.enabled) {
-    localGraphExtract.value.text = ''
-    localGraphExtract.value.tags = []
-    localGraphExtract.value.nodes = []
-    localGraphExtract.value.relations = []
-  }
   handleConfigChange()
 }
 
-const handleTagsChange = () => {
+const handleModeChange = () => {
+  localGraphExtract.value = resetGraphExtractForMode(localGraphExtract.value, localGraphExtract.value.mode)
+  extractionSummary.value = ''
+  extractionError.value = ''
   handleConfigChange()
 }
+
+const handleSchemaChange = () => {
+  if (localGraphExtract.value.mode === 'template') localGraphExtract.value.mode = 'custom'
+  localGraphExtract.value.entity_types = localGraphExtract.value.entity_schema.map(({ type }) => type.trim()).filter(Boolean)
+  localGraphExtract.value.tags = localGraphExtract.value.relation_schema.map(({ type }) => type.trim()).filter(Boolean)
+  handleConfigChange()
+}
+
+const addEntitySchema = () => {
+  localGraphExtract.value.entity_schema.unshift({ type: '', base_type: '', description: '' })
+  handleSchemaChange()
+}
+
+const removeEntitySchema = (index: number) => {
+  const removedType = localGraphExtract.value.entity_schema[index]?.type
+  localGraphExtract.value.entity_schema.splice(index, 1)
+  if (removedType) {
+    localGraphExtract.value.relation_schema = localGraphExtract.value.relation_schema.filter(
+      ({ source_type, target_type }) => source_type !== removedType && target_type !== removedType,
+    )
+  }
+  handleSchemaChange()
+}
+
+const addRelationSchema = () => {
+  localGraphExtract.value.relation_schema.unshift({ type: '', source_type: '', target_type: '', description: '' })
+  handleSchemaChange()
+}
+
+const removeRelationSchema = (index: number) => {
+  localGraphExtract.value.relation_schema.splice(index, 1)
+  handleSchemaChange()
+}
+
+const handleStrictSchemaChange = () => {
+  handleConfigChange()
+}
+
+const loadSelectedPreset = () => {
+  Object.assign(
+    localGraphExtract.value,
+    applyGraphPreset(localGraphExtract.value, selectedPresetKey.value)
+  )
+  localGraphExtract.value.mode = 'template'
+  localGraphExtract.value.template_key = selectedPresetKey.value
+  extractionSummary.value = ''
+  extractionError.value = ''
+  handleConfigChange()
+  MessagePlugin.success(t('graphSettings.templateLoaded'))
+}
+
+const openTripleReview = () => uiStore.openSettings('graph-triples')
 
 const handleTextChange = () => {
   handleConfigChange()
@@ -394,8 +539,11 @@ const addNode = () => {
   if (!localGraphExtract.value.nodes) {
     localGraphExtract.value.nodes = []
   }
-  localGraphExtract.value.nodes.push({
+  localGraphExtract.value.nodes.unshift({
     name: '',
+    entity_type: '',
+    description: '',
+    aliases: [],
     attributes: []
   })
   handleNodesChange()
@@ -406,25 +554,17 @@ const removeNode = (index: number) => {
   handleNodesChange()
 }
 
-const addAttribute = (nodeIndex: number) => {
-  localGraphExtract.value.nodes[nodeIndex].attributes.push('')
-  handleNodesChange()
-}
-
-const removeAttribute = (nodeIndex: number, attrIndex: number) => {
-  localGraphExtract.value.nodes[nodeIndex].attributes.splice(attrIndex, 1)
-  handleNodesChange()
-}
-
 // 关系操作
 const addRelation = () => {
   if (!localGraphExtract.value.relations) {
     localGraphExtract.value.relations = []
   }
-  localGraphExtract.value.relations.push({
+  localGraphExtract.value.relations.unshift({
     node1: '',
     node2: '',
-    type: ''
+    type: '',
+    confidence: 1,
+    description: '',
   })
   handleRelationsChange()
 }
@@ -434,34 +574,13 @@ const removeRelation = (index: number) => {
   handleRelationsChange()
 }
 
-// 生成随机标签
-const handleFabriTag = async () => {
-  tagFabring.value = true
-  try {
-    const response = await fabriTag({})
-    localGraphExtract.value.tags = response.tags || []
-    handleTagsChange()
-    MessagePlugin.success(t('graphSettings.tagsGenerated'))
-  } catch (error: any) {
-    console.error('Failed to generate tags:', error)
-    MessagePlugin.error(t('graphSettings.tagsGenerateFailed'))
-  } finally {
-    tagFabring.value = false
-  }
-}
-
 // 生成随机文本
 const handleFabriText = async () => {
-  if (!props.modelId) {
-    MessagePlugin.warning(t('graphSettings.completeModelConfig'))
-    return
-  }
-  
   textFabring.value = true
   try {
     const response = await fabriText({
       tags: localGraphExtract.value.tags,
-      model_id: props.modelId
+      model_id: ''
     })
     localGraphExtract.value.text = response.text || ''
     handleTextChange()
@@ -476,60 +595,50 @@ const handleFabriText = async () => {
 
 // 提取实体关系
 const handleExtract = async () => {
-  if (!props.modelId) {
-    MessagePlugin.warning(t('graphSettings.completeModelConfig'))
-    return
-  }
-  
   if (!localGraphExtract.value.text) {
     MessagePlugin.warning(t('graphSettings.pleaseInputText'))
     return
   }
   
   extracting.value = true
+  extractionSummary.value = ''
+  extractionError.value = ''
   try {
     const response = await extractTextRelations({
       text: localGraphExtract.value.text,
       tags: localGraphExtract.value.tags,
-      model_id: props.modelId
+      entity_types: localGraphExtract.value.entity_types,
+      strict_schema: localGraphExtract.value.strict_schema,
+      max_entities: localGraphExtract.value.max_entities,
+      max_relations: localGraphExtract.value.max_relations,
+      min_confidence: localGraphExtract.value.min_confidence,
+      model_id: ''
     })
     localGraphExtract.value.nodes = response.nodes || []
     localGraphExtract.value.relations = response.relations || []
     handleNodesChange()
+    extractionSummary.value = t('graphSettings.extractSummary', {
+      entities: localGraphExtract.value.nodes.length,
+      relations: localGraphExtract.value.relations.length,
+    })
     MessagePlugin.success(t('graphSettings.extractSuccess'))
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Failed to extract relations:', error)
-    MessagePlugin.error(t('graphSettings.extractFailed'))
+    const detail = error instanceof Error ? error.message : t('graphSettings.errors.unknown')
+    extractionError.value = t('graphSettings.extractFailedWithReason', { reason: detail })
+    MessagePlugin.error(extractionError.value)
   } finally {
     extracting.value = false
   }
 }
 
-// 默认示例
-const defaultExtractExample = () => {
-  localGraphExtract.value.text = `"Romeo and Juliet" is a tragedy written by William Shakespeare early in his career, and is one of the most frequently performed plays in world literature. The play follows two young lovers from feuding families in Verona, Italy — the Montagues and the Capulets. Written around 1594-1596, it was first published in quarto in 1597. The full title is "The Most Excellent and Lamentable Tragedy of Romeo and Juliet." The story has been adapted countless times for stage, film, and other media.`
-  localGraphExtract.value.tags = ['Author', 'Alias']
-  localGraphExtract.value.nodes = [
-    {name: 'Romeo and Juliet', attributes: ['One of the most frequently performed plays', 'Written around 1594-1596', 'A tragedy']},
-    {name: 'The Most Excellent and Lamentable Tragedy of Romeo and Juliet', attributes: ['Full title of Romeo and Juliet']},
-    {name: 'William Shakespeare', attributes: ['English playwright', 'Author of Romeo and Juliet']},
-    {name: 'Verona', attributes: ['City in Italy', 'Setting of the play']}
-  ]
-  localGraphExtract.value.relations = [
-    {node1: 'Romeo and Juliet', node2: 'The Most Excellent and Lamentable Tragedy of Romeo and Juliet', type: 'Alias'},
-    {node1: 'Romeo and Juliet', node2: 'William Shakespeare', type: 'Author'},
-    {node1: 'Romeo and Juliet', node2: 'Verona', type: 'Setting'}
-  ]
-  handleNodesChange()
-  MessagePlugin.success(t('graphSettings.exampleLoaded'))
-}
-
 // 清除示例
 const clearExtractExample = () => {
   localGraphExtract.value.text = ''
-  localGraphExtract.value.tags = []
   localGraphExtract.value.nodes = []
   localGraphExtract.value.relations = []
+  extractionSummary.value = ''
+  extractionError.value = ''
   handleNodesChange()
   MessagePlugin.success(t('graphSettings.exampleCleared'))
 }
@@ -546,11 +655,12 @@ const loadSystemInfo = async () => {
 
 const graphGuideUrl =
   import.meta.env.VITE_KG_GUIDE_URL ||
-  'https://github.com/Tencent/WeKnora/blob/main/docs/KnowledgeGraph.md'
+  ''
 
 // Open guide documentation to show how to enable graph database
 const handleOpenGraphGuide = () => {
-  window.open(graphGuideUrl, '_blank', 'noopener')
+  if (!graphGuideUrl) return
+  openExternalUrl(graphGuideUrl)
 }
 
 // 初始化
@@ -586,6 +696,22 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 0;
+}
+
+.graph-config-collapse {
+  width: 100%;
+
+  :deep(.t-collapse-panel__header) {
+    padding: 0;
+  }
+
+  :deep(.t-collapse-panel__wrapper) {
+    margin-top: 16px;
+  }
+
+  :deep(.t-collapse-panel__body) {
+    background: transparent;
+  }
 }
 
 .setting-row {
@@ -631,6 +757,13 @@ onMounted(async () => {
   }
 }
 
+.list-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  width: 100%;
+}
+
 .setting-control {
   flex: 0 0 55%;
   max-width: 55%;
@@ -647,12 +780,69 @@ onMounted(async () => {
   }
 }
 
-.tags-control-group,
 .text-control-group {
   display: flex;
   gap: 12px;
   width: 100%;
   align-items: flex-start;
+}
+
+.preset-control {
+  gap: 12px;
+
+  .preset-select {
+    width: 220px;
+  }
+}
+
+.schema-list {
+  gap: 12px;
+}
+
+.schema-row {
+  display: grid;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.entity-schema-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 32px;
+}
+
+.relation-schema-row,
+.relation-item {
+  grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr) 20px minmax(0, 1fr) minmax(0, 0.8fr) 32px;
+}
+
+.select-empty-tip {
+  color: var(--td-text-color-placeholder);
+  font-size: 13px;
+}
+
+.few-shot-row {
+  opacity: 0.86;
+}
+
+.quality-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: 16px;
+  width: 100%;
+
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: var(--td-text-color-secondary);
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 760px) {
+  .quality-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .text-control-group {
@@ -679,26 +869,31 @@ onMounted(async () => {
 }
 
 .node-item {
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  padding: 16px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
 }
 
 .node-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 32px;
   align-items: center;
   gap: 12px;
-  margin-bottom: 12px;
-
-  .node-icon {
-    font-size: 20px;
-    color: var(--td-brand-color);
-  }
+  margin-bottom: 0;
 
   .node-name-input {
     flex: 1;
   }
+
+  .node-type-input {
+    min-width: 0;
+  }
+}
+
+.node-aliases {
+  padding-left: 32px;
+  margin-bottom: 8px;
 }
 
 .node-attributes {
@@ -730,17 +925,26 @@ onMounted(async () => {
 }
 
 .relation-item {
-  display: flex;
+  display: grid;
   align-items: center;
   gap: 12px;
-  padding: 12px;
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 
   .relation-select {
-    flex: 1;
-    min-width: 150px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .relation-description {
+    width: 100%;
+    min-width: 0;
+  }
+
+  > :last-child {
+    justify-self: end;
   }
 
   .relation-arrow {
@@ -753,5 +957,21 @@ onMounted(async () => {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.extraction-feedback {
+  width: 100%;
+  margin-top: 12px;
+}
+
+@media (max-width: 900px) {
+  .node-header,
+  .preset-control {
+    flex-wrap: wrap;
+  }
+
+  .node-header .node-type-input {
+    min-width: 220px;
+  }
 }
 </style>

@@ -1,0 +1,1 @@
+-- The metadata is additive and is intentionally retained on rollback.

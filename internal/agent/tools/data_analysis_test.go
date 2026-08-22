@@ -3,7 +3,21 @@ package tools
 import (
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func TestTableNameIsIsolatedBySession(t *testing.T) {
+	knowledge := &types.Knowledge{ID: "knowledge-1"}
+	first := &DataAnalysisTool{sessionID: "session-a"}
+	second := &DataAnalysisTool{sessionID: "session-b"}
+	if first.TableName(knowledge) == second.TableName(knowledge) {
+		t.Fatal("table names must be isolated by analysis session")
+	}
+	if got := first.TableName(knowledge); !strings.HasPrefix(got, "k_knowledge_1_") || len(got) != len("k_knowledge_1_")+16 {
+		t.Fatalf("unexpected bounded table name: %s", got)
+	}
+}
 
 func TestBuildExcelCreateTableSQL_NoSheets(t *testing.T) {
 	got := buildExcelCreateTableSQL("tbl", "/tmp/data.xlsx", nil)

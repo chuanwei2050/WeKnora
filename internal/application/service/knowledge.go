@@ -74,6 +74,7 @@ type knowledgeService struct {
 	tagService     interfaces.KnowledgeTagService
 	fileSvc        interfaces.FileService
 	modelService   interfaces.ModelService
+	governanceRepo interfaces.KnowledgeGovernanceRepository
 	task           interfaces.TaskEnqueuer
 	graphEngine    interfaces.RetrieveGraphRepository
 	redisClient    *redis.Client
@@ -107,6 +108,7 @@ func NewKnowledgeService(
 	tagService interfaces.KnowledgeTagService,
 	fileSvc interfaces.FileService,
 	modelService interfaces.ModelService,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
 	task interfaces.TaskEnqueuer,
 	graphEngine interfaces.RetrieveGraphRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
@@ -129,6 +131,7 @@ func NewKnowledgeService(
 		tagService:     tagService,
 		fileSvc:        fileSvc,
 		modelService:   modelService,
+		governanceRepo: governanceRepo,
 		task:           task,
 		graphEngine:    graphEngine,
 		retrieveEngine: retrieveEngine,
@@ -176,18 +179,20 @@ func (s *knowledgeService) isKnowledgeDeleting(ctx context.Context, tenantID uin
 	return knowledge.ParseStatus == types.ParseStatusDeleting
 }
 
-// checkStorageEngineConfigured verifies that the knowledge base has a storage engine configured
-// (either at the KB level or via the tenant default). Returns an error if no storage engine is found.
-func checkStorageEngineConfigured(ctx context.Context, kb *types.KnowledgeBase) error {
-	provider := kb.GetStorageProvider()
-	if provider == "" {
-		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		if tenant != nil && tenant.StorageEngineConfig != nil {
-			provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-		}
+// platformStorageProvider returns the storage provider managed by platform settings.
+func platformStorageProvider(ctx context.Context) string {
+	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenant == nil || tenant.StorageEngineConfig == nil {
+		return ""
 	}
+	return strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+}
+
+// checkStorageEngineConfigured verifies that the platform has a storage engine configured.
+func checkStorageEngineConfigured(ctx context.Context, _ *types.KnowledgeBase) error {
+	provider := platformStorageProvider(ctx)
 	if provider == "" {
-		return werrors.NewBadRequestError("请先为知识库选择存储引擎，再上传内容。请前往知识库设置页面进行配置。")
+		return werrors.NewBadRequestError("请先在平台管理设置中配置存储引擎，再上传内容。")
 	}
 	return nil
 }
@@ -197,6 +202,64 @@ func defaultChannel(ch string) string {
 		return types.ChannelWeb
 	}
 	return ch
+}
+
+func currentUserID(ctx context.Context) string {
+	userID, _ := types.UserIDFromContext(ctx)
+	return userID
+}
+
+func governanceSourceMetadata(metadata map[string]string) (types.KnowledgeSourceMetadata, error) {
+	value := func(key string) string { return strings.TrimSpace(metadata[key]) }
+	result := types.KnowledgeSourceMetadata{
+		Layer:          types.KnowledgeLayer(value("layer")),
+		SourceCategory: value("source_category"),
+		StandardNumber: value("standard_number"),
+		VersionLabel:   value("version_label"),
+		AuthorityLevel: value("authority_level"),
+		Department:     value("department"),
+	}
+	for key, target := range map[string]**time.Time{
+		"effective_at": &result.EffectiveAt,
+		"expires_at":   &result.ExpiresAt,
+	} {
+		text := value(key)
+		if text == "" {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339, text)
+		if err != nil {
+			return types.KnowledgeSourceMetadata{}, werrors.NewBadRequestError(fmt.Sprintf("治理元数据 %s 必须是 RFC3339 时间", key))
+		}
+		*target = &parsed
+	}
+	if result.VersionLabel == "" {
+		return types.KnowledgeSourceMetadata{}, werrors.NewBadRequestError("治理元数据缺少 version_label")
+	}
+	if err := result.Validate(); err != nil {
+		return types.KnowledgeSourceMetadata{}, werrors.NewBadRequestError("治理来源元数据无效: " + err.Error())
+	}
+	return result, nil
+}
+
+func (s *knowledgeService) resolveDocumentTagID(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	tagID string,
+) (string, error) {
+	tagID = strings.TrimSpace(tagID)
+	if tagID == "" || tagID == "__untagged__" {
+		tag, err := s.tagService.FindOrCreateTagByName(ctx, kb.ID, types.UntaggedTagName)
+		if err != nil {
+			return "", err
+		}
+		return tag.ID, nil
+	}
+	tag, err := s.tagRepo.GetByID(ctx, kb.TenantID, tagID)
+	if err != nil || tag.KnowledgeBaseID != kb.ID {
+		return "", werrors.NewBadRequestError("目标文件夹不存在或不属于当前知识库")
+	}
+	return tag.ID, nil
 }
 
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
@@ -231,30 +294,41 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	if kb.Type == types.KnowledgeBaseTypeFAQ {
 		return nil, werrors.NewBadRequestError("FAQ 知识库不支持文件上传，请使用 FAQ 导入功能")
 	}
+	tagID, err = s.resolveDocumentTagID(ctx, kb, tagID)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
+	}
+	var sourceMetadata types.KnowledgeSourceMetadata
+	if kb.Governance.Enabled {
+		var metadataErr error
+		sourceMetadata, metadataErr = governanceSourceMetadata(metadata)
+		if metadataErr != nil {
+			return nil, metadataErr
+		}
+		if s.governanceRepo == nil {
+			return nil, werrors.NewInternalServerError("治理版本仓储未初始化")
+		}
 	}
 
 	// 检查多模态配置完整性 - 只在图片文件时校验
 	if !IsImageType(getFileType(fileName)) {
 		logger.Info(ctx, "Non-image file with multimodal enabled, skipping COS/VLM validation")
 	} else {
-		// 解析有效 provider：优先 KB 级别（新字段 > 旧字段），其次租户默认
-		provider := kb.GetStorageProvider()
 		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-			provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-		}
+		provider := platformStorageProvider(ctx)
 
-		// 根据 provider 校验租户级存储引擎配置
+		// 根据平台选择的 provider 校验存储引擎配置
 		switch provider {
 		case "cos":
 			if tenant == nil || tenant.StorageEngineConfig == nil || tenant.StorageEngineConfig.COS == nil ||
 				tenant.StorageEngineConfig.COS.SecretID == "" || tenant.StorageEngineConfig.COS.SecretKey == "" ||
 				tenant.StorageEngineConfig.COS.Region == "" || tenant.StorageEngineConfig.COS.BucketName == "" {
 				logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
-				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
+				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息，请前往平台管理设置中补全")
 			}
 		case "minio":
 			ok := false
@@ -270,12 +344,12 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 			}
 			if !ok {
 				logger.Error(ctx, "MinIO configuration incomplete for image multimodal processing")
-				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
+				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息，请前往平台管理设置中补全")
 			}
 		}
 
 		// 检查VLM配置
-		if !kb.VLMConfig.Enabled || kb.VLMConfig.ModelID == "" {
+		if !kb.VLMConfig.Enabled {
 			logger.Error(ctx, "VLM model is not configured")
 			return nil, werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
 		}
@@ -357,9 +431,15 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 
 	// Create knowledge record
 	logger.Info(ctx, "Creating knowledge record")
+	parseStatus := types.ParseStatusPending
+	isManagedGovernanceUpload := kb.Governance.Enabled && types.CanManageKnowledgeBase(ctx, kb)
+	if kb.Governance.Enabled {
+		parseStatus = types.ParseStatusDraft
+	}
 	knowledge := &types.Knowledge{
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		CreatedBy:        currentUserID(ctx),
 		TagID:            tagID, // 设置分类ID，用于知识分类管理
 		Type:             "file",
 		Channel:          defaultChannel(channel),
@@ -368,7 +448,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		FileType:         getFileType(safeFilename),
 		FileSize:         file.Size,
 		FileHash:         hash,
-		ParseStatus:      "pending",
+		ParseStatus:      parseStatus,
 		EnableStatus:     "disabled",
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
@@ -381,11 +461,13 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
 	}
-	// Save the file to storage (use KB-level storage engine if configured)
+	// Save the file using the platform-managed storage engine.
 	logger.Infof(ctx, "Saving file, knowledge ID: %s", knowledge.ID)
-	filePath, err := s.resolveFileService(ctx, kb).SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
+	fileService := s.resolveFileService(ctx, kb)
+	filePath, err := fileService.SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to save file, knowledge ID: %s, error: %v", knowledge.ID, err)
+		_ = s.repo.DeleteKnowledge(ctx, tenantID, knowledge.ID)
 		return nil, err
 	}
 	knowledge.FilePath = filePath
@@ -394,7 +476,50 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	logger.Info(ctx, "Updating knowledge record with file path")
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge with file path, ID: %s, error: %v", knowledge.ID, err)
+		_ = fileService.DeleteFile(ctx, filePath)
+		_ = s.repo.DeleteKnowledge(ctx, tenantID, knowledge.ID)
 		return nil, err
+	}
+
+	if kb.Governance.Enabled {
+		createdBy, _ := types.UserIDFromContext(ctx)
+		version := &types.KnowledgeVersion{
+			ID:             uuid.NewString(),
+			TenantID:       tenantID,
+			KnowledgeID:    knowledge.ID,
+			VersionLabel:   sourceMetadata.VersionLabel,
+			ContentHash:    hash,
+			SnapshotRef:    filePath,
+			SourceMetadata: sourceMetadata,
+			Status:         types.KnowledgeVersionDraft,
+			CreatedBy:      createdBy,
+			CreatedAt:      time.Now().UTC(),
+			EffectiveAt:    sourceMetadata.EffectiveAt,
+			ExpiresAt:      sourceMetadata.ExpiresAt,
+		}
+		if err := s.governanceRepo.CreateVersion(ctx, version); err != nil {
+			_ = fileService.DeleteFile(ctx, filePath)
+			_ = s.repo.DeleteKnowledge(ctx, tenantID, knowledge.ID)
+			return nil, err
+		}
+		knowledge.PendingVersionID = version.ID
+		if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+			_ = s.governanceRepo.DeleteDraftVersion(ctx, tenantID, version.ID)
+			_ = fileService.DeleteFile(ctx, filePath)
+			_ = s.repo.DeleteKnowledge(ctx, tenantID, knowledge.ID)
+			return nil, err
+		}
+		if !isManagedGovernanceUpload {
+			// Contributor uploads stay as immutable drafts until an authorized reviewer approves them.
+			return knowledge, nil
+		}
+		if err := s.governanceRepo.PrepareManagedUpload(ctx, tenantID, knowledge.ID, version.ID, createdBy); err != nil {
+			_ = s.governanceRepo.DeleteDraftVersion(ctx, tenantID, version.ID)
+			_ = fileService.DeleteFile(ctx, filePath)
+			_ = s.repo.DeleteKnowledge(ctx, tenantID, knowledge.ID)
+			return nil, err
+		}
+		knowledge.ParseStatus = types.ParseStatusPending
 	}
 
 	// Enqueue document processing task to Asynq
@@ -497,6 +622,10 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
 		return nil, err
 	}
+	tagID, err = s.resolveDocumentTagID(ctx, kb, tagID)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
@@ -553,6 +682,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		CreatedBy:        currentUserID(ctx),
 		Type:             "url",
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -693,6 +823,10 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
 		return nil, err
 	}
+	tagID, err = s.resolveDocumentTagID(ctx, kb, tagID)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
@@ -774,6 +908,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		CreatedBy:        currentUserID(ctx),
 		Type:             "file_url",
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -897,6 +1032,10 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
 		return nil, err
 	}
+	resolvedTagID, err := s.resolveDocumentTagID(ctx, kb, payload.TagID)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
@@ -915,6 +1054,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 	knowledge := &types.Knowledge{
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		CreatedBy:        currentUserID(ctx),
 		Type:             types.KnowledgeTypeManual,
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -927,7 +1067,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		EmbeddingModelID: kb.EmbeddingModelID,
 		FileName:         fileName,
 		FileType:         types.KnowledgeTypeManual,
-		TagID:            payload.TagID, // 设置分类ID，用于知识分类管理
+		TagID:            resolvedTagID, // 设置分类ID，用于知识分类管理
 	}
 	if err := knowledge.SetManualMetadata(meta); err != nil {
 		logger.Errorf(ctx, "Failed to set manual metadata: %v", err)
@@ -999,6 +1139,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 		ID:               uuid.New().String(),
 		TenantID:         ctx.Value(types.TenantIDContextKey).(uint64),
 		KnowledgeBaseID:  kbID,
+		CreatedBy:        currentUserID(ctx),
 		Type:             "passage",
 		Channel:          defaultChannel(channel),
 		ParseStatus:      "pending",
@@ -1109,6 +1250,42 @@ func (s *knowledgeService) ListPagedKnowledgeByKnowledgeBaseID(ctx context.Conte
 	return types.NewPageResult(total, page, knowledges), nil
 }
 
+func (s *knowledgeService) assertKnowledgeDeletable(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	allowManage bool,
+) error {
+	if knowledge == nil {
+		return werrors.NewBadRequestError("Knowledge not found")
+	}
+	if allowManage {
+		return nil
+	}
+	userID, ok := types.UserIDFromContext(ctx)
+	if !ok || knowledge.CreatedBy != userID {
+		return werrors.NewForbiddenError("Only the contributor can delete unsubmitted knowledge")
+	}
+	if knowledge.CurrentVersionID != "" {
+		return werrors.NewForbiddenError("Published knowledge cannot be deleted")
+	}
+	if knowledge.ParseStatus == types.ParseStatusPendingReview {
+		return werrors.NewBadRequestError("Pending review knowledge cannot be deleted; withdraw first")
+	}
+	if knowledge.ParseStatus != types.ParseStatusDraft && knowledge.ParseStatus != types.ParseStatusRejected {
+		return werrors.NewForbiddenError("Only draft or rejected knowledge can be deleted")
+	}
+	if s.governanceRepo != nil && knowledge.PendingVersionID != "" {
+		version, err := s.governanceRepo.GetVersion(ctx, knowledge.TenantID, knowledge.PendingVersionID)
+		if err != nil {
+			return err
+		}
+		if version == nil || (version.Status != types.KnowledgeVersionDraft && version.Status != types.KnowledgeVersionRejected) {
+			return werrors.NewForbiddenError("Only draft or rejected knowledge can be deleted")
+		}
+	}
+	return nil
+}
+
 // collectImageURLs extracts unique provider:// image URLs from image_info JSON strings.
 func collectImageURLs(ctx context.Context, imageInfos []string) []string {
 	seen := make(map[string]struct{})
@@ -1154,6 +1331,13 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	// Get the knowledge entry
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, ctx.Value(types.TenantIDContextKey).(uint64), id)
 	if err != nil {
+		return err
+	}
+	allowManage := false
+	if kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID); kbErr == nil {
+		allowManage = types.CanManageKnowledgeBase(ctx, kb)
+	}
+	if err := s.assertKnowledgeDeletable(ctx, knowledge, allowManage); err != nil {
 		return err
 	}
 
@@ -1510,6 +1694,14 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	knowledgeList, err := s.repo.GetKnowledgeBatch(ctx, tenantInfo.ID, ids)
 	if err != nil {
 		return err
+	}
+	if len(knowledgeList) != len(ids) {
+		return werrors.NewBadRequestError("One or more knowledge entries not found")
+	}
+	for _, knowledge := range knowledgeList {
+		if err := s.assertKnowledgeDeletable(ctx, knowledge, true); err != nil {
+			return err
+		}
 	}
 
 	// Mark all as deleting first to prevent async task conflicts
@@ -1883,9 +2075,30 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// Get embedding model for vectorization — only needed when vector/keyword indexing is enabled
 	var embeddingModel embedding.Embedder
+	var resolvedEmbeddingModel *types.Model
+	oldEmbeddingDimension := knowledge.EmbeddingDimension
+	stagingVersionID := ""
+	if kb.Governance.Enabled {
+		stagingVersionID = strings.TrimSpace(knowledge.PendingVersionID)
+	}
+	isGovernedStaging := stagingVersionID != ""
 	if kb.NeedsEmbeddingModel() {
 		var err error
-		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+		if oldEmbeddingDimension <= 0 {
+			models, listErr := s.modelService.ListModels(ctx)
+			if listErr == nil {
+				for _, model := range models {
+					if model != nil && model.ID == knowledge.EmbeddingModelID {
+						oldEmbeddingDimension = model.Parameters.EmbeddingParameters.Dimension
+						break
+					}
+				}
+			}
+		}
+		resolvedEmbeddingModel, err = s.modelService.GetModelByID(ctx, kb.EmbeddingModelID)
+		if err == nil {
+			embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, resolvedEmbeddingModel.ID)
+		}
 		if err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks get embedding model failed")
 			span.RecordError(err)
@@ -1899,8 +2112,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
 
 	// 删除旧的chunks
-	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
+	if !isGovernedStaging {
+		if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+			logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
+		}
 		// 不返回错误，继续处理（可能没有旧数据）
 	}
 
@@ -1910,8 +2125,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		s.retrieveEngine,
 		indexingEnginesForKnowledgeBase(tenantInfo.GetEffectiveEngines(), kb),
 	)
-	if err == nil && embeddingModel != nil {
-		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
+	if !isGovernedStaging && err == nil && embeddingModel != nil {
+		deleteDimension := oldEmbeddingDimension
+		if deleteDimension <= 0 {
+			deleteDimension = embeddingModel.GetDimensions()
+		}
+		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, deleteDimension, knowledge.Type); err != nil {
 			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
 			// 不返回错误，继续处理（可能没有旧数据）
 		} else {
@@ -1920,10 +2139,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// 删除知识图谱数据（如果存在）
-	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
-	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing graph data (may not exist): %v", err)
-		// 不返回错误，继续处理
+	if !isGovernedStaging {
+		namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
+		if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
+			logger.Warnf(ctx, "Failed to delete existing graph data (may not exist): %v", err)
+			// 不返回错误
+		}
 	}
 
 	logger.Infof(ctx, "Cleanup completed, starting to process new chunks")
@@ -1999,18 +2220,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
 		for i, pc := range options.ParentChunks {
 			parentDBChunks[i] = &types.Chunk{
-				ID:              uuid.New().String(),
-				TenantID:        knowledge.TenantID,
-				KnowledgeID:     knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID,
-				Content:         pc.Content,
-				ChunkIndex:      pc.Seq,
-				IsEnabled:       true,
-				CreatedAt:       time.Now(),
-				UpdatedAt:       time.Now(),
-				StartAt:         pc.Start,
-				EndAt:           pc.End,
-				ChunkType:       types.ChunkTypeParentText,
+				ID:                 uuid.New().String(),
+				TenantID:           knowledge.TenantID,
+				KnowledgeID:        knowledge.ID,
+				KnowledgeBaseID:    knowledge.KnowledgeBaseID,
+				Content:            pc.Content,
+				ChunkIndex:         pc.Seq,
+				IsEnabled:          true,
+				CreatedAt:          time.Now(),
+				UpdatedAt:          time.Now(),
+				StartAt:            pc.Start,
+				EndAt:              pc.End,
+				ChunkType:          types.ChunkTypeParentText,
+				KnowledgeVersionID: stagingVersionID,
 			}
 		}
 		// Set prev/next links for parent chunks
@@ -2038,18 +2260,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 		// 创建主文本Chunk
 		textChunk := &types.Chunk{
-			ID:              uuid.New().String(),
-			TenantID:        knowledge.TenantID,
-			KnowledgeID:     knowledge.ID,
-			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Content:         chunkData.Content,
-			ChunkIndex:      int(chunkData.Seq),
-			IsEnabled:       true,
-			CreatedAt:       time.Now(),
-			UpdatedAt:       time.Now(),
-			StartAt:         int(chunkData.Start),
-			EndAt:           int(chunkData.End),
-			ChunkType:       types.ChunkTypeText,
+			ID:                 uuid.New().String(),
+			TenantID:           knowledge.TenantID,
+			KnowledgeID:        knowledge.ID,
+			KnowledgeBaseID:    knowledge.KnowledgeBaseID,
+			Content:            chunkData.Content,
+			ChunkIndex:         int(chunkData.Seq),
+			IsEnabled:          true,
+			CreatedAt:          time.Now(),
+			UpdatedAt:          time.Now(),
+			StartAt:            int(chunkData.Start),
+			EndAt:              int(chunkData.End),
+			ChunkType:          types.ChunkTypeText,
+			KnowledgeVersionID: stagingVersionID,
 		}
 
 		// Wire up ParentChunkID for child chunks
@@ -2142,7 +2365,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			totalStorageSize = retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfoList)
 			if tenantInfo.StorageQuota > 0 {
 				// Re-fetch tenant storage information
-				tenantInfo, err = s.tenantRepo.GetTenantByID(ctx, tenantInfo.ID)
+				tenantInfo, err = s.tenantService.GetTenantByID(ctx, tenantInfo.ID)
 				if err != nil {
 					knowledge.ParseStatus = types.ParseStatusFailed
 					knowledge.ErrorMessage = err.Error()
@@ -2201,6 +2424,13 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			return
 		}
 		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
+		if resolvedEmbeddingModel != nil {
+			knowledge.EmbeddingModelID = resolvedEmbeddingModel.ID
+			knowledge.EmbeddingCompatibilityID = strings.TrimSpace(
+				resolvedEmbeddingModel.Parameters.EmbeddingParameters.CompatibilityID,
+			)
+			knowledge.EmbeddingDimension = resolvedEmbeddingModel.Parameters.EmbeddingParameters.Dimension
+		}
 
 		// Final check before marking as completed - if deleted during processing, don't update status
 		if s.isKnowledgeDeleting(ctx, knowledge.TenantID, knowledge.ID) {
@@ -2219,6 +2449,8 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			span.AddEvent("aborted: knowledge was deleted during processing")
 			return
 		}
+	} else if isGovernedStaging {
+		logger.Infof(ctx, "Governed version %s parsed into version-scoped staging chunks", stagingVersionID)
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping BatchIndex", kb.ID)
 	}
@@ -2457,18 +2689,6 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		return nil
 	}
 
-	if kb.SummaryModelID == "" {
-		logger.Warn(ctx, "Knowledge base summary model ID is empty, skipping summary generation")
-		if knowledge.SummaryStatus == types.SummaryStatusPending || knowledge.SummaryStatus == types.SummaryStatusProcessing {
-			knowledge.SummaryStatus = types.SummaryStatusNone
-			knowledge.UpdatedAt = time.Now()
-			if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
-				logger.Warnf(ctx, "Failed to reset summary status to none: %v", err)
-			}
-		}
-		return nil
-	}
-
 	// Update summary status to processing
 	knowledge.SummaryStatus = types.SummaryStatusProcessing
 	knowledge.UpdatedAt = time.Now()
@@ -2478,9 +2698,14 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 
 	// Helper function to mark summary as failed
 	markSummaryFailed := func() {
-		knowledge.SummaryStatus = types.SummaryStatusFailed
-		knowledge.UpdatedAt = time.Now()
-		if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+		latest, getErr := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
+		if getErr != nil {
+			logger.Warnf(ctx, "Failed to reload knowledge before marking summary as failed: %v", getErr)
+			return
+		}
+		latest.SummaryStatus = types.SummaryStatusFailed
+		latest.UpdatedAt = time.Now()
+		if err := s.repo.UpdateKnowledge(ctx, latest); err != nil {
 			logger.Warnf(ctx, "Failed to update summary status to failed: %v", err)
 		}
 	}
@@ -2504,9 +2729,14 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	if len(textChunks) == 0 {
 		logger.Infof(ctx, "No text chunks found for knowledge: %s", payload.KnowledgeID)
 		// Mark as completed since there's nothing to summarize
-		knowledge.SummaryStatus = types.SummaryStatusCompleted
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		latest, getErr := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
+		if getErr != nil {
+			logger.Warnf(ctx, "Failed to reload knowledge before completing empty summary: %v", getErr)
+			return nil
+		}
+		latest.SummaryStatus = types.SummaryStatusCompleted
+		latest.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, latest)
 		return nil
 	}
 
@@ -2541,13 +2771,19 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	}
 
 	// Update knowledge description
-	knowledge.Description = summary
-	knowledge.SummaryStatus = types.SummaryStatusCompleted
-	knowledge.UpdatedAt = time.Now()
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	latest, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to reload knowledge before updating description: %v", err)
+		return fmt.Errorf("failed to reload knowledge: %w", err)
+	}
+	latest.Description = summary
+	latest.SummaryStatus = types.SummaryStatusCompleted
+	latest.UpdatedAt = time.Now()
+	if err := s.repo.UpdateKnowledge(ctx, latest); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge description: %v", err)
 		return fmt.Errorf("failed to update knowledge: %w", err)
 	}
+	knowledge = latest
 
 	// Create summary chunk and index it — only when RAG indexing is enabled.
 	// Wiki-only KBs don't need summary chunks in the vector index.
@@ -2583,7 +2819,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		}
 
 		// Index summary chunk
-		tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+		tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to get tenant info: %v", err)
 			return fmt.Errorf("failed to get tenant info: %w", err)
@@ -2752,7 +2988,7 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 		return fmt.Errorf("failed to get embedding model: %w", err)
 	}
 
-	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		exitStatus = "get_tenant_failed"
 		logger.Errorf(ctx, "Failed to get tenant info: %v", err)
@@ -2790,77 +3026,102 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 		return chunk.Content
 	}
 
-	// Generate questions for each chunk with context
+	// Generate questions for each chunk with context (bounded parallelism).
 	var indexInfoList []*types.IndexInfo
+	var statsMu sync.Mutex
+	questionWorkers := secutils.ConcurrencyPoolSize()
+	questionGroup, questionCtx := errgroup.WithContext(ctx)
+	questionGroup.SetLimit(questionWorkers)
+
 	for i, chunk := range textChunks {
 		if strings.TrimSpace(chunk.Content) == "" {
 			emptyContentChunks++
 			continue
 		}
 
-		// Build context from adjacent chunks
-		var prevContent, nextContent string
-		if i > 0 {
-			prevContent = enrichContent(textChunks[i-1])
-		}
-		if i < len(textChunks)-1 {
-			nextContent = enrichContent(textChunks[i+1])
-		}
-
-		llmCallAttempts++
-		questions, err := s.generateQuestionsWithContext(ctx, chatModel, enrichContent(chunk), prevContent, nextContent, knowledge.Title, questionCount)
-		if err != nil {
-			llmCallFailed++
-			logger.Warnf(ctx, "Failed to generate questions for chunk %s: %v", chunk.ID, err)
-			continue
-		}
-
-		if len(questions) == 0 {
-			llmCallEmpty++
-			continue
-		}
-		llmCallSuccess++
-		generatedQuestionsTotal += len(questions)
-
-		// Update chunk metadata with unique IDs for each question
-		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
-		for j, question := range questions {
-			questionID := fmt.Sprintf("q%d", time.Now().UnixNano()+int64(j))
-			generatedQuestions[j] = types.GeneratedQuestion{
-				ID:       questionID,
-				Question: question,
+		i, chunk := i, chunk
+		questionGroup.Go(func() error {
+			var prevContent, nextContent string
+			if i > 0 {
+				prevContent = enrichContent(textChunks[i-1])
 			}
-		}
-		meta := &types.DocumentChunkMetadata{
-			GeneratedQuestions: generatedQuestions,
-		}
-		if err := chunk.SetDocumentMetadata(meta); err != nil {
-			chunkMetadataSetFailed++
-			logger.Warnf(ctx, "Failed to set document metadata for chunk %s: %v", chunk.ID, err)
-			continue
-		}
+			if i < len(textChunks)-1 {
+				nextContent = enrichContent(textChunks[i+1])
+			}
 
-		// Update chunk in database
-		if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
-			chunkUpdateFailed++
-			logger.Warnf(ctx, "Failed to update chunk %s: %v", chunk.ID, err)
-			continue
-		}
+			statsMu.Lock()
+			llmCallAttempts++
+			statsMu.Unlock()
 
-		// Create index entries for generated questions
-		for _, gq := range generatedQuestions {
-			sourceID := fmt.Sprintf("%s-%s", chunk.ID, gq.ID)
-			indexInfoList = append(indexInfoList, &types.IndexInfo{
-				Content:         gq.Question,
-				SourceID:        sourceID,
-				SourceType:      types.ChunkSourceType,
-				ChunkID:         chunk.ID,
-				KnowledgeID:     knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID,
-				IsEnabled:       true,
-			})
-		}
-		logger.Debugf(ctx, "Generated %d questions for chunk %s", len(questions), chunk.ID)
+			questions, err := s.generateQuestionsWithContext(questionCtx, chatModel, enrichContent(chunk), prevContent, nextContent, knowledge.Title, questionCount)
+			if err != nil {
+				statsMu.Lock()
+				llmCallFailed++
+				statsMu.Unlock()
+				logger.Warnf(questionCtx, "Failed to generate questions for chunk %s: %v", chunk.ID, err)
+				return nil
+			}
+
+			if len(questions) == 0 {
+				statsMu.Lock()
+				llmCallEmpty++
+				statsMu.Unlock()
+				return nil
+			}
+
+			generatedQuestions := make([]types.GeneratedQuestion, len(questions))
+			for j, question := range questions {
+				generatedQuestions[j] = types.GeneratedQuestion{
+					ID:       fmt.Sprintf("%s-q%d", chunk.ID, j),
+					Question: question,
+				}
+			}
+			meta := &types.DocumentChunkMetadata{
+				GeneratedQuestions: generatedQuestions,
+			}
+			if err := chunk.SetDocumentMetadata(meta); err != nil {
+				statsMu.Lock()
+				chunkMetadataSetFailed++
+				statsMu.Unlock()
+				logger.Warnf(questionCtx, "Failed to set document metadata for chunk %s: %v", chunk.ID, err)
+				return nil
+			}
+
+			if err := s.chunkService.UpdateChunk(questionCtx, chunk); err != nil {
+				statsMu.Lock()
+				chunkUpdateFailed++
+				statsMu.Unlock()
+				logger.Warnf(questionCtx, "Failed to update chunk %s: %v", chunk.ID, err)
+				return nil
+			}
+
+			chunkIndexEntries := make([]*types.IndexInfo, 0, len(generatedQuestions))
+			for _, gq := range generatedQuestions {
+				sourceID := fmt.Sprintf("%s-%s", chunk.ID, gq.ID)
+				chunkIndexEntries = append(chunkIndexEntries, &types.IndexInfo{
+					Content:         gq.Question,
+					SourceID:        sourceID,
+					SourceType:      types.ChunkSourceType,
+					ChunkID:         chunk.ID,
+					KnowledgeID:     knowledge.ID,
+					KnowledgeBaseID: knowledge.KnowledgeBaseID,
+					IsEnabled:       true,
+				})
+			}
+
+			statsMu.Lock()
+			llmCallSuccess++
+			generatedQuestionsTotal += len(questions)
+			indexInfoList = append(indexInfoList, chunkIndexEntries...)
+			statsMu.Unlock()
+			logger.Debugf(questionCtx, "Generated %d questions for chunk %s", len(questions), chunk.ID)
+			return nil
+		})
+	}
+	if err := questionGroup.Wait(); err != nil {
+		exitStatus = "question_generation_failed"
+		logger.Errorf(ctx, "Question generation worker failed: %v", err)
+		return err
 	}
 	indexEntriesPrepared = len(indexInfoList)
 
@@ -2974,7 +3235,7 @@ func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.
 		return io.NopCloser(strings.NewReader(content)), filename, nil
 	}
 
-	// Resolve KB-level file service with FilePath fallback protection
+	// Resolve the platform file service with FilePath fallback protection.
 	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
 	file, err := s.resolveFileServiceForPath(ctx, kb, knowledge.FilePath).GetFile(ctx, knowledge.FilePath)
 	if err != nil {
@@ -3181,7 +3442,9 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 		}
 
 		existing.ParseStatus = "pending"
-		existing.EnableStatus = "disabled"
+		if !kb.Governance.Enabled || strings.TrimSpace(existing.PendingVersionID) == "" {
+			existing.EnableStatus = "disabled"
+		}
 		existing.Description = ""
 		existing.ProcessedAt = nil
 		existing.EmbeddingModelID = kb.EmbeddingModelID
@@ -3191,7 +3454,8 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return nil, err
 		}
 
-		if err := s.enqueueManualProcessing(ctx, existing, meta.Content, true); err != nil {
+		needCleanup := !kb.Governance.Enabled || strings.TrimSpace(existing.PendingVersionID) == ""
+		if err := s.enqueueManualProcessing(ctx, existing, meta.Content, needCleanup); err != nil {
 			logger.Errorf(ctx, "Failed to enqueue manual reparse task: %v", err)
 			existing.ParseStatus = "failed"
 			existing.ErrorMessage = "Failed to enqueue processing task"
@@ -3200,18 +3464,23 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 		return existing, nil
 	}
 
-	// For non-manual knowledge, cleanup synchronously then enqueue document processing
-	logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
-	if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"knowledge_id": knowledgeID,
-		})
-		return nil, err
+	// Governed reparses retain the current production version while the pending
+	// version is parsed into isolated staging chunks.
+	if !kb.Governance.Enabled || strings.TrimSpace(existing.PendingVersionID) == "" {
+		logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
+		if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"knowledge_id": knowledgeID,
+			})
+			return nil, err
+		}
 	}
 
 	// Step 2: Update knowledge status and metadata
 	existing.ParseStatus = "pending"
-	existing.EnableStatus = "disabled"
+	if !kb.Governance.Enabled || strings.TrimSpace(existing.PendingVersionID) == "" {
+		existing.EnableStatus = "disabled"
+	}
 	existing.Description = ""
 	existing.ProcessedAt = nil
 	existing.EmbeddingModelID = kb.EmbeddingModelID
@@ -3413,6 +3682,30 @@ func (s *knowledgeService) GetKnowledgeBatch(ctx context.Context,
 		return nil, nil
 	}
 	return s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
+}
+
+// MarkKnowledgeListDeleting marks knowledge entries as deleting so they disappear from
+// list views immediately while the async cleanup task runs.
+func (s *knowledgeService) MarkKnowledgeListDeleting(ctx context.Context, tenantID uint64, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	knowledgeList, err := s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	for _, knowledge := range knowledgeList {
+		if knowledge.ParseStatus == types.ParseStatusDeleting {
+			continue
+		}
+		knowledge.ParseStatus = types.ParseStatusDeleting
+		knowledge.UpdatedAt = now
+		if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // GetKnowledgeBatchWithSharedAccess retrieves knowledge by IDs, including items from shared KBs the user has access to.
@@ -6619,6 +6912,7 @@ func (s *knowledgeService) ensureFAQKnowledge(
 	knowledge := &types.Knowledge{
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kb.ID,
+		CreatedBy:        currentUserID(ctx),
 		Type:             types.KnowledgeTypeFAQ,
 		Channel:          types.ChannelWeb,
 		Title:            fmt.Sprintf("%s - FAQ", kb.Name),
@@ -7616,12 +7910,17 @@ func (s *knowledgeService) getVLMConfig(ctx context.Context, kb *types.Knowledge
 		}, nil
 	}
 
-	// 新版本：未启用或无模型ID时返回nil
-	if !kb.VLMConfig.Enabled || kb.VLMConfig.ModelID == "" {
+	if !kb.VLMConfig.Enabled {
 		return nil, nil
 	}
 
-	model, err := s.modelService.GetModelByID(ctx, kb.VLMConfig.ModelID)
+	var model *types.Model
+	var err error
+	if kb.VLMConfig.ModelID == "" {
+		model, err = s.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm")
+	} else {
+		model, err = s.modelService.GetModelByID(ctx, kb.VLMConfig.ModelID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -7640,48 +7939,13 @@ func (s *knowledgeService) getVLMConfig(ctx context.Context, kb *types.Knowledge
 }
 
 func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.KnowledgeBase) *types.DocParserStorageConfig {
-	provider := kb.GetStorageProvider()
-	if provider == "" {
-		provider = "local"
-	}
-
-	// Backward compatibility: if legacy cos_config has full params for the chosen provider, use them.
-	sc := &kb.StorageConfig
-	hasKBFull := false
-	switch provider {
-	case "cos":
-		hasKBFull = sc.SecretID != "" && sc.BucketName != ""
-	case "minio":
-		hasKBFull = sc.BucketName != ""
-	case "local":
-		hasKBFull = false
-	}
-
-	if hasKBFull {
-		logger.Infof(ctx, "[storage] buildStorageConfig use legacy kb config: kb=%s provider=%s bucket=%s path_prefix=%s",
-			kb.ID, provider, sc.BucketName, sc.PathPrefix)
-		return &types.DocParserStorageConfig{
-			Provider:        strings.ToUpper(provider),
-			Region:          sc.Region,
-			BucketName:      sc.BucketName,
-			AccessKeyID:     sc.SecretID,
-			SecretAccessKey: sc.SecretKey,
-			AppID:           sc.AppID,
-			PathPrefix:      sc.PathPrefix,
-		}
-	}
-
-	// Merge from tenant's StorageEngineConfig.
+	provider := platformStorageProvider(ctx)
 	var out types.DocParserStorageConfig
 	out.Provider = strings.ToUpper(provider)
 
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if tenant != nil && tenant.StorageEngineConfig != nil {
 		sec := tenant.StorageEngineConfig
-		if sec.DefaultProvider != "" && provider == "" {
-			provider = strings.ToLower(strings.TrimSpace(sec.DefaultProvider))
-			out.Provider = strings.ToUpper(provider)
-		}
 		switch provider {
 		case "local":
 			if sec.Local != nil {
@@ -7713,26 +7977,22 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 		}
 	}
 
-	logger.Infof(ctx, "[storage] buildStorageConfig use merged tenant/global config: kb=%s provider=%s bucket=%s path_prefix=%s endpoint=%s",
+	logger.Infof(ctx, "[storage] buildStorageConfig use platform config: kb=%s provider=%s bucket=%s path_prefix=%s endpoint=%s",
 		kb.ID, strings.ToLower(out.Provider), out.BucketName, out.PathPrefix, out.Endpoint)
 	return &out
 }
 
 // resolveFileService returns the FileService for the given knowledge base,
-// based on the KB's StorageProviderConfig (or legacy StorageConfig.Provider) and the tenant's StorageEngineConfig.
-// Falls back to the global fileSvc when no tenant-level storage config is found.
+// based on the platform-managed StorageEngineConfig.
+// Falls back to the global fileSvc when no platform storage config is found.
 func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.KnowledgeBase) interfaces.FileService {
 	if kb == nil {
 		logger.Infof(ctx, "[storage] resolveFileService fallback default: kb=nil")
 		return s.fileSvc
 	}
 
-	provider := kb.GetStorageProvider()
-
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-	}
+	provider := platformStorageProvider(ctx)
 
 	if provider == "" || tenant == nil || tenant.StorageEngineConfig == nil {
 		logger.Infof(ctx, "[storage] resolveFileService fallback default: kb=%s provider=%q tenant_cfg=%v",
@@ -7766,13 +8026,7 @@ func (s *knowledgeService) resolveFileServiceForPath(ctx context.Context, kb *ty
 		return svc
 	}
 
-	configured := kb.GetStorageProvider()
-	if configured == "" {
-		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		if tenant != nil && tenant.StorageEngineConfig != nil {
-			configured = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-		}
-	}
+	configured := platformStorageProvider(ctx)
 	if configured == "" {
 		configured = strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
 	}
@@ -7891,7 +8145,7 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	ctx = logger.WithField(ctx, "manual_process", payload.KnowledgeID)
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 
-	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "ProcessManualUpdate: failed to get tenant: %v", err)
 		return nil
@@ -7975,7 +8229,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	maxRetry, _ := asynq.GetMaxRetry(ctx)
 	isLastRetry := retryCount >= maxRetry
 
-	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get tenant: %v", err)
 		return nil
@@ -8215,7 +8469,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "[ASR] Starting audio transcription for knowledge %s, audio size=%d bytes",
 			knowledge.ID, len(convertResult.AudioData))
 
-		asrModel, err := s.modelService.GetASRModel(ctx, kb.ASRConfig.ModelID)
+		asrModel, err := s.modelService.GetASRModel(ctx, "")
 		if err != nil {
 			logger.Errorf(ctx, "[ASR] Failed to get ASR model: %v", err)
 			knowledge.ParseStatus = "failed"
@@ -8361,13 +8615,15 @@ func (s *knowledgeService) convert(
 		}
 	}
 
-	parserEngine := kb.ChunkingConfig.ResolveParserEngine(fileType)
-	if isURL {
-		parserEngine = kb.ChunkingConfig.ResolveParserEngine("url")
+	parserEngine := ""
+	if !isURL {
+		docreaderConnected := s.documentReader != nil && s.documentReader.IsConnected()
+		hasCloudCredentials := s.tenantService != nil && s.tenantService.GetWeKnoraCloudCredentials(ctx) != nil
+		parserEngine = docparser.SelectConfiguredEngine(fileType, docreaderConnected, hasCloudCredentials, overrides)
 	}
 
-	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
-		kb.ID, fileType, isURL, parserEngine, kb.ChunkingConfig.ParserEngineRules)
+	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v platformEngine=%q",
+		kb.ID, fileType, isURL, parserEngine)
 
 	var reader interfaces.DocReader = s.resolveDocReader(ctx, parserEngine, fileType, isURL, overrides)
 	if reader == nil {
@@ -8551,7 +8807,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	maxRetry, _ := asynq.GetMaxRetry(ctx)
 	isLastRetry := retryCount >= maxRetry
 
-	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get tenant: %v", err)
 		return nil
@@ -8989,7 +9245,7 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 
 	// Get tenant info and add to context
-	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get tenant info: %v", err)
 		return fmt.Errorf("failed to get tenant info: %w", err)
@@ -9364,6 +9620,7 @@ func (s *knowledgeService) getOrCreateFAQKnowledge(ctx context.Context, kb *type
 		ID:               uuid.New().String(),
 		TenantID:         kb.TenantID,
 		KnowledgeBaseID:  kb.ID,
+		CreatedBy:        currentUserID(ctx),
 		Type:             types.KnowledgeTypeFAQ,
 		Channel:          types.ChannelWeb,
 		Title:            "FAQ",
@@ -9474,7 +9731,7 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 
 	// Get tenant info and add to context
-	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "ProcessKnowledgeMove: failed to get tenant info: %v", err)
 		return fmt.Errorf("failed to get tenant info: %w", err)
@@ -9866,7 +10123,7 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 	logger.Infof(ctx, "Processing knowledge list delete task for %d knowledge items", len(payload.KnowledgeIDs))
 
 	// Get tenant info
-	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	tenant, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get tenant %d: %v", payload.TenantID, err)
 		return err

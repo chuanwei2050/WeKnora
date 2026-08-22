@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
@@ -15,8 +17,10 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-// ErrInvalidTenantID represents an error for invalid tenant ID
-var ErrInvalidTenantID = errors.New("invalid tenant ID")
+var (
+	ErrInvalidTenantID           = errors.New("invalid tenant ID")
+	ErrKnowledgeBaseAccessDenied = errors.New("knowledge base access denied")
+)
 
 // knowledgeBaseService implements the knowledge base service interface
 type knowledgeBaseService struct {
@@ -75,6 +79,22 @@ func (s *knowledgeBaseService) GetRepository() interfaces.KnowledgeBaseRepositor
 func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb *types.KnowledgeBase,
 ) (*types.KnowledgeBase, error) {
+	kb.EnsureDefaults()
+	applyNewDocumentKnowledgeBaseDefaults(kb)
+	// Storage is platform-managed; ignore legacy clients that still submit KB-level overrides.
+	kb.StorageProviderConfig = nil
+	kb.StorageConfig = types.StorageConfig{}
+	// Parser selection is platform-managed; discard legacy KB-level rules.
+	kb.ChunkingConfig.ParserEngineRules = nil
+	if err := s.applyPlatformModelDefaults(ctx, kb); err != nil {
+		return nil, err
+	}
+	if err := kb.Governance.Validate(); err != nil {
+		return nil, err
+	}
+	if err := kb.ValidateContributionPolicy(); err != nil {
+		return nil, err
+	}
 	// Generate UUID and set creation timestamps
 	if kb.ID == "" {
 		kb.ID = uuid.New().String()
@@ -85,7 +105,6 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	if userID, ok := types.UserIDFromContext(ctx); ok {
 		kb.CreatedBy = userID
 	}
-	kb.EnsureDefaults()
 
 	logger.Infof(ctx, "Creating knowledge base, ID: %s, tenant ID: %d, name: %s", kb.ID, kb.TenantID, kb.Name)
 
@@ -99,6 +118,39 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base created successfully, ID: %s, name: %s", kb.ID, kb.Name)
 	return kb, nil
+}
+
+func (s *knowledgeBaseService) applyPlatformModelDefaults(ctx context.Context, kb *types.KnowledgeBase) error {
+	chatModel, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeKnowledgeQA, "chat")
+	if err != nil {
+		return fmt.Errorf("resolve platform chat model: %w", err)
+	}
+	kb.SummaryModelID = chatModel.ID
+	if kb.WikiConfig != nil {
+		kb.WikiConfig.SynthesisModelID = chatModel.ID
+	}
+	if kb.IsVectorEnabled() {
+		embeddingModel, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeEmbedding, "embedding")
+		if err != nil {
+			return fmt.Errorf("resolve platform embedding model: %w", err)
+		}
+		kb.EmbeddingModelID = embeddingModel.ID
+	}
+	if kb.VLMConfig.Enabled {
+		vlmModel, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm")
+		if err != nil {
+			return fmt.Errorf("resolve platform vision model: %w", err)
+		}
+		kb.VLMConfig.ModelID = vlmModel.ID
+	}
+	if kb.ASRConfig.Enabled {
+		asrModel, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeASR, "asr")
+		if err != nil {
+			return fmt.Errorf("resolve platform ASR model: %w", err)
+		}
+		kb.ASRConfig.ModelID = asrModel.ID
+	}
+	return nil
 }
 
 // GetKnowledgeBaseByID retrieves a knowledge base by its ID
@@ -149,12 +201,16 @@ func (s *knowledgeBaseService) GetKnowledgeBasesByIDsOnly(ctx context.Context, i
 	if err != nil {
 		return nil, err
 	}
+	filtered := make([]*types.KnowledgeBase, 0, len(kbs))
 	for _, kb := range kbs {
 		if kb != nil {
 			kb.EnsureDefaults()
+			if types.IsKnowledgeBaseVisibleToUser(ctx, kb) {
+				filtered = append(filtered, kb)
+			}
 		}
 	}
-	return kbs, nil
+	return filtered, nil
 }
 
 // ListKnowledgeBases returns all knowledge bases for a tenant
@@ -171,6 +227,13 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 		})
 		return nil, err
 	}
+	visible := make([]*types.KnowledgeBase, 0, len(kbs))
+	for _, kb := range kbs {
+		if types.IsKnowledgeBaseVisibleToUser(ctx, kb) {
+			visible = append(visible, kb)
+		}
+	}
+	kbs = visible
 
 	// Query knowledge count and chunk count for each knowledge base
 	for _, kb := range kbs {
@@ -322,13 +385,32 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	kb.Name = name
 	kb.Description = description
 	if config != nil {
-		kb.ChunkingConfig = config.ChunkingConfig
-		kb.ImageProcessingConfig = config.ImageProcessingConfig
+		if config.ChunkingConfig.ChunkSize > 0 || config.ChunkingConfig.ChunkOverlap > 0 || len(config.ChunkingConfig.Separators) > 0 {
+			kb.ChunkingConfig = config.ChunkingConfig
+		}
+		if config.ImageProcessingConfig != (types.ImageProcessingConfig{}) {
+			kb.ImageProcessingConfig = config.ImageProcessingConfig
+		}
 		if config.FAQConfig != nil {
 			kb.FAQConfig = config.FAQConfig
 		}
 		if config.WikiConfig != nil {
 			kb.WikiConfig = config.WikiConfig
+		}
+		if config.Governance != nil {
+			if err := config.Governance.Validate(); err != nil {
+				return nil, err
+			}
+			kb.Governance = *config.Governance
+		}
+		if config.ContributionMode != nil {
+			kb.ContributionMode = *config.ContributionMode
+		}
+		if config.ContributorIDs != nil {
+			kb.ContributorIDs = *config.ContributorIDs
+		}
+		if config.ReviewerIDs != nil {
+			kb.ReviewerIDs = *config.ReviewerIDs
 		}
 		// Update indexing strategy — syncs to ExtractConfig for backward compat
 		if config.IndexingStrategy != nil {
@@ -349,8 +431,11 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			}
 		}
 	}
-	kb.UpdatedAt = time.Now()
 	kb.EnsureDefaults()
+	if err := kb.ValidateContributionPolicy(); err != nil {
+		return nil, err
+	}
+	kb.UpdatedAt = time.Now()
 
 	logger.Info(ctx, "Saving knowledge base update")
 	if err := s.repo.UpdateKnowledgeBase(ctx, kb); err != nil {
@@ -570,6 +655,12 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 		}
 	}
 
+	if s.graphEngine != nil {
+		if err := s.graphEngine.DeleteCanonicalKnowledgeBase(ctx, tenantID, kbID); err != nil {
+			return fmt.Errorf("delete canonical knowledge graph for knowledge base %s: %w", kbID, err)
+		}
+	}
+
 	logger.Infof(ctx, "KB delete task completed successfully, knowledge base ID: %s", kbID)
 	return nil
 }
@@ -657,8 +748,6 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			EmbeddingModelID:      sourceKB.EmbeddingModelID,
 			SummaryModelID:        sourceKB.SummaryModelID,
 			VLMConfig:             sourceKB.VLMConfig,
-			StorageProviderConfig: sourceKB.StorageProviderConfig,
-			StorageConfig:         sourceKB.StorageConfig,
 			FAQConfig:             faqConfig,
 			CreatedBy:             sourceKB.CreatedBy,
 		}
@@ -671,4 +760,27 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 		}
 	}
 	return sourceKB, targetKB, nil
+}
+
+func applyNewDocumentKnowledgeBaseDefaults(kb *types.KnowledgeBase) {
+	if kb == nil || kb.Type == types.KnowledgeBaseTypeFAQ {
+		return
+	}
+	if !kb.Governance.Enabled && strings.TrimSpace(kb.Governance.ProfileID) == "" {
+		kb.Governance = types.KnowledgeGovernanceConfig{
+			Enabled:        true,
+			ProfileID:      "software-testing",
+			ProfileVersion: "1.0",
+		}
+	} else if kb.Governance.Enabled {
+		if strings.TrimSpace(kb.Governance.ProfileID) == "" {
+			kb.Governance.ProfileID = "software-testing"
+		}
+		if strings.TrimSpace(kb.Governance.ProfileVersion) == "" {
+			kb.Governance.ProfileVersion = "1.0"
+		}
+	}
+	if kb.ContributionMode == "" {
+		kb.ContributionMode = types.ContributionModeMembers
+	}
 }

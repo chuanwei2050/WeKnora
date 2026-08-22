@@ -53,6 +53,9 @@ func (h *DataSourceHandler) getOwnedKnowledgeBase(
 	if kb.TenantID != tenantID {
 		return nil, http.StatusForbidden, "access denied"
 	}
+	if !types.CanManageKnowledgeBase(ctx, kb) {
+		return nil, http.StatusForbidden, "knowledge base management permission required"
+	}
 
 	return kb, http.StatusOK, ""
 }
@@ -310,13 +313,23 @@ func (h *DataSourceHandler) ValidateCredentials(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
+	user, ok := types.UserFromContext(ctx)
+	if !ok || !user.CanManageTenant() {
+		c.JSON(http.StatusForbidden, gin.H{"error": "tenant management permission required"})
+		return
+	}
 
 	var req struct {
-		Type        string                 `json:"type" binding:"required"`
-		Credentials map[string]interface{} `json:"credentials" binding:"required"`
+		KnowledgeBaseID string                 `json:"kb_id" binding:"required"`
+		Type            string                 `json:"type" binding:"required"`
+		Credentials     map[string]interface{} `json:"credentials" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: type and credentials are required"})
+		return
+	}
+	if _, status, msg := h.getOwnedKnowledgeBase(ctx, tenantID, req.KnowledgeBaseID); status != http.StatusOK {
+		c.JSON(status, gin.H{"error": msg})
 		return
 	}
 

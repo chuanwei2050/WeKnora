@@ -1,0 +1,26 @@
+{
+  "target": "http://127.0.0.1:8081",
+  "users": 1,
+  "concurrent": 1,
+  "duration_seconds": 30,
+  "started_at": "2026-08-12T04:02:37.5821839+00:00",
+  "completed_at": "2026-08-12T04:02:41.2275078+00:00",
+  "results": [
+    {
+      "user": 1,
+      "accepted_at": "2026-08-12T04:02:37.8256034+00:00",
+      "first_visible_at": "2026-08-12T04:02:40.994793+00:00",
+      "completed_at": "2026-08-12T04:02:41.2172158+00:00",
+      "total_ms": 3392,
+      "ttft_ms": 3169,
+      "timed_out": false,
+      "completed_event": true,
+      "error": null
+    }
+  ],
+  "gate": "passed",
+  "failed_users": [],
+  "error_count": 0,
+  "timeout_count": 0,
+  "missing_first_visible_count": 0
+}

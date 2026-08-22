@@ -200,6 +200,13 @@
                 />
               </div>
               <div class="form-item">
+                <label class="form-label">{{ $t('settings.storage.approvedEndpointLabel') }}</label>
+                <t-select v-model="config.minio.approved_endpoint_id" clearable :placeholder="$t('settings.storage.approvedEndpointPlaceholder')">
+                  <t-option :value="''" :label="$t('settings.storage.publicEndpointOption')" />
+                  <t-option v-for="endpoint in approvedStorageEndpoints" :key="endpoint.id" :value="endpoint.id" :label="endpointLabel(endpoint)" />
+                </t-select>
+              </div>
+              <div class="form-item">
                 <label class="form-label">Access Key ID</label>
                 <t-input
                   v-model="config.minio.access_key_id"
@@ -321,6 +328,13 @@
               />
             </div>
             <div class="form-item">
+              <label class="form-label">{{ $t('settings.storage.approvedEndpointLabel') }}</label>
+              <t-select v-model="config.tos.approved_endpoint_id" clearable :placeholder="$t('settings.storage.approvedEndpointPlaceholder')">
+                <t-option :value="''" :label="$t('settings.storage.publicEndpointOption')" />
+                <t-option v-for="endpoint in approvedStorageEndpoints" :key="endpoint.id" :value="endpoint.id" :label="endpointLabel(endpoint)" />
+              </t-select>
+            </div>
+            <div class="form-item">
               <label class="form-label">Region</label>
               <t-input
                 v-model="config.tos.region"
@@ -383,6 +397,13 @@
               />
             </div>
             <div class="form-item">
+              <label class="form-label">{{ $t('settings.storage.approvedEndpointLabel') }}</label>
+              <t-select v-model="config.s3.approved_endpoint_id" clearable :placeholder="$t('settings.storage.approvedEndpointPlaceholder')">
+                <t-option :value="''" :label="$t('settings.storage.publicEndpointOption')" />
+                <t-option v-for="endpoint in approvedStorageEndpoints" :key="endpoint.id" :value="endpoint.id" :label="endpointLabel(endpoint)" />
+              </t-select>
+            </div>
+            <div class="form-item">
               <label class="form-label">Region</label>
               <t-input
                 v-model="config.s3.region"
@@ -443,6 +464,13 @@
                 placeholder="e.g. https://oss-cn-hangzhou.aliyuncs.com"
                 clearable
               />
+            </div>
+            <div class="form-item">
+              <label class="form-label">{{ $t('settings.storage.approvedEndpointLabel') }}</label>
+              <t-select v-model="config.oss.approved_endpoint_id" clearable :placeholder="$t('settings.storage.approvedEndpointPlaceholder')">
+                <t-option :value="''" :label="$t('settings.storage.publicEndpointOption')" />
+                <t-option v-for="endpoint in approvedStorageEndpoints" :key="endpoint.id" :value="endpoint.id" :label="endpointLabel(endpoint)" />
+              </t-select>
             </div>
             <div class="form-item">
               <label class="form-label">Region</label>
@@ -520,10 +548,14 @@ import {
   checkStorageEngine,
   type StorageEngineConfig,
 } from '@/api/system'
+import { listApprovedEndpoints, type ApprovedEndpoint } from '@/api/approved-endpoint'
 
 const { t } = useI18n()
 
-const defaultConfig = (): StorageEngineConfig => ({
+type EditableStorageEngineConfig = Required<StorageEngineConfig>
+type StorageCheckResult = { ok: boolean; message: string; bucket_created?: boolean }
+
+const defaultConfig = (): EditableStorageEngineConfig => ({
   default_provider: 'local',
   local: { path_prefix: '' },
   minio: { mode: 'docker', endpoint: '', access_key_id: '', secret_access_key: '', bucket_name: '', use_ssl: false, path_prefix: '' },
@@ -566,7 +598,7 @@ const defaultConfig = (): StorageEngineConfig => ({
 
 const loading = ref(true)
 const error = ref('')
-const config = ref<StorageEngineConfig>(defaultConfig())
+const config = ref<EditableStorageEngineConfig>(defaultConfig())
 const engineStatus = ref<{ local: boolean; minio: boolean; cos: boolean }>({
   local: true,
   minio: false,
@@ -574,19 +606,20 @@ const engineStatus = ref<{ local: boolean; minio: boolean; cos: boolean }>({
 })
 const minioEnvAvailable = ref(false)
 const saving = ref(false)
+const approvedStorageEndpoints = ref<ApprovedEndpoint[]>([])
 const saveMessage = ref('')
 const saveSuccess = ref(false)
 
 const checkingMinio = ref(false)
-const minioCheckResult = ref<{ ok: boolean; message: string; bucket_created?: boolean } | null>(null)
+const minioCheckResult = ref<StorageCheckResult | null>(null)
 const checkingCos = ref(false)
-const cosCheckResult = ref<{ ok: boolean; message: string } | null>(null)
+const cosCheckResult = ref<StorageCheckResult | null>(null)
 const checkingTos = ref(false)
-const tosCheckResult = ref<{ ok: boolean; message: string } | null>(null)
+const tosCheckResult = ref<StorageCheckResult | null>(null)
 const checkingS3 = ref(false)
-const s3CheckResult = ref<{ ok: boolean; message: string } | null>(null)
+const s3CheckResult = ref<StorageCheckResult | null>(null)
 const checkingOss = ref(false)
-const ossCheckResult = ref<{ ok: boolean; message: string } | null>(null)
+const ossCheckResult = ref<StorageCheckResult | null>(null)
 
 const drawerVisible = ref(false)
 const currentEngine = ref<string | null>(null)
@@ -652,6 +685,7 @@ async function loadConfig() {
               bucket_name: d.minio.bucket_name || '',
               use_ssl: d.minio.use_ssl ?? false,
               path_prefix: d.minio.path_prefix || '',
+              approved_endpoint_id: d.minio.approved_endpoint_id || '',
             }
           : defaultConfig().minio!,
         cos: d.cos
@@ -672,6 +706,7 @@ async function loadConfig() {
               secret_key: d.tos.secret_key || '',
               bucket_name: d.tos.bucket_name || '',
               path_prefix: d.tos.path_prefix || '',
+              approved_endpoint_id: d.tos.approved_endpoint_id || '',
             }
           : defaultConfig().tos!,
         s3: d.s3
@@ -682,6 +717,7 @@ async function loadConfig() {
               secret_key: d.s3.secret_key || '',
               bucket_name: d.s3.bucket_name || '',
               path_prefix: d.s3.path_prefix || '',
+              approved_endpoint_id: d.s3.approved_endpoint_id || '',
             }
           : defaultConfig().s3!,
         oss: d.oss
@@ -695,6 +731,7 @@ async function loadConfig() {
               use_temp_bucket: d.oss.use_temp_bucket ?? false,
               temp_bucket_name: d.oss.temp_bucket_name || '',
               temp_region: d.oss.temp_region || '',
+              approved_endpoint_id: d.oss.approved_endpoint_id || '',
             }
           : defaultConfig().oss!,
       }
@@ -722,11 +759,24 @@ async function loadStatus() {
   }
 }
 
+async function loadApprovedStorageEndpoints() {
+  try {
+    const response = await listApprovedEndpoints('object-storage')
+    approvedStorageEndpoints.value = Array.isArray(response.data) ? response.data : []
+  } catch {
+    approvedStorageEndpoints.value = []
+  }
+}
+
+function endpointLabel(endpoint: ApprovedEndpoint): string {
+  return `${endpoint.scheme}://${endpoint.host}:${endpoint.port}`
+}
+
 async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    await Promise.all([loadConfig(), loadStatus()])
+    await Promise.all([loadConfig(), loadStatus(), loadApprovedStorageEndpoints()])
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : t('settings.storage.loadFailed')
   } finally {
@@ -747,6 +797,7 @@ function buildPayload(): StorageEngineConfig {
       bucket_name: (config.value.minio?.bucket_name || '').trim(),
       use_ssl: config.value.minio?.use_ssl ?? false,
       path_prefix: (config.value.minio?.path_prefix || '').trim(),
+      approved_endpoint_id: (config.value.minio?.approved_endpoint_id || '').trim(),
     },
     cos: {
       secret_id: (config.value.cos?.secret_id || '').trim(),
@@ -763,6 +814,7 @@ function buildPayload(): StorageEngineConfig {
       secret_key: (config.value.tos?.secret_key || '').trim(),
       bucket_name: (config.value.tos?.bucket_name || '').trim(),
       path_prefix: (config.value.tos?.path_prefix || '').trim(),
+      approved_endpoint_id: (config.value.tos?.approved_endpoint_id || '').trim(),
     },
     s3: {
       endpoint: (config.value.s3?.endpoint || '').trim(),
@@ -771,6 +823,7 @@ function buildPayload(): StorageEngineConfig {
       secret_key: (config.value.s3?.secret_key || '').trim(),
       bucket_name: (config.value.s3?.bucket_name || '').trim(),
       path_prefix: (config.value.s3?.path_prefix || '').trim(),
+      approved_endpoint_id: (config.value.s3?.approved_endpoint_id || '').trim(),
     },
     oss: {
       endpoint: (config.value.oss?.endpoint || '').trim(),
@@ -783,6 +836,7 @@ function buildPayload(): StorageEngineConfig {
       use_temp_bucket: config.value.oss?.use_temp_bucket ?? false,
       temp_bucket_name: (config.value.oss?.temp_bucket_name || '').trim(),
       temp_region: (config.value.oss?.temp_region || '').trim(),
+      approved_endpoint_id: (config.value.oss?.approved_endpoint_id || '').trim(),
     },
   }
 }

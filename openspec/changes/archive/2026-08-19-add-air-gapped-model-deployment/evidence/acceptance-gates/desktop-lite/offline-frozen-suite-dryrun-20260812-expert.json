@@ -1,0 +1,79 @@
+{
+  "schema": "weknora-offline-frozen-suite/v1",
+  "profile": "desktop-lite",
+  "run_id": "offline-20260812140838",
+  "frozen_inputs": {
+    "path": "F:\\AI-Project\\WeKnora-development\\openspec\\changes\\add-air-gapped-model-deployment\\evidence\\frozen-inputs-v1.json",
+    "freeze_sha256": "f0fb7604903c2ec5331876692b4fccc8a86068d31a32818a5734b52f44351172",
+    "suite_sha256": "12abf60e96eb3d33b1bdf3046406e9a1bced1972401d10cf5aa62593beca802e"
+  },
+  "applicability": {
+    "document_ingest": true,
+    "retrieval": true,
+    "routing": true,
+    "graph": true,
+    "verification": true,
+    "voice": true,
+    "performance": true
+  },
+  "profile_semantics": {
+    "single_node": "component/model location gate",
+    "server_load": "not_applicable"
+  },
+  "checks": [
+    {
+      "name": "single_node_gate",
+      "status": "blocked",
+      "details": "未提供可审计部署清单，不能计算 single-node。",
+      "data": null
+    },
+    {
+      "name": "airgap_preflight",
+      "status": "blocked",
+      "details": "未提供离线包目录。",
+      "data": null
+    },
+    {
+      "name": "outbound_audit",
+      "status": "passed",
+      "details": "出站审计必须证明成功公网连接数为 0。",
+      "data": {
+        "schema": "weknora-outbound-audit/v1",
+        "status": "passed",
+        "probe_url": "https://example.invalid/health",
+        "resolved_ips": [],
+        "public_ips": [],
+        "attempted_public_connections": 0,
+        "successful_public_connections": 0,
+        "blocked_or_failed_connections": 0,
+        "events": [
+          {
+            "mode": "fixture",
+            "url": "https://example.invalid/health",
+            "outcome": "not_attempted",
+            "reason": "NoNetwork"
+          }
+        ],
+        "generated_at": "2026-08-12T17:29:35.2398766+08:00"
+      }
+    },
+    {
+      "name": "frozen_e2e_suite",
+      "status": "blocked",
+      "details": "dry-run 未执行真实离线 RAG/Agent。",
+      "data": null
+    },
+    {
+      "name": "server_load_gate",
+      "status": "not_applicable",
+      "details": "desktop-lite 不执行服务器负载门禁；该结果不能替代 single-node。",
+      "data": null
+    }
+  ],
+  "single_node_gate": "blocked",
+  "server_load_gate": "not_applicable",
+  "started_at": "2026-08-12T14:08:38.3849759+00:00",
+  "completed_at": "2026-08-12T14:08:38.4173728+00:00",
+  "gate": "blocked",
+  "integrity_sha256": "01618c4788db2a5b28f7e78e6eb11725542488ffc91187908ca9846de50e72da"
+}

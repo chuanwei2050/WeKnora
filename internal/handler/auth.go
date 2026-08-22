@@ -44,6 +44,27 @@ func NewAuthHandler(configInfo *config.Config,
 	}
 }
 
+// sanitizeTenantForClient keeps the tenant identity and API key needed by the
+// frontend while preventing platform-level credentials from leaking through
+// authentication and tenant-detail responses.
+func sanitizeTenantForClient(tenant *types.Tenant) *types.Tenant {
+	if tenant == nil {
+		return nil
+	}
+	publicTenant := *tenant
+	publicTenant.RetrieverEngines = types.RetrieverEngines{}
+	publicTenant.AgentConfig = nil
+	publicTenant.ContextConfig = nil
+	publicTenant.WebSearchConfig = nil
+	publicTenant.ConversationConfig = nil
+	publicTenant.ParserEngineConfig = nil
+	publicTenant.Credentials = nil
+	publicTenant.StorageEngineConfig = nil
+	publicTenant.ChatHistoryConfig = nil
+	publicTenant.RetrievalConfig = nil
+	return &publicTenant
+}
+
 // Register godoc
 // @Summary      用户注册
 // @Description  注册新用户账号
@@ -58,54 +79,8 @@ func NewAuthHandler(configInfo *config.Config,
 func (h *AuthHandler) Register(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	logger.Info(ctx, "Start user registration")
-
-	// 通过环境变量 DISABLE_REGISTRATION=true 禁止注册
-	if os.Getenv("DISABLE_REGISTRATION") == "true" {
-		logger.Warn(ctx, "Registration is disabled by DISABLE_REGISTRATION env")
-		appErr := errors.NewForbiddenError("Registration is disabled")
-		c.Error(appErr)
-		return
-	}
-
-	var req types.RegisterRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		logger.Error(ctx, "Failed to parse registration request parameters", err)
-		appErr := errors.NewValidationError("Invalid registration parameters").WithDetails(err.Error())
-		c.Error(appErr)
-		return
-	}
-	req.Username = secutils.SanitizeForLog(req.Username)
-	req.Email = secutils.SanitizeForLog(req.Email)
-	req.Password = secutils.SanitizeForLog(req.Password)
-
-	// Validate required fields
-	if req.Username == "" || req.Email == "" || req.Password == "" {
-		logger.Error(ctx, "Missing required registration fields")
-		appErr := errors.NewValidationError("Username, email and password are required")
-		c.Error(appErr)
-		return
-	}
-	req.Username = secutils.SanitizeForLog(req.Username)
-	req.Email = secutils.SanitizeForLog(req.Email)
-	// Call service to register user
-	user, err := h.userService.Register(ctx, &req)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to register user: %v", err)
-		appErr := errors.NewBadRequestError(err.Error())
-		c.Error(appErr)
-		return
-	}
-
-	// Return success response
-	response := &types.RegisterResponse{
-		Success: true,
-		Message: "Registration successful",
-		User:    user,
-	}
-
-	logger.Infof(ctx, "User registered successfully: %s", secutils.SanitizeForLog(user.Email))
-	c.JSON(http.StatusCreated, response)
+	logger.Warn(ctx, "Public registration attempt rejected")
+	c.Error(errors.NewForbiddenError("Registration is disabled"))
 }
 
 // Login godoc
@@ -130,12 +105,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.Error(appErr)
 		return
 	}
-	email := secutils.SanitizeForLog(req.Email)
+	username := secutils.SanitizeForLog(req.Username)
 
 	// Validate required fields
-	if req.Email == "" || req.Password == "" {
+	if req.Username == "" || req.Password == "" {
 		logger.Error(ctx, "Missing required login fields")
-		appErr := errors.NewValidationError("Email and password are required")
+		appErr := errors.NewValidationError("Username and password are required")
 		c.Error(appErr)
 		return
 	}
@@ -155,10 +130,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, response)
 		return
 	}
+	response.Tenant = sanitizeTenantForClient(response.Tenant)
 
 	// User is already in the correct format from service
 
-	logger.Infof(ctx, "User logged in successfully, email: %s", email)
+	logger.Infof(ctx, "User logged in successfully, username: %s", username)
 	c.JSON(http.StatusOK, response)
 }
 
@@ -186,6 +162,7 @@ func (h *AuthHandler) BidReviewSSO(c *gin.Context) {
 		c.Error(errors.NewInternalServerError("BidReview SSO failed").WithDetails(err.Error()))
 		return
 	}
+	response.Tenant = sanitizeTenantForClient(response.Tenant)
 	c.JSON(http.StatusOK, response)
 }
 
@@ -472,6 +449,7 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	}
 	userInfo := user.ToUserInfo()
 	userInfo.CanAccessAllTenants = user.CanAccessAllTenants && h.configInfo.Tenant.EnableCrossTenantAccess
+	tenant = sanitizeTenantForClient(tenant)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
@@ -499,7 +477,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 
 	var req struct {
 		OldPassword string `json:"old_password" binding:"required"`
-		NewPassword string `json:"new_password" binding:"required,min=6"`
+		NewPassword string `json:"new_password" binding:"required,min=8,max=72"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -595,6 +573,7 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
 	}
 
 	tenant, _ := h.tenantService.GetTenantByID(ctx, user.TenantID)
+	tenant = sanitizeTenantForClient(tenant)
 
 	logger.Info(ctx, "Auto-setup: completed successfully")
 	c.JSON(http.StatusOK, &types.LoginResponse{

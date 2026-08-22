@@ -1,9 +1,6 @@
 package elasticsearch
 
 import (
-	"maps"
-	"slices"
-
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -16,7 +13,7 @@ type VectorEmbedding struct {
 	KnowledgeID     string    `json:"knowledge_id"      gorm:"column:knowledge_id"`         // ID of the knowledge item
 	KnowledgeBaseID string    `json:"knowledge_base_id" gorm:"column:knowledge_base_id"`    // ID of the knowledge base
 	TagID           string    `json:"tag_id"            gorm:"column:tag_id"`               // Tag ID for categorization
-	Embedding       []float32 `json:"embedding"         gorm:"column:embedding;not null"`   // Vector embedding of the content
+	Embedding       []float32 `json:"-" gorm:"-"`                                           // Legacy field; vectors are stored in Milvus only
 	IsEnabled       bool      `json:"is_enabled"`                                           // Whether the chunk is enabled
 	IsRecommended   bool      `json:"is_recommended"`                                       // Whether the chunk is recommended
 }
@@ -39,12 +36,6 @@ func ToDBVectorEmbedding(embedding *types.IndexInfo, additionalParams map[string
 		TagID:           embedding.TagID,
 		IsEnabled:       embedding.IsEnabled,
 		IsRecommended:   embedding.IsRecommended,
-	}
-	// Add embedding data if available in additionalParams
-	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), "embedding") {
-		if embeddingMap, ok := additionalParams["embedding"].(map[string][]float32); ok {
-			vector.Embedding = embeddingMap[embedding.SourceID]
-		}
 	}
 	// Get is_enabled from additionalParams if available
 	if additionalParams != nil {
