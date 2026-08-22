@@ -2049,7 +2049,7 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 		return
 	}
 
-	// 验证文件大小 (configurable via MAX_FILE_SIZE_MB, 0 = unlimited)
+	// 验证文件大小 (configurable via MAX_FILE_SIZE_MB, default 2047 MB)
 	maxSize := utils.GetMaxFileSize()
 	if maxSize > 0 && header.Size > maxSize {
 		logger.Error(ctx, "File size too large")

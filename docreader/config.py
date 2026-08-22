@@ -6,6 +6,10 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# Default upload/gRPC limit (~2GB). gRPC int32 max is 2147483647 bytes (= 2047 MiB).
+DEFAULT_MAX_FILE_SIZE_MB = 2047
+GRPC_MAX_MESSAGE_BYTES = 2147483647
+
 
 def _get_first_env(keys: Iterable[str]) -> Tuple[Optional[str], Optional[str]]:
     """Return (value, key) for the first existing env var in keys."""
@@ -63,15 +67,24 @@ class DocReaderConfig:
     image_output_dir: str
 
 
+def _resolve_grpc_max_file_size_bytes() -> int:
+    size_mb = _get_int(
+        ["DOCREADER_GRPC_MAX_FILE_SIZE_MB", "MAX_FILE_SIZE_MB"],
+        DEFAULT_MAX_FILE_SIZE_MB,
+    )
+    if size_mb <= 0:
+        size_mb = DEFAULT_MAX_FILE_SIZE_MB
+    if size_mb > DEFAULT_MAX_FILE_SIZE_MB:
+        size_mb = DEFAULT_MAX_FILE_SIZE_MB
+    size_bytes = size_mb * 1024 * 1024
+    return min(size_bytes, GRPC_MAX_MESSAGE_BYTES)
+
+
 def load_config() -> DocReaderConfig:
     """Load config from environment variables (lightweight version)."""
 
     grpc_max_workers = _get_int(["DOCREADER_GRPC_MAX_WORKERS", "GRPC_MAX_WORKERS"], 4)
-    grpc_max_file_size_mb = (
-        _get_int(["DOCREADER_GRPC_MAX_FILE_SIZE_MB", "MAX_FILE_SIZE_MB"], 50)
-        * 1024
-        * 1024
-    )
+    grpc_max_file_size_mb = _resolve_grpc_max_file_size_bytes()
     grpc_port = _get_int(["DOCREADER_GRPC_PORT", "PORT"], 50051)
     docx_max_pages = _get_int(["DOCREADER_DOCX_MAX_PAGES"], 0)
 

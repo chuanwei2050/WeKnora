@@ -13,16 +13,26 @@ import (
 	"google.golang.org/grpc/resolver"
 )
 
+const (
+	defaultMaxFileSizeMB  = 2047
+	grpcMaxMessageBytes   = 2147483647
+)
+
 func getMaxMessageSize() int {
+	sizeMB := defaultMaxFileSizeMB
 	if sizeStr := os.Getenv("MAX_FILE_SIZE_MB"); sizeStr != "" {
-		if size, err := strconv.Atoi(sizeStr); err == nil {
-			if size <= 0 {
-				return 1024 * 1024 * 1024 // 1GB when unlimited
-			}
-			return size * 1024 * 1024
+		if size, err := strconv.Atoi(sizeStr); err == nil && size > 0 {
+			sizeMB = size
 		}
 	}
-	return 1024 * 1024 * 1024
+	if sizeMB > defaultMaxFileSizeMB {
+		sizeMB = defaultMaxFileSizeMB
+	}
+	bytes := sizeMB * 1024 * 1024
+	if bytes > grpcMaxMessageBytes {
+		return grpcMaxMessageBytes
+	}
+	return bytes
 }
 
 var Logger = log.New(os.Stdout, "[DocReader] ", log.LstdFlags|log.Lmicroseconds)

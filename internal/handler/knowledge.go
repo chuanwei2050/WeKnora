@@ -293,7 +293,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		return
 	}
 
-	// Validate file size (configurable via MAX_FILE_SIZE_MB, 0 = unlimited)
+	// Validate file size (configurable via MAX_FILE_SIZE_MB, default 2047 MB)
 	maxSize := secutils.GetMaxFileSize()
 	if maxSize > 0 && file.Size > maxSize {
 		logger.Error(ctx, "File size too large")
