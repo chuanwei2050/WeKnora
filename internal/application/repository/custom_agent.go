@@ -78,9 +78,38 @@ func (r *customAgentRepository) ListAgentsByTenantID(ctx context.Context, tenant
 	return agents, nil
 }
 
-// UpdateAgent updates an agent
+// UpdateAgent updates an agent by composite primary key (id, tenant_id).
+// GORM Save treats tenant_id=0 as an empty primary key and may INSERT instead of UPDATE,
+// so we always issue an explicit UPDATE scoped by both key columns.
 func (r *customAgentRepository) UpdateAgent(ctx context.Context, agent *types.CustomAgent) error {
-	return r.db.WithContext(ctx).Save(agent).Error
+	if agent == nil || agent.ID == "" {
+		return errors.New("agent is required")
+	}
+	updates := map[string]interface{}{
+		"name":        agent.Name,
+		"description": agent.Description,
+		"avatar":      agent.Avatar,
+		"is_builtin":  agent.IsBuiltin,
+		"created_by":  agent.CreatedBy,
+		"config":      agent.Config,
+		"updated_at":  agent.UpdatedAt,
+	}
+	if agent.DeletedAt.Valid {
+		updates["deleted_at"] = agent.DeletedAt
+	} else {
+		updates["deleted_at"] = nil
+	}
+	result := r.db.WithContext(ctx).Unscoped().
+		Model(&types.CustomAgent{}).
+		Where("id = ? AND tenant_id = ?", agent.ID, agent.TenantID).
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrCustomAgentNotFound
+	}
+	return nil
 }
 
 // DeleteAgent deletes an agent (soft delete)
