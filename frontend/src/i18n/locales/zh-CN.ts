@@ -90,6 +90,7 @@ export default {
     folderSearchPlaceholder: "搜索文件夹",
     folderRenameAction: "重命名",
     folderDeleteAction: "删除",
+    folderDeleteNotEmpty: "文件夹必须清空后才能删除",
     uploadTarget: "上传到：{name}",
     folderReorderSuccess: "文件夹顺序已保存",
     folderReorderFailed: "文件夹顺序保存失败",

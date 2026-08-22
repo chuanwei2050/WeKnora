@@ -90,6 +90,7 @@ export default {
     folderSearchPlaceholder: "폴더 검색",
     folderRenameAction: "이름 변경",
     folderDeleteAction: "삭제",
+    folderDeleteNotEmpty: "폴더를 비운 후에만 삭제할 수 있습니다",
     uploadTarget: "업로드 위치: {name}",
     folderReorderSuccess: "폴더 순서가 저장되었습니다",
     folderReorderFailed: "폴더 순서를 저장하지 못했습니다",

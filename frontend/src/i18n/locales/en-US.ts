@@ -90,6 +90,7 @@ export default {
     folderSearchPlaceholder: 'Search folders',
     folderRenameAction: 'Rename',
     folderDeleteAction: 'Delete',
+    folderDeleteNotEmpty: 'Folder must be empty before it can be deleted',
     uploadTarget: 'Upload to: {name}',
     folderReorderSuccess: 'Folder order saved',
     folderReorderFailed: 'Failed to save folder order',

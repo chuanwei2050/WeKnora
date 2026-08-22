@@ -307,7 +307,7 @@ const filteredTags = computed(() => {
 const untaggedTag = computed(() => tagList.value.find(tag => tag.name === UNTAGGED_TAG_NAME));
 const ordinaryTags = computed(() => tagList.value.filter(tag => tag.name !== UNTAGGED_TAG_NAME));
 const filteredOrdinaryTags = computed(() => filteredTags.value.filter(tag => tag.name !== UNTAGGED_TAG_NAME));
-const isFolderDeleteDisabled = (tag: any) => (
+const isFolderNotEmpty = (tag: any) => (
   Number(tag.knowledge_count || 0) > 0 || Number(tag.chunk_count || 0) > 0
 );
 const folderOrderComplete = computed(() => tagList.value.length === tagTotal.value);
@@ -636,7 +636,10 @@ const tagDeleteDesc = computed(() => {
 });
 
 const confirmDeleteTag = (tag: any) => {
-  if (isFolderDeleteDisabled(tag)) return;
+  if (isFolderNotEmpty(tag)) {
+    MessagePlugin.warning(t('knowledgeBase.folderDeleteNotEmpty'));
+    return;
+  }
   if (!kbId.value) {
     MessagePlugin.warning(t('knowledgeEditor.messages.missingId'));
     return;
@@ -2257,8 +2260,6 @@ async function createNewSession(value: string): Promise<void> {
                           </div>
                           <div
                             class="tag-menu-item danger"
-                            :class="{ disabled: isFolderDeleteDisabled(tag) }"
-                            :aria-disabled="isFolderDeleteDisabled(tag)"
                             @click="confirmDeleteTag(tag)"
                           >
                             <t-icon class="menu-icon" name="delete" />

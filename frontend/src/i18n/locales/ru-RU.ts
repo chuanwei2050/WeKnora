@@ -72,6 +72,7 @@ export default {
     folderSearchPlaceholder: 'Поиск папок',
     folderRenameAction: 'Переименовать',
     folderDeleteAction: 'Удалить',
+    folderDeleteNotEmpty: 'Папку можно удалить только после её очистки',
     uploadTarget: 'Загрузить в: {name}',
     folderReorderSuccess: 'Порядок папок сохранён',
     folderReorderFailed: 'Не удалось сохранить порядок папок',
