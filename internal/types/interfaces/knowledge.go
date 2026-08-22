@@ -58,6 +58,8 @@ type KnowledgeService interface {
 	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
 	// GetKnowledgeBatch retrieves a batch of knowledge by IDs.
 	GetKnowledgeBatch(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)
+	// MarkKnowledgeListDeleting marks knowledge entries as deleting before async cleanup runs.
+	MarkKnowledgeListDeleting(ctx context.Context, tenantID uint64, ids []string) error
 	// GetKnowledgeBatchWithSharedAccess retrieves knowledge by IDs including items from shared KBs the user has access to.
 	GetKnowledgeBatchWithSharedAccess(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)
 	// ListKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base.

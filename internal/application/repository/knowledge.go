@@ -73,7 +73,8 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 	ctx context.Context, tenantID uint64, kbID string,
 ) ([]*types.Knowledge, error) {
 	var knowledges []*types.Knowledge
-	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?", tenantID, kbID, types.ParseStatusDeleting).
 		Order("created_at DESC").Find(&knowledges).Error; err != nil {
 		return nil, err
 	}
@@ -94,7 +95,7 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	var total int64
 
 	query := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID)
+		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?", tenantID, kbID, types.ParseStatusDeleting)
 	if tagID != "" {
 		query = query.Where("tag_id = ?", tagID)
 	}
@@ -119,7 +120,7 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 
 	// Then query paginated data
 	dataQuery := r.db.Debug().WithContext(ctx).
-		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID)
+		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?", tenantID, kbID, types.ParseStatusDeleting)
 	if tagID != "" {
 		dataQuery = dataQuery.Where("tag_id = ?", tagID)
 	}

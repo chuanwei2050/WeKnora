@@ -1250,6 +1250,42 @@ func (s *knowledgeService) ListPagedKnowledgeByKnowledgeBaseID(ctx context.Conte
 	return types.NewPageResult(total, page, knowledges), nil
 }
 
+func (s *knowledgeService) assertKnowledgeDeletable(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	allowManage bool,
+) error {
+	if knowledge == nil {
+		return werrors.NewBadRequestError("Knowledge not found")
+	}
+	if allowManage {
+		return nil
+	}
+	userID, ok := types.UserIDFromContext(ctx)
+	if !ok || knowledge.CreatedBy != userID {
+		return werrors.NewForbiddenError("Only the contributor can delete unsubmitted knowledge")
+	}
+	if knowledge.CurrentVersionID != "" {
+		return werrors.NewForbiddenError("Published knowledge cannot be deleted")
+	}
+	if knowledge.ParseStatus == types.ParseStatusPendingReview {
+		return werrors.NewBadRequestError("Pending review knowledge cannot be deleted; withdraw first")
+	}
+	if knowledge.ParseStatus != types.ParseStatusDraft && knowledge.ParseStatus != types.ParseStatusRejected {
+		return werrors.NewForbiddenError("Only draft or rejected knowledge can be deleted")
+	}
+	if s.governanceRepo != nil && knowledge.PendingVersionID != "" {
+		version, err := s.governanceRepo.GetVersion(ctx, knowledge.TenantID, knowledge.PendingVersionID)
+		if err != nil {
+			return err
+		}
+		if version == nil || (version.Status != types.KnowledgeVersionDraft && version.Status != types.KnowledgeVersionRejected) {
+			return werrors.NewForbiddenError("Only draft or rejected knowledge can be deleted")
+		}
+	}
+	return nil
+}
+
 // collectImageURLs extracts unique provider:// image URLs from image_info JSON strings.
 func collectImageURLs(ctx context.Context, imageInfos []string) []string {
 	seen := make(map[string]struct{})
@@ -1295,6 +1331,13 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	// Get the knowledge entry
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, ctx.Value(types.TenantIDContextKey).(uint64), id)
 	if err != nil {
+		return err
+	}
+	allowManage := false
+	if kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID); kbErr == nil {
+		allowManage = types.CanManageKnowledgeBase(ctx, kb)
+	}
+	if err := s.assertKnowledgeDeletable(ctx, knowledge, allowManage); err != nil {
 		return err
 	}
 
@@ -1651,6 +1694,14 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	knowledgeList, err := s.repo.GetKnowledgeBatch(ctx, tenantInfo.ID, ids)
 	if err != nil {
 		return err
+	}
+	if len(knowledgeList) != len(ids) {
+		return werrors.NewBadRequestError("One or more knowledge entries not found")
+	}
+	for _, knowledge := range knowledgeList {
+		if err := s.assertKnowledgeDeletable(ctx, knowledge, true); err != nil {
+			return err
+		}
 	}
 
 	// Mark all as deleting first to prevent async task conflicts
@@ -3606,6 +3657,30 @@ func (s *knowledgeService) GetKnowledgeBatch(ctx context.Context,
 		return nil, nil
 	}
 	return s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
+}
+
+// MarkKnowledgeListDeleting marks knowledge entries as deleting so they disappear from
+// list views immediately while the async cleanup task runs.
+func (s *knowledgeService) MarkKnowledgeListDeleting(ctx context.Context, tenantID uint64, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	knowledgeList, err := s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	for _, knowledge := range knowledgeList {
+		if knowledge.ParseStatus == types.ParseStatusDeleting {
+			continue
+		}
+		knowledge.ParseStatus = types.ParseStatusDeleting
+		knowledge.UpdatedAt = now
+		if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // GetKnowledgeBatchWithSharedAccess retrieves knowledge by IDs, including items from shared KBs the user has access to.

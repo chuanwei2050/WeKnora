@@ -682,21 +682,18 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 		return
 	}
 
-	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
 	if err != nil {
 		c.Error(err)
 		return
 	}
-	if knowledge.CurrentVersionID != "" {
-		kb, kbErr := h.kbService.GetKnowledgeBaseByID(effCtx, knowledge.KnowledgeBaseID)
-		if kbErr != nil || !types.CanManageKnowledgeBase(effCtx, kb) {
-			c.Error(errors.NewForbiddenError("published contribution cannot be deleted"))
-			return
-		}
-	}
 	logger.Infof(ctx, "Deleting knowledge, ID: %s", secutils.SanitizeForLog(id))
 	err = h.kgService.DeleteKnowledge(effCtx, id)
 	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
@@ -782,10 +779,19 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
-	if len(knowledgeList) != len(ids) {
-		c.Error(errors.NewBadRequestError("One or more knowledge entries not found"))
+	if len(knowledgeList) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "Batch delete task submitted",
+			"data": gin.H{
+				"task_id":       "",
+				"deleted_count": 0,
+			},
+		})
 		return
 	}
+
+	deleteIDs := make([]string, 0, len(knowledgeList))
 	for _, k := range knowledgeList {
 		if k.KnowledgeBaseID != kbID {
 			c.Error(errors.NewBadRequestError(
@@ -793,9 +799,16 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 					secutils.SanitizeForLog(k.ID), secutils.SanitizeForLog(kbID))))
 			return
 		}
+		deleteIDs = append(deleteIDs, k.ID)
 	}
 
-	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, ids)
+	if err := h.kgService.MarkKnowledgeListDeleting(ctx, effectiveTenantID, deleteIDs); err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, deleteIDs)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue batch knowledge delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue batch delete task"))
@@ -803,14 +816,14 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Batch knowledge delete task enqueued: %s, kb_id: %s, count: %d",
-		taskID, secutils.SanitizeForLog(kbID), len(ids))
+		taskID, secutils.SanitizeForLog(kbID), len(deleteIDs))
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Batch delete task submitted",
 		"data": gin.H{
 			"task_id":       taskID,
-			"deleted_count": len(ids),
+			"deleted_count": len(deleteIDs),
 		},
 	})
 }

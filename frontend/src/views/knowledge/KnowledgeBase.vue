@@ -1022,7 +1022,7 @@ const onCardMouseLeave = () => {
 };
 
 const delCard = (index: number, item: KnowledgeCard) => {
-  if (isKnowledgeDeleteDisabled(item)) return;
+  if (isKnowledgeDeleteDisabled(item, knowledgeDeleteOptions.value)) return;
   knowledgeIndex.value = index;
   knowledge.value = item;
   delDialog.value = true;
@@ -1753,16 +1753,21 @@ const governanceActionContext = computed(() => ({
   currentUserId: authStore.currentUserId,
 }));
 
+const knowledgeDeleteOptions = computed(() => ({
+  canManage: canEdit.value,
+  currentUserId: authStore.currentUserId,
+}));
+
 const governanceActionsForItem = (item: KnowledgeCard) => getGovernanceRowActions(item, governanceActionContext.value);
 const canShowCardMenu = (item: KnowledgeCard) => canEdit.value || canOperateGovernanceRow(item, governanceActionContext.value);
 const canSelectCard = (item: KnowledgeCard) => canEdit.value || canOperateGovernanceRow(item, governanceActionContext.value);
 
 const getEligibleBatchItems = (action: GovernanceRowAction): KnowledgeCard[] => {
   if (action === 'delete' && canEdit.value) {
-    return selectedKnowledgeItems.value.filter((item: KnowledgeCard) => !isKnowledgeDeleteDisabled(item));
+    return selectedKnowledgeItems.value;
   }
   return selectedKnowledgeItems.value.filter((item: KnowledgeCard) => (
-    canExecuteGovernanceRowAction(item, governanceActionContext.value, action)
+    canExecuteGovernanceRowAction(item, governanceActionContext.value, action, knowledgeDeleteOptions.value)
   ));
 };
 
@@ -1786,9 +1791,14 @@ const confirmBatchDelete = async () => {
   try {
     const res: any = await batchDeleteKnowledge(kbId.value, ids);
     if (res?.success) {
-      MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: ids.length }));
+      const removed = new Set(ids);
+      cardList.value = (cardList.value || []).filter((item: KnowledgeCard) => !removed.has(item.id));
       ids.forEach(id => selectedIds.value.delete(id));
       batchDeleteDialog.value = false;
+      const deletedCount = res?.data?.deleted_count ?? ids.length;
+      if (deletedCount > 0) {
+        MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: deletedCount }));
+      }
       page = 1;
       loadKnowledgeFiles(kbId.value);
       loadTags(kbId.value);
@@ -2437,8 +2447,8 @@ async function createNewSession(value: string): Promise<void> {
                               <div
                                 v-if="canEdit && !governanceActionsForItem(item).includes('delete')"
                                 class="card-menu-item danger"
-                                :class="{ disabled: isKnowledgeDeleteDisabled(item) }"
-                                :aria-disabled="isKnowledgeDeleteDisabled(item)"
+                                :class="{ disabled: isKnowledgeDeleteDisabled(item, knowledgeDeleteOptions) }"
+                                :aria-disabled="isKnowledgeDeleteDisabled(item, knowledgeDeleteOptions)"
                                 @click.stop="delCard(index, item)"
                               >
                                 <t-icon class="icon" name="delete" />
