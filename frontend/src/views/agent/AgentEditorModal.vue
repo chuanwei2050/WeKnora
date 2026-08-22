@@ -995,6 +995,17 @@
                       </div>
                     </div>
 
+                    <!-- 显示 @ 知识库/文件选择按钮 -->
+                    <div v-if="hasKnowledgeBase" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.kbMentionEnabled') }}</label>
+                        <p class="desc">{{ $t('agent.editor.kbMentionEnabledDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.kb_mention_enabled" />
+                      </div>
+                    </div>
+
                     <!-- 仅在提及时检索知识库（当配置了知识库时显示） -->
                     <div v-if="hasKnowledgeBase" class="setting-row">
                       <div class="setting-info">
@@ -1868,6 +1879,7 @@ const defaultFormData = {
     kb_selection_mode: 'all' as 'all' | 'selected' | 'none',
     knowledge_bases: [] as string[],
     retrieve_kb_only_when_mentioned: false,
+    kb_mention_enabled: true,
     // 智能推理下的类型预设：新建 agent 时默认给 RAG 问答（最常用场景）。
     // 编辑既有 agent 时会被 agent 自己保存的 agent_type 覆盖。
     agent_type: 'rag-qa' as AgentType,

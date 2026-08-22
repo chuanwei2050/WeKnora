@@ -71,6 +71,8 @@ export interface CustomAgentConfig {
   // true: 只有用户通过 @ 明确提及知识库/文档时才检索
   // false: 根据 kb_selection_mode 自动检索知识库
   retrieve_kb_only_when_mentioned?: boolean;
+  // 是否在对话输入框显示 @ 知识库/文件选择按钮（默认: true）
+  kb_mention_enabled?: boolean;
 
   // ===== 图片上传/多模态设置 =====
   image_upload_enabled?: boolean;    // 是否启用图片上传（默认: false）

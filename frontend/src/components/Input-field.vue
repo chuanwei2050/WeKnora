@@ -150,7 +150,7 @@ const hasAgentConfig = computed(() => {
   // 内置智能体需要从 agents 列表中获取实际配置
   if (agent?.is_builtin) {
     const builtinAgent = agents.value.find(a => a.id === agent.id);
-    return !!builtinAgent?.config;
+    return !!(builtinAgent?.config || agent?.config);
   }
   return !!agent?.config;
 });
@@ -218,6 +218,7 @@ const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; k
 // 当智能体改变时，模型、网络搜索、可@知识库列表均跟随新智能体配置
 // 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
 watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId]) => {
+  if (props.embeddedMode) return
   if (newAgentId !== oldAgentId && oldAgentId !== undefined) {
     if (newKbMode === 'none') {
       settingsStore.selectKnowledgeBases([]);
@@ -291,6 +292,14 @@ const isKnowledgeBaseLockedByAgent = computed(() => {
 const isKnowledgeBaseDisabledByAgent = computed(() => {
   if (!hasAgentConfig.value) return false;
   return agentKBSelectionMode.value === 'none';
+});
+
+// 智能体是否显示 @ 知识库/文件选择按钮（未配置时默认显示，兼容旧数据）
+const isMentionButtonVisible = computed(() => {
+  if (!hasAgentConfig.value) return true;
+  if (isKnowledgeBaseDisabledByAgent.value) return false;
+  const enabled = currentAgentConfig.value?.kb_mention_enabled;
+  return enabled !== false;
 });
 
 // 智能体配置的模型 ID
@@ -671,6 +680,19 @@ const inputPlaceholder = computed(() => {
     return t('input.placeholder');
   }
 });
+
+// 外挂悬浮窗：从 Integration API 拉取授权知识库（all-allowed 时 kbIds 为空，展示全部）
+const loadEmbeddedKnowledgeBases = async () => {
+  try {
+    const items = await listIntegrationKnowledgeBases();
+    const ids = props.kbIds;
+    knowledgeBases.value = ids.length > 0
+      ? items.filter((item) => ids.includes(item.id))
+      : items;
+  } catch {
+    knowledgeBases.value = [];
+  }
+};
 
 // 加载知识库列表（自己的 + 共享的，用于 @ 提及等）
 const loadKnowledgeBases = async () => {
@@ -1130,7 +1152,14 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
           // 'selected' 完全信任用户在编辑器里的勾选；编辑器已经用 kb_filter 灰显
           // 不兼容项，这里不再二次过滤，避免越权擦除用户明确的选择。
           const configuredKbIds = agentKnowledgeBases.value;
-          availableKbs = availableKbs.filter((kb: any) => configuredKbIds.includes(kb.id));
+          if (configuredKbIds.length > 0) {
+            availableKbs = availableKbs.filter((kb: any) => configuredKbIds.includes(kb.id));
+          } else if (props.embeddedMode && props.kbIds.length > 0) {
+            const allowed = new Set(props.kbIds);
+            availableKbs = availableKbs.filter((kb: any) => allowed.has(kb.id));
+          } else {
+            availableKbs = [];
+          }
         } else if (kbMode === 'all') {
           // 'all' 的语义是"全部兼容的 KB"——按工具派生的能力集合过滤，
           // 避免 wiki-qa 选"全部"后 @ 出来一堆 wiki 工具跑不动的 KB。
@@ -1315,6 +1344,7 @@ const onInput = (val: string | InputEvent) => {
     }
   } else {
     if (textBeforeCursor.endsWith('@')) {
+      if (!isMentionButtonVisible.value) return;
       // 如果智能体禁用了知识库，不触发 @ 菜单
       if (isKnowledgeBaseDisabledByAgent.value) {
         return;
@@ -1387,6 +1417,7 @@ const onCompositionEnd = (e: CompositionEvent) => {
 };
 
 const triggerMention = () => {
+  if (!isMentionButtonVisible.value) return;
   // 如果智能体锁定或禁用了知识库，不允许打开选择器
   if (isKnowledgeBaseLockedByAgent.value) {
     const msgKey = isKnowledgeBaseDisabledByAgent.value ? 'input.kbDisabledByAgent' : 'input.kbLockedByAgent';
@@ -1542,15 +1573,16 @@ const closeMentionSelector = (e: MouseEvent) => {
 let resizeHandler: (() => void) | null = null;
 let scrollHandler: (() => void) | null = null;
 
+watch(() => props.kbIds, () => {
+  if (props.embeddedMode) loadEmbeddedKnowledgeBases();
+}, { deep: true });
+
 onMounted(() => {
   loadConversationConfig();
   loadChatModels();
   loadAgents();
   if (props.embeddedMode) {
-    listIntegrationKnowledgeBases().then((items) => {
-      const allowed = new Set(props.kbIds);
-      knowledgeBases.value = items.filter((item) => allowed.has(item.id));
-    }).catch(() => { knowledgeBases.value = []; });
+    loadEmbeddedKnowledgeBases();
   } else {
     loadKnowledgeBases();
     loadWebSearchConfig();
@@ -2349,7 +2381,7 @@ defineExpose({
         </t-tooltip>
 
         <!-- @ 知识库/文件选择按钮 -->
-        <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+        <t-tooltip v-if="isMentionButtonVisible" placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
           <template #content>
             <div v-if="isKnowledgeBaseDisabledByAgent" class="tooltip-with-link">
               <span>{{ $t('input.kbDisabledByAgent') }}</span>

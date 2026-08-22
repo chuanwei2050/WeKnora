@@ -1464,6 +1464,8 @@ export default {
       sharedKnowledgeBases: "协作知识库",
       retrieveKBOnlyWhenMentioned: "仅在 {'@'} 提及时检索",
       retrieveKBOnlyWhenMentionedDesc: "关闭：自动检索已配置的知识库，开启：仅当用户 {'@'} 提及时才检索",
+      kbMentionEnabled: "显示 {'@'} 按钮",
+      kbMentionEnabledDesc: "关闭后对话输入框将隐藏 {'@'} 知识库/文件选择按钮",
       retrievalSectionTitle: "检索策略",
       rerankModel: "ReRank 模型",
       rerankModelDesc: "用于对知识库检索结果进行重排序，提高回答准确性",

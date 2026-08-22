@@ -149,6 +149,8 @@ type CustomAgentConfig struct {
 	// When true, knowledge base retrieval only happens if user explicitly mentions KB/files with @
 	// When false, knowledge base retrieval happens according to KBSelectionMode
 	RetrieveKBOnlyWhenMentioned bool `yaml:"retrieve_kb_only_when_mentioned" json:"retrieve_kb_only_when_mentioned"`
+	// Whether to show the @ knowledge-base/file picker button in the chat input (default: true)
+	KbMentionEnabled bool `yaml:"kb_mention_enabled" json:"kb_mention_enabled"`
 
 	// Whether to retain retrieval history across turns
 	RetainRetrievalHistory bool `yaml:"retain_retrieval_history" json:"retain_retrieval_history"`

@@ -520,6 +520,8 @@ export default {
       sharedKnowledgeBases: 'Collaborative Knowledge Bases',
       retrieveKBOnlyWhenMentioned: 'Retrieve Only When Mentioned',
       retrieveKBOnlyWhenMentionedDesc: "Off: auto-retrieve configured KBs; On: retrieve only when user {'@'} mentions",
+      kbMentionEnabled: "Show {'@'} Button",
+      kbMentionEnabledDesc: "When off, the {'@'} knowledge base/file picker is hidden in the chat input",
       retrievalSectionTitle: 'Retrieval Strategy',
       rerankModel: 'ReRank Model',
       rerankModelDesc: 'Used to rerank knowledge base retrieval results for better accuracy',

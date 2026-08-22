@@ -235,7 +235,8 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
 
   const pointerDrag = (target: HTMLElement, operation: (dx: number, dy: number) => void, onEnd?: () => void) => {
     target.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0 || event.target !== target) return
+      if (event.button !== 0) return
+      if (event.target !== target && !target.contains(event.target as Node)) return
       let x = event.clientX
       let y = event.clientY
       target.setPointerCapture(event.pointerId)
@@ -281,8 +282,8 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
     applyStyles(launcher, { left: `${launcherPosition.x}px`, top: `${launcherPosition.y}px`, right: 'auto', bottom: 'auto', width: `${launcherWidth}px` })
   }
   clampLauncher()
-  const snapLauncherToEdge = () => {
-    if (!launcherMoved) return
+  const snapLauncherToEdge = (dragged = launcherMoved) => {
+    if (!dragged) return
     const viewport = viewportRect()
     const leftDistance = launcherPosition.x - viewport.x
     const rightDistance = viewport.x + viewport.width - (launcherPosition.x + LAUNCHER_SIZE)
@@ -306,8 +307,14 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
     launcherPosition = { x: launcherPosition.x + dx, y: launcherPosition.y + dy }
     clampLauncher()
   }, () => {
+    const wasDrag = launcherMoved
     launcherDragDistance = 0
-    snapLauncherToEdge()
+    launcherMoved = false
+    if (wasDrag) {
+      snapLauncherToEdge(wasDrag)
+      return
+    }
+    if (!destroyed && !opened) instance.open()
   })
 
   const keyboardLayout = (operation: (dx: number, dy: number) => void) => (event: KeyboardEvent) => {
@@ -378,10 +385,6 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   window.addEventListener('resize', onViewportChange)
   window.visualViewport?.addEventListener('resize', onViewportChange)
 
-  launcher.addEventListener('click', () => {
-    if (launcherMoved) { launcherMoved = false; return }
-    instance.open()
-  })
   closeButton.addEventListener('click', () => instance.close())
   newConversationButton.addEventListener('click', () => iframe.contentWindow?.postMessage({ version: 1, type: 'new-conversation' }, config.targetOrigin!))
   conversationsButton.addEventListener('click', () => iframe.contentWindow?.postMessage({ version: 1, type: 'toggle-conversations' }, config.targetOrigin!))

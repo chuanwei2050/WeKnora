@@ -117,7 +117,8 @@ describe('floating widget', () => {
     launcher.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 900, clientY: 500 }))
     launcher.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: -100, clientY: 500 }))
     launcher.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: -100, clientY: 500 }))
-    expect(launcher.style.left).toBe('0px')
+    const viewportX = window.visualViewport?.offsetLeft ?? 0
+    expect(launcher.style.left).toBe(`${viewportX}px`)
     expect(launcher.style.width).toBe('46px')
     expect(launcher.dataset.docked).toBe('left')
     instance.destroy()
@@ -165,7 +166,6 @@ describe('floating widget', () => {
     launcher.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 944, clientY: 688 }))
     launcher.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 945, clientY: 688 }))
     launcher.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 945, clientY: 688 }))
-    launcher.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(openListener).toHaveBeenCalledOnce()
     instance.destroy()
   })
