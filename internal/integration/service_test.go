@@ -115,6 +115,81 @@ func TestTenantAdministratorMustBeExplicitlyBound(t *testing.T) {
 	require.Equal(t, secondAdministrator.ID, updated.AdministratorUserID)
 }
 
+func TestWeKnoraSideTenantAdminPromotionHonoredForHostMember(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	user := &types.User{ID: "promoted-member", Username: "promoted-member", Email: "promoted@example.test", PasswordHash: "unused", TenantID: 1, IsActive: true, Role: types.UserRoleMember}
+	require.NoError(t, svc.db.Create(user).Error)
+	client := &Client{
+		ID: "project", TenantID: 1, IdentityProviderID: "idp", Enabled: true,
+		KnowledgeBaseIDsJSON: `[]`, RoleMappingsJSON: `{"member":"member"}`,
+		MaxRole: string(types.UserRoleTenantAdmin), AdministratorUserID: "other-admin",
+	}
+	require.NoError(t, svc.db.Create(client).Error)
+	require.NoError(t, svc.db.Create(&ExternalIdentity{ClientID: client.ID, IdentityProviderID: "idp", ExternalTenantID: "external", ExternalUserID: "host-user", UserID: user.ID, Active: true}).Error)
+
+	req := BootstrapRequest{ExternalTenantID: "external", ExternalUserID: "host-user", ExternalRoles: []string{"member"}}
+	resolved, err := svc.resolveExternalUser(ctx, client, req)
+	require.NoError(t, err)
+	require.Equal(t, types.UserRoleMember, resolved.EffectiveRole())
+
+	user.Role = types.UserRoleTenantAdmin
+	require.NoError(t, svc.db.Save(user).Error)
+	resolved, err = svc.resolveExternalUser(ctx, client, req)
+	require.NoError(t, err)
+	require.Equal(t, user.ID, resolved.ID)
+	require.Equal(t, types.UserRoleTenantAdmin, resolved.EffectiveRole())
+
+	user.Role = types.UserRoleMember
+	require.NoError(t, svc.db.Save(user).Error)
+	resolved, err = svc.resolveExternalUser(ctx, client, req)
+	require.NoError(t, err)
+	require.Equal(t, types.UserRoleMember, resolved.EffectiveRole())
+}
+
+func TestWeKnoraSideTenantAdminPromotionIgnoresClientMaxRole(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	user := &types.User{ID: "promoted-member", Username: "promoted-member", Email: "promoted@example.test", PasswordHash: "unused", TenantID: 1, IsActive: true, Role: types.UserRoleTenantAdmin}
+	require.NoError(t, svc.db.Create(user).Error)
+	client := &Client{
+		ID: "project", TenantID: 1, IdentityProviderID: "idp", Enabled: true,
+		KnowledgeBaseIDsJSON: `[]`, RoleMappingsJSON: `{"member":"member"}`,
+		MaxRole: string(types.UserRoleMember),
+	}
+	require.NoError(t, svc.db.Create(client).Error)
+	require.NoError(t, svc.db.Create(&ExternalIdentity{ClientID: client.ID, IdentityProviderID: "idp", ExternalTenantID: "external", ExternalUserID: "host-user", UserID: user.ID, Active: true}).Error)
+
+	resolved, err := svc.resolveExternalUser(ctx, client, BootstrapRequest{ExternalTenantID: "external", ExternalUserID: "host-user", ExternalRoles: []string{"member"}})
+	require.NoError(t, err)
+	require.Equal(t, user.ID, resolved.ID)
+	require.Equal(t, types.UserRoleTenantAdmin, resolved.EffectiveRole())
+}
+
+func TestHostMappedTenantAdminMustHitBoundAdministrator(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	boundAdmin := &types.User{ID: "bound-admin", Username: "bound-admin", Email: "bound@example.test", PasswordHash: "unused", TenantID: 1, IsActive: true, Role: types.UserRoleTenantAdmin}
+	otherAdmin := &types.User{ID: "other-admin", Username: "other-admin", Email: "other@example.test", PasswordHash: "unused", TenantID: 1, IsActive: true, Role: types.UserRoleTenantAdmin}
+	require.NoError(t, svc.db.Create(boundAdmin).Error)
+	require.NoError(t, svc.db.Create(otherAdmin).Error)
+	client := &Client{
+		ID: "project", TenantID: 1, IdentityProviderID: "idp", Enabled: true,
+		KnowledgeBaseIDsJSON: `[]`, RoleMappingsJSON: `{"external_admin":"tenant_admin","member":"member"}`,
+		MaxRole: string(types.UserRoleTenantAdmin), AdministratorUserID: boundAdmin.ID,
+	}
+	require.NoError(t, svc.db.Create(client).Error)
+	require.NoError(t, svc.db.Create(&ExternalIdentity{ClientID: client.ID, IdentityProviderID: "idp", ExternalTenantID: "external", ExternalUserID: "other-admin-host", UserID: otherAdmin.ID, Active: true}).Error)
+	require.NoError(t, svc.db.Create(&ExternalIdentity{ClientID: client.ID, IdentityProviderID: "idp", ExternalTenantID: "external", ExternalUserID: "bound-admin-host", UserID: boundAdmin.ID, Active: true}).Error)
+
+	_, err := svc.resolveExternalUser(ctx, client, BootstrapRequest{ExternalTenantID: "external", ExternalUserID: "other-admin-host", ExternalRoles: []string{"external_admin"}})
+	require.ErrorIs(t, err, ErrForbidden)
+
+	resolved, err := svc.resolveExternalUser(ctx, client, BootstrapRequest{ExternalTenantID: "external", ExternalUserID: "bound-admin-host", ExternalRoles: []string{"external_admin"}})
+	require.NoError(t, err)
+	require.Equal(t, boundAdmin.ID, resolved.ID)
+}
+
 func TestBrowserTicketExchangeRefreshAndLogoutLifecycle(t *testing.T) {
 	svc := testService(t)
 	ctx := context.Background()
@@ -136,9 +211,11 @@ func TestBrowserTicketExchangeRefreshAndLogoutLifecycle(t *testing.T) {
 	svc.tenants = staticTenantService{tenant: &types.Tenant{ID: 1, Status: string(types.TenantStatusActive)}}
 	require.NoError(t, svc.ValidateCSRF(ctx, browserToken, csrf))
 	require.ErrorIs(t, svc.ValidateCSRF(ctx, browserToken, ""), ErrForbidden)
-	refreshedCSRF, err := svc.Refresh(ctx, browserToken, csrf)
+	refreshedCSRF, refreshedUser, err := svc.Refresh(ctx, browserToken, csrf)
 	require.NoError(t, err)
 	require.Equal(t, csrf, refreshedCSRF)
+	require.NotNil(t, refreshedUser)
+	require.Equal(t, user.ID, refreshedUser.ID)
 	require.NoError(t, svc.Logout(ctx, browserToken))
 	_, _, _, err = svc.Authenticate(ctx, browserToken, "browser")
 	require.ErrorIs(t, err, ErrUnauthorized)

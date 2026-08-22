@@ -26,7 +26,7 @@ TBD - created by archiving change add-tenant-user-administration. Update Purpose
 - **THEN** 系统软删除租户、阻断其用户访问且不物理删除关联业务数据
 
 ### Requirement: 管理员必须能够管理租户内用户
-系统 MUST 允许平台管理员管理任意租户用户，并 MUST 允许租户管理员列出、创建、统一编辑和启用或禁用本租户用户。统一编辑 MUST 支持修改用户名、可选重置密码、修改普通成员角色及配置知识库可见范围。
+系统 MUST 允许平台管理员管理任意租户用户，并 MUST 允许租户管理员列出、创建、统一编辑和启用或禁用本租户用户。统一编辑 MUST 支持修改用户名、可选重置密码、在 `tenant_admin` 与 `member` 之间调整角色及配置知识库可见范围。
 
 #### Scenario: 租户管理员创建普通成员
 - **WHEN** 租户管理员在本租户提交唯一用户名、符合强度的初始密码和知识库范围
@@ -40,8 +40,12 @@ TBD - created by archiving change add-tenant-user-administration. Update Purpose
 - **WHEN** 管理员在编辑弹窗修改普通成员的用户名、密码、角色或知识库范围
 - **THEN** 系统校验后保存全部变更，密码留空时保持原密码不变
 
+#### Scenario: 管理员将租户管理员改回普通成员
+- **WHEN** 管理员在编辑弹窗将非最后一个启用状态的 `tenant_admin` 改为 `member` 并配置知识库范围
+- **THEN** 系统保存为普通成员、应用知识库范围并撤销其现有令牌
+
 ### Requirement: 用户管理必须强制租户隔离和角色上限
-系统 MUST 拒绝租户管理员读取或修改其他租户用户，MUST 拒绝租户管理员创建或授予 `platform_admin`，MUST 拒绝修改现有 `tenant_admin` 或 `platform_admin` 的角色，并 MUST 拒绝普通成员访问用户管理 API。
+系统 MUST 拒绝租户管理员读取或修改其他租户用户，MUST 拒绝租户管理员创建或授予 `platform_admin`，MUST 拒绝修改现有 `platform_admin` 的角色，MUST 允许在保留至少一名启用租户管理员的前提下将 `tenant_admin` 与 `member` 互改，并 MUST 拒绝普通成员访问用户管理 API。
 
 #### Scenario: 跨租户修改用户
 - **WHEN** 租户管理员尝试修改路径中其他租户的用户
@@ -51,8 +55,12 @@ TBD - created by archiving change add-tenant-user-administration. Update Purpose
 - **WHEN** 租户管理员尝试将用户角色设置为 `platform_admin`
 - **THEN** 系统拒绝请求且不改变用户角色
 
-#### Scenario: 修改管理员角色
-- **WHEN** 管理员尝试修改现有租户管理员或平台管理员的角色
+#### Scenario: 租户管理员降级为普通成员
+- **WHEN** 管理员将非最后一个启用状态的 `tenant_admin` 改为 `member`
+- **THEN** 系统保存为普通成员并撤销其现有令牌
+
+#### Scenario: 修改平台管理员角色
+- **WHEN** 管理员尝试修改现有平台管理员的角色
 - **THEN** 系统拒绝请求且目标管理员角色保持不变
 
 ### Requirement: 普通成员知识库可见范围必须可配置且不可绕过
@@ -106,6 +114,10 @@ TBD - created by archiving change add-tenant-user-administration. Update Purpose
 #### Scenario: 禁用最后一个租户管理员
 - **WHEN** 管理员尝试禁用租户内唯一启用的 `tenant_admin`
 - **THEN** 系统返回冲突响应且用户状态保持启用
+
+#### Scenario: 降级最后一个租户管理员
+- **WHEN** 管理员尝试将租户内唯一启用的 `tenant_admin` 改为 `member`
+- **THEN** 系统返回冲突响应且目标用户角色保持为 `tenant_admin`
 
 ### Requirement: 管理页面必须按角色提供对应操作
 系统 MUST 为平台管理员提供租户管理页面，并 MUST 为平台管理员和租户管理员提供用户管理页面；新增与编辑用户弹窗 MUST 使用一致的角色、密码和知识库范围控件且输入控件 MUST 占满表单可用宽度；用户列表 MUST 通过统一编辑弹窗修改用户，操作栏 MUST 提供符合删除条件时可用的删除操作；普通成员 MUST 看不到入口且直接访问路由时被拒绝。

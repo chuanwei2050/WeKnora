@@ -729,7 +729,9 @@ func validateManagedRoleChange(currentRole, nextRole types.UserRole) error {
 	if !types.IsTenantUserRole(nextRole) {
 		return werrors.NewValidationError("Role must be tenant_admin or member")
 	}
-	if currentRole != types.UserRoleMember && nextRole != currentRole {
+	// Platform admins stay immutable; tenant_admin ↔ member is allowed
+	// (last active tenant admin is guarded separately).
+	if currentRole == types.UserRolePlatformAdmin || !types.IsTenantUserRole(currentRole) {
 		return werrors.NewForbiddenError("Administrator roles cannot be changed")
 	}
 	return nil
@@ -790,6 +792,11 @@ func (s *userService) UpdateTenantUser(ctx context.Context, actor *types.User, t
 	if err := validateManagedRoleChange(currentRole, req.Role); err != nil {
 		return nil, err
 	}
+	if currentRole == types.UserRoleTenantAdmin && req.Role != types.UserRoleTenantAdmin {
+		if err := s.ensureNotLastTenantAdmin(ctx, user); err != nil {
+			return nil, err
+		}
+	}
 	if existing, lookupErr := s.userRepo.GetUserByUsername(ctx, username); lookupErr == nil && existing != nil && existing.ID != user.ID {
 		return nil, werrors.NewConflictError("Username already exists")
 	} else if lookupErr != nil && !isUserLookupNotFound(lookupErr) {
@@ -809,8 +816,7 @@ func (s *userService) UpdateTenantUser(ctx context.Context, actor *types.User, t
 
 	user.Username = username
 	user.Nickname = nickname
-	user.Role = req.Role
-	user.CanAccessAllTenants = false
+	applyManagedTenantRole(user, req.Role)
 	user.KnowledgeBaseAccessMode = mode
 	user.KnowledgeBaseIDs = ids
 	if req.Password != "" {
@@ -942,8 +948,21 @@ func (s *userService) ResetTenantUserPassword(ctx context.Context, actor *types.
 	return s.tokenRepo.RevokeTokensByUserID(ctx, user.ID)
 }
 
+func applyManagedTenantRole(user *types.User, role types.UserRole) {
+	user.Role = role
+	user.CanAccessAllTenants = false
+	// Keep EffectiveRole() aligned after demotion when legacy BidReviewRole
+	// still elevates the account.
+	if role == types.UserRoleMember {
+		switch user.BidReviewRole {
+		case string(types.UserRoleTenantAdmin), string(types.UserRolePlatformAdmin):
+			user.BidReviewRole = string(types.UserRoleMember)
+		}
+	}
+}
+
 func (s *userService) ensureNotLastTenantAdmin(ctx context.Context, user *types.User) error {
-	if user.Role != types.UserRoleTenantAdmin || !user.IsActive {
+	if user.EffectiveRole() != types.UserRoleTenantAdmin || !user.IsActive {
 		return nil
 	}
 	count, err := s.userRepo.CountActiveTenantAdmins(ctx, user.TenantID, user.ID)
@@ -967,16 +986,16 @@ func (s *userService) UpdateTenantUserRole(ctx context.Context, actor *types.Use
 	if err != nil {
 		return nil, err
 	}
-	if err := validateManagedRoleChange(user.EffectiveRole(), role); err != nil {
+	currentRole := user.EffectiveRole()
+	if err := validateManagedRoleChange(currentRole, role); err != nil {
 		return nil, err
 	}
-	if user.Role == types.UserRoleTenantAdmin && role != types.UserRoleTenantAdmin {
+	if currentRole == types.UserRoleTenantAdmin && role != types.UserRoleTenantAdmin {
 		if err := s.ensureNotLastTenantAdmin(ctx, user); err != nil {
 			return nil, err
 		}
 	}
-	user.Role = role
-	user.CanAccessAllTenants = false
+	applyManagedTenantRole(user, role)
 	user.UpdatedAt = time.Now()
 	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
 		return nil, err

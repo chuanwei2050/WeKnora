@@ -3,7 +3,7 @@ import axios, { type AxiosResponse } from "axios";
 import { generateRandomString } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
-import { getEmbeddedCSRFToken, getEmbeddedSessionToken, isCookieEmbeddedMode, notifyEmbeddedHost } from './embedded-runtime';
+import { getEmbeddedCSRFToken, getEmbeddedSessionToken, isCookieEmbeddedMode, clearEmbeddedAuth, notifyEmbeddedHost } from './embedded-runtime';
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -112,6 +112,7 @@ instance.interceptors.response.use(
   async (error: any) => {
     const originalRequest = error.config;
     if (error.response?.status === 401 && isCookieEmbeddedMode()) {
+      clearEmbeddedAuth();
       notifyEmbeddedHost('unauthorized');
       return Promise.reject({ status: 401, message: t('error.pleaseRelogin') });
     }

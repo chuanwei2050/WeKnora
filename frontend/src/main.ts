@@ -12,8 +12,16 @@ import i18n from "./i18n";
 import { initTheme } from "@/composables/useTheme";
 import { installTDesignIconOfflineGuard } from "@/utils/tdesign-icon-offline";
 import { ensureBidReviewSession } from "@/utils/bidreview-sso";
-import { getEmbeddedParentOrigin, getRuntimeMode, isIntegrationAuthFailure, notifyEmbeddedHost, parseEmbeddedMessage } from '@/utils/embedded-runtime';
-import { exchangeBootstrapTicket, refreshIntegrationSession } from '@/api/integration';
+import {
+  clearEmbeddedAuth,
+  getEmbeddedParentOrigin,
+  getRuntimeMode,
+  isIntegrationAuthFailure,
+  notifyEmbeddedHost,
+  parseEmbeddedMessage,
+  restoreEmbeddedAuth,
+} from '@/utils/embedded-runtime';
+import { exchangeBootstrapTicket, refreshIntegrationSession, type ExchangeResponse } from '@/api/integration';
 import { useAuthStore } from '@/stores/auth';
 
 // 必须在 Vue 组件挂载之前执行，避免 tdesign-icons 运行时请求 tdesign.gtimg.com
@@ -28,7 +36,59 @@ app.use(pinia);
 app.use(router);
 app.use(i18n);
 
+function applyEmbeddedUser(sessionUser: ExchangeResponse['user']) {
+  const authStore = useAuthStore(pinia)
+  authStore.setUser({
+    id: sessionUser.id,
+    username: sessionUser.username,
+    nickname: sessionUser.username,
+    email: '',
+    tenant_id: String(sessionUser.tenant_id),
+    can_access_all_tenants: false,
+    role: (sessionUser.role || 'member') as 'platform_admin' | 'tenant_admin' | 'member',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  })
+}
+
+function startEmbeddedSessionRefresh() {
+  const sync = () => {
+    refreshIntegrationSession().then((refreshed) => {
+      if (refreshed.user) applyEmbeddedUser(refreshed.user)
+    }).catch((error) => {
+      if (isIntegrationAuthFailure(error)) {
+        clearEmbeddedAuth()
+        notifyEmbeddedHost('unauthorized')
+      }
+    })
+  }
+  window.setInterval(sync, 10 * 60 * 1000)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') sync()
+  })
+}
+
+async function tryResumeEmbeddedPageSession(): Promise<boolean> {
+  if (!restoreEmbeddedAuth()) return false
+  try {
+    const refreshed = await refreshIntegrationSession()
+    if (!refreshed.user?.id) {
+      clearEmbeddedAuth()
+      return false
+    }
+    applyEmbeddedUser(refreshed.user)
+    startEmbeddedSessionRefresh()
+    notifyEmbeddedHost('ready')
+    return true
+  } catch {
+    clearEmbeddedAuth()
+    return false
+  }
+}
+
 async function prepareEmbeddedPageSession() {
+  if (await tryResumeEmbeddedPageSession()) return
+
   const embeddedParentOrigin = getEmbeddedParentOrigin()
   const session = await new Promise<Awaited<ReturnType<typeof exchangeBootstrapTicket>>>((resolve, reject) => {
     let timeoutTimer = 0
@@ -62,23 +122,8 @@ async function prepareEmbeddedPageSession() {
     notifyEmbeddedHost('ready')
     readyTimer = window.setInterval(() => notifyEmbeddedHost('ready'), 1_500)
   })
-  const authStore = useAuthStore(pinia)
-  authStore.setUser({
-    id: session.user.id,
-    username: session.user.username,
-    nickname: session.user.username,
-    email: '',
-    tenant_id: String(session.user.tenant_id),
-    can_access_all_tenants: false,
-    role: (session.user.role || 'member') as 'platform_admin' | 'tenant_admin' | 'member',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  })
-  window.setInterval(() => {
-    refreshIntegrationSession().catch((error) => {
-      if (isIntegrationAuthFailure(error)) notifyEmbeddedHost('unauthorized')
-    })
-  }, 10 * 60 * 1000)
+  applyEmbeddedUser(session.user)
+  startEmbeddedSessionRefresh()
 }
 
 const mode = getRuntimeMode()
@@ -111,6 +156,7 @@ const mountApp = () => {
 }
 
 prepareSession.then(mountApp).catch(() => {
+  clearEmbeddedAuth()
   notifyEmbeddedHost('unauthorized')
   if (mode !== 'embedded-page') {
     mountApp()

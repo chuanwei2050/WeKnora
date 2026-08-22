@@ -45,7 +45,20 @@ func TestValidateManagedNickname(t *testing.T) {
 func TestValidateManagedRoleChange(t *testing.T) {
 	require.NoError(t, validateManagedRoleChange(types.UserRoleMember, types.UserRoleTenantAdmin))
 	require.NoError(t, validateManagedRoleChange(types.UserRoleTenantAdmin, types.UserRoleTenantAdmin))
-	require.Error(t, validateManagedRoleChange(types.UserRoleTenantAdmin, types.UserRoleMember))
+	require.NoError(t, validateManagedRoleChange(types.UserRoleTenantAdmin, types.UserRoleMember))
+	require.Error(t, validateManagedRoleChange(types.UserRolePlatformAdmin, types.UserRoleMember))
+	require.Error(t, validateManagedRoleChange(types.UserRolePlatformAdmin, types.UserRoleTenantAdmin))
+}
+
+func TestApplyManagedTenantRoleClearsLegacyAdminBidReviewRole(t *testing.T) {
+	user := &types.User{
+		Role:          types.UserRoleTenantAdmin,
+		BidReviewRole: string(types.UserRoleTenantAdmin),
+	}
+	applyManagedTenantRole(user, types.UserRoleMember)
+	require.Equal(t, types.UserRoleMember, user.Role)
+	require.Equal(t, string(types.UserRoleMember), user.BidReviewRole)
+	require.Equal(t, types.UserRoleMember, user.EffectiveRole())
 }
 
 func TestNormalizeKnowledgeBaseIDs(t *testing.T) {

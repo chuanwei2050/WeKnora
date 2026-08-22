@@ -88,11 +88,11 @@
         </t-form-item>
         <t-form-item label="角色" required>
           <div class="field-control">
-            <t-select v-model="editForm.role" class="form-control" :disabled="editTarget?.role !== 'member'">
+            <t-select v-model="editForm.role" class="form-control" :disabled="editTarget?.role === 'platform_admin'">
               <t-option value="member" label="普通成员" />
               <t-option value="tenant_admin" label="租户管理员" />
             </t-select>
-            <div v-if="editTarget?.role !== 'member'" class="field-hint">管理员角色不可修改</div>
+            <div class="field-hint">租户需至少保留一名启用的租户管理员</div>
           </div>
         </t-form-item>
         <t-form-item label="知识库权限" required>
@@ -233,7 +233,11 @@ async function saveEdit() {
     const invalidPassword = passwordError(editForm.password)
     if (invalidPassword) { MessagePlugin.warning(invalidPassword); return }
   }
-  const input: TenantUserUpdateInput = editForm.knowledgeBaseAccessMode === 'all'
+  if (editForm.role === 'member' && editForm.knowledgeBaseAccessMode === 'selected' && editForm.knowledgeBaseIds.length === 0) {
+    MessagePlugin.warning('请至少选择一个知识库，或改为“全部知识库”')
+    return
+  }
+  const input: TenantUserUpdateInput = editForm.role !== 'member' || editForm.knowledgeBaseAccessMode === 'all'
     ? { username: editForm.username.trim(), nickname: editForm.nickname.trim(), password: editForm.password, role: editForm.role, knowledge_base_access_mode: 'all', knowledge_base_ids: [] }
     : { username: editForm.username.trim(), nickname: editForm.nickname.trim(), password: editForm.password, role: editForm.role, knowledge_base_access_mode: 'selected', knowledge_base_ids: [...editForm.knowledgeBaseIds] }
   saving.value = true
@@ -244,6 +248,7 @@ async function saveEdit() {
         ...authStore.user,
         nickname: updatedUser.nickname,
         username: updatedUser.username,
+        role: updatedUser.role,
       })
     }
     MessagePlugin.success('用户已更新')
@@ -276,6 +281,19 @@ watch(() => [createForm.role, createForm.knowledgeBaseAccessMode], ([role, mode]
 })
 watch(() => [editForm.role, editForm.knowledgeBaseAccessMode], ([role, mode]) => {
   if (editVisible.value && role === 'member' && mode === 'selected' && !knowledgeBasesLoaded.value) void loadKnowledgeBaseOptions()
+})
+watch(() => editForm.role, (role, previous) => {
+  if (!editVisible.value || !editTarget.value) return
+  // Switching tenant_admin → member unlocks KB controls; prompt an intentional scope.
+  if (previous === 'tenant_admin' && role === 'member' && editTarget.value.role === 'tenant_admin') {
+    editForm.knowledgeBaseAccessMode = 'selected'
+    editForm.knowledgeBaseIds = []
+    void loadKnowledgeBaseOptions()
+  }
+  if (role === 'tenant_admin') {
+    editForm.knowledgeBaseAccessMode = 'all'
+    editForm.knowledgeBaseIds = []
+  }
 })
 watch(tenantId, () => { page.value = 1; knowledgeBases.value = []; knowledgeBasesLoaded.value = false; void loadUsers() })
 onMounted(loadUsers)

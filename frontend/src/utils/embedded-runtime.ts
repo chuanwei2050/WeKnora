@@ -1,9 +1,54 @@
 export type RuntimeMode = 'standalone' | 'embedded-page' | 'embedded-widget'
 
 const ALLOWED_MODES = new Set<RuntimeMode>(['standalone', 'embedded-page', 'embedded-widget'])
+const EMBEDDED_AUTH_STORAGE_KEY = 'weknora_integration_embed_auth'
 let csrfToken = ''
 let sessionToken = ''
 let embeddedScopes = new Set<string>()
+
+type StoredEmbeddedAuth = { session_token: string; csrf_token: string; scopes?: string[] }
+
+function canUseSessionStorage(): boolean {
+  try {
+    return typeof sessionStorage !== 'undefined'
+  } catch {
+    return false
+  }
+}
+
+export function persistEmbeddedAuth(): void {
+  if (!canUseSessionStorage() || !sessionToken || !csrfToken) return
+  const payload: StoredEmbeddedAuth = {
+    session_token: sessionToken,
+    csrf_token: csrfToken,
+    scopes: Array.from(embeddedScopes),
+  }
+  sessionStorage.setItem(EMBEDDED_AUTH_STORAGE_KEY, JSON.stringify(payload))
+}
+
+export function restoreEmbeddedAuth(): boolean {
+  if (!canUseSessionStorage()) return false
+  const raw = sessionStorage.getItem(EMBEDDED_AUTH_STORAGE_KEY)
+  if (!raw) return false
+  try {
+    const parsed = JSON.parse(raw) as StoredEmbeddedAuth
+    if (!parsed?.session_token || !parsed?.csrf_token) return false
+    sessionToken = parsed.session_token
+    csrfToken = parsed.csrf_token
+    embeddedScopes = new Set(Array.isArray(parsed.scopes) ? parsed.scopes : [])
+    return true
+  } catch {
+    sessionStorage.removeItem(EMBEDDED_AUTH_STORAGE_KEY)
+    return false
+  }
+}
+
+export function clearEmbeddedAuth(): void {
+  sessionToken = ''
+  csrfToken = ''
+  embeddedScopes = new Set()
+  if (canUseSessionStorage()) sessionStorage.removeItem(EMBEDDED_AUTH_STORAGE_KEY)
+}
 
 export function getRuntimeMode(location: Pick<Location, 'pathname' | 'search'> = window.location): RuntimeMode {
   const requested = new URLSearchParams(location.search).get('mode') as RuntimeMode | null
@@ -24,6 +69,7 @@ export function isCookieEmbeddedMode(): boolean {
 
 export function setEmbeddedCSRFToken(value: string): void {
   csrfToken = value
+  persistEmbeddedAuth()
 }
 
 export function getEmbeddedCSRFToken(): string {
@@ -32,6 +78,7 @@ export function getEmbeddedCSRFToken(): string {
 
 export function setEmbeddedSessionToken(value: string): void {
   sessionToken = value
+  persistEmbeddedAuth()
 }
 
 export function getEmbeddedSessionToken(): string {
@@ -51,6 +98,7 @@ export function getEmbeddedAuthHeaders(options: { csrf?: boolean; json?: boolean
 
 export function setEmbeddedScopes(scopes: string[]): void {
   embeddedScopes = new Set(scopes)
+  persistEmbeddedAuth()
 }
 
 export function hasEmbeddedScope(scope: string): boolean {

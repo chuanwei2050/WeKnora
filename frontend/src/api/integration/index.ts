@@ -27,16 +27,17 @@ export async function exchangeBootstrapTicket(ticket: string): Promise<ExchangeR
   return data
 }
 
-export async function refreshIntegrationSession(): Promise<void> {
+export async function refreshIntegrationSession(): Promise<{ csrf_token: string; user?: ExchangeResponse['user'] }> {
   const response = await fetch(`${getApiBaseUrl()}/api/integration/v1/auth/refresh`, {
     method: 'POST',
     credentials: 'include',
     headers: getEmbeddedAuthHeaders({ csrf: true }),
   })
   if (!response.ok) throw new Error(`session refresh failed: ${response.status}`)
-  const payload = await response.json() as { data?: { csrf_token?: string } }
+  const payload = await response.json() as { data?: { csrf_token?: string; user?: ExchangeResponse['user'] } }
   if (!payload.data?.csrf_token) throw new Error('invalid session refresh response')
   setEmbeddedCSRFToken(payload.data.csrf_token)
+  return { csrf_token: payload.data.csrf_token, user: payload.data.user }
 }
 
 export async function createIntegrationChatSession(input: { mode: 'selected'; knowledgeBaseIds: string[] } | { mode: 'all-allowed' }): Promise<{ id: string }> {

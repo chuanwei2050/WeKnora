@@ -558,7 +558,7 @@ func (s *Service) resolveExternalUser(ctx context.Context, client *Client, req B
 		if getErr != nil || user == nil {
 			return user, getErr
 		}
-		if user.TenantID != client.TenantID || !user.IsActive || user.EffectiveRole() != role {
+		if !existingExternalUserRoleAllowed(client, user, role) {
 			return nil, ErrForbidden
 		}
 		return user, nil
@@ -627,6 +627,27 @@ func mappedRole(client *Client, externalRoles []string) types.UserRole {
 		}
 	}
 	return role
+}
+
+// existingExternalUserRoleAllowed decides whether a persisted WeKnora user may
+// continue an integration session for the host-mapped role.
+//
+// Host-mapped tenant_admin still requires the bound administrator account
+// (checked by the caller). WeKnora-side promotion is allowed when the host
+// still maps to member and the account is already tenant_admin, regardless of
+// client max_role (max_role only caps host-driven role mapping).
+func existingExternalUserRoleAllowed(client *Client, user *types.User, mapped types.UserRole) bool {
+	if client == nil || user == nil || user.TenantID != client.TenantID || !user.IsActive {
+		return false
+	}
+	effective := user.EffectiveRole()
+	if effective == mapped {
+		return true
+	}
+	if mapped == types.UserRoleMember && effective == types.UserRoleTenantAdmin {
+		return true
+	}
+	return false
 }
 
 func (s *Service) Exchange(ctx context.Context, ticketToken, origin string) (string, string, *Principal, *types.User, error) {
@@ -800,16 +821,16 @@ func (s *Service) ValidateCSRF(ctx context.Context, browserToken, csrf string) e
 	return nil
 }
 
-func (s *Service) Refresh(ctx context.Context, browserToken, csrf string) (string, error) {
-	principal, _, _, err := s.Authenticate(ctx, browserToken, "browser")
+func (s *Service) Refresh(ctx context.Context, browserToken, csrf string) (string, *types.User, error) {
+	principal, user, _, err := s.Authenticate(ctx, browserToken, "browser")
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	now := s.now()
 	expires := now.Add(SessionTTL)
 	var session Session
 	if err = s.db.WithContext(ctx).Where("digest = ?", digest(browserToken)).First(&session).Error; err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if expires.After(session.AbsoluteExpiresAt) {
 		expires = session.AbsoluteExpiresAt
@@ -818,7 +839,7 @@ func (s *Service) Refresh(ctx context.Context, browserToken, csrf string) (strin
 	if err == nil {
 		s.Audit(ctx, principal, "auth.refresh", "allowed", "")
 	}
-	return csrf, err
+	return csrf, user, err
 }
 
 func (s *Service) Logout(ctx context.Context, browserToken string) error {
