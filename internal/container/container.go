@@ -79,6 +79,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	apputils "github.com/Tencent/WeKnora/internal/utils"
 	slackpkg "github.com/slack-go/slack"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
@@ -1083,16 +1084,7 @@ func loadDBStoresIntoRegistry(storeRegistry interfaces.StoreRegistry, db *gorm.D
 //   - Configured goroutine pool
 //   - Error if initialization fails
 func initAntsPool(cfg *config.Config) (*ants.Pool, error) {
-	// Default to 5 if not specified in config
-	poolSize := os.Getenv("CONCURRENCY_POOL_SIZE")
-	if poolSize == "" {
-		poolSize = "5"
-	}
-	poolSizeInt, err := strconv.Atoi(poolSize)
-	if err != nil {
-		return nil, err
-	}
-	// Set up the pool with pre-allocation for better performance
+	poolSizeInt := apputils.ConcurrencyPoolSize()
 	return ants.NewPool(poolSizeInt, ants.WithPreAlloc(true))
 }
 

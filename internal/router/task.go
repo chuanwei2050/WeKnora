@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	apputils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/hibiken/asynq"
 	"go.uber.org/dig"
 )
@@ -87,6 +88,7 @@ func NewAsynqServer() *asynq.Server {
 	srv := asynq.NewServer(
 		opt,
 		asynq.Config{
+			Concurrency: apputils.AsynqConcurrency(),
 			Queues: map[string]int{
 				"critical": 6, // Highest priority queue
 				"default":  3, // Default priority queue

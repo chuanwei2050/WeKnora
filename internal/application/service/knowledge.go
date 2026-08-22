@@ -3026,77 +3026,102 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 		return chunk.Content
 	}
 
-	// Generate questions for each chunk with context
+	// Generate questions for each chunk with context (bounded parallelism).
 	var indexInfoList []*types.IndexInfo
+	var statsMu sync.Mutex
+	questionWorkers := secutils.ConcurrencyPoolSize()
+	questionGroup, questionCtx := errgroup.WithContext(ctx)
+	questionGroup.SetLimit(questionWorkers)
+
 	for i, chunk := range textChunks {
 		if strings.TrimSpace(chunk.Content) == "" {
 			emptyContentChunks++
 			continue
 		}
 
-		// Build context from adjacent chunks
-		var prevContent, nextContent string
-		if i > 0 {
-			prevContent = enrichContent(textChunks[i-1])
-		}
-		if i < len(textChunks)-1 {
-			nextContent = enrichContent(textChunks[i+1])
-		}
-
-		llmCallAttempts++
-		questions, err := s.generateQuestionsWithContext(ctx, chatModel, enrichContent(chunk), prevContent, nextContent, knowledge.Title, questionCount)
-		if err != nil {
-			llmCallFailed++
-			logger.Warnf(ctx, "Failed to generate questions for chunk %s: %v", chunk.ID, err)
-			continue
-		}
-
-		if len(questions) == 0 {
-			llmCallEmpty++
-			continue
-		}
-		llmCallSuccess++
-		generatedQuestionsTotal += len(questions)
-
-		// Update chunk metadata with unique IDs for each question
-		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
-		for j, question := range questions {
-			questionID := fmt.Sprintf("q%d", time.Now().UnixNano()+int64(j))
-			generatedQuestions[j] = types.GeneratedQuestion{
-				ID:       questionID,
-				Question: question,
+		i, chunk := i, chunk
+		questionGroup.Go(func() error {
+			var prevContent, nextContent string
+			if i > 0 {
+				prevContent = enrichContent(textChunks[i-1])
 			}
-		}
-		meta := &types.DocumentChunkMetadata{
-			GeneratedQuestions: generatedQuestions,
-		}
-		if err := chunk.SetDocumentMetadata(meta); err != nil {
-			chunkMetadataSetFailed++
-			logger.Warnf(ctx, "Failed to set document metadata for chunk %s: %v", chunk.ID, err)
-			continue
-		}
+			if i < len(textChunks)-1 {
+				nextContent = enrichContent(textChunks[i+1])
+			}
 
-		// Update chunk in database
-		if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
-			chunkUpdateFailed++
-			logger.Warnf(ctx, "Failed to update chunk %s: %v", chunk.ID, err)
-			continue
-		}
+			statsMu.Lock()
+			llmCallAttempts++
+			statsMu.Unlock()
 
-		// Create index entries for generated questions
-		for _, gq := range generatedQuestions {
-			sourceID := fmt.Sprintf("%s-%s", chunk.ID, gq.ID)
-			indexInfoList = append(indexInfoList, &types.IndexInfo{
-				Content:         gq.Question,
-				SourceID:        sourceID,
-				SourceType:      types.ChunkSourceType,
-				ChunkID:         chunk.ID,
-				KnowledgeID:     knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID,
-				IsEnabled:       true,
-			})
-		}
-		logger.Debugf(ctx, "Generated %d questions for chunk %s", len(questions), chunk.ID)
+			questions, err := s.generateQuestionsWithContext(questionCtx, chatModel, enrichContent(chunk), prevContent, nextContent, knowledge.Title, questionCount)
+			if err != nil {
+				statsMu.Lock()
+				llmCallFailed++
+				statsMu.Unlock()
+				logger.Warnf(questionCtx, "Failed to generate questions for chunk %s: %v", chunk.ID, err)
+				return nil
+			}
+
+			if len(questions) == 0 {
+				statsMu.Lock()
+				llmCallEmpty++
+				statsMu.Unlock()
+				return nil
+			}
+
+			generatedQuestions := make([]types.GeneratedQuestion, len(questions))
+			for j, question := range questions {
+				generatedQuestions[j] = types.GeneratedQuestion{
+					ID:       fmt.Sprintf("%s-q%d", chunk.ID, j),
+					Question: question,
+				}
+			}
+			meta := &types.DocumentChunkMetadata{
+				GeneratedQuestions: generatedQuestions,
+			}
+			if err := chunk.SetDocumentMetadata(meta); err != nil {
+				statsMu.Lock()
+				chunkMetadataSetFailed++
+				statsMu.Unlock()
+				logger.Warnf(questionCtx, "Failed to set document metadata for chunk %s: %v", chunk.ID, err)
+				return nil
+			}
+
+			if err := s.chunkService.UpdateChunk(questionCtx, chunk); err != nil {
+				statsMu.Lock()
+				chunkUpdateFailed++
+				statsMu.Unlock()
+				logger.Warnf(questionCtx, "Failed to update chunk %s: %v", chunk.ID, err)
+				return nil
+			}
+
+			chunkIndexEntries := make([]*types.IndexInfo, 0, len(generatedQuestions))
+			for _, gq := range generatedQuestions {
+				sourceID := fmt.Sprintf("%s-%s", chunk.ID, gq.ID)
+				chunkIndexEntries = append(chunkIndexEntries, &types.IndexInfo{
+					Content:         gq.Question,
+					SourceID:        sourceID,
+					SourceType:      types.ChunkSourceType,
+					ChunkID:         chunk.ID,
+					KnowledgeID:     knowledge.ID,
+					KnowledgeBaseID: knowledge.KnowledgeBaseID,
+					IsEnabled:       true,
+				})
+			}
+
+			statsMu.Lock()
+			llmCallSuccess++
+			generatedQuestionsTotal += len(questions)
+			indexInfoList = append(indexInfoList, chunkIndexEntries...)
+			statsMu.Unlock()
+			logger.Debugf(questionCtx, "Generated %d questions for chunk %s", len(questions), chunk.ID)
+			return nil
+		})
+	}
+	if err := questionGroup.Wait(); err != nil {
+		exitStatus = "question_generation_failed"
+		logger.Errorf(ctx, "Question generation worker failed: %v", err)
+		return err
 	}
 	indexEntriesPrepared = len(indexInfoList)
 

@@ -2,11 +2,10 @@ package embedding
 
 import (
 	"context"
-	"os"
-	"strconv"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/models/utils"
+	apputils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/panjf2000/ants/v2"
 )
 
@@ -28,14 +27,7 @@ func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 	var wg sync.WaitGroup
 	var mu sync.Mutex  // For synchronizing access to error
 	var firstErr error // Record the first error that occurs
-	batchSizeStr := os.Getenv("BATCH_EMBED_SIZE")
-	if batchSizeStr == "" {
-		batchSizeStr = "5"
-	}
-	batchSize, err := strconv.Atoi(batchSizeStr)
-	if err != nil {
-		return nil, err
-	}
+	batchSize := apputils.BatchEmbedSize()
 	textEmbeddings := utils.MapSlice(texts, func(text string) *textEmbedding {
 		return &textEmbedding{text: text}
 	})
@@ -44,10 +36,12 @@ func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 	processChunk := func(texts []*textEmbedding) func() {
 		return func() {
 			defer wg.Done()
-			// If an error has already occurred, don't continue processing
+			mu.Lock()
 			if firstErr != nil {
+				mu.Unlock()
 				return
 			}
+			mu.Unlock()
 			// Embed text
 			embedding, err := model.BatchEmbed(ctx, utils.MapSlice(texts, func(text *textEmbedding) string {
 				return text.text
