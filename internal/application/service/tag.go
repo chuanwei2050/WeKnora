@@ -165,11 +165,6 @@ func (s *knowledgeTagService) CreateTag(
 	// "未分类" tag should have the lowest sort order to appear first
 	if name == types.UntaggedTagName {
 		sortOrder = -1
-	} else if sortOrder == 0 {
-		sortOrder, err = s.repo.NextSortOrder(ctx, kb.TenantID, kbID)
-		if err != nil {
-			return nil, err
-		}
 	}
 	tag := &types.KnowledgeTag{
 		ID:              uuid.New().String(),
@@ -233,44 +228,45 @@ func (s *knowledgeTagService) UpdateTag(
 	return tag, nil
 }
 
-// ReorderTags updates the order of selected tags while preserving unlisted tags.
-func (s *knowledgeTagService) ReorderTags(ctx context.Context, kbID string, tagIDs []string) error {
+// ReorderTags validates and atomically persists the complete order of ordinary tags.
+func (s *knowledgeTagService) ReorderTags(ctx context.Context, kbID string, orderedIDs []string) error {
 	if kbID == "" {
 		return werrors.NewBadRequestError("知识库ID不能为空")
 	}
-	if len(tagIDs) == 0 {
-		return werrors.NewBadRequestError("标签顺序不能为空")
-	}
-
-	normalizedIDs := make([]string, 0, len(tagIDs))
-	seenIDs := make(map[string]struct{}, len(tagIDs))
-	for _, tagID := range tagIDs {
-		tagID = strings.TrimSpace(tagID)
-		if tagID == "" {
-			return werrors.NewBadRequestError("标签ID不能为空")
-		}
-		if _, exists := seenIDs[tagID]; exists {
-			return werrors.NewBadRequestError("标签ID不能重复")
-		}
-		seenIDs[tagID] = struct{}{}
-		normalizedIDs = append(normalizedIDs, tagID)
-	}
-
-	tenantID := types.MustTenantIDFromContext(ctx)
-	tags, err := s.repo.GetByIDs(ctx, tenantID, normalizedIDs)
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
 		return err
 	}
-	if len(tags) != len(normalizedIDs) {
-		return werrors.NewBadRequestError("存在无效标签")
+
+	page := &types.Pagination{Page: 1, PageSize: 1000}
+	tags, total, err := s.repo.ListByKB(ctx, kb.TenantID, kbID, page, "")
+	if err != nil {
+		return err
 	}
-	for _, tag := range tags {
-		if tag.KnowledgeBaseID != kbID {
-			return werrors.NewBadRequestError("标签不属于当前知识库")
-		}
+	if total != int64(len(tags)) {
+		return werrors.NewBadRequestError("文件夹数量超过可排序上限")
 	}
 
-	return s.repo.Reorder(ctx, tenantID, kbID, normalizedIDs)
+	expected := make(map[string]struct{}, len(tags))
+	for _, tag := range tags {
+		if tag != nil && tag.Name != types.UntaggedTagName {
+			expected[tag.ID] = struct{}{}
+		}
+	}
+	if len(orderedIDs) != len(expected) {
+		return werrors.NewBadRequestError("文件夹排序集合不完整")
+	}
+	seen := make(map[string]struct{}, len(orderedIDs))
+	for _, id := range orderedIDs {
+		if _, duplicate := seen[id]; duplicate {
+			return werrors.NewBadRequestError("文件夹排序包含重复项")
+		}
+		if _, ok := expected[id]; !ok {
+			return werrors.NewBadRequestError("文件夹排序包含无效项")
+		}
+		seen[id] = struct{}{}
+	}
+	return s.repo.Reorder(ctx, kb.TenantID, kbID, orderedIDs)
 }
 
 // DeleteTag deletes a tag. When force=true, also deletes all chunks under this tag.

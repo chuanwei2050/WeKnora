@@ -65,30 +65,18 @@ func (s documentTagServiceStub) FindOrCreateTagByName(context.Context, string, s
 	return s.untagged, nil
 }
 
-func (s *folderTagRepositoryStub) GetByIDs(_ context.Context, _ uint64, ids []string) ([]*types.KnowledgeTag, error) {
-	tags := make([]*types.KnowledgeTag, 0, len(ids))
-	for _, id := range ids {
-		if tag, ok := s.byID[id]; ok {
-			tags = append(tags, tag)
-		}
-	}
-	return tags, nil
-}
-
 func TestKnowledgeTagServiceReorderTags(t *testing.T) {
-	repo := &folderTagRepositoryStub{
-		byID: map[string]*types.KnowledgeTag{
-			"a": {ID: "a", KnowledgeBaseID: "kb", Name: "A"},
-			"b": {ID: "b", KnowledgeBaseID: "kb", Name: "B"},
-		},
-	}
+	repo := &folderTagRepositoryStub{tags: []*types.KnowledgeTag{
+		{ID: "untagged", Name: types.UntaggedTagName},
+		{ID: "a", Name: "A"},
+		{ID: "b", Name: "B"},
+	}}
 	svc := &knowledgeTagService{
 		kbService: folderKBServiceStub{kb: &types.KnowledgeBase{ID: "kb", TenantID: 1}},
 		repo:      repo,
 	}
-	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 
-	require.NoError(t, svc.ReorderTags(ctx, "kb", []string{"b", "a"}))
+	require.NoError(t, svc.ReorderTags(context.Background(), "kb", []string{"b", "a"}))
 	require.Equal(t, []string{"b", "a"}, repo.reordered)
 }
 
@@ -98,24 +86,22 @@ func TestKnowledgeTagServiceRejectsInvalidReorderSets(t *testing.T) {
 		ids  []string
 	}{
 		{name: "duplicate", ids: []string{"a", "a"}},
-		{name: "missing", ids: []string{"a", "missing"}},
+		{name: "missing", ids: []string{"a"}},
 		{name: "foreign", ids: []string{"a", "foreign"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo := &folderTagRepositoryStub{
-				byID: map[string]*types.KnowledgeTag{
-					"a":       {ID: "a", KnowledgeBaseID: "kb", Name: "A"},
-					"foreign": {ID: "foreign", KnowledgeBaseID: "other", Name: "Foreign"},
-				},
-			}
+			repo := &folderTagRepositoryStub{tags: []*types.KnowledgeTag{
+				{ID: "untagged", Name: types.UntaggedTagName},
+				{ID: "a", Name: "A"},
+				{ID: "b", Name: "B"},
+			}}
 			svc := &knowledgeTagService{
 				kbService: folderKBServiceStub{kb: &types.KnowledgeBase{ID: "kb", TenantID: 1}},
 				repo:      repo,
 			}
-			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 
-			require.Error(t, svc.ReorderTags(ctx, "kb", tt.ids))
+			require.Error(t, svc.ReorderTags(context.Background(), "kb", tt.ids))
 			require.Empty(t, repo.reordered)
 		})
 	}

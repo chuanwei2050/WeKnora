@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
+	integrationauth "github.com/Tencent/WeKnora/internal/integration"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -32,40 +33,48 @@ import (
 type RouterParams struct {
 	dig.In
 
-	Config                   *config.Config
-	UserService              interfaces.UserService
-	KBService                interfaces.KnowledgeBaseService
-	KnowledgeService         interfaces.KnowledgeService
-	ChunkService             interfaces.ChunkService
-	SessionService           interfaces.SessionService
-	MessageService           interfaces.MessageService
-	ModelService             interfaces.ModelService
-	EvaluationService        interfaces.EvaluationService
-	KBHandler                *handler.KnowledgeBaseHandler
-	KnowledgeHandler         *handler.KnowledgeHandler
-	TenantHandler            *handler.TenantHandler
-	TenantService            interfaces.TenantService
-	ChunkHandler             *handler.ChunkHandler
-	SessionHandler           *session.Handler
-	MessageHandler           *handler.MessageHandler
-	ModelHandler             *handler.ModelHandler
-	EvaluationHandler        *handler.EvaluationHandler
-	AuthHandler              *handler.AuthHandler
-	InitializationHandler    *handler.InitializationHandler
-	SystemHandler            *handler.SystemHandler
-	MCPServiceHandler        *handler.MCPServiceHandler
-	WebSearchHandler         *handler.WebSearchHandler
-	WebSearchProviderHandler *handler.WebSearchProviderHandler
-	VectorStoreHandler       *handler.VectorStoreHandler
-	FAQHandler               *handler.FAQHandler
-	TagHandler               *handler.TagHandler
-	CustomAgentHandler       *handler.CustomAgentHandler
-	SkillHandler             *handler.SkillHandler
-	OrganizationHandler      *handler.OrganizationHandler
-	IMHandler                *handler.IMHandler
-	DataSourceHandler        *handler.DataSourceHandler
-	WeKnoraCloudHandler      *handler.WeKnoraCloudHandler
-	WikiPageHandler          *handler.WikiPageHandler
+	Config                     *config.Config
+	UserService                interfaces.UserService
+	KBService                  interfaces.KnowledgeBaseService
+	KnowledgeService           interfaces.KnowledgeService
+	ChunkService               interfaces.ChunkService
+	SessionService             interfaces.SessionService
+	MessageService             interfaces.MessageService
+	ModelService               interfaces.ModelService
+	EvaluationService          interfaces.EvaluationService
+	KBHandler                  *handler.KnowledgeBaseHandler
+	KnowledgeHandler           *handler.KnowledgeHandler
+	TenantHandler              *handler.TenantHandler
+	TenantService              interfaces.TenantService
+	ChunkHandler               *handler.ChunkHandler
+	SessionHandler             *session.Handler
+	MessageHandler             *handler.MessageHandler
+	ModelHandler               *handler.ModelHandler
+	EvaluationHandler          *handler.EvaluationHandler
+	AuthHandler                *handler.AuthHandler
+	InitializationHandler      *handler.InitializationHandler
+	SystemHandler              *handler.SystemHandler
+	MCPServiceHandler          *handler.MCPServiceHandler
+	WebSearchHandler           *handler.WebSearchHandler
+	WebSearchProviderHandler   *handler.WebSearchProviderHandler
+	VectorStoreHandler         *handler.VectorStoreHandler
+	FAQHandler                 *handler.FAQHandler
+	TagHandler                 *handler.TagHandler
+	CustomAgentHandler         *handler.CustomAgentHandler
+	SkillHandler               *handler.SkillHandler
+	OrganizationHandler        *handler.OrganizationHandler
+	IMHandler                  *handler.IMHandler
+	DataSourceHandler          *handler.DataSourceHandler
+	WeKnoraCloudHandler        *handler.WeKnoraCloudHandler
+	WikiPageHandler            *handler.WikiPageHandler
+	AnswerFeedbackHandler      *handler.AnswerFeedbackHandler
+	GraphTripleReviewHandler   *handler.GraphTripleReviewHandler
+	KnowledgeGovernanceHandler *handler.KnowledgeGovernanceHandler
+	AcceptanceBenchmarkHandler *handler.AcceptanceBenchmarkHandler
+	ApprovedEndpointHandler    *handler.ApprovedEndpointHandler
+	AdminHandler               *handler.AdminHandler
+	IntegrationHandler         *handler.IntegrationHandler
+	IntegrationService         *integrationauth.Service
 }
 
 // NewRouter 创建新的路由
@@ -74,14 +83,31 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.ContextWithFallback = true
 
 	// CORS 中间件应放在最前面
-	r.Use(cors.New(cors.Config{
+	legacyCORS := cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-Request-ID"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-Request-ID", "X-Tenant-ID"},
 		ExposeHeaders:    []string{"Content-Length", "Access-Control-Allow-Origin"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
-	}))
+	})
+	integrationCORS := cors.New(cors.Config{
+		AllowOriginWithContextFunc: func(c *gin.Context, origin string) bool {
+			return params.IntegrationService != nil && params.IntegrationService.IsAllowedOrigin(c.Request.Context(), origin)
+		},
+		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-CSRF-Token", "Idempotency-Key", "Last-Event-ID", "X-Request-ID"},
+		ExposeHeaders:    []string{"Content-Length", "Access-Control-Allow-Origin"},
+		AllowCredentials: true,
+		MaxAge:           10 * time.Minute,
+	})
+	r.Use(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/integration/") {
+			integrationCORS(c)
+			return
+		}
+		legacyCORS(c)
+	})
 
 	// 基础中间件（不需要认证）
 	r.Use(middleware.RequestID())
@@ -115,7 +141,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 	RegisterIMRoutes(r, params.IMHandler)
 
 	// 认证中间件
-	r.Use(middleware.Auth(params.TenantService, params.UserService, params.Config))
+	RegisterIntegrationPublicRoutes(r, params.IntegrationHandler)
+
+	// 认证中间件
+	r.Use(middleware.Auth(params.TenantService, params.UserService, params.Config, params.IntegrationService))
 
 	// 文件服务：统一代理本地/MinIO/COS/TOS存储后端（需要认证）
 	serveFiles(r)
@@ -155,9 +184,158 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler)
+		RegisterFeedbackRoutes(v1, params.AnswerFeedbackHandler)
+		RegisterGraphTripleReviewRoutes(v1, params.GraphTripleReviewHandler)
+		RegisterKnowledgeGovernanceRoutes(v1, params.KnowledgeGovernanceHandler)
+		RegisterAcceptanceBenchmarkRoutes(v1, params.AcceptanceBenchmarkHandler)
+		RegisterApprovedEndpointRoutes(v1, params.ApprovedEndpointHandler)
+		RegisterAdminRoutes(v1, params.AdminHandler)
+		RegisterIntegrationAdminRoutes(v1, params.IntegrationHandler)
 	}
 
 	return r
+}
+
+func RegisterIntegrationPublicRoutes(r *gin.Engine, h *handler.IntegrationHandler) {
+	if h == nil {
+		return
+	}
+	auth := r.Group("/api/integration/v1/auth")
+	auth.POST("/token", h.Token)
+	auth.POST("/bootstrap", h.Bootstrap)
+	auth.POST("/exchange", h.Exchange)
+	auth.POST("/refresh", h.Refresh)
+	auth.POST("/logout", h.Logout)
+	integration := r.Group("/api/integration/v1")
+	integration.Use(h.Authenticate())
+	integration.GET("/knowledge-bases", h.ListKnowledgeBases)
+	integration.GET("/knowledge-bases/:knowledge_base_id/knowledge", h.ListKnowledge)
+	integration.POST("/rag/search", h.Search)
+	integration.POST("/tables/analyze", h.AnalyzeKnowledgeTable)
+	integration.GET("/chat/sessions", h.ListChatSessions)
+	integration.POST("/chat/sessions", h.CreateChatSession)
+	integration.GET("/chat/sessions/:session_id", h.GetChatSession)
+	integration.PATCH("/chat/sessions/:session_id", h.UpdateChatSession)
+	integration.DELETE("/chat/sessions/:session_id", h.DeleteChatSession)
+	integration.GET("/chat/sessions/:session_id/messages", h.ListChatMessages)
+	integration.POST("/chat/sessions/:session_id/messages", h.SendChatMessage)
+	integration.GET("/chat/sessions/:session_id/messages/:message_id", h.GetMessageSnapshot)
+	integration.GET("/chat/sessions/:session_id/messages/:message_id/events", h.GetMessageEvents)
+	integration.POST("/chat/sessions/:session_id/messages/:message_id/cancel", h.CancelMessage)
+	integration.POST("/chat/sessions/:session_id/voice/tts", h.SynthesizeVoice)
+	integration.POST("/chat/sessions/:session_id/voice/asr", h.TranscribeVoice)
+}
+
+func RegisterIntegrationAdminRoutes(r *gin.RouterGroup, h *handler.IntegrationHandler) {
+	if h == nil {
+		return
+	}
+	clients := r.Group("/admin/integration-clients")
+	clients.GET("", h.ListClients)
+	clients.POST("", h.CreateClient)
+	clients.GET("/:client_id/secret", h.RevealClientSecret)
+	clients.POST("/:client_id/rotate-secret", h.RotateClientSecret)
+	clients.POST("/:client_id/revoke-previous-secret", h.RevokePreviousClientSecret)
+	clients.POST("/:client_id/disable", h.DisableClient)
+	clients.PUT("/:client_id/scopes", h.UpdateClientScopes)
+	clients.PUT("/:client_id/knowledge-bases", h.UpdateClientKnowledgeBases)
+	clients.PUT("/:client_id/administrator", h.BindClientAdministrator)
+	providers := r.Group("/admin/integration-identity-providers")
+	providers.GET("", h.ListIdentityProviders)
+	providers.POST("", h.CreateIdentityProvider)
+}
+
+func RegisterAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler) {
+	if h == nil {
+		return
+	}
+	admin := r.Group("/admin")
+	tenants := admin.Group("/tenants")
+	tenants.GET("", h.ListTenants)
+	tenants.POST("", h.CreateTenant)
+	tenants.PUT("/:tenant_id", h.UpdateTenant)
+	tenants.PATCH("/:tenant_id/status", h.UpdateTenantStatus)
+	tenants.DELETE("/:tenant_id", h.DeleteTenant)
+	users := tenants.Group("/:tenant_id/users")
+	users.GET("", h.ListTenantUsers)
+	users.POST("", h.CreateTenantUser)
+	users.PUT("/:user_id", h.UpdateTenantUser)
+	users.DELETE("/:user_id", h.DeleteTenantUser)
+	users.PUT("/:user_id/password", h.ResetTenantUserPassword)
+	users.PATCH("/:user_id/role", h.UpdateTenantUserRole)
+	users.PATCH("/:user_id/status", h.UpdateTenantUserStatus)
+	tenants.GET("/:tenant_id/knowledge-bases", h.ListTenantKnowledgeBases)
+}
+
+func RegisterKnowledgeGovernanceRoutes(r *gin.RouterGroup, h *handler.KnowledgeGovernanceHandler) {
+	if h == nil {
+		return
+	}
+	// Reuse the existing /knowledge/:id branch so Gin can attach the nested
+	// version routes without conflicting wildcard parameter names.
+	versions := r.Group("/knowledge/:id/versions")
+	versions.POST("", h.CreateVersion)
+	versions.GET("", h.ListVersions)
+	versions.GET("/:version_id", h.GetVersion)
+	versions.POST("/:version_id/submit-review", h.SubmitReview)
+	versions.POST("/:version_id/approve", h.Approve)
+	versions.POST("/:version_id/reject", h.Reject)
+	versions.POST("/:version_id/withdraw", h.Withdraw)
+	versions.POST("/:version_id/publish", h.Publish)
+	versions.POST("/:version_id/rollback", h.Rollback)
+}
+
+func RegisterAcceptanceBenchmarkRoutes(r *gin.RouterGroup, h *handler.AcceptanceBenchmarkHandler) {
+	if h == nil {
+		return
+	}
+	suites := r.Group("/acceptance/suites")
+	suites.POST("", h.CreateSuite)
+	suites.GET("", h.ListSuites)
+	suites.GET("/:suite_version_id", h.GetSuite)
+	suites.POST("/:suite_version_id/freeze", h.FreezeSuite)
+	runs := r.Group("/acceptance/runs")
+	runs.POST("", h.CreateRun)
+	runs.GET("", h.ListRuns)
+	runs.GET("/:run_id", h.GetRun)
+	runs.POST("/:run_id/cases/:case_id", h.CreateCaseResult)
+	runs.POST("/:run_id/finalize", h.FinalizeRun)
+	runs.POST("/:run_id/cases/:case_id/review", h.ReviewCaseResult)
+	runs.GET("/:run_id/results", h.ListCaseResults)
+	runs.GET("/:run_id/artifacts", h.ListArtifacts)
+	runs.GET("/:run_id/materials", h.ListMaterials)
+	runs.POST("/:run_id/artifacts", h.CreateArtifact)
+}
+
+func RegisterApprovedEndpointRoutes(r *gin.RouterGroup, h *handler.ApprovedEndpointHandler) {
+	if h == nil {
+		return
+	}
+	endpoints := r.Group("/approved-endpoints")
+	endpoints.POST("", h.Create)
+	endpoints.GET("", h.List)
+	endpoints.GET("/:id", h.Get)
+	endpoints.GET("/:id/audits", h.Audits)
+	endpoints.PUT("/:id", h.Update)
+	endpoints.DELETE("/:id", h.Delete)
+}
+
+func RegisterFeedbackRoutes(r *gin.RouterGroup, h *handler.AnswerFeedbackHandler) {
+	feedback := r.Group("/answer-feedback")
+	feedback.POST("", h.Submit)
+	feedback.GET("", h.List)
+	feedback.POST("/:id/review", h.Review)
+}
+
+func RegisterGraphTripleReviewRoutes(r *gin.RouterGroup, h *handler.GraphTripleReviewHandler) {
+	if h == nil {
+		return
+	}
+	triples := r.Group("/graph-triple-reviews")
+	triples.GET("", h.List)
+	triples.GET("/:id", h.Get)
+	triples.POST("/:id/approve", h.Approve)
+	triples.POST("/:id/reject", h.Reject)
 }
 
 // RegisterChunkRoutes 注册分块相关的路由
@@ -273,6 +451,7 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		kb.GET("/:id", handler.GetKnowledgeBase)
 		// 更新知识库
 		kb.PUT("/:id", handler.UpdateKnowledgeBase)
+		kb.POST("/:id/rebuild-index", handler.RebuildIndex)
 		// 删除知识库
 		kb.DELETE("/:id", handler.DeleteKnowledgeBase)
 		// 置顶/取消置顶知识库
@@ -297,7 +476,7 @@ func RegisterKnowledgeTagRoutes(r *gin.RouterGroup, tagHandler *handler.TagHandl
 	{
 		kbTags.GET("", tagHandler.ListTags)
 		kbTags.POST("", tagHandler.CreateTag)
-		kbTags.PUT("/order", tagHandler.ReorderTags)
+		kbTags.PUT("/reorder", tagHandler.ReorderTags)
 		kbTags.PUT("/:tag_id", tagHandler.UpdateTag)
 		kbTags.DELETE("/:tag_id", tagHandler.DeleteTag)
 	}
@@ -325,6 +504,9 @@ func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler) {
 	{
 		sessions.POST("", handler.CreateSession)
 		sessions.DELETE("/batch", handler.BatchDeleteSessions)
+		// Reuse the :id parameter name so Gin can attach the nested WebSocket
+		// route to the existing /sessions/:id branch.
+		sessions.GET("/:id/voice/ws", handler.VoiceWebSocket)
 		sessions.GET("/:id", handler.GetSession)
 		sessions.GET("", handler.GetSessionsByTenant)
 		sessions.PUT("/:id", handler.UpdateSession)
@@ -334,6 +516,9 @@ func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler) {
 		sessions.POST("/:session_id/stop", handler.StopSession)
 		// 继续接收活跃流
 		sessions.GET("/continue-stream/:session_id", handler.ContinueStream)
+		sessions.POST("/:session_id/voice/ws-ticket", handler.IssueVoiceWSTicket)
+		sessions.POST("/:session_id/voice/asr", handler.TranscribeVoiceBatch)
+		sessions.POST("/:session_id/voice/tts", handler.SynthesizeVoice)
 	}
 }
 
@@ -354,11 +539,6 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler) {
 	knowledgeSearch := r.Group("/knowledge-search")
 	{
 		knowledgeSearch.POST("", handler.SearchKnowledge)
-	}
-
-	knowledgeTableAnalysis := r.Group("/knowledge-table-analysis")
-	{
-		knowledgeTableAnalysis.POST("", handler.AnalyzeKnowledgeTable)
 	}
 }
 
@@ -397,6 +577,7 @@ func RegisterModelRoutes(r *gin.RouterGroup, handler *handler.ModelHandler) {
 		models.GET("", handler.ListModels)
 		// 获取单个模型
 		models.GET("/:id", handler.GetModel)
+		models.POST("/:id/preflight", handler.PreflightModel)
 		// 更新模型
 		models.PUT("/:id", handler.UpdateModel)
 		// 删除模型
@@ -447,6 +628,8 @@ func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.Initializ
 	r.POST("/initialization/embedding/test", handler.TestEmbeddingModel)
 	r.POST("/initialization/rerank/check", handler.CheckRerankModel)
 	r.POST("/initialization/asr/check", handler.CheckASRModel)
+	r.POST("/initialization/tts/check", handler.CheckTTSModel)
+	r.POST("/initialization/tts/voices", handler.ListTTSVoices)
 	r.POST("/initialization/multimodal/test", handler.TestMultimodalFunction)
 
 	r.POST("/initialization/extract/text-relation", handler.ExtractTextRelations)
@@ -459,6 +642,9 @@ func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler) {
 	systemRoutes := r.Group("/system")
 	{
 		systemRoutes.GET("/info", handler.GetSystemInfo)
+		systemRoutes.GET("/model-profile-status", handler.GetModelProfileStatus)
+		systemRoutes.GET("/model-profile", handler.GetModelProfile)
+		systemRoutes.PUT("/model-profile", handler.UpdateModelProfile)
 		systemRoutes.GET("/parser-engines", handler.ListParserEngines)
 		systemRoutes.POST("/parser-engines/check", handler.CheckParserEngines)
 		systemRoutes.POST("/docreader/reconnect", handler.ReconnectDocReader)

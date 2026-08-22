@@ -2,8 +2,8 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"strings"
-	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -91,87 +91,6 @@ func (r *knowledgeTagRepository) GetByName(ctx context.Context, tenantID uint64,
 	return &tag, nil
 }
 
-// NextSortOrder returns a stable append-only order for a newly created tag.
-func (r *knowledgeTagRepository) NextSortOrder(
-	ctx context.Context,
-	tenantID uint64,
-	kbID string,
-) (int, error) {
-	var maxSortOrder int
-	if err := r.db.WithContext(ctx).
-		Model(&types.KnowledgeTag{}).
-		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
-		Select("COALESCE(MAX(sort_order), 0)").
-		Scan(&maxSortOrder).Error; err != nil {
-		return 0, err
-	}
-	if maxSortOrder < 0 {
-		maxSortOrder = 0
-	}
-	return maxSortOrder + 100, nil
-}
-
-// Reorder updates selected tags in their current slots and preserves the order of unlisted tags.
-func (r *knowledgeTagRepository) Reorder(
-	ctx context.Context,
-	tenantID uint64,
-	kbID string,
-	tagIDs []string,
-) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var tags []*types.KnowledgeTag
-		if err := tx.
-			Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
-			Order("sort_order ASC, created_at DESC").
-			Find(&tags).Error; err != nil {
-			return err
-		}
-
-		tagsByID := make(map[string]*types.KnowledgeTag, len(tags))
-		for _, tag := range tags {
-			tagsByID[tag.ID] = tag
-		}
-
-		selectedTags := make([]*types.KnowledgeTag, 0, len(tagIDs))
-		selectedIDs := make(map[string]struct{}, len(tagIDs))
-		for _, tagID := range tagIDs {
-			if _, exists := selectedIDs[tagID]; exists {
-				return gorm.ErrDuplicatedKey
-			}
-			tag, exists := tagsByID[tagID]
-			if !exists {
-				return gorm.ErrRecordNotFound
-			}
-			selectedIDs[tagID] = struct{}{}
-			selectedTags = append(selectedTags, tag)
-		}
-
-		selectedIndex := 0
-		orderedTags := make([]*types.KnowledgeTag, 0, len(tags))
-		for _, tag := range tags {
-			if _, selected := selectedIDs[tag.ID]; selected {
-				orderedTags = append(orderedTags, selectedTags[selectedIndex])
-				selectedIndex++
-				continue
-			}
-			orderedTags = append(orderedTags, tag)
-		}
-
-		now := time.Now()
-		for index, tag := range orderedTags {
-			if err := tx.Model(&types.KnowledgeTag{}).
-				Where("tenant_id = ? AND knowledge_base_id = ? AND id = ?", tenantID, kbID, tag.ID).
-				Updates(map[string]interface{}{
-					"sort_order": (index + 1) * 100,
-					"updated_at": now,
-				}).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
 // ListByKB lists knowledge tags by knowledge base ID with pagination and optional keyword filtering.
 func (r *knowledgeTagRepository) ListByKB(
 	ctx context.Context,
@@ -214,6 +133,34 @@ func (r *knowledgeTagRepository) ListByKB(
 	}
 
 	return tags, total, nil
+}
+
+// Reorder atomically updates ordinary tag sort orders and keeps the default tag first.
+func (r *knowledgeTagRepository) Reorder(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	orderedIDs []string,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&types.KnowledgeTag{}).
+			Where("tenant_id = ? AND knowledge_base_id = ? AND name = ?", tenantID, kbID, types.UntaggedTagName).
+			Update("sort_order", -1).Error; err != nil {
+			return err
+		}
+		for index, id := range orderedIDs {
+			result := tx.Model(&types.KnowledgeTag{}).
+				Where("tenant_id = ? AND knowledge_base_id = ? AND id = ? AND name <> ?", tenantID, kbID, id, types.UntaggedTagName).
+				Update("sort_order", index)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("tag %s is not reorderable", id)
+			}
+		}
+		return nil
+	})
 }
 
 // Delete deletes a knowledge tag

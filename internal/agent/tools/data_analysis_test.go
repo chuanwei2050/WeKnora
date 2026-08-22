@@ -14,8 +14,17 @@ func TestTableNameIsIsolatedBySession(t *testing.T) {
 	if first.TableName(knowledge) == second.TableName(knowledge) {
 		t.Fatal("table names must be isolated by analysis session")
 	}
-	if got := first.TableName(knowledge); !strings.HasPrefix(got, "k_knowledge_1_") || len(got) != len("k_knowledge_1_")+16 {
+	if got := first.TableName(knowledge); !strings.HasPrefix(got, "k_knowledge_1_") || len(got) != len("k_knowledge_1_")+12 {
 		t.Fatalf("unexpected bounded table name: %s", got)
+	}
+}
+
+func TestReconcileSQLTableUsesAuthorizedSessionTable(t *testing.T) {
+	schema := &TableSchema{TableName: "k_authorized_123"}
+	got := reconcileSQLTableWithSchema(`SELECT * FROM "k_hallucinated-123" JOIN other_table ON 1=1`, schema)
+	want := `SELECT * FROM "k_authorized_123" JOIN "k_authorized_123" ON 1=1`
+	if got != want {
+		t.Fatalf("unexpected reconciled SQL: %s", got)
 	}
 }
 
@@ -100,18 +109,5 @@ func TestSqlSingleQuoteEscape(t *testing.T) {
 		if got := sqlSingleQuoteEscape(in); got != want {
 			t.Errorf("sqlSingleQuoteEscape(%q) = %q, want %q", in, got, want)
 		}
-	}
-}
-
-func TestSessionTableSuffixIsStableAndSessionScoped(t *testing.T) {
-	first := sessionTableSuffix("session-one")
-	if first != sessionTableSuffix("session-one") {
-		t.Fatal("same session must produce a stable table suffix")
-	}
-	if first == sessionTableSuffix("session-two") {
-		t.Fatal("different sessions must not share a table suffix")
-	}
-	if len(first) != 16 {
-		t.Fatalf("expected a bounded hexadecimal suffix, got %q", first)
 	}
 }
