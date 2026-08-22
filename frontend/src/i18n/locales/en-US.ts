@@ -520,8 +520,6 @@ export default {
       sharedKnowledgeBases: 'Collaborative Knowledge Bases',
       retrieveKBOnlyWhenMentioned: 'Retrieve Only When Mentioned',
       retrieveKBOnlyWhenMentionedDesc: "Off: auto-retrieve configured KBs; On: retrieve only when user {'@'} mentions",
-      kbMentionEnabled: "Show {'@'} Button",
-      kbMentionEnabledDesc: "When off, the {'@'} knowledge base/file picker is hidden in the chat input",
       retrievalSectionTitle: 'Retrieval Strategy',
       rerankModel: 'ReRank Model',
       rerankModelDesc: 'Used to rerank knowledge base retrieval results for better accuracy',
@@ -3842,6 +3840,10 @@ export default {
     attachmentUpload: {
       label: 'Attachment Upload',
       desc: 'When enabled, users can upload attachments (documents, audio, etc.) in conversations',
+    },
+    kbMention: {
+      label: "Show {'@'} Button",
+      desc: "When off, the {'@'} knowledge base/file picker is hidden in the chat input",
     },
     faq: {
       title: 'FAQ Priority Strategy',
