@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
@@ -79,6 +80,7 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb *types.KnowledgeBase,
 ) (*types.KnowledgeBase, error) {
 	kb.EnsureDefaults()
+	applyNewDocumentKnowledgeBaseDefaults(kb)
 	// Storage is platform-managed; ignore legacy clients that still submit KB-level overrides.
 	kb.StorageProviderConfig = nil
 	kb.StorageConfig = types.StorageConfig{}
@@ -383,8 +385,12 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	kb.Name = name
 	kb.Description = description
 	if config != nil {
-		kb.ChunkingConfig = config.ChunkingConfig
-		kb.ImageProcessingConfig = config.ImageProcessingConfig
+		if config.ChunkingConfig.ChunkSize > 0 || config.ChunkingConfig.ChunkOverlap > 0 || len(config.ChunkingConfig.Separators) > 0 {
+			kb.ChunkingConfig = config.ChunkingConfig
+		}
+		if config.ImageProcessingConfig != (types.ImageProcessingConfig{}) {
+			kb.ImageProcessingConfig = config.ImageProcessingConfig
+		}
 		if config.FAQConfig != nil {
 			kb.FAQConfig = config.FAQConfig
 		}
@@ -754,4 +760,27 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 		}
 	}
 	return sourceKB, targetKB, nil
+}
+
+func applyNewDocumentKnowledgeBaseDefaults(kb *types.KnowledgeBase) {
+	if kb == nil || kb.Type == types.KnowledgeBaseTypeFAQ {
+		return
+	}
+	if !kb.Governance.Enabled && strings.TrimSpace(kb.Governance.ProfileID) == "" {
+		kb.Governance = types.KnowledgeGovernanceConfig{
+			Enabled:        true,
+			ProfileID:      "software-testing",
+			ProfileVersion: "1.0",
+		}
+	} else if kb.Governance.Enabled {
+		if strings.TrimSpace(kb.Governance.ProfileID) == "" {
+			kb.Governance.ProfileID = "software-testing"
+		}
+		if strings.TrimSpace(kb.Governance.ProfileVersion) == "" {
+			kb.Governance.ProfileVersion = "1.0"
+		}
+	}
+	if kb.ContributionMode == "" {
+		kb.ContributionMode = types.ContributionModeMembers
+	}
 }

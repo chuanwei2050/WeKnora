@@ -21,7 +21,10 @@ import {
 import {
   getGovernanceActionNextStatus,
   canExecuteGovernanceRowAction,
+  canOperateGovernanceRow,
+  getGovernanceRowActions,
   isKnowledgeDeleteDisabled,
+  isGovernanceRowActionDisabled,
   type DocumentBatchAction,
   type GovernanceReviewAction,
   type GovernanceRowAction,
@@ -190,7 +193,8 @@ const canManage = computed(() => {
 });
 
 const canContribute = computed(() => {
-  if (authStore.user?.role !== 'member' || !kbInfo.value?.governance?.enabled) return false;
+  // Tenant managers upload through the managed path; contributors are non-admin members.
+  if (authStore.canManageTenant || !kbInfo.value?.governance?.enabled) return false;
   if (Number(kbInfo.value.tenant_id) !== Number(authStore.effectiveTenantId)) return false;
   const mode = kbInfo.value.contribution_mode || 'closed';
   return mode === 'members' || (mode === 'allowlist' && (kbInfo.value.contributor_ids || []).includes(authStore.currentUserId));
@@ -1749,6 +1753,10 @@ const governanceActionContext = computed(() => ({
   currentUserId: authStore.currentUserId,
 }));
 
+const governanceActionsForItem = (item: KnowledgeCard) => getGovernanceRowActions(item, governanceActionContext.value);
+const canShowCardMenu = (item: KnowledgeCard) => canEdit.value || canOperateGovernanceRow(item, governanceActionContext.value);
+const canSelectCard = (item: KnowledgeCard) => canEdit.value || canOperateGovernanceRow(item, governanceActionContext.value);
+
 const getEligibleBatchItems = (action: GovernanceRowAction): KnowledgeCard[] => {
   if (action === 'delete' && canEdit.value) {
     return selectedKnowledgeItems.value.filter((item: KnowledgeCard) => !isKnowledgeDeleteDisabled(item));
@@ -2325,7 +2333,7 @@ async function createNewSession(value: string): Promise<void> {
                     @mouseleave="onCardMouseLeave"
                   >
                     <label
-                      v-if="canEdit"
+                      v-if="canSelectCard(item)"
                       class="card-select-overlay"
                       :class="{ active: selectedIds.has(item.id) }"
                       @click.stop
@@ -2341,7 +2349,7 @@ async function createNewSession(value: string): Promise<void> {
                       <div class="card-content-nav">
                         <span class="card-content-title" :title="item.file_name">{{ item.file_name }}</span>
                         <t-popup
-                          v-if="canEdit"
+                          v-if="canShowCardMenu(item)"
                           v-model="item.isMore"
                           overlayClassName="card-more"
                           :on-visible-change="onVisibleChange"
@@ -2361,7 +2369,49 @@ async function createNewSession(value: string): Promise<void> {
                             <!-- Normal menu -->
                             <div v-if="moveMenuMode === 'normal'" class="card-menu">
                               <div
-                                v-if="item.type === 'manual'"
+                                v-if="governanceActionsForItem(item).includes('submit')"
+                                class="card-menu-item"
+                                @click.stop="handleGovernanceAction('submit', item)"
+                              >
+                                <t-icon class="icon" name="upload" />
+                                <span>{{ t('knowledgeBase.governanceSubmit') }}</span>
+                              </div>
+                              <div
+                                v-if="governanceActionsForItem(item).includes('withdraw')"
+                                class="card-menu-item"
+                                @click.stop="handleGovernanceAction('withdraw', item)"
+                              >
+                                <t-icon class="icon" name="rollback" />
+                                <span>{{ t('knowledgeBase.governanceWithdraw') }}</span>
+                              </div>
+                              <div
+                                v-if="governanceActionsForItem(item).includes('approve')"
+                                class="card-menu-item"
+                                @click.stop="handleGovernanceAction('approve', item)"
+                              >
+                                <t-icon class="icon" name="check" />
+                                <span>{{ t('knowledgeBase.governanceApprove') }}</span>
+                              </div>
+                              <div
+                                v-if="governanceActionsForItem(item).includes('reject')"
+                                class="card-menu-item"
+                                @click.stop="handleGovernanceAction('reject', item)"
+                              >
+                                <t-icon class="icon" name="close" />
+                                <span>{{ t('knowledgeBase.governanceReject') }}</span>
+                              </div>
+                              <div
+                                v-if="governanceActionsForItem(item).includes('delete')"
+                                class="card-menu-item danger"
+                                :class="{ disabled: isGovernanceRowActionDisabled(item, 'delete') }"
+                                :aria-disabled="isGovernanceRowActionDisabled(item, 'delete')"
+                                @click.stop="delCard(index, item)"
+                              >
+                                <t-icon class="icon" name="delete" />
+                                <span>{{ t('knowledgeBase.governanceDelete') }}</span>
+                              </div>
+                              <div
+                                v-if="canEdit && item.type === 'manual'"
                                 class="card-menu-item"
                                 @click.stop="handleManualEdit(index, item)"
                               >
@@ -2369,18 +2419,23 @@ async function createNewSession(value: string): Promise<void> {
                                 <span>{{ t('knowledgeBase.editDocument') }}</span>
                               </div>
                               <div
-                                v-if="item.parse_status !== 'pending_review'"
+                                v-if="canEdit && item.parse_status !== 'pending_review'"
                                 class="card-menu-item"
                                 @click.stop="handleKnowledgeReparse(index, item)"
                               >
                                 <t-icon class="icon" name="refresh" />
                                 <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                               </div>
-                              <div class="card-menu-item" @click.stop="handleMoveKnowledge(item)">
+                              <div
+                                v-if="canEdit"
+                                class="card-menu-item"
+                                @click.stop="handleMoveKnowledge(item)"
+                              >
                                 <t-icon class="icon" name="swap" />
                                 <span>{{ t('knowledgeBase.moveDocument') }}</span>
                               </div>
                               <div
+                                v-if="canEdit && !governanceActionsForItem(item).includes('delete')"
                                 class="card-menu-item danger"
                                 :class="{ disabled: isKnowledgeDeleteDisabled(item) }"
                                 :aria-disabled="isKnowledgeDeleteDisabled(item)"

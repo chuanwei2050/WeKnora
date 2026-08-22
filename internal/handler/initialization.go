@@ -273,12 +273,14 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 
 	// 模型由平台模型管理统一决定。Embedding 一旦写入知识库即固定，
 	// 避免平台切换到不同维度后使既有向量索引失效。
-	llmModel, err := h.modelService.GetDefaultModel(ctx, types.ModelTypeKnowledgeQA, "chat")
-	if err != nil {
-		c.Error(errors.NewBadRequestError("平台默认对话模型未配置"))
-		return
+	if strings.TrimSpace(kb.SummaryModelID) == "" {
+		llmModel, err := h.modelService.GetDefaultModel(ctx, types.ModelTypeKnowledgeQA, "chat")
+		if err != nil {
+			c.Error(errors.NewBadRequestError("平台默认对话模型未配置"))
+			return
+		}
+		kb.SummaryModelID = llmModel.ID
 	}
-	kb.SummaryModelID = llmModel.ID
 	if kb.IsVectorEnabled() && kb.EmbeddingModelID == "" {
 		embeddingModel, err := h.modelService.GetDefaultModel(ctx, types.ModelTypeEmbedding, "embedding")
 		if err != nil {

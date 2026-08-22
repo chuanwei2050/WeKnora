@@ -129,7 +129,8 @@ const statusByRow = computed(() => {
   return map;
 });
 
-const showActions = computed(() => props.canEdit || (props.governanceEnabled && (props.canContribute || props.canReview)));
+// Show the actions column whenever the user can manage documents or participate in governance.
+const showActions = computed(() => props.canEdit || props.canContribute || props.canReview);
 const governanceContext = () => ({
   enabled: Boolean(props.governanceEnabled),
   canContribute: Boolean(props.canContribute),

@@ -1276,6 +1276,7 @@ export default {
     retry: "重试",
     expand: "展开",
     collapse: "收起",
+    operationFailed: "操作失败",
   },
   mentionDetail: {
     faqCount: "共 {count} 条问答",

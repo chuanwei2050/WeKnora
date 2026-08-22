@@ -497,7 +497,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       profile_id: 'software-testing',
       profile_version: '1.0',
     },
-    contributionMode: 'closed' as 'closed' | 'members' | 'allowlist',
+    contributionMode: 'members' as 'closed' | 'members' | 'allowlist',
     contributorIds: [] as string[],
     reviewerIds: [] as string[],
   }
@@ -882,6 +882,9 @@ const handleSubmit = async () => {
   doSubmit()
 }
 
+const resolveOperationError = (error: any) =>
+  error?.message || error?.error?.message || error?.details || '';
+
 const doSubmit = async () => {
   saving.value = true
   try {
@@ -1029,7 +1032,8 @@ const doSubmit = async () => {
     handleClose()
   } catch (error: any) {
     console.error('Knowledge base operation failed:', error)
-    MessagePlugin.error(error?.message || t('common.operationFailed'))
+    const message = resolveOperationError(error)
+    MessagePlugin.error(message || t('common.operationFailed'))
   } finally {
     saving.value = false
   }

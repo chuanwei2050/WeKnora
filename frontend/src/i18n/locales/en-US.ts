@@ -1395,6 +1395,7 @@ export default {
     retry: 'Retry',
     expand: 'Expand',
     collapse: 'Collapse',
+    operationFailed: 'Operation failed',
   },
   mentionDetail: {
     readOnlyFromAgent: 'Read-only in this conversation; not shown in Knowledge Base list',
