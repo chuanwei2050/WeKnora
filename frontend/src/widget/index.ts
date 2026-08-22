@@ -15,6 +15,7 @@ const DEFAULT_SIZE: WidgetSize = { width: 460, height: 700 }
 const LAUNCHER_SIZE = 64
 const DOCKED_LAUNCHER_WIDTH = 46
 const DOCK_DISTANCE = 72
+const LAUNCHER_DRAG_THRESHOLD = 5
 const EDGE_GAP = 16
 const DEFAULT_ICON_URL = '/widget/icons/ai-assistant.png'
 
@@ -263,6 +264,7 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   let launcherPosition = { x: initialViewport.x + initialViewport.width - 80, y: initialViewport.y + initialViewport.height - 80 }
   let dockedSide: 'left' | 'right' | null = null
   let launcherMoved = false
+  let launcherDragDistance = 0
   const clampLauncher = () => {
     const viewport = viewportRect()
     const launcherWidth = dockedSide ? DOCKED_LAUNCHER_WIDTH : LAUNCHER_SIZE
@@ -293,6 +295,8 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   }
   pointerDrag(launcher, (dx, dy) => {
     if (dx === 0 && dy === 0) return
+    launcherDragDistance += Math.hypot(dx, dy)
+    if (launcherDragDistance < LAUNCHER_DRAG_THRESHOLD) return
     launcherMoved = true
     if (dockedSide) {
       dockedSide = null
@@ -301,7 +305,10 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
     }
     launcherPosition = { x: launcherPosition.x + dx, y: launcherPosition.y + dy }
     clampLauncher()
-  }, snapLauncherToEdge)
+  }, () => {
+    launcherDragDistance = 0
+    snapLauncherToEdge()
+  })
 
   const keyboardLayout = (operation: (dx: number, dy: number) => void) => (event: KeyboardEvent) => {
     const step = event.shiftKey ? 40 : 10

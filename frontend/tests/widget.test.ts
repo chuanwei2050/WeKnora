@@ -153,6 +153,23 @@ describe('floating widget', () => {
     instance.destroy()
   })
 
+  it('opens on the first click when the pointer jitters slightly', () => {
+    const instance = initWidget(config())
+    const openListener = vi.fn()
+    instance.on('open', openListener)
+    const host = document.querySelector<HTMLElement>('[data-weknora-widget]')
+    const launcher = host?.shadowRoot?.querySelector<HTMLButtonElement>('.weknora-launcher')
+    expect(launcher).not.toBeNull()
+    if (!launcher) return
+    launcher.setPointerCapture = vi.fn()
+    launcher.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 944, clientY: 688 }))
+    launcher.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 945, clientY: 688 }))
+    launcher.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 945, clientY: 688 }))
+    launcher.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(openListener).toHaveBeenCalledOnce()
+    instance.destroy()
+  })
+
   it('buffers early authentication and replays ready to late listeners', async () => {
     const instance = initWidget(config())
     const host = document.querySelector<HTMLElement>('[data-weknora-widget]')
