@@ -4,7 +4,7 @@
 TBD - created by archiving change add-integration-knowledge-api. Update Purpose after archive.
 ## Requirements
 ### Requirement: Integration API 必须使用独立版本化边界
-系统 MUST 在 `/api/integration/v1/*` 提供以下稳定接口：`GET /knowledge-bases`、`POST /rag/search`、`POST /chat/sessions`、`GET /chat/sessions/{id}`、`POST /chat/sessions/{id}/messages`、`GET /chat/sessions/{id}/messages/{message_id}`、`GET /chat/sessions/{id}/messages/{message_id}/events` 和 `POST /chat/sessions/{id}/messages/{message_id}/cancel`；系统 MUST NOT 将内部 `/api/v1/*` DTO 直接作为稳定契约。
+系统 MUST 在 `/api/integration/v1/*` 提供稳定、版本化的知识库清单与维护、单次及批量 RAG、表格分析和聊天接口；系统 MUST NOT 将内部 `/api/v1/*` DTO 直接作为稳定契约。
 
 #### Scenario: 同域代理访问 Integration API
 - **WHEN** 浏览器请求 `/knowledge/api/integration/v1/knowledge-bases`
@@ -16,6 +16,17 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 #### Scenario: 用户列出可用知识库
 - **WHEN** 具有 `kb:list` scope 的主体请求知识库列表
 - **THEN** 系统只返回 client allowlist 与用户权限交集内的知识库，不包含模型密钥、存储配置或内部治理配置
+
+### Requirement: 授权客户端必须能够维护租户知识
+系统 MUST 允许具有 `knowledge:write` scope 的主体创建或删除文档知识库并向已授权知识库上传文件。租户和用户身份 MUST 仅来自认证后的 integration principal，请求体 MUST NOT 覆盖租户身份，上传 MUST 受请求体上限约束，所有变更 MUST 写入审计记录。签发带有 `knowledge:write` 的 service token 时 MUST 绑定并重新校验该 client 配置的有效租户管理员，MUST NOT 以空用户身份产生无法发布的治理草稿。
+
+#### Scenario: 创建并填充租户知识库
+- **WHEN** 具有 `knowledge:write` scope 的 service client 创建知识库并向返回的 ID 上传合法文件
+- **THEN** 两个资源都在主体绑定的租户内创建，且两个变更都有审计记录
+
+#### Scenario: 向越权知识库上传
+- **WHEN** 客户端向不在授权范围内的知识库上传文件
+- **THEN** 系统在摄取文件前整次拒绝请求
 
 ### Requirement: RAG 搜索必须支持多个授权知识库
 系统 MUST 要求请求显式提交至少一个 `knowledge_base_id`，对所有授权知识库执行统一召回和统一重排，并返回全局 Top K；字段缺失、null 或空数组 MUST 返回 `400`，MUST NOT 被解释为全部知识库。
@@ -31,6 +42,21 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 #### Scenario: 搜索未选择知识库
 - **WHEN** `knowledge_base_ids` 缺失、为 null 或为空数组
 - **THEN** 系统返回 `400`，不执行搜索，也不自动使用全部授权知识库
+
+### Requirement: RAG 搜索必须支持有界批量查询
+系统 MUST 在 `POST /api/integration/v1/rag/search-batch` 接受共享的非空 `knowledge_base_ids` 和有界 `queries` 数组。每个查询 MUST 携带批内唯一稳定 ID、非空 query，并 MAY 携带该查询的 `knowledge_ids` 与 `top_k`。系统 MUST 在执行任何查询前校验整批参数及知识库授权，以受控并发执行检索，按请求顺序返回逐查询状态和结果；批量请求 MUST 作为一次独立限流操作计费。
+
+#### Scenario: 批量搜索多个业务目标
+- **WHEN** 具有 `rag:search` scope 的主体提交多个唯一查询和已授权知识库
+- **THEN** 系统以配置化并发执行，并按原顺序返回每个查询 ID、状态和全局 Top K 结果
+
+#### Scenario: 批量请求包含重复查询 ID
+- **WHEN** 同一批次包含重复查询 ID、空查询或超过服务端查询数上限
+- **THEN** 系统整批返回 `400`，不执行部分检索
+
+#### Scenario: 批量请求包含越权知识库
+- **WHEN** 批量请求的共享知识库范围包含任一越权 ID
+- **THEN** 系统整批返回 `403`，不执行任何查询
 
 ### Requirement: 搜索结果必须可追溯来源
 每个搜索结果 MUST 包含 `knowledge_base_id`、`knowledge_base_name`、`knowledge_id`、`chunk_id`、命中内容或摘要、综合得分、文档标题与来源；治理知识还 MUST 包含当前生效版本 ID。
@@ -134,4 +160,3 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 #### Scenario: 搜索超过限流
 - **WHEN** 主体超过 RAG 搜索速率限制
 - **THEN** 系统返回稳定限流错误，不开始召回，并写入不含敏感内容的审计记录
-

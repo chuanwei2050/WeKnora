@@ -63,6 +63,8 @@ func NewIntegrationHandler(service *integrationauth.Service, kbs interfaces.Know
 type integrationLimits struct {
 	maxKnowledgeBases int
 	maxKnowledgeIDs   int
+	maxBatchQueries   int
+	batchConcurrency  int
 	defaultTopK       int
 	maxTopK           int
 	maxQueryBytes     int
@@ -80,6 +82,8 @@ func loadIntegrationLimits() integrationLimits {
 	limits := integrationLimits{
 		maxKnowledgeBases: positiveEnv("INTEGRATION_MAX_KNOWLEDGE_BASES", 20),
 		maxKnowledgeIDs:   positiveEnv("INTEGRATION_MAX_KNOWLEDGE_IDS", 100),
+		maxBatchQueries:   positiveEnv("INTEGRATION_MAX_BATCH_QUERIES", 100),
+		batchConcurrency:  positiveEnv("INTEGRATION_BATCH_SEARCH_CONCURRENCY", 8),
 		defaultTopK:       positiveEnv("INTEGRATION_DEFAULT_TOP_K", 10),
 		maxTopK:           positiveEnv("INTEGRATION_MAX_TOP_K", 50),
 		maxQueryBytes:     positiveEnv("INTEGRATION_MAX_QUERY_BYTES", 8192),
@@ -89,6 +93,25 @@ func loadIntegrationLimits() integrationLimits {
 		limits.defaultTopK = limits.maxTopK
 	}
 	return limits
+}
+
+type integrationBatchSearchQuery struct {
+	ID           string    `json:"id" binding:"required"`
+	Query        string    `json:"query" binding:"required"`
+	KnowledgeIDs *[]string `json:"knowledge_ids"`
+	TopK         int       `json:"top_k"`
+}
+
+type integrationBatchSearchRequest struct {
+	KnowledgeBaseIDs *[]string                     `json:"knowledge_base_ids" binding:"required"`
+	Queries          []integrationBatchSearchQuery `json:"queries" binding:"required"`
+}
+
+type integrationBatchSearchResult struct {
+	ID      string  `json:"id"`
+	Status  string  `json:"status"`
+	Results []gin.H `json:"results"`
+	Error   string  `json:"error,omitempty"`
 }
 
 var integrationKnowledgeIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
@@ -491,6 +514,111 @@ func (h *IntegrationHandler) ListKnowledgeBases(c *gin.Context) {
 	integrationData(c, http.StatusOK, result)
 }
 
+func (h *IntegrationHandler) CreateKnowledgeBase(c *gin.Context) {
+	if !h.enforceRate(c, "api.knowledge_base.create", 30) {
+		return
+	}
+	if !h.requireScope(c, "knowledge:write") {
+		return
+	}
+	h.limitRequestBody(c)
+	var req struct {
+		Name        string `json:"name" binding:"required"`
+		Description string `json:"description"`
+	}
+	if c.ShouldBindJSON(&req) != nil {
+		h.audit(c, "api.knowledge_base.create", "denied", "invalid_request")
+		integrationError(c, http.StatusBadRequest, "invalid_knowledge_base", "name is required")
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	req.Description = strings.TrimSpace(req.Description)
+	if req.Name == "" || len(req.Name) > 255 || len(req.Description) > 4000 {
+		h.audit(c, "api.knowledge_base.create", "denied", "limit_exceeded")
+		integrationError(c, http.StatusBadRequest, "invalid_knowledge_base", "knowledge base limits exceeded")
+		return
+	}
+	kb, err := h.kbs.CreateKnowledgeBase(c.Request.Context(), &types.KnowledgeBase{
+		Name: req.Name, Description: req.Description, Type: types.KnowledgeBaseTypeDocument,
+	})
+	if err != nil {
+		h.audit(c, "api.knowledge_base.create", "denied", "create_failed")
+		integrationError(c, http.StatusInternalServerError, "knowledge_base_create_failed", "knowledge base creation failed")
+		return
+	}
+	h.service.AuditResources(c.Request.Context(), integrationPrincipal(c), "api.knowledge_base.create", "allowed", "", []string{kb.ID})
+	integrationData(c, http.StatusCreated, kb)
+}
+
+func (h *IntegrationHandler) DeleteKnowledgeBase(c *gin.Context) {
+	if !h.enforceRate(c, "api.knowledge_base.delete", 30) {
+		return
+	}
+	if !h.requireScope(c, "knowledge:write") {
+		return
+	}
+	kbID := strings.TrimSpace(c.Param("knowledge_base_id"))
+	principal := integrationPrincipal(c)
+	if kbID == "" || h.service.AuthorizeKnowledgeBases(principal, []string{kbID}) != nil {
+		h.service.AuditResources(c.Request.Context(), principal, "api.knowledge_base.delete", "denied", "knowledge_base_denied", []string{kbID})
+		integrationError(c, http.StatusForbidden, "knowledge_base_denied", "knowledge base access denied")
+		return
+	}
+	if err := h.kbs.DeleteKnowledgeBase(c.Request.Context(), kbID); err != nil {
+		h.service.AuditResources(c.Request.Context(), principal, "api.knowledge_base.delete", "denied", "delete_failed", []string{kbID})
+		integrationError(c, http.StatusInternalServerError, "knowledge_base_delete_failed", "knowledge base deletion failed")
+		return
+	}
+	h.service.AuditResources(c.Request.Context(), principal, "api.knowledge_base.delete", "allowed", "", []string{kbID})
+	integrationData(c, http.StatusOK, gin.H{"deleted": true, "id": kbID})
+}
+
+func (h *IntegrationHandler) CreateKnowledgeFromFile(c *gin.Context) {
+	if !h.enforceRate(c, "api.knowledge.create", 120) {
+		return
+	}
+	if !h.requireScope(c, "knowledge:write") {
+		return
+	}
+	h.limitRequestBody(c)
+	kbID := strings.TrimSpace(c.Param("knowledge_base_id"))
+	principal := integrationPrincipal(c)
+	if kbID == "" || h.service.AuthorizeKnowledgeBases(principal, []string{kbID}) != nil {
+		h.service.AuditResources(c.Request.Context(), principal, "api.knowledge.create", "denied", "knowledge_base_denied", []string{kbID})
+		integrationError(c, http.StatusForbidden, "knowledge_base_denied", "knowledge base access denied")
+		return
+	}
+	file, err := c.FormFile("file")
+	if err != nil || file.Size <= 0 {
+		h.audit(c, "api.knowledge.create", "denied", "invalid_file")
+		integrationError(c, http.StatusBadRequest, "invalid_file", "a non-empty file is required")
+		return
+	}
+	customFileName := strings.TrimSpace(c.PostForm("fileName"))
+	if len(customFileName) > 500 {
+		integrationError(c, http.StatusBadRequest, "invalid_file", "file name limit exceeded")
+		return
+	}
+	metadata := map[string]string{}
+	if raw := strings.TrimSpace(c.PostForm("metadata")); raw != "" {
+		if len(raw) > 64*1024 || json.Unmarshal([]byte(raw), &metadata) != nil {
+			integrationError(c, http.StatusBadRequest, "invalid_metadata", "metadata must be a string map")
+			return
+		}
+	}
+	knowledge, err := h.knowledges.CreateKnowledgeFromFile(
+		c.Request.Context(), kbID, file, metadata, nil, customFileName, "", "integration",
+	)
+	if err != nil {
+		fmt.Printf("integration knowledge upload failed for kb %s: %v\n", kbID, err)
+		h.service.AuditResources(c.Request.Context(), principal, "api.knowledge.create", "denied", "create_failed", []string{kbID})
+		integrationError(c, http.StatusInternalServerError, "knowledge_create_failed", "knowledge creation failed")
+		return
+	}
+	h.service.AuditResources(c.Request.Context(), principal, "api.knowledge.create", "allowed", "", []string{kbID})
+	integrationData(c, http.StatusCreated, knowledge)
+}
+
 func (h *IntegrationHandler) ListKnowledge(c *gin.Context) {
 	if !h.enforceRate(c, "api.knowledge.list", 120) {
 		return
@@ -750,6 +878,132 @@ func (h *IntegrationHandler) Search(c *gin.Context) {
 	}
 	h.service.AuditResources(c.Request.Context(), integrationPrincipal(c), "api.search", "allowed", "", *req.KnowledgeBaseIDs)
 	integrationData(c, http.StatusOK, publicResults)
+}
+
+func (h *IntegrationHandler) SearchBatch(c *gin.Context) {
+	if !h.enforceRate(c, "api.search.batch", 60) {
+		return
+	}
+	if !h.requireScope(c, "rag:search") {
+		return
+	}
+	h.limitRequestBody(c)
+	var req integrationBatchSearchRequest
+	if c.ShouldBindJSON(&req) != nil {
+		h.audit(c, "api.search.batch", "denied", "invalid_request")
+		integrationError(c, http.StatusBadRequest, "invalid_batch_search", "knowledge_base_ids and queries are required")
+		return
+	}
+	if reason := validateIntegrationBatchSearchRequest(req, h.limits); reason != "" {
+		h.audit(c, "api.search.batch", "denied", reason)
+		integrationError(c, http.StatusBadRequest, "batch_search_limit_exceeded", "batch search limits exceeded")
+		return
+	}
+	knowledgeBaseIDs := *req.KnowledgeBaseIDs
+	principal := integrationPrincipal(c)
+	if h.service.AuthorizeKnowledgeBases(principal, knowledgeBaseIDs) != nil {
+		h.service.AuditResources(c.Request.Context(), principal, "api.search.batch", "denied", "knowledge_base_denied", knowledgeBaseIDs)
+		integrationError(c, http.StatusForbidden, "knowledge_base_denied", "knowledge base access denied")
+		return
+	}
+	results, forbidden := h.runIntegrationSearchBatch(c.Request.Context(), knowledgeBaseIDs, req.Queries)
+	if forbidden {
+		h.service.AuditResources(c.Request.Context(), principal, "api.search.batch", "denied", "knowledge_denied", knowledgeBaseIDs)
+		integrationError(c, http.StatusForbidden, "knowledge_denied", "knowledge access denied")
+		return
+	}
+	h.service.AuditResources(c.Request.Context(), principal, "api.search.batch", "allowed", "", knowledgeBaseIDs)
+	integrationData(c, http.StatusOK, gin.H{"results": results})
+}
+
+func validateIntegrationBatchSearchRequest(req integrationBatchSearchRequest, limits integrationLimits) string {
+	if req.KnowledgeBaseIDs == nil || len(*req.KnowledgeBaseIDs) == 0 || len(req.Queries) == 0 {
+		return "invalid_request"
+	}
+	if len(*req.KnowledgeBaseIDs) > limits.maxKnowledgeBases || len(req.Queries) > limits.maxBatchQueries {
+		return "limit_exceeded"
+	}
+	seen := make(map[string]struct{}, len(req.Queries))
+	for _, query := range req.Queries {
+		trimmedID := strings.TrimSpace(query.ID)
+		if trimmedID == "" || trimmedID != query.ID || len(query.ID) > 128 || strings.TrimSpace(query.Query) == "" || len(query.Query) > limits.maxQueryBytes || query.TopK < 0 || query.TopK > limits.maxTopK {
+			return "limit_exceeded"
+		}
+		if _, exists := seen[query.ID]; exists {
+			return "duplicate_query_id"
+		}
+		seen[query.ID] = struct{}{}
+		if query.KnowledgeIDs != nil && !validIntegrationKnowledgeIDs(*query.KnowledgeIDs, limits.maxKnowledgeIDs) {
+			return "knowledge_limit_exceeded"
+		}
+	}
+	return ""
+}
+
+func (h *IntegrationHandler) runIntegrationSearchBatch(ctx context.Context, knowledgeBaseIDs []string, queries []integrationBatchSearchQuery) ([]integrationBatchSearchResult, bool) {
+	results := make([]integrationBatchSearchResult, len(queries))
+	knowledgeBaseNames := make(map[string]string)
+	if listed, err := h.kbs.ListKnowledgeBases(ctx); err == nil {
+		for _, kb := range listed {
+			knowledgeBaseNames[kb.ID] = kb.Name
+		}
+	}
+	concurrency := h.limits.batchConcurrency
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	semaphore := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	var forbiddenMu sync.Mutex
+	forbidden := false
+	for index, query := range queries {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+			knowledgeIDs := []string(nil)
+			if query.KnowledgeIDs != nil {
+				knowledgeIDs = append(knowledgeIDs, (*query.KnowledgeIDs)...)
+			}
+			found, err := h.sessions.SearchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, query.Query)
+			if err != nil {
+				if appErr, ok := werrors.IsAppError(err); ok && appErr.Code == werrors.ErrForbidden {
+					forbiddenMu.Lock()
+					forbidden = true
+					forbiddenMu.Unlock()
+				}
+				results[index] = integrationBatchSearchResult{ID: query.ID, Status: "failed", Results: []gin.H{}, Error: "search_failed"}
+				return
+			}
+			limit := query.TopK
+			if limit == 0 {
+				limit = h.limits.defaultTopK
+			}
+			results[index] = integrationBatchSearchResult{ID: query.ID, Status: "completed", Results: integrationPublicSearchResults(found, knowledgeBaseNames, limit)}
+		}()
+	}
+	wg.Wait()
+	return results, forbidden
+}
+
+func integrationPublicSearchResults(results []*types.SearchResult, knowledgeBaseNames map[string]string, limit int) []gin.H {
+	if len(results) > limit {
+		results = results[:limit]
+	}
+	publicResults := make([]gin.H, 0, len(results))
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		publicResults = append(publicResults, gin.H{
+			"knowledge_base_id": result.KnowledgeBaseID, "knowledge_base_name": knowledgeBaseNames[result.KnowledgeBaseID],
+			"knowledge_id": result.KnowledgeID, "knowledge_version_id": result.KnowledgeVersionID,
+			"chunk_id": result.ID, "title": result.KnowledgeTitle, "source": result.KnowledgeSource,
+			"content": result.Content, "score": result.Score,
+		})
+	}
+	return publicResults
 }
 
 func (h *IntegrationHandler) CreateChatSession(c *gin.Context) {

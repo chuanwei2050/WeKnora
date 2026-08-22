@@ -459,7 +459,19 @@ func (s *Service) IssueServiceToken(ctx context.Context, clientID, secret string
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	session := Session{ID: uuid.NewString(), Digest: digest(token), Kind: "service", ClientID: client.ID, TenantID: client.TenantID, ScopesJSON: client.ScopesJSON, KnowledgeBaseIDsJSON: encodeStrings(knowledgeBaseIDs), ExpiresAt: expires, AbsoluteExpiresAt: expires}
+	serviceUserID := ""
+	if slices.Contains(client.Scopes(), "knowledge:write") {
+		if strings.TrimSpace(client.AdministratorUserID) == "" {
+			return "", time.Time{}, ErrForbidden
+		}
+		administrator, getErr := s.users.GetUserByID(ctx, client.AdministratorUserID)
+		if getErr != nil || administrator == nil || administrator.TenantID != client.TenantID ||
+			!administrator.IsActive || administrator.EffectiveRole() != types.UserRoleTenantAdmin {
+			return "", time.Time{}, ErrForbidden
+		}
+		serviceUserID = administrator.ID
+	}
+	session := Session{ID: uuid.NewString(), Digest: digest(token), Kind: "service", ClientID: client.ID, TenantID: client.TenantID, UserID: serviceUserID, ScopesJSON: client.ScopesJSON, KnowledgeBaseIDsJSON: encodeStrings(knowledgeBaseIDs), ExpiresAt: expires, AbsoluteExpiresAt: expires}
 	err = s.db.WithContext(ctx).Create(&session).Error
 	if err == nil {
 		s.Audit(ctx, auditPrincipal, "auth.token", "allowed", "")

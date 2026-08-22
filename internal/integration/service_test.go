@@ -269,6 +269,31 @@ func TestServiceTokenRotationAndRevocation(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnauthorized)
 }
 
+func TestKnowledgeWriteServiceTokenUsesBoundTenantAdministrator(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	actor := &types.User{Role: types.UserRolePlatformAdmin, IsActive: true}
+	administrator := &types.User{
+		ID: "tenant-admin", TenantID: 1, Username: "tenant-admin", Email: "tenant-admin@example.com",
+		Role: types.UserRoleTenantAdmin, IsActive: true,
+	}
+	require.NoError(t, svc.db.Create(administrator).Error)
+	require.NoError(t, svc.CreateIdentityProvider(ctx, actor, &IdentityProvider{ID: "idp-write", Name: "Write IdP"}))
+	client := &Client{
+		TenantID: 1, IdentityProviderID: "idp-write", Name: "write-client",
+		AllowedOriginsJSON: `["https://host.example"]`, KnowledgeBaseIDsJSON: `[]`,
+		ScopesJSON: `["knowledge:write"]`, RoleMappingsJSON: `{}`,
+		AdministratorUserID: administrator.ID,
+	}
+	secret, err := svc.CreateClient(ctx, actor, client, "long-enough-secret")
+	require.NoError(t, err)
+	token, _, err := svc.IssueServiceToken(ctx, client.ID, secret)
+	require.NoError(t, err)
+	var session Session
+	require.NoError(t, svc.db.First(&session, "digest = ?", digest(token)).Error)
+	require.Equal(t, administrator.ID, session.UserID)
+}
+
 func TestRevealClientSecretLikeModelAPIKey(t *testing.T) {
 	svc := testService(t)
 	actor := &types.User{Role: types.UserRolePlatformAdmin, IsActive: true}

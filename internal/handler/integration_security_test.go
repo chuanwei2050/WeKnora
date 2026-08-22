@@ -9,16 +9,47 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	integrationauth "github.com/Tencent/WeKnora/internal/integration"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
 type integrationContextKey string
+
+type batchSearchSessionService struct {
+	interfaces.SessionService
+	mu        sync.Mutex
+	active    int
+	maxActive int
+}
+
+func (s *batchSearchSessionService) SearchKnowledge(_ context.Context, knowledgeBaseIDs []string, knowledgeIDs []string, query string) ([]*types.SearchResult, error) {
+	s.mu.Lock()
+	s.active++
+	if s.active > s.maxActive {
+		s.maxActive = s.active
+	}
+	s.mu.Unlock()
+	time.Sleep(5 * time.Millisecond)
+	s.mu.Lock()
+	s.active--
+	s.mu.Unlock()
+	return []*types.SearchResult{{ID: "chunk-" + query, KnowledgeBaseID: knowledgeBaseIDs[0], KnowledgeID: strings.Join(knowledgeIDs, ","), Content: "evidence-" + query, Score: 0.9}}, nil
+}
+
+type batchSearchKnowledgeBaseService struct {
+	interfaces.KnowledgeBaseService
+}
+
+func (batchSearchKnowledgeBaseService) ListKnowledgeBases(context.Context) ([]*types.KnowledgeBase, error) {
+	return []*types.KnowledgeBase{{ID: "kb-1", Name: "authorized"}}, nil
+}
 
 func TestIntegrationGenerationContextSurvivesRequestCancellation(t *testing.T) {
 	requestContext, cancelRequest := context.WithCancel(context.WithValue(context.Background(), integrationContextKey("tenant"), "10000"))
@@ -90,6 +121,48 @@ func TestIntegrationKnowledgeIDsAreBoundedAndValidated(t *testing.T) {
 	require.False(t, validIntegrationKnowledgeIDs([]string{"doc-1", "doc-2", "doc-3"}, 2))
 	require.False(t, validIntegrationKnowledgeIDs([]string{"../foreign"}, 2))
 	require.False(t, validIntegrationKnowledgeIDs([]string{strings.Repeat("x", 129)}, 2))
+}
+
+func TestIntegrationBatchSearchValidationRejectsDuplicateAndOversizedPlans(t *testing.T) {
+	knowledgeBaseIDs := []string{"kb-1"}
+	limits := integrationLimits{maxKnowledgeBases: 2, maxKnowledgeIDs: 2, maxBatchQueries: 2, maxQueryBytes: 20, maxTopK: 5}
+	valid := integrationBatchSearchRequest{KnowledgeBaseIDs: &knowledgeBaseIDs, Queries: []integrationBatchSearchQuery{{ID: "q-1", Query: "first"}, {ID: "q-2", Query: "second"}}}
+	require.Empty(t, validateIntegrationBatchSearchRequest(valid, limits))
+
+	duplicate := valid
+	duplicate.Queries[1].ID = "q-1"
+	require.Equal(t, "duplicate_query_id", validateIntegrationBatchSearchRequest(duplicate, limits))
+
+	whitespaceID := valid
+	whitespaceID.Queries = []integrationBatchSearchQuery{{ID: " q-1", Query: "first"}}
+	require.Equal(t, "limit_exceeded", validateIntegrationBatchSearchRequest(whitespaceID, limits))
+
+	oversized := valid
+	oversized.Queries = append(oversized.Queries, integrationBatchSearchQuery{ID: "q-3", Query: "third"})
+	require.Equal(t, "limit_exceeded", validateIntegrationBatchSearchRequest(oversized, limits))
+}
+
+func TestIntegrationBatchSearchPreservesQueryOrderAndBoundsConcurrency(t *testing.T) {
+	sessions := &batchSearchSessionService{}
+	handler := &IntegrationHandler{
+		sessions: sessions,
+		kbs:      batchSearchKnowledgeBaseService{},
+		limits:   integrationLimits{defaultTopK: 2, batchConcurrency: 2},
+	}
+	knowledgeIDs := []string{"doc-1"}
+	queries := []integrationBatchSearchQuery{
+		{ID: "q-1", Query: "first", KnowledgeIDs: &knowledgeIDs},
+		{ID: "q-2", Query: "second"},
+		{ID: "q-3", Query: "third"},
+	}
+
+	results, forbidden := handler.runIntegrationSearchBatch(context.Background(), []string{"kb-1"}, queries)
+
+	require.False(t, forbidden)
+	require.Equal(t, []string{"q-1", "q-2", "q-3"}, []string{results[0].ID, results[1].ID, results[2].ID})
+	require.Equal(t, "chunk-first", results[0].Results[0]["chunk_id"])
+	require.Equal(t, "authorized", results[0].Results[0]["knowledge_base_name"])
+	require.Equal(t, 2, sessions.maxActive)
 }
 
 func TestIntegrationBrowserCookieCoversAPIAndFilesOnWeKnoraOrigin(t *testing.T) {
