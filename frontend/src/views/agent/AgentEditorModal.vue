@@ -432,6 +432,17 @@
                       </div>
                     </div>
 
+                    <!-- @ 知识库/文件选择按钮 -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.kbMention.label') }}</label>
+                        <p class="desc">{{ $t('agentEditor.kbMention.desc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.kb_mention_enabled" />
+                      </div>
+                    </div>
+
                     <!-- 音频上传开关 -->
                     <div class="setting-row">
                       <div class="setting-info">
@@ -992,17 +1003,6 @@
                             :label="ft.label"
                           />
                         </t-select>
-                      </div>
-                    </div>
-
-                    <!-- 显示 @ 知识库/文件选择按钮 -->
-                    <div v-if="hasKnowledgeBase" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.kbMentionEnabled') }}</label>
-                        <p class="desc">{{ $t('agent.editor.kbMentionEnabledDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.kb_mention_enabled" />
                       </div>
                     </div>
 
