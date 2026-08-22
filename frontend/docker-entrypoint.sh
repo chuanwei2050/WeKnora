@@ -12,7 +12,12 @@ export MAX_FILE_SIZE=${MAX_FILE_SIZE_MB}M
 export APP_HOST=${APP_HOST:-app}
 export APP_PORT=${APP_PORT:-8080}
 export APP_SCHEME=${APP_SCHEME:-http}
-export FRAME_ANCESTORS=${FRAME_ANCESTORS:-"'self'"}
+FRAME_ANCESTORS=${FRAME_ANCESTORS:-"'self'"}
+# Docker Compose .env parsing may strip quotes or truncate at spaces (e.g. FRAME_ANCESTORS=self).
+case "$FRAME_ANCESTORS" in
+  self) FRAME_ANCESTORS="'self'" ;;
+esac
+export FRAME_ANCESTORS
 envsubst '${MAX_FILE_SIZE} ${APP_HOST} ${APP_PORT} ${APP_SCHEME} ${FRAME_ANCESTORS}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
 
 # 启动 nginx

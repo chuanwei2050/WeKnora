@@ -1,0 +1,6 @@
+# Example override for cross-origin iframe embedding.
+# Copy to docker-compose.override.yml and replace the host origin.
+services:
+  frontend:
+    environment:
+      FRAME_ANCESTORS: "'self' https://project-a.example.com"
