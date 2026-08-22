@@ -1,5 +1,10 @@
-# Example override for cross-origin iframe embedding.
+# Example override for cross-origin iframe embedding (FRAME_ANCESTORS only).
+#
+# 若 WeKnora 与 bidder-agent 等同机 Docker 部署，还须配置网络别名 external-weknora，
+# 请使用 docker-compose.bidder-integration.override.example.yml（或与其合并）。
+#
 # Copy to docker-compose.override.yml and replace the host origin.
+# 详见 docs/外挂知识库指南.md §4、§7.1
 services:
   frontend:
     environment:

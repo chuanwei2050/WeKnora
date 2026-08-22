@@ -1,0 +1,40 @@
+# WeKnora 与 bidder-agent（或其它宿主）同机 Docker 部署时的网络 override 示例。
+#
+# 用法：
+#   cp docker-compose.bidder-integration.override.example.yml docker-compose.override.yml
+#   # 编辑 FRAME_ANCESTORS、external network 名称后：
+#   docker compose up -d app frontend
+#
+# 作用：
+#   1. 将 WeKnora app 加入宿主 Docker 网络，并注册 DNS 别名 external-weknora
+#      （bidder-agent 的 WEKNORA_INTEGRATION_BASE_URL 依赖此主机名）
+#   2. 将 WeKnora frontend 加入同一网络，供宿主 Caddy 反代 /widget、/knowledge
+#   3. 配置 FRAME_ANCESTORS，允许宿主 Origin 嵌入 iframe
+#
+# 常见错误：
+#   - 别名写成 external-wennora（拼写错误）→ 宿主 bootstrap 报「认证服务暂不可用」
+#   - 未加入 external network → DNS 解析失败
+#   - FRAME_ANCESTORS 写在 .env 且含空格 → Docker Compose 截断，iframe 空白
+#
+# 详见 docs/外挂知识库指南.md §7.1
+
+services:
+  app:
+    networks:
+      bidder-agent-v12_core:
+        aliases:
+          - weknora-app
+          - external-weknora
+
+  frontend:
+    networks:
+      - bidder-agent-v12_core
+    environment:
+      # 同域反代：填宿主公网 Origin（与 WEKNORA_FRONTEND_URL / parent_origin 一致）
+      FRAME_ANCESTORS: "'self' https://host-project.example.com"
+
+networks:
+  # 名称 = Docker Compose 项目名 + "_core"。bidder-agent v12 默认为 bidder-agent-v12_core。
+  # 可用 docker network ls | grep _core 确认。
+  bidder-agent-v12_core:
+    external: true

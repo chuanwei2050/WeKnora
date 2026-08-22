@@ -1,0 +1,30 @@
+# bidder-agent Caddy 同域反代片段示例
+#
+# 将 WeKnora Widget 与嵌入知识库页挂到宿主公网 Origin，避免浏览器 Private Network Access
+# 拦截内网地址（如 http://192.168.x.x:8089）。
+#
+# WEKNORA_UPSTREAM：宿主能访问到的 WeKnora frontend 地址。
+#   - 同机部署常用宿主机映射端口，如 127.0.0.1:8089 或 192.168.x.x:8089
+#   - 若 Caddy 与 WeKnora frontend 在同一 Docker 网络，可改为 frontend 服务名
+#
+# 完整 Caddyfile 还须：
+#   - 对 /widget/*、/knowledge/* 排除全局 frame-ancestors 'none'
+#   - 在 frame-src / script-src 中允许 WeKnora 相关 Origin（若使用 CSP）
+
+{
+	# 示例：仅展示 WeKnora 相关 handle，其余路由按宿主现有规则配置
+}
+
+:443 {
+	# WeKnora Widget 静态资源
+	handle /widget/* {
+		reverse_proxy {$WEKNORA_UPSTREAM:127.0.0.1:8089}
+	}
+
+	# WeKnora 嵌入站（页面、/knowledge/embed/assets、/knowledge/api、/knowledge/files）
+	handle /knowledge/* {
+		reverse_proxy {$WEKNORA_UPSTREAM:127.0.0.1:8089}
+	}
+
+	# 宿主 SPA / /api/* 等按现有配置继续 ...
+}

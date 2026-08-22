@@ -138,7 +138,7 @@ cd frontend
 npm run build:widget
 ```
 
-构建结果位于 `frontend/dist-widget/`。接入方需要由自己的后端申请短期 bootstrap ticket，浏览器不应持有 integration client secret。完整认证流程、初始化示例和 API 边界参见[外挂知识库对接指南](./docs/外挂知识库指南.md)。
+构建结果位于 `frontend/dist-widget/`。接入方需要由自己的后端申请短期 bootstrap ticket，浏览器不应持有 integration client secret。完整认证流程、初始化示例和 API 边界参见[外挂知识库对接指南](./docs/外挂知识库指南.md)；与 bidder-agent 同机部署的配置示例见 [`deploy/examples/bidder-integration/`](./deploy/examples/bidder-integration/README.md)。
 
 ## 🚀 快速开始
 
