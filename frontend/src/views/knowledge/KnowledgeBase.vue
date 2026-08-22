@@ -435,6 +435,7 @@ const loadTags = async (kbIdValue: string, reset = false) => {
     if (actualUntagged && (!selectedTagId.value || selectedTagId.value === '__untagged__' || !selectedTagExists)) {
       selectedTagId.value = actualUntagged.id;
       uiStore.setSelectedTagId(actualUntagged.id);
+      uiStore.setUploadTargetTagId(undefined);
     }
   } catch (error) {
     console.error('Failed to load tags', error);
@@ -445,8 +446,10 @@ const loadTags = async (kbIdValue: string, reset = false) => {
 
 const handleTagFilterChange = (value: string) => {
   selectedTagId.value = value;
-  // 同步更新 store 中的 selectedTagId，供 menu.vue 上传时使用
+  // 同步更新 store 中的 selectedTagId，供全局拖拽上传等场景使用
   uiStore.setSelectedTagId(value);
+  const target = resolveUploadTarget(tagMap.value[value]);
+  uiStore.setUploadTargetTagId(target.tagId);
   page = 1;
 };
 
@@ -700,6 +703,7 @@ const loadKnowledgeBaseInfo = async (targetKbId: string) => {
     kbInfo.value = res?.data || null;
     selectedTagId.value = '';
     uiStore.setSelectedTagId('');
+    uiStore.setUploadTargetTagId(undefined);
     await loadTags(targetKbId, true);
     if (!isFAQ.value) {
       docListLoading.value = true;
@@ -761,6 +765,7 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
     tagSearchQuery.value = '';
     // 重置标签选择状态，避免在不同知识库间保持标签选择
     uiStore.setSelectedTagId('');
+    uiStore.setUploadTargetTagId(undefined);
     loadKnowledgeBaseInfo(newKbId);
   }
 }, { immediate: false });

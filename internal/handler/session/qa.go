@@ -154,7 +154,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 
 		maxSize := secutils.GetMaxFileSize()
 		for i, upload := range request.AttachmentUploads {
-			if upload.FileSize > maxSize {
+			if maxSize > 0 && upload.FileSize > maxSize {
 				return nil, nil, errors.NewBadRequestError(
 					fmt.Sprintf("attachment %d exceeds size limit of %dMB", i+1, secutils.GetMaxFileSizeMB()))
 			}

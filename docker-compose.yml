@@ -226,6 +226,7 @@ services:
       - TENANT_AES_KEY=${TENANT_AES_KEY:-}
       - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}
+      - SSRF_ALLOW_PRIVATE_NETWORKS=${SSRF_ALLOW_PRIVATE_NETWORKS:-true}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}
       # Crypto: 主密钥和盐值，用于 AppSecret 等敏感字段的 AES-256 加密
@@ -233,8 +234,8 @@ services:
       # 重启时自动从文件恢复，保证已加密数据可继续解密
       - CRYPTO_MASTER_KEY=${CRYPTO_MASTER_KEY:-}
       - CRYPTO_SALT=${CRYPTO_SALT:-}
-      # File size limit (in MB)
-      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+      # File size limit (in MB, 0 = unlimited)
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-0}
       # Agent Skills Sandbox
       - WEKNORA_SANDBOX_MODE=${WEKNORA_SANDBOX_MODE:-docker}
       - WEKNORA_SANDBOX_TIMEOUT=${WEKNORA_SANDBOX_TIMEOUT:-60}

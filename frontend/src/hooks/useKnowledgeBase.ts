@@ -128,9 +128,9 @@ export default function (knowledgeBaseId?: string) {
       return;
     }
     
-    // 获取当前选中的分类ID
+    // 获取当前选中的分类ID（与文件夹选择保持一致）
     const uiStore = useUIStore();
-    const tagIdToUpload = uiStore.selectedTagId !== '__untagged__' ? uiStore.selectedTagId : undefined;
+    const tagIdToUpload = uiStore.uploadTargetTagId;
     
     const metadata = buildKnowledgeUploadMetadata(
       file.name,
@@ -141,7 +141,14 @@ export default function (knowledgeBaseId?: string) {
       .then((result: any) => {
         if (result.success) {
           MessagePlugin.info(t('knowledgeBase.uploadSuccess'));
-          getKnowled({ page: 1, page_size: 35 }, currentKbId);
+          window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
+            detail: { kbId: currentKbId }
+          }));
+          getKnowled({
+            page: 1,
+            page_size: 35,
+            tag_id: uiStore.selectedTagId || undefined,
+          }, currentKbId);
         } else {
           const errorMessage = result.error?.message || result.message || t('knowledgeBase.uploadFailed');
           MessagePlugin.error(result.code === 'duplicate_file' ? t('knowledgeBase.fileExists') : errorMessage);

@@ -9,6 +9,8 @@ export const useUIStore = defineStore('ui', {
     kbEditorType: 'document' as 'document' | 'faq',
     // 当前选中的分类ID，用于文件上传时传递
     selectedTagId: '__untagged__' as string,
+    // 实际上传目标分类ID（未分类文件夹为 undefined）
+    uploadTargetTagId: undefined as string | undefined,
     kbEditorInitialSection: null as string | null,
     settingsInitialSection: null as string | null,
     settingsInitialSubSection: null as string | null,
@@ -109,6 +111,10 @@ export const useUIStore = defineStore('ui', {
     // 设置当前选中的分类ID
     setSelectedTagId(tagId: string) {
       this.selectedTagId = tagId
+    },
+
+    setUploadTargetTagId(tagId?: string) {
+      this.uploadTargetTagId = tagId
     },
 
     toggleSidebar() {

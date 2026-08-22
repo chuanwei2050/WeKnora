@@ -293,9 +293,9 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		return
 	}
 
-	// Validate file size (configurable via MAX_FILE_SIZE_MB)
+	// Validate file size (configurable via MAX_FILE_SIZE_MB, 0 = unlimited)
 	maxSize := secutils.GetMaxFileSize()
-	if file.Size > maxSize {
+	if maxSize > 0 && file.Size > maxSize {
 		logger.Error(ctx, "File size too large")
 		c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", secutils.GetMaxFileSizeMB())))
 		return
