@@ -130,7 +130,8 @@ const props = defineProps({
   session_id: { type: String, default: '' },
   agentId: { type: String, default: '' },
   kbIds: { type: Array, default: () => [] },
-  embeddedMode: { type: Boolean, default: false }
+  embeddedMode: { type: Boolean, default: false },
+  suggestedQuestionsEnabled: { type: Boolean, default: true }
 });
 
 const usemenuStore = useMenuStore();
@@ -179,6 +180,11 @@ let suggestedQuestionsFetchId = 0; // 用于取消过时的请求
 let suggestedDebounceTimer = null;
 
 const fetchSuggestedQuestions = async () => {
+    if (!props.suggestedQuestionsEnabled) {
+        suggestedQuestions.value = [];
+        suggestedQuestionsLoading.value = false;
+        return;
+    }
     const fetchId = ++suggestedQuestionsFetchId;
     suggestedQuestionsLoading.value = true;
     // 加载期间保留旧数据，不清空，避免布局抖动
@@ -217,6 +223,7 @@ const handleSuggestedQuestionClick = (question) => {
 
 // 防抖包装，切换知识库/文件时300ms内不重复请求
 const debouncedFetchSuggestions = () => {
+    if (!props.suggestedQuestionsEnabled) return;
     if (suggestedDebounceTimer) clearTimeout(suggestedDebounceTimer);
     suggestedDebounceTimer = setTimeout(() => { fetchSuggestedQuestions(); }, 300);
 };

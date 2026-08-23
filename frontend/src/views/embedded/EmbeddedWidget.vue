@@ -277,7 +277,7 @@ onBeforeUnmount(() => {
       <span v-else-if="widgetMode === 'all-allowed'" class="embedded-widget__scope-chip">全部授权知识库（{{ availableKnowledgeBases.length }}）</span>
       <span v-for="kb in selectedKnowledgeBases" v-else :key="kb.id" class="embedded-widget__scope-chip" :title="kb.name">{{ kb.name }}</span>
     </section>
-    <ChatView v-if="authenticated && selectionReady" :key="sessionId" :session_id="sessionId" :agentId="widgetAgentId" :kbIds="selectionMode === 'all-allowed' ? [] : knowledgeBaseIds" :embeddedMode="true" @answer-completed="refreshConversations" />
+    <ChatView v-if="authenticated && selectionReady" :key="sessionId" :session_id="sessionId" :agentId="widgetAgentId" :kbIds="selectionMode === 'all-allowed' ? [] : knowledgeBaseIds" :embeddedMode="true" :suggestedQuestionsEnabled="false" @answer-completed="refreshConversations" />
     <div v-else-if="authenticated" class="embedded-widget__status" role="status">请至少选择一个知识库</div>
     <div v-else class="embedded-widget__status" role="status">
       {{ errorMessage || '正在等待宿主认证…' }}
