@@ -17,6 +17,8 @@ describe('agent AG-UI display config', () => {
     expect(chat).toContain("!aguiDisplayEnabled.value && ['thinking', 'tool_call', 'tool_result', 'reflection'].includes(data.response_type)")
     expect(chat).toContain('aguiDisplayEnabled.value && item.agent_steps')
     expect(chat).toContain('!aguiDisplayEnabled.value && !data.done')
+    expect(chat).toContain("typeof data.data?.agui_enabled === 'boolean'")
+    expect(chat).toContain('if (!props.embeddedMode) await loadAgentDisplayConfig()')
 
     const widget = readSource('../src/views/embedded/EmbeddedWidget.vue')
     expect(widget).toContain('aguiEnabled.value = session.agui_enabled === true')

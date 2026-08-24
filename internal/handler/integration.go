@@ -1419,7 +1419,8 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 		integrationError(c, http.StatusInternalServerError, "message_create_failed", "failed to create assistant message")
 		return
 	}
-	_, _ = h.service.AppendStreamEvent(c.Request.Context(), binding.SessionID, assistantMessage.ID, "message.created", gin.H{"user_message_id": userMessage.ID, "selected_knowledge_base_ids": selected})
+	aguiEnabled := customAgent != nil && customAgent.Config.AGUIEnabled
+	_, _ = h.service.AppendStreamEvent(c.Request.Context(), binding.SessionID, assistantMessage.ID, "message.created", gin.H{"user_message_id": userMessage.ID, "selected_knowledge_base_ids": selected, "agui_enabled": aguiEnabled})
 	eventBus := event.NewEventBus()
 	var answer strings.Builder
 	var references types.References = types.References{}
