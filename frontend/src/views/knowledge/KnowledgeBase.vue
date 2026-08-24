@@ -2209,8 +2209,9 @@ async function createNewSession(value: string): Promise<void> {
               @dragleave="dragOverPublicFolder = false"
               @drop="handleFolderDrop($event, '', true)"
             >
-              <span class="folder-drag-placeholder" />
-              <t-icon :name="publicFolderExpanded ? 'chevron-down' : 'chevron-right'" size="14px" />
+              <span class="public-folder-toggle" aria-hidden="true">
+                <t-icon :name="publicFolderExpanded ? 'chevron-down' : 'chevron-right'" size="14px" />
+              </span>
               <span class="folder-icon computer-folder-icon" aria-hidden="true" />
               <span class="tree-name">{{ $t('knowledgeBase.publicFilesFolder') }}</span>
               <t-button
@@ -3554,6 +3555,15 @@ async function createNewSession(value: string): Promise<void> {
 
   .public-folder-row {
     cursor: pointer;
+
+    .public-folder-toggle {
+      width: 18px;
+      height: 22px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 18px;
+    }
 
     .public-folder-add {
       margin-left: auto;
