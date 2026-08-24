@@ -89,6 +89,7 @@ export default {
     folderCreateAction: "新建文件夹",
     folderSearchPlaceholder: "搜索文件夹",
     folderRenameAction: "重命名",
+    folderSearchLabel: "搜索",
     folderDeleteAction: "删除",
     folderDeleteNotEmpty: "文件夹必须清空后才能删除",
     uploadTarget: "上传到：{name}",

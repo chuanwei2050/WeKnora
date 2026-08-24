@@ -10112,6 +10112,103 @@ func (s *knowledgeService) SearchKnowledgeForScopes(ctx context.Context, scopes 
 	return s.repo.SearchKnowledgeInScopes(ctx, scopes, keyword, offset, limit, fileTypes)
 }
 
+// SearchKnowledgeForMention applies folder visibility only for the @ selector.
+func (s *knowledgeService) SearchKnowledgeForMention(ctx context.Context, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, error) {
+	return s.searchKnowledgeForMention(ctx, offset, limit, func(pageOffset, pageLimit int) ([]*types.Knowledge, bool, error) {
+		return s.SearchKnowledge(ctx, keyword, pageOffset, pageLimit, fileTypes)
+	})
+}
+
+// SearchKnowledgeForScopesMention is the shared-agent variant used by the @ selector.
+func (s *knowledgeService) SearchKnowledgeForScopesMention(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, error) {
+	return s.searchKnowledgeForMention(ctx, offset, limit, func(pageOffset, pageLimit int) ([]*types.Knowledge, bool, error) {
+		return s.SearchKnowledgeForScopes(ctx, scopes, keyword, pageOffset, pageLimit, fileTypes)
+	})
+}
+
+func (s *knowledgeService) searchKnowledgeForMention(
+	ctx context.Context,
+	offset, limit int,
+	load func(int, int) ([]*types.Knowledge, bool, error),
+) ([]*types.Knowledge, bool, error) {
+	if limit <= 0 {
+		return []*types.Knowledge{}, false, nil
+	}
+	wanted := offset + limit + 1
+	filtered := make([]*types.Knowledge, 0, wanted)
+	pageOffset := 0
+	pageSize := limit * 2
+	if pageSize < 20 {
+		pageSize = 20
+	}
+	for len(filtered) < wanted {
+		items, hasMore, err := load(pageOffset, pageSize)
+		if err != nil {
+			return nil, false, err
+		}
+		if len(items) == 0 {
+			break
+		}
+		byTenant := make(map[uint64][]string)
+		for _, item := range items {
+			if item != nil && item.TagID != "" {
+				byTenant[item.TenantID] = append(byTenant[item.TenantID], item.TagID)
+			}
+		}
+		enabled := make(map[string]bool)
+		for tenantID, tagIDs := range byTenant {
+			tags, tagErr := s.tagRepo.GetByIDs(ctx, tenantID, tagIDs)
+			if tagErr != nil {
+				return nil, false, tagErr
+			}
+			for _, tag := range tags {
+				if tag != nil {
+					enabled[tag.ID] = tag.SearchEnabled
+				}
+			}
+		}
+		for _, item := range items {
+			if item != nil && enabled[item.TagID] {
+				filtered = append(filtered, item)
+			}
+		}
+		pageOffset += len(items)
+		if !hasMore {
+			break
+		}
+	}
+	if offset >= len(filtered) {
+		return []*types.Knowledge{}, false, nil
+	}
+	filtered = filtered[offset:]
+	hasMore := len(filtered) > limit
+	if hasMore {
+		filtered = filtered[:limit]
+	}
+	return filtered, hasMore, nil
+}
+
+// SearchableTagIDs returns the folders that are allowed to participate in search.
+func (s *knowledgeService) SearchableTagIDs(ctx context.Context, tenantID uint64, kbID string) ([]string, error) {
+	const pageSize = 1000
+	ids := make([]string, 0)
+	for page := 1; ; page++ {
+		tags, total, err := s.tagRepo.ListByKB(ctx, tenantID, kbID, &types.Pagination{Page: page, PageSize: pageSize}, "")
+		if err != nil {
+			return nil, err
+		}
+		for _, tag := range tags {
+			if tag != nil && tag.SearchEnabled {
+				ids = append(ids, tag.ID)
+			}
+		}
+		if len(tags) == 0 || int64(page*pageSize) >= total {
+			break
+		}
+	}
+	return ids, nil
+}
+
 // ProcessKnowledgeListDelete handles Asynq knowledge list delete tasks
 func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *asynq.Task) error {
 	var payload types.KnowledgeListDeletePayload

@@ -14,7 +14,7 @@ type KnowledgeTagService interface {
 	// CreateTag creates a new tag under a knowledge base.
 	CreateTag(ctx context.Context, kbID string, name string, color string, sortOrder int) (*types.KnowledgeTag, error)
 	// UpdateTag updates tag basic information.
-	UpdateTag(ctx context.Context, id string, name *string, color *string, sortOrder *int) (*types.KnowledgeTag, error)
+	UpdateTag(ctx context.Context, id string, name *string, color *string, sortOrder *int, searchEnabled *bool) (*types.KnowledgeTag, error)
 	// ReorderTags atomically persists the complete order of non-default tags in a knowledge base.
 	ReorderTags(ctx context.Context, kbID string, orderedIDs []string) error
 	// DeleteTag deletes a tag.

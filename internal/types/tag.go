@@ -24,6 +24,8 @@ type KnowledgeTag struct {
 	Color string `json:"color"             gorm:"type:varchar(32)"`
 	// Sort order within the same knowledge base
 	SortOrder int `json:"sort_order"        gorm:"default:0"`
+	// Whether files in this folder can appear in search and conversation retrieval.
+	SearchEnabled bool `json:"search_enabled" gorm:"not null;default:true"`
 	// Creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time

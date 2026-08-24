@@ -215,9 +215,10 @@ func (h *TagHandler) CreateTag(c *gin.Context) {
 }
 
 type updateTagRequest struct {
-	Name      *string `json:"name"`
-	Color     *string `json:"color"`
-	SortOrder *int    `json:"sort_order"`
+	Name          *string `json:"name"`
+	Color         *string `json:"color"`
+	SortOrder     *int    `json:"sort_order"`
+	SearchEnabled *bool   `json:"search_enabled"`
 }
 
 type reorderTagsRequest struct {
@@ -293,7 +294,7 @@ func (h *TagHandler) UpdateTag(c *gin.Context) {
 		return
 	}
 
-	tag, err := h.tagService.UpdateTag(effCtx, tagID, req.Name, req.Color, req.SortOrder)
+	tag, err := h.tagService.UpdateTag(effCtx, tagID, req.Name, req.Color, req.SortOrder, req.SearchEnabled)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tag_id": tagID,

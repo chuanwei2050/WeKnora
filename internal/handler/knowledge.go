@@ -1526,6 +1526,11 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 	keyword := c.Query("keyword")
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	mentionOnly := c.Query("usage") == "mention"
+	type mentionSearcher interface {
+		SearchKnowledgeForMention(context.Context, string, int, int, []string) ([]*types.Knowledge, bool, error)
+		SearchKnowledgeForScopesMention(context.Context, []types.KnowledgeSearchScope, string, int, int, []string) ([]*types.Knowledge, bool, error)
+	}
 
 	var fileTypes []string
 	if fileTypesStr := c.Query("file_types"); fileTypesStr != "" {
@@ -1606,10 +1611,17 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 					agentID, removed)
 			}
 		}
-		knowledges, hasMore, err := h.kgService.SearchKnowledgeForScopes(ctx, scopes, keyword, offset, limit, fileTypes)
-		if err != nil {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to search knowledge").WithDetails(err.Error()))
+		var knowledges []*types.Knowledge
+		var hasMore bool
+		var searchErr error
+		if searcher, ok := h.kgService.(mentionSearcher); mentionOnly && ok {
+			knowledges, hasMore, searchErr = searcher.SearchKnowledgeForScopesMention(ctx, scopes, keyword, offset, limit, fileTypes)
+		} else {
+			knowledges, hasMore, searchErr = h.kgService.SearchKnowledgeForScopes(ctx, scopes, keyword, offset, limit, fileTypes)
+		}
+		if searchErr != nil {
+			logger.ErrorWithFields(ctx, searchErr, nil)
+			c.Error(errors.NewInternalServerError("Failed to search knowledge").WithDetails(searchErr.Error()))
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -1621,7 +1633,14 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 	}
 
 	// Default: own + shared KBs
-	knowledges, hasMore, err := h.kgService.SearchKnowledge(ctx, keyword, offset, limit, fileTypes)
+	var knowledges []*types.Knowledge
+	var hasMore bool
+	var err error
+	if searcher, ok := h.kgService.(mentionSearcher); mentionOnly && ok {
+		knowledges, hasMore, err = searcher.SearchKnowledgeForMention(ctx, keyword, offset, limit, fileTypes)
+	} else {
+		knowledges, hasMore, err = h.kgService.SearchKnowledge(ctx, keyword, offset, limit, fileTypes)
+	}
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError("Failed to search knowledge").WithDetails(err.Error()))

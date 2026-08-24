@@ -337,6 +337,7 @@ const newTagName = ref('');
 const editingTagId = ref<string | null>(null);
 const editingTagName = ref('');
 const editingTagSubmitting = ref(false);
+const tagSearchUpdatingId = ref<string | null>(null);
 const getPageSize = () => {
   const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
   const itemHeight = 148;
@@ -625,6 +626,21 @@ const submitEditTag = async () => {
     MessagePlugin.error(error?.message || t('common.operationFailed'));
   } finally {
     editingTagSubmitting.value = false;
+  }
+};
+
+const updateTagSearchEnabled = async (tag: any, enabled: boolean) => {
+  if (!kbId.value || tagSearchUpdatingId.value) return;
+  const previous = tag.search_enabled !== false;
+  tag.search_enabled = enabled;
+  tagSearchUpdatingId.value = tag.id;
+  try {
+    await updateKnowledgeBaseTag(kbId.value, tag.id, { search_enabled: enabled });
+  } catch (error: any) {
+    tag.search_enabled = previous;
+    MessagePlugin.error(error?.message || t('common.operationFailed'));
+  } finally {
+    tagSearchUpdatingId.value = null;
   }
 };
 
@@ -2258,6 +2274,16 @@ async function createNewSession(value: string): Promise<void> {
                             <t-icon class="menu-icon" name="edit" />
                             <span>{{ $t('knowledgeBase.folderRenameAction') }}</span>
                           </div>
+                          <div class="tag-menu-item tag-menu-search" @click.stop>
+                            <t-icon class="menu-icon" name="search" />
+                            <span>{{ $t('knowledgeBase.folderSearchLabel') }}</span>
+                            <t-switch
+                              :value="tag.search_enabled !== false"
+                              size="small"
+                              :loading="tagSearchUpdatingId === tag.id"
+                              @change="updateTagSearchEnabled(tag, Boolean($event))"
+                            />
+                          </div>
                           <div
                             class="tag-menu-item danger"
                             @click="confirmDeleteTag(tag)"
@@ -3733,6 +3759,15 @@ async function createNewSession(value: string): Promise<void> {
         color: var(--td-text-color-disabled);
       }
     }
+  }
+}
+
+:deep(.tag-menu-search) {
+  min-width: 156px;
+  cursor: default;
+
+  > span {
+    flex: 1;
   }
 }
 

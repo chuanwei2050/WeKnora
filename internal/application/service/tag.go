@@ -189,6 +189,7 @@ func (s *knowledgeTagService) UpdateTag(
 	name *string,
 	color *string,
 	sortOrder *int,
+	searchEnabled *bool,
 ) (*types.KnowledgeTag, error) {
 	if id == "" {
 		return nil, werrors.NewBadRequestError("标签ID不能为空")
@@ -220,6 +221,9 @@ func (s *knowledgeTagService) UpdateTag(
 			return nil, werrors.NewBadRequestError("未分类文件夹不能排序")
 		}
 		tag.SortOrder = *sortOrder
+	}
+	if searchEnabled != nil {
+		tag.SearchEnabled = *searchEnabled
 	}
 	tag.UpdatedAt = time.Now()
 	if err := s.repo.Update(ctx, tag); err != nil {

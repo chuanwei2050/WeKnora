@@ -29,6 +29,8 @@ type SearchTarget struct {
 	// KnowledgeIDs is the list of specific knowledge IDs to search within the knowledge base
 	// Only used when Type is SearchTargetTypeKnowledge
 	KnowledgeIDs []string `json:"knowledge_ids,omitempty"`
+	// TagIDs limits retrieval to folders whose search switch is enabled.
+	TagIDs []string `json:"tag_ids,omitempty"`
 }
 
 // SearchTargets is a list of search targets, pre-computed at request entry point

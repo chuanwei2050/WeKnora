@@ -435,10 +435,12 @@ func (p *PluginSearch) searchByTargets(
 			// Separate full-KB targets (can be combined into one retrieval)
 			// from specific-knowledge targets (need per-target direct loading).
 			var fullKBIDs []string
+			var fullTagIDs []string
 			var knowledgeTargets []*types.SearchTarget
 			for _, t := range targets {
 				if t.Type == types.SearchTargetTypeKnowledgeBase {
 					fullKBIDs = append(fullKBIDs, t.KnowledgeBaseID)
+					fullTagIDs = append(fullTagIDs, t.TagIDs...)
 				} else {
 					knowledgeTargets = append(knowledgeTargets, t)
 				}
@@ -463,6 +465,7 @@ func (p *PluginSearch) searchByTargets(
 						QueryText:             queryText,
 						QueryEmbedding:        queryEmbedding,
 						KnowledgeBaseIDs:      fullKBIDs,
+						TagIDs:                fullTagIDs,
 						VectorThreshold:       chatManage.VectorThreshold,
 						KeywordThreshold:      chatManage.KeywordThreshold,
 						MatchCount:            chatManage.EmbeddingTopK,
@@ -555,6 +558,7 @@ func (p *PluginSearch) searchSingleTarget(
 		MatchCount:            chatManage.EmbeddingTopK,
 		SkipContextEnrichment: true,
 	}
+	params.TagIDs = t.TagIDs
 	if t.Type == types.SearchTargetTypeKnowledge {
 		params.KnowledgeIDs = searchKnowledgeIDs
 	}

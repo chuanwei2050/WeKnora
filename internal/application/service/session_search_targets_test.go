@@ -21,11 +21,43 @@ func (s searchTargetKnowledgeBaseService) GetKnowledgeBasesByIDsOnly(context.Con
 
 type searchTargetKnowledgeService struct {
 	interfaces.KnowledgeService
-	items []*types.Knowledge
+	items            []*types.Knowledge
+	searchableTagIDs []string
 }
 
 func (s searchTargetKnowledgeService) GetKnowledgeBatchWithSharedAccess(context.Context, uint64, []string) ([]*types.Knowledge, error) {
 	return s.items, nil
+}
+
+func (s searchTargetKnowledgeService) SearchableTagIDs(context.Context, uint64, string) ([]string, error) {
+	return s.searchableTagIDs, nil
+}
+
+func TestBuildSearchTargetsFiltersFoldersOnlyWhenRequested(t *testing.T) {
+	service := &sessionService{
+		knowledgeBaseService: searchTargetKnowledgeBaseService{items: []*types.KnowledgeBase{{ID: "kb-1", TenantID: 7}}},
+		knowledgeService:     searchTargetKnowledgeService{searchableTagIDs: []string{"enabled"}},
+	}
+
+	conversationTargets, err := service.buildSearchTargets(context.Background(), 7, []string{"kb-1"}, nil, true)
+	require.NoError(t, err)
+	require.Equal(t, []string{"enabled"}, conversationTargets[0].TagIDs)
+
+	directSearchTargets, err := service.buildSearchTargets(context.Background(), 7, []string{"kb-1"}, nil, false)
+	require.NoError(t, err)
+	require.Nil(t, directSearchTargets[0].TagIDs)
+}
+
+func TestBuildSearchTargetsSkipsKnowledgeBaseWhenAllFoldersAreDisabled(t *testing.T) {
+	service := &sessionService{
+		knowledgeBaseService: searchTargetKnowledgeBaseService{items: []*types.KnowledgeBase{{ID: "kb-1", TenantID: 7}}},
+		knowledgeService:     searchTargetKnowledgeService{searchableTagIDs: []string{}},
+	}
+
+	targets, err := service.buildSearchTargets(context.Background(), 7, []string{"kb-1"}, nil, true)
+
+	require.NoError(t, err)
+	require.Empty(t, targets)
 }
 
 func TestBuildSearchTargetsRestrictsSearchToRequestedDocuments(t *testing.T) {
@@ -34,7 +66,7 @@ func TestBuildSearchTargetsRestrictsSearchToRequestedDocuments(t *testing.T) {
 		knowledgeService:     searchTargetKnowledgeService{items: []*types.Knowledge{{ID: "doc-1", KnowledgeBaseID: "kb-1", TenantID: 7}}},
 	}
 
-	targets, err := service.buildSearchTargets(context.Background(), 7, []string{"kb-1"}, []string{"doc-1"})
+	targets, err := service.buildSearchTargets(context.Background(), 7, []string{"kb-1"}, []string{"doc-1"}, false)
 
 	require.NoError(t, err)
 	require.Len(t, targets, 1)
@@ -49,7 +81,7 @@ func TestBuildSearchTargetsRejectsDocumentOutsideKnowledgeBaseScope(t *testing.T
 		knowledgeService:     searchTargetKnowledgeService{items: []*types.Knowledge{{ID: "doc-foreign", KnowledgeBaseID: "kb-foreign", TenantID: 7}}},
 	}
 
-	_, err := service.buildSearchTargets(context.Background(), 7, []string{"kb-allowed"}, []string{"doc-foreign"})
+	_, err := service.buildSearchTargets(context.Background(), 7, []string{"kb-allowed"}, []string{"doc-foreign"}, false)
 
 	appErr, ok := werrors.IsAppError(err)
 	require.True(t, ok)
@@ -65,7 +97,7 @@ func TestBuildSearchTargetsRejectsIncompleteDocumentResolution(t *testing.T) {
 		}},
 	}
 
-	_, err := service.buildSearchTargets(context.Background(), 7, []string{"kb-1"}, []string{"doc-1", "doc-2"})
+	_, err := service.buildSearchTargets(context.Background(), 7, []string{"kb-1"}, []string{"doc-1", "doc-2"}, false)
 
 	appErr, ok := werrors.IsAppError(err)
 	require.True(t, ok)

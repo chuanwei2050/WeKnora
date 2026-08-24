@@ -1,0 +1,1 @@
+ALTER TABLE knowledge_tags ADD COLUMN search_enabled INTEGER NOT NULL DEFAULT 1;

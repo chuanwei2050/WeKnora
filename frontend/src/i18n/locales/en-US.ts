@@ -89,6 +89,7 @@ export default {
     folderCreateAction: 'New folder',
     folderSearchPlaceholder: 'Search folders',
     folderRenameAction: 'Rename',
+    folderSearchLabel: 'Search',
     folderDeleteAction: 'Delete',
     folderDeleteNotEmpty: 'Folder must be empty before it can be deleted',
     uploadTarget: 'Upload to: {name}',

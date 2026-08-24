@@ -114,13 +114,27 @@ func TestKnowledgeTagServiceProtectsUntaggedFolder(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 
 	name := "renamed"
-	_, err := svc.UpdateTag(ctx, "untagged", &name, nil, nil)
+	_, err := svc.UpdateTag(ctx, "untagged", &name, nil, nil, nil)
 	require.Error(t, err)
 	require.False(t, repo.updateCall)
 
 	err = svc.DeleteTag(ctx, "untagged", true, false, nil)
 	require.Error(t, err)
 	require.False(t, repo.deleteCall)
+}
+
+func TestKnowledgeTagServiceUpdatesFolderSearchSwitch(t *testing.T) {
+	tag := &types.KnowledgeTag{ID: "folder", Name: "Folder", SearchEnabled: true}
+	repo := &folderTagRepositoryStub{byID: map[string]*types.KnowledgeTag{"folder": tag}}
+	svc := &knowledgeTagService{repo: repo}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	disabled := false
+
+	updated, err := svc.UpdateTag(ctx, "folder", nil, nil, nil, &disabled)
+
+	require.NoError(t, err)
+	require.False(t, updated.SearchEnabled)
+	require.True(t, repo.updateCall)
 }
 
 func TestResolveDocumentTagID(t *testing.T) {

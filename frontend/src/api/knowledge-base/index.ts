@@ -231,7 +231,7 @@ export function createKnowledgeBaseTag(
 export function updateKnowledgeBaseTag(
   kbId: string,
   tagId: string,
-  data: { name?: string; color?: string; sort_order?: number },
+  data: { name?: string; color?: string; sort_order?: number; search_enabled?: boolean },
 ) {
   return put(`/api/v1/knowledge-bases/${kbId}/tags/${tagId}`, data);
 }
@@ -372,7 +372,7 @@ export function searchKnowledge(
   offset = 0,
   limit = 20,
   fileTypes?: string[],
-  options?: { agent_id?: string }
+  options?: { agent_id?: string; usage?: 'mention' }
 ) {
   const query = new URLSearchParams();
   query.set('keyword', keyword);
@@ -382,6 +382,7 @@ export function searchKnowledge(
     query.set('file_types', fileTypes.join(','));
   }
   if (options?.agent_id) query.set('agent_id', options.agent_id);
+  if (options?.usage) query.set('usage', options.usage);
   return get(`/api/v1/knowledge/search?${query.toString()}`);
 }
 

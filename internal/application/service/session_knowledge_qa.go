@@ -79,7 +79,7 @@ func (s *sessionService) KnowledgeQA(
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs)
+	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, true)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets: %v", err)
 	}
@@ -477,8 +477,22 @@ func (s *sessionService) buildSearchTargets(
 	tenantID uint64,
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
+	filterDisabledFolders bool,
 ) (types.SearchTargets, error) {
 	var targets types.SearchTargets
+	type searchableTagProvider interface {
+		SearchableTagIDs(context.Context, uint64, string) ([]string, error)
+	}
+	searchableTags := func(scopeTenantID uint64, kbID string) ([]string, error) {
+		if !filterDisabledFolders {
+			return nil, nil
+		}
+		provider, ok := s.knowledgeService.(searchableTagProvider)
+		if !ok {
+			return nil, nil
+		}
+		return provider.SearchableTagIDs(ctx, scopeTenantID, kbID)
+	}
 
 	// Build a map from KB ID to TenantID for all KBs we need to process
 	kbTenantMap := make(map[string]uint64)
@@ -514,10 +528,18 @@ func (s *sessionService) buildSearchTargets(
 				kbTenantMap[kbID] = tenantID
 			}
 			if len(knowledgeIDs) == 0 {
+				tagIDs, tagErr := searchableTags(kbTenantMap[kbID], kbID)
+				if tagErr != nil {
+					return nil, tagErr
+				}
+				if tagIDs != nil && len(tagIDs) == 0 {
+					continue
+				}
 				targets = append(targets, &types.SearchTarget{
 					Type:            types.SearchTargetTypeKnowledgeBase,
 					KnowledgeBaseID: kbID,
 					TenantID:        kbTenantMap[kbID],
+					TagIDs:          tagIDs,
 				})
 			}
 		}
@@ -561,6 +583,23 @@ func (s *sessionService) buildSearchTargets(
 			}
 			if kbTenantMap[k.KnowledgeBaseID] == 0 {
 				kbTenantMap[k.KnowledgeBaseID] = k.TenantID
+			}
+			tagIDs, tagErr := searchableTags(k.TenantID, k.KnowledgeBaseID)
+			if tagErr != nil {
+				return nil, tagErr
+			}
+			if tagIDs != nil {
+				allowed := false
+				for _, tagID := range tagIDs {
+					if tagID == k.TagID {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					logger.Infof(ctx, "Skipping knowledge %s because its folder is disabled for search", k.ID)
+					continue
+				}
 			}
 			kbToKnowledgeIDs[k.KnowledgeBaseID] = append(kbToKnowledgeIDs[k.KnowledgeBaseID], k.ID)
 		}
@@ -662,7 +701,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs)
+	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, false)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets: %v", err)
 		return nil, err

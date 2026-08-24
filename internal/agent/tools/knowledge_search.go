@@ -524,10 +524,12 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 
 				// Separate full-KB targets (combinable) from specific-knowledge targets
 				var fullKBIDs []string
+				var fullTagIDs []string
 				var knowledgeTargets []*types.SearchTarget
 				for _, st := range targets {
 					if st.Type == types.SearchTargetTypeKnowledgeBase {
 						fullKBIDs = append(fullKBIDs, st.KnowledgeBaseID)
+						fullTagIDs = append(fullTagIDs, st.TagIDs...)
 					} else {
 						knowledgeTargets = append(knowledgeTargets, st)
 					}
@@ -544,6 +546,7 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 							QueryText:        q,
 							QueryEmbedding:   queryEmbedding,
 							KnowledgeBaseIDs: fullKBIDs,
+							TagIDs:           fullTagIDs,
 							MatchCount:       topK,
 							VectorThreshold:  vectorThreshold,
 							KeywordThreshold: keywordThreshold,
@@ -580,6 +583,7 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 							VectorThreshold:  vectorThreshold,
 							KeywordThreshold: keywordThreshold,
 							KnowledgeIDs:     st.KnowledgeIDs,
+							TagIDs:           st.TagIDs,
 						}
 						kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, st.KnowledgeBaseID, searchParams)
 						if err != nil {

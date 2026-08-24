@@ -71,6 +71,7 @@ export default {
     folderCreateAction: 'Новая папка',
     folderSearchPlaceholder: 'Поиск папок',
     folderRenameAction: 'Переименовать',
+    folderSearchLabel: 'Поиск',
     folderDeleteAction: 'Удалить',
     folderDeleteNotEmpty: 'Папку можно удалить только после её очистки',
     uploadTarget: 'Загрузить в: {name}',
