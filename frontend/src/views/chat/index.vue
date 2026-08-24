@@ -771,7 +771,11 @@ onChunk((data) => {
         return;
     }
     
-    fullContent.value += data.content;
+    if (data.data?.replace_content) {
+        fullContent.value = data.content;
+    } else {
+        fullContent.value += data.content;
+    }
     let obj = { ...data, content: '', role: 'assistant', showThink: false, is_completed: false };
 
     // 检查是否为 fallback 回答（未从知识库检索到内容）

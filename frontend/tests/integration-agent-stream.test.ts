@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { buildIntegrationMessageBody, mapIntegrationEvent } from '../src/api/chat/integration-stream'
 
@@ -26,7 +28,7 @@ describe('integration agent stream', () => {
     })
   })
 
-  it('does not append the completed answer after streaming deltas', () => {
+  it('replaces streamed deltas with the authoritative completed answer', () => {
     expect(mapIntegrationEvent({
       event: 'answer.completed',
       message_id: 'message-1',
@@ -34,9 +36,14 @@ describe('integration agent stream', () => {
     })).toEqual({
       response_type: 'complete',
       id: 'message-1',
-      content: '',
+      content: 'already streamed',
       done: true,
       knowledge_references: [],
+      data: { replace_content: true },
     })
+
+    const chatView = readFileSync(fileURLToPath(new URL('../src/views/chat/index.vue', import.meta.url)), 'utf8')
+    expect(chatView).toContain('if (data.data?.replace_content)')
+    expect(chatView).toContain('fullContent.value = data.content;')
   })
 })

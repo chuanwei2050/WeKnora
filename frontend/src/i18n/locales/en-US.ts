@@ -2074,6 +2074,8 @@ export default {
     thinking: 'Thinking...',
     regenerate: 'Regenerate',
     copy: 'Copy',
+    copySuccess: 'Copied successfully',
+    copyFailed: 'Copy failed',
     delete: 'Delete',
     reference: 'Reference',
     noMessages: 'No messages',

@@ -357,6 +357,8 @@ export default {
     thinking: "생각 중...",
     regenerate: "다시 생성",
     copy: "복사",
+    copySuccess: "복사되었습니다",
+    copyFailed: "복사에 실패했습니다",
     delete: "삭제",
     reference: "참조",
     noMessages: "메시지 없음",

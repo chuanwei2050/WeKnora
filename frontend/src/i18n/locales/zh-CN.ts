@@ -354,6 +354,8 @@ export default {
     thinking: "思考中...",
     regenerate: "重新生成",
     copy: "复制",
+    copySuccess: "复制成功",
+    copyFailed: "复制失败",
     delete: "删除",
     reference: "引用",
     noMessages: "暂无消息",

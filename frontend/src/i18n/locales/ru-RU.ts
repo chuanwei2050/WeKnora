@@ -2227,6 +2227,8 @@ export default {
     thinking: 'Думаю...',
     regenerate: 'Сгенерировать заново',
     copy: 'Копировать',
+    copySuccess: 'Скопировано',
+    copyFailed: 'Не удалось скопировать',
     delete: 'Удалить',
     reference: 'Ссылка',
     noMessages: 'Нет сообщений',
