@@ -166,6 +166,7 @@ type createTagRequest struct {
 	Name      string `json:"name"       binding:"required"`
 	Color     string `json:"color"`
 	SortOrder int    `json:"sort_order"`
+	IsPublic  bool   `json:"is_public"`
 }
 
 // CreateTag godoc
@@ -199,7 +200,7 @@ func (h *TagHandler) CreateTag(c *gin.Context) {
 	}
 
 	tag, err := h.tagService.CreateTag(effCtx, kbID,
-		secutils.SanitizeForLog(req.Name), secutils.SanitizeForLog(req.Color), req.SortOrder)
+		secutils.SanitizeForLog(req.Name), secutils.SanitizeForLog(req.Color), req.SortOrder, req.IsPublic)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"kb_id": kbID,
@@ -222,7 +223,8 @@ type updateTagRequest struct {
 }
 
 type reorderTagsRequest struct {
-	TagIDs []string `json:"tag_ids" binding:"required"`
+	RootTagIDs   []string `json:"root_tag_ids"`
+	PublicTagIDs []string `json:"public_tag_ids"`
 }
 
 // ReorderTags atomically saves the complete order of ordinary folders.
@@ -241,15 +243,17 @@ func (h *TagHandler) ReorderTags(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("文件夹排序参数不合法").WithDetails(err.Error()))
 		return
 	}
-	for index := range req.TagIDs {
-		req.TagIDs[index] = strings.TrimSpace(req.TagIDs[index])
-		if req.TagIDs[index] == "" {
-			c.Error(errors.NewBadRequestError("文件夹ID不能为空"))
-			return
+	for _, ids := range [][]string{req.RootTagIDs, req.PublicTagIDs} {
+		for index := range ids {
+			ids[index] = strings.TrimSpace(ids[index])
+			if ids[index] == "" {
+				c.Error(errors.NewBadRequestError("文件夹ID不能为空"))
+				return
+			}
 		}
 	}
 
-	if err := h.tagService.ReorderTags(effCtx, kbID, req.TagIDs); err != nil {
+	if err := h.tagService.ReorderTags(effCtx, kbID, req.RootTagIDs, req.PublicTagIDs); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kb_id": kbID})
 		c.Error(err)
 		return

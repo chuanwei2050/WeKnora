@@ -145,6 +145,14 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	kb, err := h.service.CreateKnowledgeBase(ctx, &req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
+		if stderrors.Is(err, service.ErrKnowledgeBaseCodeConflict) {
+			c.Error(apperrors.NewConflictError(err.Error()))
+			return
+		}
+		if stderrors.Is(err, service.ErrInvalidKnowledgeBaseCode) {
+			c.Error(apperrors.NewBadRequestError(err.Error()))
+			return
+		}
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
@@ -473,6 +481,7 @@ func (h *KnowledgeBaseHandler) TogglePinKnowledgeBase(c *gin.Context) {
 // UpdateKnowledgeBaseRequest defines the request body structure for updating a knowledge base
 type UpdateKnowledgeBaseRequest struct {
 	Name        string                     `json:"name"        binding:"required"`
+	Code        *string                    `json:"code"`
 	Description string                     `json:"description"`
 	Config      *types.KnowledgeBaseConfig `json:"config"`
 }
@@ -519,9 +528,17 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.Name))
 
 	// Update the knowledge base
-	kb, err := h.service.UpdateKnowledgeBase(ctx, id, req.Name, req.Description, req.Config)
+	kb, err := h.service.UpdateKnowledgeBase(ctx, id, req.Name, req.Code, req.Description, req.Config)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
+		if stderrors.Is(err, service.ErrKnowledgeBaseCodeConflict) {
+			c.Error(apperrors.NewConflictError(err.Error()))
+			return
+		}
+		if stderrors.Is(err, service.ErrInvalidKnowledgeBaseCode) {
+			c.Error(apperrors.NewBadRequestError(err.Error()))
+			return
+		}
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}

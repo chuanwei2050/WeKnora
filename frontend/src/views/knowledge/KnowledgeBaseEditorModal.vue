@@ -124,6 +124,10 @@
                         />
                       </div>
                       <div class="form-item">
+                        <label class="form-label">{{ $t('knowledgeEditor.basic.codeLabel') }}</label>
+                        <t-input v-model="formData.code" :placeholder="$t('knowledgeEditor.basic.codePlaceholder')" :maxlength="64" />
+                      </div>
+                      <div class="form-item">
                         <label class="form-label">{{ $t('knowledgeEditor.basic.descriptionLabel') }}</label>
                         <t-textarea
                           v-model="formData.description"
@@ -447,6 +451,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
   return {
     type,
     name: '',
+    code: '',
     description: '',
     faqConfig: {
       indexMode: 'question_only',
@@ -526,6 +531,7 @@ const loadKBData = async () => {
     formData.value = {
       type: kbType,
       name: kb.name || '',
+      code: kb.code || '',
       description: kb.description || '',
       faqConfig: {
         indexMode: kb.faq_config?.index_mode || 'question_only',
@@ -727,6 +733,13 @@ const validateForm = (): boolean => {
     return false
   }
 
+  const code = formData.value.code?.trim()
+  if (code && !/^[A-Za-z0-9_-]{1,64}$/.test(code)) {
+    MessagePlugin.warning(t('knowledgeEditor.messages.codeInvalid'))
+    currentSection.value = 'basic'
+    return false
+  }
+
   // 验证索引策略 — 文档类型至少需要开启一种
   if (formData.value.type !== 'faq') {
     const s = formData.value.indexingStrategy
@@ -765,6 +778,7 @@ const buildSubmitData = () => {
 
   const data: any = {
     name: formData.value.name,
+    code: formData.value.code?.trim() || '',
     description: formData.value.description,
     type: formData.value.type,
     chunking_config: {
@@ -942,6 +956,7 @@ const doSubmit = async () => {
       }
       await updateKnowledgeBase(props.kbId, {
         name: data.name,
+        code: data.code,
         description: data.description,
         config: updateConfig
       })

@@ -101,6 +101,7 @@ type integrationBatchSearchQuery struct {
 	ID           string    `json:"id" binding:"required"`
 	Query        string    `json:"query" binding:"required"`
 	KnowledgeIDs *[]string `json:"knowledge_ids"`
+	FolderIDs    *[]string `json:"folder_ids"`
 	TopK         int       `json:"top_k"`
 }
 
@@ -117,6 +118,16 @@ type integrationBatchSearchResult struct {
 }
 
 var integrationKnowledgeIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
+var integrationKnowledgeBaseCodePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+type integrationFolderProvider interface {
+	ListIntegrationFolders(context.Context, uint64, string) ([]*types.KnowledgeTag, error)
+	ResolveIntegrationFolderIDs(context.Context, uint64, []string, []string, []string) ([]string, error)
+}
+
+type folderSearchSession interface {
+	SearchKnowledgeWithFolders(context.Context, []string, []string, []string, string) ([]*types.SearchResult, error)
+}
 
 func validIntegrationKnowledgeIDs(ids []string, limit int) bool {
 	if len(ids) > limit {
@@ -523,6 +534,42 @@ func (h *IntegrationHandler) ListKnowledgeBases(c *gin.Context) {
 	integrationData(c, http.StatusOK, result)
 }
 
+func (h *IntegrationHandler) ListKnowledgeBaseFoldersByCode(c *gin.Context) {
+	if !h.requireScope(c, "kb:list") || !h.requireScope(c, "knowledge:read") {
+		return
+	}
+	code := strings.TrimSpace(c.Param("code"))
+	if !integrationKnowledgeBaseCodePattern.MatchString(code) {
+		h.audit(c, "api.knowledge_base.folders", "denied", "invalid_code")
+		integrationError(c, http.StatusBadRequest, "invalid_knowledge_base_code", "invalid knowledge base code")
+		return
+	}
+	principal := integrationPrincipal(c)
+	key := strings.ToUpper(code)
+	matched, err := h.kbs.GetRepository().GetKnowledgeBaseByCodeKey(c.Request.Context(), principal.TenantID, key)
+	if err != nil || matched == nil || h.service.AuthorizeKnowledgeBases(principal, []string{matched.ID}) != nil {
+		h.audit(c, "api.knowledge_base.folders", "denied", "not_found_or_denied")
+		integrationError(c, http.StatusNotFound, "knowledge_base_not_found", "knowledge base not found")
+		return
+	}
+	provider, ok := h.knowledges.(integrationFolderProvider)
+	if !ok {
+		integrationError(c, http.StatusInternalServerError, "folder_list_failed", "failed to list folders")
+		return
+	}
+	folders, err := provider.ListIntegrationFolders(c.Request.Context(), principal.TenantID, matched.ID)
+	if err != nil {
+		integrationError(c, http.StatusInternalServerError, "folder_list_failed", "failed to list folders")
+		return
+	}
+	data := make([]gin.H, 0, len(folders))
+	for _, folder := range folders {
+		data = append(data, gin.H{"id": folder.ID, "name": folder.Name, "sort_order": folder.SortOrder})
+	}
+	h.service.AuditResources(c.Request.Context(), principal, "api.knowledge_base.folders", "allowed", "", []string{matched.ID})
+	integrationData(c, http.StatusOK, data)
+}
+
 func (h *IntegrationHandler) CreateKnowledgeBase(c *gin.Context) {
 	if !h.enforceRate(c, "api.knowledge_base.create", 30) {
 		return
@@ -818,6 +865,7 @@ func (h *IntegrationHandler) Search(c *gin.Context) {
 	var req struct {
 		KnowledgeBaseIDs *[]string `json:"knowledge_base_ids" binding:"required"`
 		KnowledgeIDs     *[]string `json:"knowledge_ids"`
+		FolderIDs        *[]string `json:"folder_ids"`
 		Query            string    `json:"query" binding:"required"`
 		TopK             int       `json:"top_k"`
 	}
@@ -845,7 +893,28 @@ func (h *IntegrationHandler) Search(c *gin.Context) {
 		integrationError(c, http.StatusForbidden, "knowledge_base_denied", "knowledge base access denied")
 		return
 	}
-	results, err := h.sessions.SearchKnowledge(c.Request.Context(), *req.KnowledgeBaseIDs, knowledgeIDs, req.Query)
+	var results []*types.SearchResult
+	var err error
+	if req.FolderIDs == nil || len(*req.FolderIDs) == 0 {
+		results, err = h.sessions.SearchKnowledge(c.Request.Context(), *req.KnowledgeBaseIDs, knowledgeIDs, req.Query)
+	} else {
+		provider, providerOK := h.knowledges.(integrationFolderProvider)
+		searcher, searcherOK := h.sessions.(folderSearchSession)
+		if !providerOK || !searcherOK || !validIntegrationKnowledgeIDs(*req.FolderIDs, h.limits.maxKnowledgeIDs) {
+			integrationError(c, http.StatusBadRequest, "invalid_folder_ids", "invalid folder ids")
+			return
+		}
+		folderIDs, resolveErr := provider.ResolveIntegrationFolderIDs(c.Request.Context(), integrationPrincipal(c).TenantID, *req.KnowledgeBaseIDs, *req.FolderIDs, knowledgeIDs)
+		if resolveErr != nil {
+			if resolveErr.Error() == "invalid_knowledge_folder_scope" {
+				integrationError(c, http.StatusBadRequest, "invalid_knowledge_folder_scope", "knowledge is outside the folder scope")
+				return
+			}
+			integrationError(c, http.StatusBadRequest, "invalid_folder_ids", "invalid folder ids")
+			return
+		}
+		results, err = searcher.SearchKnowledgeWithFolders(c.Request.Context(), *req.KnowledgeBaseIDs, knowledgeIDs, folderIDs, req.Query)
+	}
 	if err != nil {
 		if appErr, ok := werrors.IsAppError(err); ok && appErr.Code == werrors.ErrForbidden {
 			h.audit(c, "api.search", "denied", "knowledge_denied")
@@ -915,7 +984,32 @@ func (h *IntegrationHandler) SearchBatch(c *gin.Context) {
 		integrationError(c, http.StatusForbidden, "knowledge_base_denied", "knowledge base access denied")
 		return
 	}
-	results, forbidden := h.runIntegrationSearchBatch(c.Request.Context(), knowledgeBaseIDs, req.Queries)
+	folderIDsByQuery := make([][]string, len(req.Queries))
+	provider, providerOK := h.knowledges.(integrationFolderProvider)
+	for i, query := range req.Queries {
+		if query.FolderIDs == nil || len(*query.FolderIDs) == 0 {
+			continue
+		}
+		if !providerOK {
+			integrationError(c, http.StatusInternalServerError, "search_failed", "knowledge search failed")
+			return
+		}
+		knowledgeIDs := []string(nil)
+		if query.KnowledgeIDs != nil {
+			knowledgeIDs = *query.KnowledgeIDs
+		}
+		resolved, resolveErr := provider.ResolveIntegrationFolderIDs(c.Request.Context(), principal.TenantID, knowledgeBaseIDs, *query.FolderIDs, knowledgeIDs)
+		if resolveErr != nil {
+			if resolveErr.Error() == "invalid_knowledge_folder_scope" {
+				integrationError(c, http.StatusBadRequest, "invalid_knowledge_folder_scope", "knowledge is outside the folder scope")
+				return
+			}
+			integrationError(c, http.StatusBadRequest, "invalid_folder_ids", "invalid folder ids")
+			return
+		}
+		folderIDsByQuery[i] = resolved
+	}
+	results, forbidden := h.runIntegrationSearchBatch(c.Request.Context(), knowledgeBaseIDs, req.Queries, folderIDsByQuery)
 	if forbidden {
 		h.service.AuditResources(c.Request.Context(), principal, "api.search.batch", "denied", "knowledge_denied", knowledgeBaseIDs)
 		integrationError(c, http.StatusForbidden, "knowledge_denied", "knowledge access denied")
@@ -945,11 +1039,14 @@ func validateIntegrationBatchSearchRequest(req integrationBatchSearchRequest, li
 		if query.KnowledgeIDs != nil && !validIntegrationKnowledgeIDs(*query.KnowledgeIDs, limits.maxKnowledgeIDs) {
 			return "knowledge_limit_exceeded"
 		}
+		if query.FolderIDs != nil && !validIntegrationKnowledgeIDs(*query.FolderIDs, limits.maxKnowledgeIDs) {
+			return "folder_limit_exceeded"
+		}
 	}
 	return ""
 }
 
-func (h *IntegrationHandler) runIntegrationSearchBatch(ctx context.Context, knowledgeBaseIDs []string, queries []integrationBatchSearchQuery) ([]integrationBatchSearchResult, bool) {
+func (h *IntegrationHandler) runIntegrationSearchBatch(ctx context.Context, knowledgeBaseIDs []string, queries []integrationBatchSearchQuery, folderIDsByQuery ...[][]string) ([]integrationBatchSearchResult, bool) {
 	results := make([]integrationBatchSearchResult, len(queries))
 	knowledgeBaseNames := make(map[string]string)
 	if listed, err := h.kbs.ListKnowledgeBases(ctx); err == nil {
@@ -975,7 +1072,18 @@ func (h *IntegrationHandler) runIntegrationSearchBatch(ctx context.Context, know
 			if query.KnowledgeIDs != nil {
 				knowledgeIDs = append(knowledgeIDs, (*query.KnowledgeIDs)...)
 			}
-			found, err := h.sessions.SearchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, query.Query)
+			var found []*types.SearchResult
+			var err error
+			if len(folderIDsByQuery) > 0 && folderIDsByQuery[0][index] != nil {
+				searcher, ok := h.sessions.(folderSearchSession)
+				if !ok {
+					err = errors.New("folder search is unavailable")
+				} else {
+					found, err = searcher.SearchKnowledgeWithFolders(ctx, knowledgeBaseIDs, knowledgeIDs, folderIDsByQuery[0][index], query.Query)
+				}
+			} else {
+				found, err = h.sessions.SearchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, query.Query)
+			}
 			if err != nil {
 				if appErr, ok := werrors.IsAppError(err); ok && appErr.Code == werrors.ErrForbidden {
 					forbiddenMu.Lock()

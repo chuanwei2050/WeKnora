@@ -58,6 +58,91 @@ var (
 	ErrImageNotParse = errors.New("image not parse without enable multimodel")
 )
 
+// ListIntegrationFolders returns only selectable root folders for the integration API.
+func (s *knowledgeService) ListIntegrationFolders(ctx context.Context, tenantID uint64, kbID string) ([]*types.KnowledgeTag, error) {
+	tags, err := s.listAllIntegrationTags(ctx, tenantID, kbID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*types.KnowledgeTag, 0, len(tags))
+	for _, tag := range tags {
+		if tag != nil && !tag.IsPublic && tag.Name != types.UntaggedTagName {
+			result = append(result, tag)
+		}
+	}
+	return result, nil
+}
+
+func (s *knowledgeService) listAllIntegrationTags(ctx context.Context, tenantID uint64, kbID string) ([]*types.KnowledgeTag, error) {
+	const pageSize = 1000
+	var result []*types.KnowledgeTag
+	for page := 1; ; page++ {
+		tags, total, err := s.tagRepo.ListByKB(ctx, tenantID, kbID, &types.Pagination{Page: page, PageSize: pageSize}, "")
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, tags...)
+		if len(tags) == 0 || int64(len(result)) >= total {
+			return result, nil
+		}
+	}
+}
+
+// ResolveIntegrationFolderIDs validates explicit folders and adds public folders in the selected KBs.
+func (s *knowledgeService) ResolveIntegrationFolderIDs(ctx context.Context, tenantID uint64, kbIDs, explicitIDs, knowledgeIDs []string) ([]string, error) {
+	allowedKBs := make(map[string]struct{}, len(kbIDs))
+	for _, kbID := range kbIDs {
+		allowedKBs[kbID] = struct{}{}
+	}
+	resolved := make(map[string]struct{}, len(explicitIDs))
+	if len(explicitIDs) > 0 {
+		tags, err := s.tagRepo.GetByIDs(ctx, tenantID, explicitIDs)
+		if err != nil || len(tags) != len(explicitIDs) {
+			return nil, errors.New("invalid_folder_ids")
+		}
+		for _, tag := range tags {
+			if tag == nil || tag.Name == types.UntaggedTagName {
+				return nil, errors.New("invalid_folder_ids")
+			}
+			if _, ok := allowedKBs[tag.KnowledgeBaseID]; !ok {
+				return nil, errors.New("invalid_folder_ids")
+			}
+			resolved[tag.ID] = struct{}{}
+		}
+	}
+	for _, kbID := range kbIDs {
+		tags, err := s.listAllIntegrationTags(ctx, tenantID, kbID)
+		if err != nil {
+			return nil, err
+		}
+		for _, tag := range tags {
+			if tag != nil && tag.IsPublic {
+				resolved[tag.ID] = struct{}{}
+			}
+		}
+	}
+	ids := make([]string, 0, len(resolved))
+	for id := range resolved {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	if len(knowledgeIDs) > 0 {
+		knowledges, err := s.repo.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+		if err != nil || len(knowledges) != len(knowledgeIDs) {
+			return nil, errors.New("invalid_knowledge_folder_scope")
+		}
+		for _, knowledge := range knowledges {
+			if knowledge == nil {
+				return nil, errors.New("invalid_knowledge_folder_scope")
+			}
+			if _, ok := resolved[knowledge.TagID]; !ok {
+				return nil, errors.New("invalid_knowledge_folder_scope")
+			}
+		}
+	}
+	return ids, nil
+}
+
 // knowledgeService implements the knowledge service interface
 // service 实现知识服务接口
 type knowledgeService struct {

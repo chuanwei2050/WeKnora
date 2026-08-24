@@ -140,7 +140,7 @@ func (r *knowledgeTagRepository) Reorder(
 	ctx context.Context,
 	tenantID uint64,
 	kbID string,
-	orderedIDs []string,
+	rootIDs, publicIDs []string,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&types.KnowledgeTag{}).
@@ -148,18 +148,24 @@ func (r *knowledgeTagRepository) Reorder(
 			Update("sort_order", -1).Error; err != nil {
 			return err
 		}
-		for index, id := range orderedIDs {
-			result := tx.Model(&types.KnowledgeTag{}).
-				Where("tenant_id = ? AND knowledge_base_id = ? AND id = ? AND name <> ?", tenantID, kbID, id, types.UntaggedTagName).
-				Update("sort_order", index)
-			if result.Error != nil {
-				return result.Error
+		updateSection := func(ids []string, isPublic bool) error {
+			for index, id := range ids {
+				result := tx.Model(&types.KnowledgeTag{}).
+					Where("tenant_id = ? AND knowledge_base_id = ? AND id = ? AND name <> ?", tenantID, kbID, id, types.UntaggedTagName).
+					Updates(map[string]interface{}{"sort_order": index, "is_public": isPublic})
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected != 1 {
+					return fmt.Errorf("tag %s is not reorderable", id)
+				}
 			}
-			if result.RowsAffected != 1 {
-				return fmt.Errorf("tag %s is not reorderable", id)
-			}
+			return nil
 		}
-		return nil
+		if err := updateSection(rootIDs, false); err != nil {
+			return err
+		}
+		return updateSection(publicIDs, true)
 	})
 }
 

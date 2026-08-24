@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -478,12 +479,16 @@ func (s *sessionService) buildSearchTargets(
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
 	filterDisabledFolders bool,
+	explicitTagIDs ...[]string,
 ) (types.SearchTargets, error) {
 	var targets types.SearchTargets
 	type searchableTagProvider interface {
 		SearchableTagIDs(context.Context, uint64, string) ([]string, error)
 	}
 	searchableTags := func(scopeTenantID uint64, kbID string) ([]string, error) {
+		if len(explicitTagIDs) > 0 {
+			return explicitTagIDs[0], nil
+		}
 		if !filterDisabledFolders {
 			return nil, nil
 		}
@@ -597,6 +602,9 @@ func (s *sessionService) buildSearchTargets(
 					}
 				}
 				if !allowed {
+					if len(explicitTagIDs) > 0 {
+						return nil, errors.New("invalid_knowledge_folder_scope")
+					}
 					logger.Infof(ctx, "Skipping knowledge %s because its folder is disabled for search", k.ID)
 					continue
 				}
@@ -689,6 +697,18 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 func (s *sessionService) SearchKnowledge(ctx context.Context,
 	knowledgeBaseIDs []string, knowledgeIDs []string, query string,
 ) ([]*types.SearchResult, error) {
+	return s.searchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, nil, query)
+}
+
+func (s *sessionService) SearchKnowledgeWithFolders(ctx context.Context,
+	knowledgeBaseIDs []string, knowledgeIDs []string, folderIDs []string, query string,
+) ([]*types.SearchResult, error) {
+	return s.searchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, folderIDs, query)
+}
+
+func (s *sessionService) searchKnowledge(ctx context.Context,
+	knowledgeBaseIDs []string, knowledgeIDs []string, folderIDs []string, query string,
+) ([]*types.SearchResult, error) {
 	logger.Info(ctx, "Start knowledge base search without LLM summary")
 	logger.Infof(ctx, "Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, query: %s",
 		knowledgeBaseIDs, knowledgeIDs, query)
@@ -701,7 +721,13 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, false)
+	var searchTargets types.SearchTargets
+	var err error
+	if folderIDs == nil {
+		searchTargets, err = s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, false)
+	} else {
+		searchTargets, err = s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, false, folderIDs)
+	}
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets: %v", err)
 		return nil, err

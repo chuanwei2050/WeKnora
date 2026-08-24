@@ -142,6 +142,7 @@ func (s *knowledgeTagService) CreateTag(
 	name string,
 	color string,
 	sortOrder int,
+	isPublic bool,
 ) (*types.KnowledgeTag, error) {
 	name = strings.TrimSpace(name)
 	if kbID == "" || name == "" {
@@ -173,6 +174,7 @@ func (s *knowledgeTagService) CreateTag(
 		Name:            name,
 		Color:           strings.TrimSpace(color),
 		SortOrder:       sortOrder,
+		IsPublic:        isPublic,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -233,7 +235,7 @@ func (s *knowledgeTagService) UpdateTag(
 }
 
 // ReorderTags validates and atomically persists the complete order of ordinary tags.
-func (s *knowledgeTagService) ReorderTags(ctx context.Context, kbID string, orderedIDs []string) error {
+func (s *knowledgeTagService) ReorderTags(ctx context.Context, kbID string, rootIDs, publicIDs []string) error {
 	if kbID == "" {
 		return werrors.NewBadRequestError("知识库ID不能为空")
 	}
@@ -257,6 +259,7 @@ func (s *knowledgeTagService) ReorderTags(ctx context.Context, kbID string, orde
 			expected[tag.ID] = struct{}{}
 		}
 	}
+	orderedIDs := append(append(make([]string, 0, len(rootIDs)+len(publicIDs)), rootIDs...), publicIDs...)
 	if len(orderedIDs) != len(expected) {
 		return werrors.NewBadRequestError("文件夹排序集合不完整")
 	}
@@ -270,7 +273,7 @@ func (s *knowledgeTagService) ReorderTags(ctx context.Context, kbID string, orde
 		}
 		seen[id] = struct{}{}
 	}
-	return s.repo.Reorder(ctx, kb.TenantID, kbID, orderedIDs)
+	return s.repo.Reorder(ctx, kb.TenantID, kbID, rootIDs, publicIDs)
 }
 
 // DeleteTag deletes a tag. When force=true, also deletes all chunks under this tag.
@@ -502,5 +505,5 @@ func (s *knowledgeTagService) FindOrCreateTagByName(ctx context.Context, kbID st
 	}
 
 	// 创建新标签
-	return s.CreateTag(ctx, kbID, name, "", 0)
+	return s.CreateTag(ctx, kbID, name, "", 0, false)
 }

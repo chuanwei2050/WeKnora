@@ -57,7 +57,7 @@ import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import {
   UNTAGGED_TAG_NAME,
   folderMoveTargets,
-  reorderFolders,
+  placeFolder,
   resolveUploadTarget,
 } from './components/document-folder-organization';
 import WikiBrowser from './wiki/WikiBrowser.vue';
@@ -306,7 +306,11 @@ const filteredTags = computed(() => {
 });
 const untaggedTag = computed(() => tagList.value.find(tag => tag.name === UNTAGGED_TAG_NAME));
 const ordinaryTags = computed(() => tagList.value.filter(tag => tag.name !== UNTAGGED_TAG_NAME));
-const filteredOrdinaryTags = computed(() => filteredTags.value.filter(tag => tag.name !== UNTAGGED_TAG_NAME));
+const rootTags = computed(() => ordinaryTags.value.filter(tag => !tag.is_public));
+const publicTags = computed(() => ordinaryTags.value.filter(tag => tag.is_public));
+const filteredRootTags = computed(() => filteredTags.value.filter(tag => tag.name !== UNTAGGED_TAG_NAME && !tag.is_public));
+const filteredPublicTags = computed(() => filteredTags.value.filter(tag => tag.name !== UNTAGGED_TAG_NAME && tag.is_public));
+const filteredDisplayTags = computed(() => [...filteredPublicTags.value, ...filteredRootTags.value]);
 const isFolderNotEmpty = (tag: any) => (
   Number(tag.knowledge_count || 0) > 0 || Number(tag.chunk_count || 0) > 0
 );
@@ -314,7 +318,9 @@ const folderOrderComplete = computed(() => tagList.value.length === tagTotal.val
 const canReorderFolders = computed(() => canEdit.value && folderOrderComplete.value && !tagSearchQuery.value.trim());
 const draggedTagId = ref('');
 const dragOverTagId = ref('');
+const dragOverPublicFolder = ref(false);
 const folderOrderSaving = ref(false);
+const publicFolderExpanded = ref(true);
 const selectedFolder = computed(() => tagMap.value[selectedTagId.value]);
 const uploadTarget = computed(() => resolveUploadTarget(selectedFolder.value));
 const uploadTargetTagId = computed(() => uploadTarget.value.tagId);
@@ -332,6 +338,7 @@ const setEditingTagInputRefByTag = (tagId: string) => (el: TagInputInstance | nu
 };
 const newTagInputRef = ref<TagInputInstance | null>(null);
 const creatingTag = ref(false);
+const creatingPublicTag = ref(false);
 const creatingTagLoading = ref(false);
 const newTagName = ref('');
 const editingTagId = ref<string | null>(null);
@@ -479,6 +486,7 @@ const selectFolder = (tagId: string) => {
 const resetFolderDrag = () => {
   draggedTagId.value = '';
   dragOverTagId.value = '';
+  dragOverPublicFolder.value = false;
 };
 
 const handleFolderDragStart = (event: DragEvent, tagId: string) => {
@@ -498,7 +506,7 @@ const handleFolderDragOver = (event: DragEvent, tagId: string) => {
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
 };
 
-const handleFolderDrop = async (event: DragEvent, targetTagId: string) => {
+const handleFolderDrop = async (event: DragEvent, targetTagId: string, targetPublic: boolean) => {
   event.preventDefault();
   const sourceTagId = draggedTagId.value || event.dataTransfer?.getData('text/plain') || '';
   if (!canReorderFolders.value || !sourceTagId || sourceTagId === targetTagId || folderOrderSaving.value) {
@@ -507,20 +515,17 @@ const handleFolderDrop = async (event: DragEvent, targetTagId: string) => {
   }
 
   const previous = [...tagList.value];
-  const reordered = reorderFolders(ordinaryTags.value, sourceTagId, targetTagId);
-  if (reordered.every((tag, index) => tag.id === ordinaryTags.value[index]?.id)) {
-    resetFolderDrag();
-    return;
-  }
-  tagList.value = [...tagList.value.filter(tag => tag.name === UNTAGGED_TAG_NAME), ...reordered];
+  const { root: nextRoot, public: nextPublic } = placeFolder(ordinaryTags.value, sourceTagId, targetTagId, targetPublic);
+  tagList.value = [...tagList.value.filter(tag => tag.name === UNTAGGED_TAG_NAME), ...nextPublic, ...nextRoot];
   folderOrderSaving.value = true;
   resetFolderDrag();
   try {
-    await reorderKnowledgeBaseTags(kbId.value, reordered.map(tag => tag.id));
+    await reorderKnowledgeBaseTags(kbId.value, nextRoot.map(tag => tag.id), nextPublic.map(tag => tag.id));
     MessagePlugin.success(t('knowledgeBase.folderReorderSuccess'));
   } catch (error: any) {
     tagList.value = previous;
     MessagePlugin.error(error?.message || t('knowledgeBase.folderReorderFailed'));
+    await loadTags(kbId.value);
   } finally {
     folderOrderSaving.value = false;
   }
@@ -537,6 +542,20 @@ const startCreateTag = () => {
   editingTagId.value = null;
   editingTagName.value = '';
   creatingTag.value = true;
+  creatingPublicTag.value = false;
+  nextTick(() => {
+    newTagInputRef.value?.focus?.();
+    newTagInputRef.value?.select?.();
+  });
+};
+
+const startCreatePublicTag = () => {
+  if (!kbId.value || creatingTag.value) return;
+  editingTagId.value = null;
+  editingTagName.value = '';
+  creatingTag.value = true;
+  creatingPublicTag.value = true;
+  publicFolderExpanded.value = true;
   nextTick(() => {
     newTagInputRef.value?.focus?.();
     newTagInputRef.value?.select?.();
@@ -545,6 +564,7 @@ const startCreateTag = () => {
 
 const cancelCreateTag = () => {
   creatingTag.value = false;
+  creatingPublicTag.value = false;
   newTagName.value = '';
 };
 
@@ -568,7 +588,8 @@ const submitCreateTag = async () => {
   }
   creatingTagLoading.value = true;
   try {
-    await createKnowledgeBaseTag(kbId.value, { name, sort_order: ordinaryTags.value.length });
+    const siblings = creatingPublicTag.value ? publicTags.value : rootTags.value;
+    await createKnowledgeBaseTag(kbId.value, { name, sort_order: siblings.length, is_public: creatingPublicTag.value });
     MessagePlugin.success(t('knowledgeBase.tagCreateSuccess'));
     cancelCreateTag();
     await loadTags(kbId.value);
@@ -2179,7 +2200,32 @@ async function createNewSession(value: string): Promise<void> {
 
             <div class="folder-list-divider" />
 
-            <div v-if="creatingTag" class="knowledge-tree-row folder-row tree-editing" @click.stop>
+            <div
+              class="knowledge-tree-row folder-row fixed-folder-row public-folder-row"
+              :class="{ 'drop-target': dragOverPublicFolder }"
+              role="listitem"
+              @click="publicFolderExpanded = !publicFolderExpanded"
+              @dragover.prevent="dragOverPublicFolder = Boolean(draggedTagId)"
+              @dragleave="dragOverPublicFolder = false"
+              @drop="handleFolderDrop($event, '', true)"
+            >
+              <span class="folder-drag-placeholder" />
+              <t-icon :name="publicFolderExpanded ? 'chevron-down' : 'chevron-right'" size="14px" />
+              <span class="folder-icon computer-folder-icon" aria-hidden="true" />
+              <span class="tree-name">{{ $t('knowledgeBase.publicFilesFolder') }}</span>
+              <t-button
+                v-if="canEdit"
+                variant="text"
+                size="small"
+                class="tag-action-btn public-folder-add"
+                :aria-label="$t('knowledgeBase.publicFolderCreateAction')"
+                @click.stop="startCreatePublicTag"
+              >
+                <t-icon name="add" size="16px" />
+              </t-button>
+            </div>
+
+            <div v-if="creatingTag && creatingPublicTag" class="knowledge-tree-row folder-row public-child-row tree-editing" @click.stop>
               <span class="folder-drag-placeholder" />
               <span class="folder-icon computer-folder-icon" aria-hidden="true" />
               <div
@@ -2205,6 +2251,18 @@ async function createNewSession(value: string): Promise<void> {
               </div>
             </div>
 
+            <div v-if="creatingTag && !creatingPublicTag" class="knowledge-tree-row folder-row tree-editing" @click.stop>
+              <span class="folder-drag-placeholder" />
+              <span class="folder-icon computer-folder-icon" aria-hidden="true" />
+              <div class="tag-edit-input" @keydown.enter="onCreateTagEnterKey" @keydown.esc.prevent.stop="cancelCreateTag">
+                <t-input ref="newTagInputRef" v-model="newTagName" size="small" :maxlength="40" :placeholder="$t('knowledgeBase.tagNamePlaceholder')" />
+              </div>
+              <div class="tag-inline-actions">
+                <t-button variant="text" size="small" class="tag-action-btn confirm" :loading="creatingTagLoading" @click.stop="submitCreateTag"><t-icon name="check" size="16px" /></t-button>
+                <t-button variant="text" size="small" class="tag-action-btn cancel" @click.stop="cancelCreateTag"><t-icon name="close" size="16px" /></t-button>
+              </div>
+            </div>
+
             <template v-if="tagLoading && !ordinaryTags.length">
               <div v-for="n in 6" :key="'folder-skel-'+n" class="knowledge-tree-row folder-row tree-skeleton-row">
                 <span class="folder-drag-placeholder" />
@@ -2213,21 +2271,24 @@ async function createNewSession(value: string): Promise<void> {
             </template>
             <template v-else>
               <div
-                v-for="tag in filteredOrdinaryTags"
+                v-for="tag in filteredDisplayTags"
                 :key="tag.id"
+                v-show="!tag.is_public || publicFolderExpanded"
                 class="knowledge-tree-row folder-row"
                 :class="{
                   active: selectedTagId === tag.id,
                   editing: editingTagId === tag.id,
                   dragging: draggedTagId === tag.id,
                   'drop-target': dragOverTagId === tag.id,
+                  'public-child-row': tag.is_public,
+                  'root-folder-row': !tag.is_public,
                 }"
                 role="listitem"
                 :draggable="canReorderFolders && !folderOrderSaving"
                 @dragstart="handleFolderDragStart($event, tag.id)"
                 @dragover="handleFolderDragOver($event, tag.id)"
                 @dragleave="dragOverTagId === tag.id && (dragOverTagId = '')"
-                @drop="handleFolderDrop($event, tag.id)"
+                @drop="handleFolderDrop($event, tag.id, Boolean(tag.is_public))"
                 @dragend="resetFolderDrag"
               >
                 <span v-if="canEdit" class="folder-drag-handle" :class="{ disabled: !canReorderFolders }" aria-hidden="true">
@@ -2298,7 +2359,13 @@ async function createNewSession(value: string): Promise<void> {
                 </div>
               </div>
             </template>
-            <div v-if="!tagLoading && tagSearchQuery && !filteredOrdinaryTags.length" class="tag-empty-state">
+            <div
+              v-if="draggedTagId && ordinaryTags.find(tag => tag.id === draggedTagId)?.is_public"
+              class="root-folder-drop-zone"
+              @dragover.prevent
+              @drop="handleFolderDrop($event, '', false)"
+            />
+            <div v-if="!tagLoading && tagSearchQuery && !filteredDisplayTags.length" class="tag-empty-state">
               {{ $t('knowledgeBase.tagEmptyResult') }}
             </div>
             <div v-if="!folderOrderComplete" class="folder-order-warning">
@@ -3483,6 +3550,27 @@ async function createNewSession(value: string): Promise<void> {
 
   .fixed-folder-row {
     font-weight: 500;
+  }
+
+  .public-folder-row {
+    cursor: pointer;
+
+    .public-folder-add {
+      margin-left: auto;
+    }
+  }
+
+  .public-child-row {
+    padding-left: 26px;
+  }
+
+  .root-folder-drop-zone {
+    height: 12px;
+    border-radius: 3px;
+
+    &:hover {
+      box-shadow: inset 0 -2px 0 var(--td-brand-color, #0052d9);
+    }
   }
 
   .folder-drag-handle,

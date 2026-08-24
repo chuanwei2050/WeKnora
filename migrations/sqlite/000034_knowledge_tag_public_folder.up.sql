@@ -1,0 +1,1 @@
+ALTER TABLE knowledge_tags ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0;

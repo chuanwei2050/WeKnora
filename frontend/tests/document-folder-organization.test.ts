@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   folderMoveTargets,
+  placeFolder,
   reorderFolders,
   resolveUploadTarget,
 } from '../src/views/knowledge/components/document-folder-organization'
@@ -34,5 +35,29 @@ describe('document folder organization', () => {
       { content: '1.1-投标文件', value: 'a' },
       { content: '产品资料', value: 'b' },
     ])
+  })
+
+  it('moves a root folder into public files', () => {
+    const result = placeFolder([
+      { id: 'root-a', name: 'A', is_public: false },
+      { id: 'root-b', name: 'B', is_public: false },
+      { id: 'public-a', name: 'C', is_public: true },
+    ], 'root-a', 'public-a', true)
+
+    expect(result.root.map(folder => folder.id)).toEqual(['root-b'])
+    expect(result.public.map(folder => folder.id)).toEqual(['root-a', 'public-a'])
+    expect(result.public[0].is_public).toBe(true)
+  })
+
+  it('moves a public folder back to the root', () => {
+    const result = placeFolder([
+      { id: 'root-a', name: 'A', is_public: false },
+      { id: 'root-b', name: 'B', is_public: false },
+      { id: 'public-a', name: 'C', is_public: true },
+    ], 'public-a', 'root-b', false)
+
+    expect(result.root.map(folder => folder.id)).toEqual(['root-a', 'public-a', 'root-b'])
+    expect(result.public).toEqual([])
+    expect(result.root[1].is_public).toBe(false)
   })
 })

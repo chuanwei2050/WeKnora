@@ -25,16 +25,21 @@ func TestKnowledgeTagRepositoryReorderIsAtomic(t *testing.T) {
 	}
 	repo := &knowledgeTagRepository{db: db}
 
-	require.NoError(t, repo.Reorder(context.Background(), 1, "kb", []string{"b", "a"}))
-	var ordered []types.KnowledgeTag
-	require.NoError(t, db.Order("sort_order ASC").Find(&ordered).Error)
-	require.Equal(t, []string{"untagged", "b", "a"}, []string{ordered[0].ID, ordered[1].ID, ordered[2].ID})
+	require.NoError(t, repo.Reorder(context.Background(), 1, "kb", []string{"b"}, []string{"a"}))
+	var root, public types.KnowledgeTag
+	require.NoError(t, db.First(&root, "id = ?", "b").Error)
+	require.NoError(t, db.First(&public, "id = ?", "a").Error)
+	require.False(t, root.IsPublic)
+	require.Equal(t, 0, root.SortOrder)
+	require.True(t, public.IsPublic)
+	require.Equal(t, 0, public.SortOrder)
 
-	err = repo.Reorder(context.Background(), 1, "kb", []string{"a", "missing"})
+	err = repo.Reorder(context.Background(), 1, "kb", []string{"a", "missing"}, nil)
 	require.Error(t, err)
-	ordered = nil
-	require.NoError(t, db.Order("sort_order ASC").Find(&ordered).Error)
-	require.Equal(t, []string{"untagged", "b", "a"}, []string{ordered[0].ID, ordered[1].ID, ordered[2].ID})
+	require.NoError(t, db.First(&root, "id = ?", "b").Error)
+	require.NoError(t, db.First(&public, "id = ?", "a").Error)
+	require.False(t, root.IsPublic)
+	require.True(t, public.IsPublic)
 }
 
 func TestKnowledgeTagRepositoryBatchCountReferencesExcludesDeleting(t *testing.T) {

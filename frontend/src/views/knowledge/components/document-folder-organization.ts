@@ -3,6 +3,12 @@ export const UNTAGGED_TAG_NAME = '未分类'
 export interface DocumentFolderRef {
   id: string
   name: string
+  is_public?: boolean
+}
+
+export interface FolderSections<T> {
+  root: T[]
+  public: T[]
 }
 
 export function resolveUploadTarget(folder?: DocumentFolderRef): { name: string; tagId?: string } {
@@ -24,6 +30,23 @@ export function reorderFolders<T extends DocumentFolderRef>(
   const [moved] = reordered.splice(sourceIndex, 1)
   reordered.splice(targetIndex, 0, moved)
   return reordered
+}
+
+export function placeFolder<T extends DocumentFolderRef>(
+  folders: readonly T[],
+  sourceId: string,
+  targetId: string,
+  targetPublic: boolean,
+): FolderSections<T> {
+  const source = folders.find(folder => folder.id === sourceId)
+  const root = folders.filter(folder => !folder.is_public && folder.id !== sourceId)
+  const publicFolders = folders.filter(folder => folder.is_public && folder.id !== sourceId)
+  if (!source) return { root, public: publicFolders }
+
+  const target = targetPublic ? publicFolders : root
+  const targetIndex = targetId ? target.findIndex(folder => folder.id === targetId) : target.length
+  target.splice(targetIndex < 0 ? target.length : targetIndex, 0, { ...source, is_public: targetPublic })
+  return { root, public: publicFolders }
 }
 
 export function folderMoveTargets<T extends DocumentFolderRef>(

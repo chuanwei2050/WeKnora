@@ -10,6 +10,7 @@ export function listKnowledgeBases(params?: { agent_id?: string }) {
 
 export function createKnowledgeBase(data: {
   name: string;
+  code?: string;
   description?: string;
   type?: 'document' | 'faq';
   chunking_config?: any;
@@ -56,6 +57,7 @@ export function getKnowledgeBaseById(id: string, options?: { agent_id?: string }
 
 export function updateKnowledgeBase(id: string, data: {
   name: string;
+  code?: string;
   description?: string;
   config?: {
     chunking_config?: any;
@@ -223,7 +225,7 @@ export function listKnowledgeTags(
 
 export function createKnowledgeBaseTag(
   kbId: string,
-  data: { name: string; color?: string; sort_order?: number },
+  data: { name: string; color?: string; sort_order?: number; is_public?: boolean },
 ) {
   return post(`/api/v1/knowledge-bases/${kbId}/tags`, data);
 }
@@ -236,8 +238,11 @@ export function updateKnowledgeBaseTag(
   return put(`/api/v1/knowledge-bases/${kbId}/tags/${tagId}`, data);
 }
 
-export function reorderKnowledgeBaseTags(kbId: string, tagIds: string[]) {
-  return put(`/api/v1/knowledge-bases/${kbId}/tags/reorder`, { tag_ids: tagIds });
+export function reorderKnowledgeBaseTags(kbId: string, rootTagIds: string[], publicTagIds: string[]) {
+  return put(`/api/v1/knowledge-bases/${kbId}/tags/reorder`, {
+    root_tag_ids: rootTagIds,
+    public_tag_ids: publicTagIds,
+  });
 }
 
 export function deleteKnowledgeBaseTag(kbId: string, tagSeqId: number, params?: { force?: boolean }) {

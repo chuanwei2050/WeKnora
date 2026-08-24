@@ -48,6 +48,31 @@ func TestBuildSearchTargetsFiltersFoldersOnlyWhenRequested(t *testing.T) {
 	require.Nil(t, directSearchTargets[0].TagIDs)
 }
 
+func TestBuildSearchTargetsAppliesExplicitIntegrationFolders(t *testing.T) {
+	service := &sessionService{
+		knowledgeBaseService: searchTargetKnowledgeBaseService{items: []*types.KnowledgeBase{{ID: "kb-1", TenantID: 7}}},
+		knowledgeService:     searchTargetKnowledgeService{},
+	}
+
+	targets, err := service.buildSearchTargets(context.Background(), 7, []string{"kb-1"}, nil, false, []string{"ordinary-1", "public-1"})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"ordinary-1", "public-1"}, targets[0].TagIDs)
+}
+
+func TestBuildSearchTargetsRejectsDirectDocumentOutsideExplicitFolders(t *testing.T) {
+	service := &sessionService{
+		knowledgeBaseService: searchTargetKnowledgeBaseService{items: []*types.KnowledgeBase{{ID: "kb-1", TenantID: 7}}},
+		knowledgeService: searchTargetKnowledgeService{items: []*types.Knowledge{
+			{ID: "doc-1", KnowledgeBaseID: "kb-1", TenantID: 7, TagID: "outside"},
+		}},
+	}
+
+	_, err := service.buildSearchTargets(context.Background(), 7, []string{"kb-1"}, []string{"doc-1"}, false, []string{"ordinary-1", "public-1"})
+
+	require.EqualError(t, err, "invalid_knowledge_folder_scope")
+}
+
 func TestBuildSearchTargetsSkipsKnowledgeBaseWhenAllFoldersAreDisabled(t *testing.T) {
 	service := &sessionService{
 		knowledgeBaseService: searchTargetKnowledgeBaseService{items: []*types.KnowledgeBase{{ID: "kb-1", TenantID: 7}}},

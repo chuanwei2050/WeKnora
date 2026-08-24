@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -18,6 +20,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 type integrationContextKey string
@@ -27,11 +31,21 @@ type batchSearchSessionService struct {
 	mu        sync.Mutex
 	active    int
 	maxActive int
+	folderIDs []string
+	calls     int
+}
+
+func (s *batchSearchSessionService) SearchKnowledgeWithFolders(_ context.Context, knowledgeBaseIDs []string, knowledgeIDs []string, folderIDs []string, query string) ([]*types.SearchResult, error) {
+	s.mu.Lock()
+	s.folderIDs = append([]string(nil), folderIDs...)
+	s.mu.Unlock()
+	return s.SearchKnowledge(context.Background(), knowledgeBaseIDs, knowledgeIDs, query)
 }
 
 func (s *batchSearchSessionService) SearchKnowledge(_ context.Context, knowledgeBaseIDs []string, knowledgeIDs []string, query string) ([]*types.SearchResult, error) {
 	s.mu.Lock()
 	s.active++
+	s.calls++
 	if s.active > s.maxActive {
 		s.maxActive = s.active
 	}
@@ -45,6 +59,65 @@ func (s *batchSearchSessionService) SearchKnowledge(_ context.Context, knowledge
 
 type batchSearchKnowledgeBaseService struct {
 	interfaces.KnowledgeBaseService
+}
+
+type folderEndpointKnowledgeBaseRepo struct {
+	interfaces.KnowledgeBaseRepository
+	byTenant map[uint64]*types.KnowledgeBase
+}
+
+func (r folderEndpointKnowledgeBaseRepo) GetKnowledgeBaseByCodeKey(_ context.Context, tenantID uint64, codeKey string) (*types.KnowledgeBase, error) {
+	kb := r.byTenant[tenantID]
+	if kb == nil || kb.CodeKey == nil || *kb.CodeKey != codeKey {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return kb, nil
+}
+
+type folderEndpointKnowledgeBaseService struct {
+	interfaces.KnowledgeBaseService
+	repo interfaces.KnowledgeBaseRepository
+}
+
+func (s folderEndpointKnowledgeBaseService) GetRepository() interfaces.KnowledgeBaseRepository {
+	return s.repo
+}
+
+type folderEndpointKnowledgeService struct {
+	interfaces.KnowledgeService
+	folders    []*types.KnowledgeTag
+	resolved   []string
+	resolveErr error
+}
+
+func (s folderEndpointKnowledgeService) ListIntegrationFolders(context.Context, uint64, string) ([]*types.KnowledgeTag, error) {
+	return s.folders, nil
+}
+
+func (s folderEndpointKnowledgeService) ResolveIntegrationFolderIDs(context.Context, uint64, []string, []string, []string) ([]string, error) {
+	return s.resolved, s.resolveErr
+}
+
+func newFolderEndpointHandler(t *testing.T, kbs map[uint64]*types.KnowledgeBase, folders []*types.KnowledgeTag) (*IntegrationHandler, *gorm.DB) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&integrationauth.Audit{}))
+	repo := folderEndpointKnowledgeBaseRepo{byTenant: kbs}
+	return &IntegrationHandler{
+		service:    integrationauth.NewService(db, nil, nil),
+		kbs:        folderEndpointKnowledgeBaseService{repo: repo},
+		knowledges: folderEndpointKnowledgeService{folders: folders},
+	}, db
+}
+
+func folderEndpointContext(method, path, code string, principal *integrationauth.Principal) (*gin.Context, *httptest.ResponseRecorder) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(method, path, nil)
+	ctx.Params = gin.Params{{Key: "code", Value: code}}
+	ctx.Set("integrationPrincipal", principal)
+	return ctx, recorder
 }
 
 func (batchSearchKnowledgeBaseService) ListKnowledgeBases(context.Context) ([]*types.KnowledgeBase, error) {
@@ -123,6 +196,82 @@ func TestIntegrationKnowledgeIDsAreBoundedAndValidated(t *testing.T) {
 	require.False(t, validIntegrationKnowledgeIDs([]string{strings.Repeat("x", 129)}, 2))
 }
 
+func TestIntegrationFoldersByCodeRequiresBothScopes(t *testing.T) {
+	key := "KB-CODE"
+	handler, _ := newFolderEndpointHandler(t, map[uint64]*types.KnowledgeBase{1: {ID: "kb-1", TenantID: 1, CodeKey: &key}}, nil)
+	principal := &integrationauth.Principal{TenantID: 1, KnowledgeBaseIDs: []string{"kb-1"}, Scopes: []string{"kb:list"}}
+	ctx, recorder := folderEndpointContext(http.MethodGet, "/api/integration/v1/knowledge-bases/by-code/kb-code/folders", "kb-code", principal)
+
+	handler.ListKnowledgeBaseFoldersByCode(ctx)
+
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+	require.NotContains(t, recorder.Body.String(), "普通文件夹")
+}
+
+func TestIntegrationFoldersByCodeReturnsStableOrdinaryFolderDTOAndAudits(t *testing.T) {
+	key := "KB-CODE"
+	handler, db := newFolderEndpointHandler(t, map[uint64]*types.KnowledgeBase{
+		1: {ID: "kb-1", TenantID: 1, Code: "Kb-Code", CodeKey: &key},
+		2: {ID: "kb-2", TenantID: 2, Code: "Kb-Code", CodeKey: &key},
+	}, []*types.KnowledgeTag{{ID: "folder-1", Name: "普通文件夹", SortOrder: 3}})
+	principal := &integrationauth.Principal{ClientID: "client-1", TenantID: 1, KnowledgeBaseIDs: []string{"kb-1"}, Scopes: []string{"kb:list", "knowledge:read"}}
+	ctx, recorder := folderEndpointContext(http.MethodGet, "/api/integration/v1/knowledge-bases/by-code/kb-code/folders", "kb-code", principal)
+
+	handler.ListKnowledgeBaseFoldersByCode(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool             `json:"success"`
+		Data    []map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	require.Equal(t, []map[string]any{{"id": "folder-1", "name": "普通文件夹", "sort_order": float64(3)}}, response.Data)
+	require.NotContains(t, recorder.Body.String(), "is_public")
+
+	var audit integrationauth.Audit
+	require.NoError(t, db.Where("action = ?", "api.knowledge_base.folders").First(&audit).Error)
+	require.Equal(t, "allowed", audit.Outcome)
+	require.Contains(t, audit.ResourceIDsJSON, "kb-1")
+}
+
+func TestIntegrationFoldersByCodeRejectsInvalidNotFoundAndUnauthorizedWithoutLeaking(t *testing.T) {
+	key := "KB-CODE"
+	handler, db := newFolderEndpointHandler(t, map[uint64]*types.KnowledgeBase{1: {ID: "kb-1", TenantID: 1, CodeKey: &key}}, nil)
+	basePrincipal := &integrationauth.Principal{ClientID: "client-1", TenantID: 1, KnowledgeBaseIDs: []string{"kb-1"}, Scopes: []string{"kb:list", "knowledge:read"}}
+
+	invalidCtx, invalidRecorder := folderEndpointContext(http.MethodGet, "/folders", "bad/code", basePrincipal)
+	handler.ListKnowledgeBaseFoldersByCode(invalidCtx)
+	require.Equal(t, http.StatusBadRequest, invalidRecorder.Code)
+	require.Contains(t, invalidRecorder.Body.String(), "invalid_knowledge_base_code")
+
+	for name, principal := range map[string]*integrationauth.Principal{
+		"not found in tenant": {ClientID: "client-1", TenantID: 2, KnowledgeBaseIDs: []string{"kb-2"}, Scopes: []string{"kb:list", "knowledge:read"}},
+		"not allowlisted":     {ClientID: "client-1", TenantID: 1, KnowledgeBaseIDs: []string{"other"}, Scopes: []string{"kb:list", "knowledge:read"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, recorder := folderEndpointContext(http.MethodGet, "/folders", "kb-code", principal)
+			handler.ListKnowledgeBaseFoldersByCode(ctx)
+			require.Equal(t, http.StatusNotFound, recorder.Code)
+			var response struct {
+				Success bool `json:"success"`
+				Error   struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			require.False(t, response.Success)
+			require.Equal(t, "knowledge_base_not_found", response.Error.Code)
+			require.Equal(t, "knowledge base not found", response.Error.Message)
+		})
+	}
+
+	var denied int64
+	require.NoError(t, db.Model(&integrationauth.Audit{}).Where("action = ? AND outcome = ?", "api.knowledge_base.folders", "denied").Count(&denied).Error)
+	require.EqualValues(t, 3, denied)
+}
+
 func TestIntegrationBatchSearchValidationRejectsDuplicateAndOversizedPlans(t *testing.T) {
 	knowledgeBaseIDs := []string{"kb-1"}
 	limits := integrationLimits{maxKnowledgeBases: 2, maxKnowledgeIDs: 2, maxBatchQueries: 2, maxQueryBytes: 20, maxTopK: 5}
@@ -140,6 +289,11 @@ func TestIntegrationBatchSearchValidationRejectsDuplicateAndOversizedPlans(t *te
 	oversized := valid
 	oversized.Queries = append(oversized.Queries, integrationBatchSearchQuery{ID: "q-3", Query: "third"})
 	require.Equal(t, "limit_exceeded", validateIntegrationBatchSearchRequest(oversized, limits))
+
+	invalidFolders := valid
+	invalidFolderIDs := []string{"../folder"}
+	invalidFolders.Queries[0].FolderIDs = &invalidFolderIDs
+	require.Equal(t, "folder_limit_exceeded", validateIntegrationBatchSearchRequest(invalidFolders, limits))
 }
 
 func TestIntegrationBatchSearchPreservesQueryOrderAndBoundsConcurrency(t *testing.T) {
@@ -163,6 +317,59 @@ func TestIntegrationBatchSearchPreservesQueryOrderAndBoundsConcurrency(t *testin
 	require.Equal(t, "chunk-first", results[0].Results[0]["chunk_id"])
 	require.Equal(t, "authorized", results[0].Results[0]["knowledge_base_name"])
 	require.Equal(t, 2, sessions.maxActive)
+}
+
+func TestIntegrationBatchSearchUsesResolvedFolders(t *testing.T) {
+	sessions := &batchSearchSessionService{}
+	handler := &IntegrationHandler{
+		sessions: sessions,
+		kbs:      batchSearchKnowledgeBaseService{},
+		limits:   integrationLimits{defaultTopK: 2, batchConcurrency: 1},
+	}
+	queries := []integrationBatchSearchQuery{{ID: "q-1", Query: "first"}}
+	resolved := [][]string{{"folder-1", "public-1"}}
+	results, forbidden := handler.runIntegrationSearchBatch(context.Background(), []string{"kb-1"}, queries, resolved)
+
+	require.False(t, forbidden)
+	require.Equal(t, "completed", results[0].Status)
+	require.Equal(t, resolved[0], sessions.folderIDs)
+}
+
+func TestIntegrationBatchSearchRejectsFolderScopeBeforeExecutingAnyQuery(t *testing.T) {
+	for name, resolveErr := range map[string]error{
+		"invalid folder":   errors.New("invalid_folder_ids"),
+		"document outside": errors.New("invalid_knowledge_folder_scope"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+			require.NoError(t, err)
+			require.NoError(t, db.AutoMigrate(&integrationauth.Audit{}))
+			sessions := &batchSearchSessionService{}
+			handler := &IntegrationHandler{
+				service:    integrationauth.NewService(db, nil, nil),
+				knowledges: folderEndpointKnowledgeService{resolveErr: resolveErr},
+				sessions:   sessions,
+				limiter:    newIntegrationRateLimiter(),
+				limits: integrationLimits{
+					maxRequestBytes: 1024, maxKnowledgeBases: 5, maxKnowledgeIDs: 10,
+					maxBatchQueries: 5, maxQueryBytes: 100, maxTopK: 10,
+				},
+			}
+			principal := &integrationauth.Principal{ClientID: "client-1", TenantID: 1, KnowledgeBaseIDs: []string{"kb-1"}, Scopes: []string{"rag:search"}}
+			body := `{"knowledge_base_ids":["kb-1"],"queries":[{"id":"q-1","query":"first","folder_ids":["folder-1"]},{"id":"q-2","query":"second"}]}`
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/api/integration/v1/rag/search-batch", strings.NewReader(body))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			ctx.Set("integrationPrincipal", principal)
+
+			handler.SearchBatch(ctx)
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.Contains(t, recorder.Body.String(), resolveErr.Error())
+			require.Zero(t, sessions.calls)
+		})
+	}
 }
 
 func TestIntegrationBrowserCookieCoversAPIAndFilesOnWeKnoraOrigin(t *testing.T) {

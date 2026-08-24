@@ -7,6 +7,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 type folderKBServiceStub struct {
@@ -22,9 +23,20 @@ type folderTagRepositoryStub struct {
 	interfaces.KnowledgeTagRepository
 	tags       []*types.KnowledgeTag
 	byID       map[string]*types.KnowledgeTag
-	reordered  []string
+	rootIDs    []string
+	publicIDs  []string
 	updateCall bool
 	deleteCall bool
+	created    *types.KnowledgeTag
+}
+
+func (s *folderTagRepositoryStub) GetByName(context.Context, uint64, string, string) (*types.KnowledgeTag, error) {
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (s *folderTagRepositoryStub) Create(_ context.Context, tag *types.KnowledgeTag) error {
+	s.created = tag
+	return nil
 }
 
 func (s *folderTagRepositoryStub) ListByKB(
@@ -37,8 +49,9 @@ func (s *folderTagRepositoryStub) ListByKB(
 	return s.tags, int64(len(s.tags)), nil
 }
 
-func (s *folderTagRepositoryStub) Reorder(_ context.Context, _ uint64, _ string, ids []string) error {
-	s.reordered = append([]string(nil), ids...)
+func (s *folderTagRepositoryStub) Reorder(_ context.Context, _ uint64, _ string, rootIDs, publicIDs []string) error {
+	s.rootIDs = append([]string(nil), rootIDs...)
+	s.publicIDs = append([]string(nil), publicIDs...)
 	return nil
 }
 
@@ -76,8 +89,22 @@ func TestKnowledgeTagServiceReorderTags(t *testing.T) {
 		repo:      repo,
 	}
 
-	require.NoError(t, svc.ReorderTags(context.Background(), "kb", []string{"b", "a"}))
-	require.Equal(t, []string{"b", "a"}, repo.reordered)
+	require.NoError(t, svc.ReorderTags(context.Background(), "kb", []string{"b"}, []string{"a"}))
+	require.Equal(t, []string{"b"}, repo.rootIDs)
+	require.Equal(t, []string{"a"}, repo.publicIDs)
+}
+
+func TestKnowledgeTagServiceCreatesPublicFolder(t *testing.T) {
+	repo := &folderTagRepositoryStub{}
+	svc := &knowledgeTagService{
+		kbService: folderKBServiceStub{kb: &types.KnowledgeBase{ID: "kb", TenantID: 1}},
+		repo:      repo,
+	}
+
+	tag, err := svc.CreateTag(context.Background(), "kb", "共享资料", "", 0, true)
+	require.NoError(t, err)
+	require.True(t, tag.IsPublic)
+	require.Same(t, tag, repo.created)
 }
 
 func TestKnowledgeTagServiceRejectsInvalidReorderSets(t *testing.T) {
@@ -101,8 +128,8 @@ func TestKnowledgeTagServiceRejectsInvalidReorderSets(t *testing.T) {
 				repo:      repo,
 			}
 
-			require.Error(t, svc.ReorderTags(context.Background(), "kb", tt.ids))
-			require.Empty(t, repo.reordered)
+			require.Error(t, svc.ReorderTags(context.Background(), "kb", tt.ids, nil))
+			require.Empty(t, repo.rootIDs)
 		})
 	}
 }

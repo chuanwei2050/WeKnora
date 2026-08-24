@@ -1,10 +1,10 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import zhCN from '../src/i18n/locales/zh-CN'
 
-const sourceRoot = fileURLToPath(new URL('../src', import.meta.url))
+const sourceRoot = resolve(process.cwd(), 'src')
 const sourceExtensions = /\.(?:ts|tsx|js|jsx|vue)$/
 const translationCall = /(?:\$t|\bt|i18n\.global\.t)\(\s*(['"])([^'"`]+)\1/g
 

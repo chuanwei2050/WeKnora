@@ -209,6 +209,7 @@ func RegisterIntegrationPublicRoutes(r *gin.Engine, h *handler.IntegrationHandle
 	integration := r.Group("/api/integration/v1")
 	integration.Use(h.Authenticate())
 	integration.GET("/knowledge-bases", h.ListKnowledgeBases)
+	integration.GET("/knowledge-bases/by-code/:code/folders", h.ListKnowledgeBaseFoldersByCode)
 	integration.POST("/knowledge-bases", h.CreateKnowledgeBase)
 	integration.DELETE("/knowledge-bases/:knowledge_base_id", h.DeleteKnowledgeBase)
 	integration.GET("/knowledge-bases/:knowledge_base_id/knowledge", h.ListKnowledge)

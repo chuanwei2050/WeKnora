@@ -18,6 +18,7 @@ type Tag struct {
 	Name            string    `json:"name"`
 	Color           string    `json:"color"`
 	SortOrder       int       `json:"sort_order"`
+	IsPublic        bool      `json:"is_public"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -34,6 +35,7 @@ type CreateTagPayload struct {
 	Name      string `json:"name"`
 	Color     string `json:"color,omitempty"`
 	SortOrder int    `json:"sort_order,omitempty"`
+	IsPublic  bool   `json:"is_public,omitempty"`
 }
 
 // UpdateTagPayload is used to update an existing tag.
