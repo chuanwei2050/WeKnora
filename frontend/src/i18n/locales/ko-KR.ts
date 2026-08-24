@@ -1160,6 +1160,10 @@ export default {
     edit: "편집",
     copy: "복사",
     copied: "복사됨",
+    avatar: "아바타",
+    createSuccess: "생성되었습니다",
+    updateSuccess: "업데이트되었습니다",
+    loadMore: "더 보기",
     default: "기본값",
     create: "생성",
     search: "검색",
@@ -1508,6 +1512,7 @@ export default {
     deleteSuccess: "파일 삭제 성공",
     deleteFailed: "파일 삭제 실패",
     download: "파일 다운로드",
+    downloadFailed: "파일 다운로드 실패",
     preview: "미리보기",
     unsupportedFormat: "지원되지 않는 파일 형식",
     maxSizeExceeded: "파일 크기가 제한을 초과했습니다",
@@ -2336,6 +2341,7 @@ export default {
     },
     faq: {
       title: "Q&A",
+      selectEntriesFirst: "먼저 FAQ 항목을 선택하세요",
       subtitle:
         "구조화된 Q&A 관리, 표준 질문, 유사 질문, 반례를 지원하여 사용자 쿼리를 정확하게 매칭하고 Q&A 정확도를 향상시킵니다",
       description: "FAQ 지식베이스의 인덱스 전략 및 Q&A 구성 방식 설정",
@@ -2867,6 +2873,7 @@ export default {
       body: "시스템 기본 요약 Prompt로 복원하시겠습니까?",
     },
     toasts: {
+      saveFailed: "저장 실패",
       chatModelSaved: "LLM 모델이 저장되었습니다",
       rerankModelSaved: "ReRank 모델이 저장되었습니다",
       contextTemplateSaved: "요약 Prompt가 저장되었습니다",
@@ -3650,6 +3657,7 @@ export default {
     },
     im: {
       title: "IM 통합",
+      wecomConsole: "WeCom 관리 콘솔",
       description: "에이전트를 Feishu, Slack, Telegram, DingTalk, Mattermost 등 인스턴트 메시징 플랫폼에 연결",
       wecom: "WeCom",
       feishu: "Feishu",
@@ -3909,6 +3917,7 @@ export default {
     paused: "일시정지됨",
     resumed: "재개됨",
     pauseFailed: "일시정지 실패",
+    resumeFailed: "재개 실패",
     logs: "로그",
     moreActions: "추가 작업",
     lastSync: "마지막 동기화",

@@ -1997,10 +1997,10 @@ async function createNewSession(value: string): Promise<void> {
       getTitle(res.data.id, value);
     } else {
       // 错误处理
-      console.error(t('knowledgeBase.createSessionFailed'));
+      console.error(t('chat.createSessionFailed'));
     }
   }).catch(error => {
-    console.error(t('knowledgeBase.createSessionError'), error);
+    console.error(t('chat.createSessionError'), error);
   });
 }
 </script>

@@ -1308,7 +1308,11 @@ export default {
     collapse: 'Свернуть',
     me: 'Я',
     copy: 'Копировать',
-    copied: 'Скопировано'
+    copied: 'Скопировано',
+    avatar: 'Аватар',
+    createSuccess: 'Успешно создано',
+    updateSuccess: 'Успешно обновлено',
+    loadMore: 'Загрузить ещё',
   },
   mentionDetail: {
     faqCount: '{count} вопросов и ответов',
@@ -1326,6 +1330,7 @@ export default {
     deleteSuccess: 'Файл успешно удален',
     deleteFailed: 'Ошибка удаления файла',
     download: 'Скачать файл',
+    downloadFailed: 'Не удалось скачать файл',
     preview: 'Предпросмотр',
     unsupportedFormat: 'Неподдерживаемый формат файла',
     maxSizeExceeded: 'Превышен максимальный размер файла',
@@ -1983,6 +1988,7 @@ export default {
     },
     faq: {
       title: 'Настройки FAQ',
+      selectEntriesFirst: 'Сначала выберите записи FAQ',
       subtitle: 'Управление записями FAQ с пакетным импортом, редактированием и тестированием поиска',
       description: 'Определите стратегию индексации и общие правила для FAQ-базы знаний',
       indexModeLabel: 'Режим индексации',
@@ -2512,6 +2518,7 @@ export default {
     },
     toasts: {
       enableQueryExpansionSaved: 'Настройка расширения запросов сохранена',
+      saveFailed: 'Не удалось сохранить',
       chatModelSaved: 'LLM model saved',
       rerankModelSaved: 'ReRank model saved',
       contextTemplateSaved: 'Retrieval result summary prompt saved',
@@ -3333,6 +3340,7 @@ export default {
     },
     im: {
       title: 'Интеграция IM',
+      wecomConsole: 'Консоль администратора WeCom',
       description: 'Подключите агента к платформам мгновенных сообщений, таким как Feishu, Slack, Telegram, DingTalk и Mattermost',
       wecom: 'WeCom',
       feishu: 'Feishu',
@@ -3812,6 +3820,7 @@ export default {
     paused: 'Приостановлено',
     resumed: 'Возобновлено',
     pauseFailed: 'Не удалось приостановить',
+    resumeFailed: 'Не удалось возобновить',
     logs: 'Журнал',
     moreActions: 'Дополнительные действия',
     lastSync: 'Последняя синхронизация',

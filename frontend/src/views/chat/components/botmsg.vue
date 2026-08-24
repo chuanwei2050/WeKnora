@@ -282,7 +282,7 @@ const getActualContent = () => {
 const handleCopyAnswer = async () => {
     const content = getActualContent();
     if (!content) {
-        MessagePlugin.warning(t('chat.emptyContentWarning'));
+        MessagePlugin.warning(t('agentStream.copy.emptyContent'));
         return;
     }
 
@@ -299,7 +299,7 @@ const handleCopyAnswer = async () => {
 const handleAddToKnowledge = () => {
     const content = getActualContent();
     if (!content) {
-        MessagePlugin.warning(t('chat.emptyContentWarning'));
+        MessagePlugin.warning(t('agentStream.copy.emptyContent'));
         return;
     }
 
@@ -313,7 +313,7 @@ const handleAddToKnowledge = () => {
         status: 'draft',
     });
 
-    MessagePlugin.info(t('chat.editorOpened'));
+    MessagePlugin.info(t('agentStream.saveToKb.editorOpened'));
 };
 
 const chooseCorrection = () => {

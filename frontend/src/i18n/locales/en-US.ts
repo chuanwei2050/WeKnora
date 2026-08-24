@@ -1345,6 +1345,10 @@ export default {
     edit: 'Edit',
     copy: 'Copy',
     copied: 'Copied',
+    avatar: 'Avatar',
+    createSuccess: 'Created successfully',
+    updateSuccess: 'Updated successfully',
+    loadMore: 'Load more',
     default: 'Default',
     create: 'Create',
     search: 'Search',
@@ -1414,6 +1418,7 @@ export default {
     deleteSuccess: 'File deleted successfully',
     deleteFailed: 'File deletion failed',
     download: 'Download File',
+    downloadFailed: 'File download failed',
     preview: 'Preview',
     unsupportedFormat: 'Unsupported file format',
     maxSizeExceeded: 'Maximum file size exceeded',
@@ -1834,6 +1839,7 @@ export default {
     },
     faq: {
       title: 'FAQ Configuration',
+      selectEntriesFirst: 'Please select FAQ entries first',
       subtitle: 'Manage FAQ entries with batch import, edit, and search testing',
       description: 'Configure indexing strategy and guidance for FAQ-style knowledge bases',
       indexModeLabel: 'Indexing Mode',
@@ -2886,6 +2892,7 @@ export default {
       body: 'Are you sure you want to reset to the default summary prompt?'
     },
     toasts: {
+      saveFailed: 'Failed to save',
       chatModelSaved: 'LLM model saved',
       rerankModelSaved: 'ReRank model saved',
       contextTemplateSaved: 'Retrieval result summary prompt saved',
@@ -3739,6 +3746,7 @@ export default {
     },
     im: {
       title: 'IM Integration',
+      wecomConsole: 'WeCom Admin Console',
       description: 'Connect agent to instant messaging platforms like WeCom, Feishu, Slack, Telegram, DingTalk, Mattermost and WeChat',
       feishu: 'Feishu',
       slack: 'Slack',
@@ -3931,6 +3939,7 @@ export default {
     paused: 'Paused',
     resumed: 'Resumed',
     pauseFailed: 'Failed to pause',
+    resumeFailed: 'Failed to resume',
     logs: 'Logs',
     lastSync: 'Last sync',
     lastStatus: 'Result',

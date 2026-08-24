@@ -588,7 +588,7 @@ async function copyUrl(channel: IMChannel) {
   const text = getCallbackUrl(channel);
   try {
     await navigator.clipboard.writeText(text);
-    MessagePlugin.success(t('common.copySuccess'));
+    MessagePlugin.success(t('chat.copySuccess'));
   } catch {
     const el = document.createElement('textarea');
     el.value = text;
@@ -599,7 +599,7 @@ async function copyUrl(channel: IMChannel) {
     const ok = document.execCommand('copy');
     document.body.removeChild(el);
     if (ok) {
-      MessagePlugin.success(t('common.copySuccess'));
+      MessagePlugin.success(t('chat.copySuccess'));
     } else {
       MessagePlugin.error(t('common.copyFailed'));
     }

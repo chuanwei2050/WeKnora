@@ -2979,7 +2979,7 @@ const downloadExcelExample = () => {
 const exportLoading = ref(false)
 const handleExportCSV = async () => {
   if (!props.kbId) {
-    MessagePlugin.warning(t('knowledgeBase.selectKnowledgeBase'))
+    MessagePlugin.warning(t('knowledgeBase.selectKnowledgeBaseFirst'))
     return
   }
   
