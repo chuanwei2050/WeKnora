@@ -2,7 +2,9 @@ package types
 
 import (
 	"encoding/json"
+
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"math"
 	"sort"
 	"strings"
@@ -92,17 +94,44 @@ type RoutingBudget struct {
 }
 
 type ComplexityRoutingConfig struct {
-	Enabled             bool                              `json:"enabled" yaml:"enabled"`
-	TaxonomyID          string                            `json:"taxonomy_id" yaml:"taxonomy_id"`
-	TaxonomyVersion     string                            `json:"taxonomy_version" yaml:"taxonomy_version"`
-	ConfidenceThreshold float64                           `json:"confidence_threshold" yaml:"confidence_threshold"`
-	FallbackAction      RoutingAction                     `json:"fallback_action" yaml:"fallback_action"`
-	LevelActions        map[ComplexityLevel]RoutingAction `json:"level_actions" yaml:"level_actions"`
-	DegradationChains   map[RoutingAction][]RoutingAction `json:"degradation_chains" yaml:"degradation_chains"`
-	Capabilities        RoutingCapabilities               `json:"capabilities" yaml:"capabilities"`
-	FewShot             []ComplexityFewShot               `json:"few_shot" yaml:"few_shot"`
-	InputBudgetChars    int                               `json:"input_budget_chars" yaml:"input_budget_chars"`
-	BudgetByAction      map[RoutingAction]RoutingBudget   `json:"budget_by_action" yaml:"budget_by_action"`
+	Enabled                bool                              `json:"enabled" yaml:"enabled"`
+	TaxonomyID             string                            `json:"taxonomy_id" yaml:"taxonomy_id"`
+	TaxonomyVersion        string                            `json:"taxonomy_version" yaml:"taxonomy_version"`
+	ConfidenceThreshold    float64                           `json:"confidence_threshold" yaml:"confidence_threshold"`
+	FallbackAction         RoutingAction                     `json:"fallback_action" yaml:"fallback_action"`
+	LevelActions           map[ComplexityLevel]RoutingAction `json:"level_actions" yaml:"level_actions"`
+	DegradationChains      map[RoutingAction][]RoutingAction `json:"degradation_chains" yaml:"degradation_chains"`
+	Capabilities           RoutingCapabilities               `json:"capabilities" yaml:"capabilities"`
+	FewShot                []ComplexityFewShot               `json:"few_shot" yaml:"few_shot"`
+	InputBudgetChars       int                               `json:"input_budget_chars" yaml:"input_budget_chars"`
+	BudgetByAction         map[RoutingAction]RoutingBudget   `json:"budget_by_action" yaml:"budget_by_action"`
+	confidenceThresholdSet bool
+}
+
+func (c *ComplexityRoutingConfig) UnmarshalJSON(data []byte) error {
+	type configAlias ComplexityRoutingConfig
+	var decoded configAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*c = ComplexityRoutingConfig(decoded)
+	_, c.confidenceThresholdSet = fields["confidence_threshold"]
+	return nil
+}
+
+func (c *ComplexityRoutingConfig) UnmarshalYAML(node *yaml.Node) error {
+	type configAlias ComplexityRoutingConfig
+	var decoded configAlias
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*c = ComplexityRoutingConfig(decoded)
+	c.confidenceThresholdSet = yamlMappingHasKey(node, "confidence_threshold")
+	return nil
 }
 
 func DefaultComplexityRoutingConfig() ComplexityRoutingConfig {
@@ -144,7 +173,7 @@ func (c *ComplexityRoutingConfig) EnsureDefaults() {
 	if c.TaxonomyVersion == "" {
 		c.TaxonomyVersion = d.TaxonomyVersion
 	}
-	if c.ConfidenceThreshold == 0 {
+	if c.ConfidenceThreshold == 0 && !c.confidenceThresholdSet {
 		c.ConfidenceThreshold = d.ConfidenceThreshold
 	}
 	if c.FallbackAction == "" {

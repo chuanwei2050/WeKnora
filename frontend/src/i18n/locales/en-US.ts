@@ -2485,6 +2485,8 @@ export default {
       remoteDimensionDetected: 'Detected vector dimension: {value}',
       supportsVisionLabel: 'Supports Vision / Multimodal',
       supportsVisionDesc: 'Whether the model accepts image and multimodal input',
+      thinkingLabel: 'Deep Thinking',
+      thinkingDesc: 'Enable extended thinking by default when calling this model (model support required)',
       dimensionHint: 'Model selected. Click "Detect Dimension" to fetch the vector dimension automatically.',
       loadModelListFailed: 'Failed to load model list',
       listRefreshed: 'List refreshed',

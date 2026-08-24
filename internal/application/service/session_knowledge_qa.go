@@ -63,6 +63,10 @@ func (s *sessionService) KnowledgeQA(
 	if chatModelID != "" {
 		if chatModelInfo, err := s.modelService.GetModelByID(ctx, chatModelID); err == nil && chatModelInfo != nil {
 			chatModelSupportsVision = chatModelInfo.Parameters.SupportsVision
+			if chatModelInfo.Parameters.HasThinkingSetting() {
+				modelThinking := chatModelInfo.Parameters.Thinking
+				summaryConfig.Thinking = &modelThinking
+			}
 		}
 	}
 	if model, defaultErr := s.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm"); defaultErr == nil {

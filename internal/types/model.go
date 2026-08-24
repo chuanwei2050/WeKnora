@@ -112,9 +112,30 @@ type ModelParameters struct {
 	// 保留字段（Authorization、api-key、Content-Type、Accept 等）会在运行期被忽略以避免破坏签名/鉴权流程。
 	CustomHeaders  map[string]string `yaml:"custom_headers,omitempty" json:"custom_headers,omitempty"`
 	SupportsVision bool              `yaml:"supports_vision"      json:"supports_vision"` // Whether the model accepts image/multimodal input
+	Thinking       bool              `yaml:"thinking"             json:"thinking"`        // Whether model calls enable extended thinking by default
+	thinkingSet    bool
 	// WeKnoraCloud 厂商专用凭证
 	AppID     string `yaml:"app_id,omitempty"     json:"app_id,omitempty"`
 	AppSecret string `yaml:"app_secret,omitempty" json:"app_secret,omitempty"` // AES-256 加密存储，实际承载上游 API Key
+}
+
+func (c *ModelParameters) UnmarshalJSON(data []byte) error {
+	type parametersAlias ModelParameters
+	var decoded parametersAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*c = ModelParameters(decoded)
+	_, c.thinkingSet = fields["thinking"]
+	return nil
+}
+
+func (c ModelParameters) HasThinkingSetting() bool {
+	return c.thinkingSet
 }
 
 // Model represents the AI model

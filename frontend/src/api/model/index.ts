@@ -29,6 +29,7 @@ export interface ModelConfig {
     // 会在调用远程模型 API 时附加到每个请求上。Authorization、Content-Type 等保留头会被忽略。
     custom_headers?: Record<string, string>;
     supports_vision?: boolean; // Whether the model accepts image/multimodal input
+	thinking?: boolean; // Whether model calls enable extended thinking by default
 	protocol?: 'ollama' | 'openai-compatible' | 'native';
 	location?: 'public' | 'private-network' | 'same-host' | 'unknown';
 	artifact_policy?: 'preloaded-only' | 'allow-download';

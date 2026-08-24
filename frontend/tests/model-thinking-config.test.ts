@@ -1,0 +1,19 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { describe, expect, it } from 'vitest'
+
+function source(relativePath: string) {
+  return readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), 'utf8')
+}
+
+describe('model thinking configuration', () => {
+  it('shows and persists the chat model thinking switch', () => {
+    const editor = source('../src/components/ModelEditorDialog.vue')
+    const settings = source('../src/views/settings/ModelSettings.vue')
+
+    expect(editor).toContain('v-model="formData.thinking"')
+    expect(editor).toContain('thinking: false')
+    expect(settings).toContain('thinking: model.parameters.thinking || false')
+    expect(settings).toContain('thinking: modelData.thinking ?? false')
+  })
+})

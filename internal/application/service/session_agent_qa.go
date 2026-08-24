@@ -151,6 +151,10 @@ func (s *sessionService) AgentQA(
 	if effectiveModelID != "" {
 		if modelInfo, err := s.modelService.GetModelByID(ctx, effectiveModelID); err == nil && modelInfo != nil {
 			agentModelSupportsVision = modelInfo.Parameters.SupportsVision
+			if agentConfig.Thinking == nil && modelInfo.Parameters.HasThinkingSetting() {
+				modelThinking := modelInfo.Parameters.Thinking
+				agentConfig.Thinking = &modelThinking
+			}
 		}
 	}
 

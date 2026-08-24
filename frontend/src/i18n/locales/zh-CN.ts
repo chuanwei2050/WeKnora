@@ -1844,6 +1844,8 @@ export default {
       remoteDimensionDetected: "检测到向量维度：{value}",
       supportsVisionLabel: "支持视觉/多模态",
       supportsVisionDesc: "模型是否支持图片等多模态输入",
+      thinkingLabel: "深度思考",
+      thinkingDesc: "调用该模型时默认启用扩展思考能力（需要模型支持）",
       dimensionHint: '模型已选择，点击"检测维度"按钮自动获取向量维度',
       loadModelListFailed: "加载模型列表失败",
       listRefreshed: "列表已刷新",

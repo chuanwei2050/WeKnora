@@ -209,17 +209,17 @@ async function onMessage(event: MessageEvent) {
         else sessionStorage.removeItem(sessionStorageKey)
       } catch { sessionStorage.removeItem(sessionStorageKey) }
     }
+    await refreshConversations()
+    chatSession ??= compatibleConversations.value.find((conversation) => !conversation.title.trim()) ?? null
     if (chatSession) {
       sessionId.value = chatSession.id
+      if (preserveSession) sessionStorage.setItem(sessionStorageKey, chatSession.id)
     } else {
       await createChatSession()
     }
     authenticated.value = true
     if (readyTimer !== undefined) window.clearInterval(readyTimer)
-    await Promise.all([
-      refreshConversations(),
-      refreshFrequentQuestions().catch(() => { frequentQuestions.value = [] }),
-    ])
+    await refreshFrequentQuestions().catch(() => { frequentQuestions.value = [] })
     if (refreshTimer !== undefined) window.clearInterval(refreshTimer)
     refreshTimer = window.setInterval(() => {
       refreshIntegrationSession().catch((error) => {

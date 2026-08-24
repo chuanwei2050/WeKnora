@@ -1703,14 +1703,20 @@ watch(effectiveVoiceConfig, (config) => {
   emit('voice-config', config || {});
 }, { immediate: true, deep: true });
 
+let submissionPending = false;
+watch(() => props.isReplying, (isReplying) => {
+  if (!isReplying) submissionPending = false;
+});
+
 const createSession = async (val: string) => {
   if (!val.trim()) {
     MessagePlugin.info(t('input.messages.enterContent'));
     return;
   }
-  if (props.isReplying) {
+  if (props.isReplying || submissionPending) {
     return MessagePlugin.error(t('input.messages.replying'));
   }
+  submissionPending = true;
   if (!props.embeddedMode) {
     // 发送前校验当前选中的智能体（含默认快速问答）是否已配置完成
     const agentToCheck = selectedAgent.value;
@@ -1728,6 +1734,7 @@ const createSession = async (val: string) => {
       ? getBuiltinAgentNotReadyReasons(actualAgent, isAgentMode)
       : getCustomAgentNotReadyReasons(actualAgent);
     if (notReadyReasons.length > 0) {
+      submissionPending = false;
       showAgentNotReadyMessage(actualAgent, notReadyReasons);
       return;
     }

@@ -28,4 +28,21 @@ describe('embedded widget capabilities', () => {
     expect(embeddedWidget).toContain('clearEmbeddedAuth()')
     expect(embeddedWidget).toContain("notifyEmbeddedHost('unauthorized')")
   })
+
+  it('reuses the latest compatible empty conversation during initialization', () => {
+    const embeddedWidget = source('../src/views/embedded/EmbeddedWidget.vue')
+
+    expect(embeddedWidget).toContain('await refreshConversations()')
+    expect(embeddedWidget).toContain('compatibleConversations.value.find((conversation) => !conversation.title.trim())')
+    expect(embeddedWidget).toContain('sessionStorage.setItem(sessionStorageKey, chatSession.id)')
+  })
+
+  it('prevents duplicate submissions before the replying prop updates', () => {
+    const inputField = source('../src/components/Input-field.vue')
+
+    expect(inputField).toContain('let submissionPending = false;')
+    expect(inputField).toContain('if (props.isReplying || submissionPending)')
+    expect(inputField).toContain('submissionPending = true;')
+    expect(inputField).toContain('if (!isReplying) submissionPending = false;')
+  })
 })

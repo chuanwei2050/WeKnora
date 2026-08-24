@@ -2,9 +2,12 @@ package types
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"sort"
+
+	"gopkg.in/yaml.v3"
 	"strings"
 	"sync"
 )
@@ -351,15 +354,45 @@ func hasCriticalIssue(report ValidationReport) bool {
 }
 
 type VerifiedAnswerConfig struct {
-	Enabled                  bool               `json:"enabled"`
-	StrictMultiModel         bool               `json:"strict_multi_model"`
-	FactValidatorModelID     string             `json:"fact_validator_model_id,omitempty"`
-	LogicValidatorModelID    string             `json:"logic_validator_model_id,omitempty"`
-	CitationValidatorModelID string             `json:"citation_validator_model_id,omitempty"`
-	Weights                  ValidationWeights  `json:"weights"`
-	MaxReflections           int                `json:"max_reflections"`
-	DegradationStrategy      string             `json:"degradation_strategy"`
-	Budget                   VerificationBudget `json:"budget"`
+	Enabled                  bool               `json:"enabled" yaml:"enabled"`
+	StrictMultiModel         bool               `json:"strict_multi_model" yaml:"strict_multi_model"`
+	FactValidatorModelID     string             `json:"fact_validator_model_id,omitempty" yaml:"fact_validator_model_id,omitempty"`
+	LogicValidatorModelID    string             `json:"logic_validator_model_id,omitempty" yaml:"logic_validator_model_id,omitempty"`
+	CitationValidatorModelID string             `json:"citation_validator_model_id,omitempty" yaml:"citation_validator_model_id,omitempty"`
+	Weights                  ValidationWeights  `json:"weights" yaml:"weights"`
+	MaxReflections           int                `json:"max_reflections" yaml:"max_reflections"`
+	DegradationStrategy      string             `json:"degradation_strategy" yaml:"degradation_strategy"`
+	Budget                   VerificationBudget `json:"budget" yaml:"budget"`
+	enabledSet               bool
+	maxReflectionsSet        bool
+}
+
+func (c *VerifiedAnswerConfig) UnmarshalYAML(node *yaml.Node) error {
+	type configAlias VerifiedAnswerConfig
+	var decoded configAlias
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*c = VerifiedAnswerConfig(decoded)
+	c.enabledSet = yamlMappingHasKey(node, "enabled")
+	c.maxReflectionsSet = yamlMappingHasKey(node, "max_reflections")
+	return nil
+}
+
+func (c *VerifiedAnswerConfig) UnmarshalJSON(data []byte) error {
+	type configAlias VerifiedAnswerConfig
+	var decoded configAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*c = VerifiedAnswerConfig(decoded)
+	_, c.enabledSet = fields["enabled"]
+	_, c.maxReflectionsSet = fields["max_reflections"]
+	return nil
 }
 
 // NormalizeLegacy maps the historical reflection flag to the new verification
@@ -368,7 +401,7 @@ func (c *VerifiedAnswerConfig) NormalizeLegacy(reflectionEnabled bool) {
 	if c == nil {
 		return
 	}
-	if reflectionEnabled {
+	if reflectionEnabled && !c.enabledSet {
 		c.Enabled = true
 	}
 	c.EnsureDefaults()
@@ -386,7 +419,7 @@ func (c *VerifiedAnswerConfig) EnsureDefaults() {
 	if c == nil {
 		return
 	}
-	if c.MaxReflections == 0 {
+	if c.MaxReflections == 0 && !c.maxReflectionsSet {
 		c.MaxReflections = 1
 	}
 	if c.MaxReflections > 2 {

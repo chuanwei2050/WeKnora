@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 )
 
@@ -245,7 +246,49 @@ type CustomAgentConfig struct {
 
 	// ===== Suggested Prompts =====
 	// 推荐问题列表，用于在前端对话面板展示快捷提问
-	SuggestedPrompts []string `yaml:"suggested_prompts" json:"suggested_prompts,omitempty"`
+	SuggestedPrompts    []string `yaml:"suggested_prompts" json:"suggested_prompts,omitempty"`
+	keywordThresholdSet bool
+	vectorThresholdSet  bool
+}
+
+func (c *CustomAgentConfig) UnmarshalJSON(data []byte) error {
+	type configAlias CustomAgentConfig
+	var decoded configAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*c = CustomAgentConfig(decoded)
+	_, c.keywordThresholdSet = fields["keyword_threshold"]
+	_, c.vectorThresholdSet = fields["vector_threshold"]
+	return nil
+}
+
+func (c *CustomAgentConfig) UnmarshalYAML(node *yaml.Node) error {
+	type configAlias CustomAgentConfig
+	var decoded configAlias
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*c = CustomAgentConfig(decoded)
+	c.keywordThresholdSet = yamlMappingHasKey(node, "keyword_threshold")
+	c.vectorThresholdSet = yamlMappingHasKey(node, "vector_threshold")
+	return nil
+}
+
+func yamlMappingHasKey(node *yaml.Node, key string) bool {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return true
+		}
+	}
+	return false
 }
 
 // Value implements driver.Valuer interface for CustomAgentConfig
@@ -296,10 +339,10 @@ func (a *CustomAgent) EnsureDefaults() {
 	if a.Config.EmbeddingTopK == 0 {
 		a.Config.EmbeddingTopK = 10
 	}
-	if a.Config.KeywordThreshold == 0 {
+	if a.Config.KeywordThreshold == 0 && !a.Config.keywordThresholdSet {
 		a.Config.KeywordThreshold = 0.3
 	}
-	if a.Config.VectorThreshold == 0 {
+	if a.Config.VectorThreshold == 0 && !a.Config.vectorThresholdSet {
 		a.Config.VectorThreshold = 0.5
 	}
 	if a.Config.RerankTopK == 0 {

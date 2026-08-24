@@ -39,7 +39,7 @@
                     </div>
                 </transition>
             </div>
-            <InputField ref="inputFieldRef" @send-msg="sendMsg"></InputField>
+            <InputField ref="inputFieldRef" :is-replying="createPending" @send-msg="sendMsg"></InputField>
         </div>
     </div>
     
@@ -171,13 +171,19 @@ watch(() => settingsStore.settings.selectedFiles, debouncedFetch, { deep: true }
 onMounted(() => { fetchSuggestedQuestions(); });
 
 const inputFieldRef = ref();
+const createPending = ref(false);
 
 const handleSuggestedQuestionClick = (question: string) => {
     inputFieldRef.value?.triggerSend(question);
 };
 
-const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = []) => {
-    createNewSession(value, modelId, mentionedItems, imageFiles, attachmentFiles);
+const sendMsg = async (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = []) => {
+    createPending.value = true;
+    try {
+        await createNewSession(value, modelId, mentionedItems, imageFiles, attachmentFiles);
+    } finally {
+        createPending.value = false;
+    }
 }
 
 async function createNewSession(value: string, modelId: string, mentionedItems: any[] = [], imageFiles: any[] = [], attachmentFiles: any[] = []) {

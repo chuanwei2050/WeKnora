@@ -293,6 +293,14 @@
           </div>
         </div>
 
+        <div v-if="modelType === 'chat'" class="form-item">
+          <label class="form-label">{{ $t('model.editor.thinkingLabel') }}</label>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <t-switch v-model="formData.thinking" />
+            <span class="form-desc">{{ $t('model.editor.thinkingDesc') }}</span>
+          </div>
+        </div>
+
         <div v-else-if="modelType === 'tts'" class="ollama-unavailable-tip rerank-tip">
           <t-icon name="info-circle-filled" class="tip-icon info" />
           <span class="tip-text">TTS 当前使用 OpenAI-compatible 远程接口。</span>
@@ -357,6 +365,7 @@ interface ModelFormData {
   interfaceType?: 'ollama' | 'openai'
   isDefault: boolean
   supportsVision?: boolean
+  thinking?: boolean
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
   customHeaders?: CustomHeaderItem[]
   defaultVoice?: string
@@ -610,6 +619,7 @@ const formData = ref<ModelFormData>({
   interfaceType: 'openai',
   isDefault: false,
   supportsVision: false,
+  thinking: false,
   customHeaders: [],
   defaultVoice: getInitialDefaultVoice()
 })
@@ -747,6 +757,7 @@ const resetForm = () => {
     interfaceType: undefined,
     isDefault: false,
     supportsVision: false,
+    thinking: false,
     customHeaders: [],
     defaultVoice: getInitialDefaultVoice()
   }

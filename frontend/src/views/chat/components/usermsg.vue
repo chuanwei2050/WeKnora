@@ -49,6 +49,11 @@
         <div class="user_msg">
             {{ content }}
         </div>
+        <div v-if="content" class="question-toolbar">
+            <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyQuestion" :title="$t('agent.copy')">
+                <t-icon name="copy" />
+            </t-button>
+        </div>
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg" />
     </div>
 </template>
@@ -57,6 +62,8 @@ import { defineProps, computed, ref, watch, onMounted, nextTick } from "vue";
 import { hydrateProtectedFileImages } from '@/utils/security';
 import picturePreview from '@/components/picture-preview.vue';
 import { useI18n } from 'vue-i18n';
+import { MessagePlugin } from 'tdesign-vue-next';
+import { copyTextToClipboard } from '@/utils/chatMessageShared';
 
 const { t } = useI18n();
 
@@ -154,6 +161,19 @@ const closePreImg = () => {
     reviewImg.value = false;
     reviewUrl.value = '';
 };
+
+const handleCopyQuestion = async () => {
+    const question = props.content?.trim();
+    if (!question) return;
+
+    try {
+        await copyTextToClipboard(question);
+        MessagePlugin.success(t('chat.copySuccess'));
+    } catch (err) {
+        console.error('复制失败:', err);
+        MessagePlugin.error(t('chat.copyFailed'));
+    }
+};
 </script>
 <style scoped lang="less">
 .user_msg_container {
@@ -246,6 +266,11 @@ const closePreImg = () => {
     text-align: justify;
     word-break: break-all;
     box-sizing: border-box;
+}
+
+.question-toolbar {
+    display: flex;
+    justify-content: flex-end;
 }
 
 .user_images {

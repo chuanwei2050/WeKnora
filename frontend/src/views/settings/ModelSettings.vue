@@ -462,6 +462,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     profile: model.profile || '',
     profileRole: model.profile_role || '',
     supportsVision: model.parameters.supports_vision || false,
+    thinking: model.parameters.thinking || false,
     protocol: model.parameters.protocol,
     location: model.parameters.location,
     artifactPolicy: model.parameters.artifact_policy,
@@ -621,7 +622,8 @@ const handleModelSave = async (modelData: any) => {
         ...(currentModelType.value === 'vllm' ? {
           supports_vision: true
         } : currentModelType.value === 'chat' ? {
-          supports_vision: modelData.supportsVision ?? false
+          supports_vision: modelData.supportsVision ?? false,
+          thinking: modelData.thinking ?? false
         } : {})
       }
     }
