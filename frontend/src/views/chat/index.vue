@@ -181,22 +181,34 @@ const handleKBEditorSuccess = (kbId) => {
 const suggestedQuestions = ref([]);
 const suggestedQuestionsLoading = ref(false);
 
-const loadAgentDisplayConfig = async () => {
+let agentDisplayConfigAgentId = '';
+let agentDisplayConfigRequestId = 0;
+let agentDisplayConfigPromise = Promise.resolve();
+
+const loadAgentDisplayConfig = () => {
     if (props.embeddedMode) {
         aguiDisplayEnabled.value = props.aguiEnabled;
-        return;
+        return Promise.resolve();
     }
-    const selectedAgentId = props.embeddedMode ? props.agentId : useSettingsStoreInstance.selectedAgentId;
+    const selectedAgentId = useSettingsStoreInstance.selectedAgentId || '';
+    if (selectedAgentId === agentDisplayConfigAgentId) return agentDisplayConfigPromise;
+    agentDisplayConfigAgentId = selectedAgentId;
+    const requestId = ++agentDisplayConfigRequestId;
     if (!selectedAgentId) {
         aguiDisplayEnabled.value = false;
-        return;
+        agentDisplayConfigPromise = Promise.resolve();
+        return agentDisplayConfigPromise;
     }
-    try {
-        const response = await getAgentById(selectedAgentId);
-        aguiDisplayEnabled.value = response?.data?.config?.agui_enabled === true;
-    } catch {
-        aguiDisplayEnabled.value = false;
-    }
+    agentDisplayConfigPromise = getAgentById(selectedAgentId)
+        .then((response) => {
+            if (requestId === agentDisplayConfigRequestId) {
+                aguiDisplayEnabled.value = response?.data?.config?.agui_enabled === true;
+            }
+        })
+        .catch(() => {
+            if (requestId === agentDisplayConfigRequestId) aguiDisplayEnabled.value = false;
+        });
+    return agentDisplayConfigPromise;
 };
 let suggestedQuestionsFetchId = 0; // 用于取消过时的请求
 let suggestedDebounceTimer = null;
@@ -531,7 +543,7 @@ const handleStopGeneration = () => {
 };
 
 const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], voiceMetadata = undefined) => {
-    if (!props.embeddedMode) await loadAgentDisplayConfig();
+    await loadAgentDisplayConfig();
     userquery.value = value;
     isReplying.value = true;
     loading.value = true;
@@ -672,9 +684,6 @@ onChunk((data) => {
     
     // 处理 agent query 事件 - 保存 assistant message ID 并保持 loading 状态
     if (data.response_type === 'agent_query') {
-        if (typeof data.data?.agui_enabled === 'boolean') {
-            aguiDisplayEnabled.value = data.data.agui_enabled;
-        }
         if (data.assistant_message_id) {
             currentAssistantMessageId.value = data.assistant_message_id;
             console.log('[Agent Query] Saved assistant message ID:', data.assistant_message_id);

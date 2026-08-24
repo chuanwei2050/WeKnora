@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { buildIntegrationMessageBody, mapIntegrationEvent } from '../src/api/chat/integration-stream'
 
+const readSource = (relativePath: string) => readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), 'utf8')
+
 describe('integration agent stream', () => {
   it('sends the configured agent with widget messages', () => {
     expect(buildIntegrationMessageBody({
@@ -42,7 +44,7 @@ describe('integration agent stream', () => {
       data: { replace_content: true },
     })
 
-    const chatView = readFileSync(fileURLToPath(new URL('../src/views/chat/index.vue', import.meta.url)), 'utf8')
+    const chatView = readSource('../src/views/chat/index.vue')
     expect(chatView).toContain('if (data.data?.replace_content)')
     expect(chatView).toContain('fullContent.value = data.content;')
   })

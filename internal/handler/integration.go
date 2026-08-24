@@ -1420,10 +1420,25 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 		return
 	}
 	aguiEnabled := customAgent != nil && customAgent.Config.AGUIEnabled
-	_, _ = h.service.AppendStreamEvent(c.Request.Context(), binding.SessionID, assistantMessage.ID, "message.created", gin.H{"user_message_id": userMessage.ID, "selected_knowledge_base_ids": selected, "agui_enabled": aguiEnabled})
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-store")
+	c.Header("X-Accel-Buffering", "no")
+	var streamMu sync.Mutex
+	appendAndWrite := func(ctx context.Context, eventName string, data any) {
+		streamMu.Lock()
+		defer streamMu.Unlock()
+		stored, appendErr := h.service.AppendStreamEvent(ctx, binding.SessionID, assistantMessage.ID, eventName, data)
+		if appendErr != nil {
+			return
+		}
+		writeIntegrationSSEEvent(c, stored)
+	}
+	appendAndWrite(c.Request.Context(), "message.created", gin.H{"user_message_id": userMessage.ID, "selected_knowledge_base_ids": selected})
 	eventBus := event.NewEventBus()
 	var answer strings.Builder
 	var references types.References = types.References{}
+	retrievalCallID := "knowledge-retrieval-" + assistantMessage.ID
+	retrievalStartedAt := time.Now()
 	generationDone := make(chan error, 1)
 	var generationDoneOnce sync.Once
 	eventBus.On(event.EventAgentFinalAnswer, func(ctx context.Context, evt event.Event) error {
@@ -1433,7 +1448,7 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 		}
 		if data.Content != "" {
 			answer.WriteString(data.Content)
-			_, _ = h.service.AppendStreamEvent(ctx, binding.SessionID, assistantMessage.ID, "answer.delta", gin.H{"content": data.Content})
+			appendAndWrite(ctx, "answer.delta", gin.H{"content": data.Content})
 		}
 		if data.Done {
 			generationDoneOnce.Do(func() { generationDone <- nil })
@@ -1448,43 +1463,46 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 		if data, ok := evt.Data.(event.AgentReferencesData); ok {
 			if values, ok := integrationReferences(data.References); ok {
 				references = values
+				if aguiEnabled && !agentMode {
+					appendAndWrite(ctx, "tool_result", event.AgentToolResultData{ToolCallID: retrievalCallID, ToolName: "knowledge_base_search", Output: fmt.Sprintf("检索完成，找到 %d 条相关资料", len(values)), Success: true, Duration: time.Since(retrievalStartedAt).Milliseconds()})
+				}
 			}
 		}
 		return nil
 	})
 	eventBus.On(event.EventAgentThought, func(ctx context.Context, evt event.Event) error {
-		if !agentMode {
+		if !aguiEnabled {
 			return nil
 		}
 		if data, ok := evt.Data.(event.AgentThoughtData); ok {
-			_, _ = h.service.AppendStreamEvent(ctx, binding.SessionID, assistantMessage.ID, "thinking", gin.H{"content": data.Content, "iteration": data.Iteration, "done": data.Done, "event_id": evt.ID})
+			appendAndWrite(ctx, "thinking", gin.H{"content": data.Content, "iteration": data.Iteration, "done": data.Done, "event_id": evt.ID})
 		}
 		return nil
 	})
 	eventBus.On(event.EventAgentToolCall, func(ctx context.Context, evt event.Event) error {
-		if !agentMode {
+		if !aguiEnabled {
 			return nil
 		}
 		if data, ok := evt.Data.(event.AgentToolCallData); ok {
-			_, _ = h.service.AppendStreamEvent(ctx, binding.SessionID, assistantMessage.ID, "tool_call", data)
+			appendAndWrite(ctx, "tool_call", data)
 		}
 		return nil
 	})
 	eventBus.On(event.EventAgentToolResult, func(ctx context.Context, evt event.Event) error {
-		if !agentMode {
+		if !aguiEnabled {
 			return nil
 		}
 		if data, ok := evt.Data.(event.AgentToolResultData); ok {
-			_, _ = h.service.AppendStreamEvent(ctx, binding.SessionID, assistantMessage.ID, "tool_result", data)
+			appendAndWrite(ctx, "tool_result", data)
 		}
 		return nil
 	})
 	eventBus.On(event.EventAgentReflection, func(ctx context.Context, evt event.Event) error {
-		if !agentMode {
+		if !aguiEnabled {
 			return nil
 		}
 		if data, ok := evt.Data.(event.AgentReflectionData); ok {
-			_, _ = h.service.AppendStreamEvent(ctx, binding.SessionID, assistantMessage.ID, "reflection", data)
+			appendAndWrite(ctx, "reflection", data)
 		}
 		return nil
 	})
@@ -1501,6 +1519,9 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 		if agentMode {
 			err = h.sessions.AgentQA(generationCtx, qaRequest, eventBus)
 		} else {
+			if aguiEnabled {
+				appendAndWrite(generationCtx, "tool_call", event.AgentToolCallData{ToolCallID: retrievalCallID, ToolName: "knowledge_base_search", Arguments: map[string]any{"query": req.Query, "knowledge_base_count": len(selected)}, Hint: "正在检索授权知识库"})
+			}
 			err = h.sessions.KnowledgeQA(generationCtx, qaRequest, eventBus)
 		}
 	}
@@ -1512,25 +1533,21 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 		}
 	}
 	if generationCtx.Err() != nil {
-		h.writeStoredEvents(c, binding, assistantMessage.ID, "")
 		return
 	}
 	if err != nil {
-		_, _ = h.service.AppendStreamEvent(c.Request.Context(), binding.SessionID, assistantMessage.ID, "error", gin.H{"code": "generation_failed", "retryable": false, "status": "failed"})
-		integrationError(c, http.StatusInternalServerError, "generation_failed", "answer generation failed")
+		appendAndWrite(generationCtx, "error", gin.H{"code": "generation_failed", "retryable": false, "status": "failed"})
 		return
 	}
 	assistantMessage.Content = answer.String()
 	assistantMessage.IsCompleted = true
 	assistantMessage.KnowledgeReferences = references
 	if err = h.messages.UpdateMessage(generationCtx, assistantMessage); err != nil {
-		_, _ = h.service.AppendStreamEvent(generationCtx, binding.SessionID, assistantMessage.ID, "error", gin.H{"code": "message_persist_failed", "retryable": true, "status": "failed"})
-		h.writeStoredEvents(c, binding, assistantMessage.ID, "")
+		appendAndWrite(generationCtx, "error", gin.H{"code": "message_persist_failed", "retryable": true, "status": "failed"})
 		return
 	}
-	_, _ = h.service.AppendStreamEvent(generationCtx, binding.SessionID, assistantMessage.ID, "answer.completed", gin.H{"status": "completed", "answer": assistantMessage.Content, "selected_knowledge_base_ids": selected, "references": references})
+	appendAndWrite(generationCtx, "answer.completed", gin.H{"status": "completed", "answer": assistantMessage.Content, "selected_knowledge_base_ids": selected, "references": references})
 	h.service.AuditResources(generationCtx, principal, "api.chat.message.create", "allowed", "", selected)
-	h.writeStoredEvents(c, binding, assistantMessage.ID, "")
 }
 
 func newIntegrationGenerationContext(requestContext context.Context) (context.Context, context.CancelFunc) {
@@ -1582,10 +1599,14 @@ func (h *IntegrationHandler) writeStoredEvents(c *gin.Context, binding *integrat
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-Accel-Buffering", "no")
 	for _, stored := range events {
-		envelope := gin.H{"event_id": stored.EventID, "event": stored.Event, "session_id": stored.SessionID, "message_id": stored.MessageID, "sequence": stored.Sequence, "occurred_at": stored.OccurredAt, "data": json.RawMessage(stored.DataJSON)}
-		data, _ := json.Marshal(envelope)
-		_, _ = c.Writer.Write([]byte("id: " + stored.EventID + "\nevent: " + stored.Event + "\ndata: " + string(data) + "\n\n"))
+		writeIntegrationSSEEvent(c, &stored)
 	}
+}
+
+func writeIntegrationSSEEvent(c *gin.Context, stored *integrationauth.StreamEvent) {
+	envelope := gin.H{"event_id": stored.EventID, "event": stored.Event, "session_id": stored.SessionID, "message_id": stored.MessageID, "sequence": stored.Sequence, "occurred_at": stored.OccurredAt, "data": json.RawMessage(stored.DataJSON)}
+	data, _ := json.Marshal(envelope)
+	_, _ = c.Writer.Write([]byte("id: " + stored.EventID + "\nevent: " + stored.Event + "\ndata: " + string(data) + "\n\n"))
 	c.Writer.Flush()
 }
 
