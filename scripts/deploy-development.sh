@@ -22,6 +22,23 @@ if [[ "$remote_revision" == "$deployed_revision" ]]; then
   exit 0
 fi
 
+app_changed=false
+frontend_changed=false
+while IFS= read -r changed_file; do
+  case "$changed_file" in
+    frontend/*)
+      frontend_changed=true
+      ;;
+    docker-compose*.yml)
+      app_changed=true
+      frontend_changed=true
+      ;;
+    *)
+      app_changed=true
+      ;;
+  esac
+done < <(git diff --name-only "$deployed_revision" "$remote_revision")
+
 git checkout --quiet -B development origin/development
 git reset --quiet --hard "$remote_revision"
 
@@ -36,47 +53,63 @@ compose=(
 
 "${compose[@]}" config --quiet
 
-app_rollback="$(docker inspect --format '{{.Image}}' WeKnora-app)"
-frontend_rollback="$(docker inspect --format '{{.Image}}' WeKnora-frontend)"
-docker tag "$app_rollback" weknora-ci/app:rollback
-docker tag "$frontend_rollback" weknora-ci/frontend:rollback
+build_services=()
+if $app_changed; then
+  build_services+=(app)
+  app_rollback="$(docker inspect --format '{{.Image}}' WeKnora-app)"
+  docker tag "$app_rollback" weknora-ci/app:rollback
+fi
+if $frontend_changed; then
+  build_services+=(frontend)
+  frontend_rollback="$(docker inspect --format '{{.Image}}' WeKnora-frontend)"
+  docker tag "$frontend_rollback" weknora-ci/frontend:rollback
+fi
 
 rollback() {
-  echo "WeKnora deployment failed; restoring previous app images" >&2
-  docker tag weknora-ci/app:rollback "wechatopenai/weknora-app:$WEKNORA_VERSION"
-  docker tag weknora-ci/frontend:rollback "wechatopenai/weknora-ui:$WEKNORA_VERSION"
-  "${compose[@]}" up -d --no-deps --force-recreate app
-  "${compose[@]}" up -d --no-deps --force-recreate frontend
+  echo "WeKnora deployment failed; restoring previous images" >&2
+  if $app_changed; then
+    docker tag weknora-ci/app:rollback "wechatopenai/weknora-app:$WEKNORA_VERSION"
+    "${compose[@]}" up -d --no-deps --force-recreate app
+  fi
+  if $frontend_changed; then
+    docker tag weknora-ci/frontend:rollback "wechatopenai/weknora-ui:$WEKNORA_VERSION"
+    "${compose[@]}" up -d --no-deps --force-recreate frontend
+  fi
 }
 trap rollback ERR
 
-"${compose[@]}" build app frontend
-"${compose[@]}" up -d --no-deps app
+"${compose[@]}" build "${build_services[@]}"
 
-for attempt in {1..60}; do
-  if [[ "$(docker inspect --format '{{.State.Health.Status}}' WeKnora-app)" == "healthy" ]] \
-    && curl --fail --silent --show-error http://127.0.0.1:18089/health >/dev/null; then
-    break
-  fi
-  if [[ "$attempt" == "60" ]]; then
-    echo "WeKnora app health check timed out" >&2
-    exit 1
-  fi
-  sleep 5
-done
+if $app_changed; then
+  "${compose[@]}" up -d --no-deps app
 
-"${compose[@]}" up -d --no-deps frontend
+  for attempt in {1..60}; do
+    if [[ "$(docker inspect --format '{{.State.Health.Status}}' WeKnora-app)" == "healthy" ]] \
+      && curl --fail --silent --show-error http://127.0.0.1:18089/health >/dev/null; then
+      break
+    fi
+    if [[ "$attempt" == "60" ]]; then
+      echo "WeKnora app health check timed out" >&2
+      exit 1
+    fi
+    sleep 5
+  done
+fi
 
-for attempt in {1..30}; do
-  if curl --fail --silent --show-error http://127.0.0.1:8089/ >/dev/null; then
-    break
-  fi
-  if [[ "$attempt" == "30" ]]; then
-    echo "WeKnora frontend health check timed out" >&2
-    exit 1
-  fi
-  sleep 2
-done
+if $frontend_changed; then
+  "${compose[@]}" up -d --no-deps frontend
+
+  for attempt in {1..30}; do
+    if curl --fail --silent --show-error http://127.0.0.1:8089/ >/dev/null; then
+      break
+    fi
+    if [[ "$attempt" == "30" ]]; then
+      echo "WeKnora frontend health check timed out" >&2
+      exit 1
+    fi
+    sleep 2
+  done
+fi
 
 trap - ERR
 printf '%s\n' "$remote_revision" > "$deployed_revision_file"
