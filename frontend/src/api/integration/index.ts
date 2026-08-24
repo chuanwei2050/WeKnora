@@ -8,6 +8,7 @@ export interface ExchangeResponse {
   user: { id: string; username: string; role: string; tenant_id: number }
   knowledge_base_ids: string[]
   scopes: string[]
+  agui_enabled: boolean
 }
 
 export async function exchangeBootstrapTicket(ticket: string): Promise<ExchangeResponse> {

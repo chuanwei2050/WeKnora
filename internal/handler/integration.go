@@ -291,6 +291,12 @@ func (h *IntegrationHandler) Exchange(c *gin.Context) {
 	c.Header("Referrer-Policy", "strict-origin")
 	c.SetSameSite(http.SameSiteLaxMode)
 	setIntegrationBrowserCookie(c, token, int(integrationauth.SessionMaxTTL.Seconds()))
+	aguiEnabled := false
+	if h.agents != nil {
+		if quickAnswerAgent, agentErr := h.agents.GetAgentByID(c.Request.Context(), types.BuiltinQuickAnswerID); agentErr == nil {
+			aguiEnabled = quickAnswerAgent.Config.AGUIEnabled
+		}
+	}
 	// session_token is required for cross-site embeds where browsers block third-party cookies.
 	integrationData(c, http.StatusOK, gin.H{
 		"csrf_token":         csrf,
@@ -298,6 +304,7 @@ func (h *IntegrationHandler) Exchange(c *gin.Context) {
 		"user":               user,
 		"knowledge_base_ids": principal.KnowledgeBaseIDs,
 		"scopes":             principal.Scopes,
+		"agui_enabled":       aguiEnabled,
 	})
 }
 

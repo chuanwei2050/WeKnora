@@ -64,6 +64,16 @@
                       </div>
                     </div>
 
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.agui.label') }}</label>
+                        <p class="desc">{{ $t('agentEditor.agui.desc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.agui_enabled" />
+                      </div>
+                    </div>
+
                     <!-- 智能体类型（仅智能推理模式下显示） -->
                     <div v-if="isAgentMode && agentTypePresets.length > 0" class="setting-row setting-row--emphasize">
                       <div class="setting-info">
@@ -1883,6 +1893,7 @@ const defaultFormData = {
     // 编辑既有 agent 时会被 agent 自己保存的 agent_type 覆盖。
     agent_type: 'rag-qa' as AgentType,
     system_prompt_id: '' as string,
+    agui_enabled: false,
     // 图片上传/多模态设置（与语音一样默认开启；模型 ID 在新建时按租户默认/已知 Chat·VLM 名回填）
                     image_upload_enabled: true,
                     vlm_model_id: '',

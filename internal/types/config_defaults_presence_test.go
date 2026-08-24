@@ -27,6 +27,26 @@ func TestCustomAgentDefaultsPreserveExplicitVerificationValues(t *testing.T) {
 	}
 }
 
+func TestCustomAgentAGUIDefaultsToFalseAndPreservesEnabled(t *testing.T) {
+	var missing CustomAgent
+	if err := json.Unmarshal([]byte(`{"config":{}}`), &missing); err != nil {
+		t.Fatal(err)
+	}
+	missing.EnsureDefaults()
+	if missing.Config.AGUIEnabled {
+		t.Fatal("missing agui_enabled must default to false")
+	}
+
+	var enabled CustomAgent
+	if err := json.Unmarshal([]byte(`{"config":{"agui_enabled":true}}`), &enabled); err != nil {
+		t.Fatal(err)
+	}
+	enabled.EnsureDefaults()
+	if !enabled.Config.AGUIEnabled {
+		t.Fatal("explicit agui_enabled=true must be preserved")
+	}
+}
+
 func TestYAMLDefaultsPreserveExplicitZeroValues(t *testing.T) {
 	var agent CustomAgent
 	if err := yaml.Unmarshal([]byte(`config:

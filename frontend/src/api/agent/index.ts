@@ -17,6 +17,7 @@ export interface CustomAgentConfig {
   system_prompt?: string;           // 统一系统提示词（使用 {{web_search_status}} 占位符动态控制行为）
   system_prompt_id?: string;        // 引用的 prompt template ID（预设会填入此字段）
   context_template?: string;        // 上下文模板（普通模式）
+  agui_enabled?: boolean;           // 是否展示 AG-UI 思考过程和流式回答
 
   // ===== 模型设置 =====
   model_id?: string;

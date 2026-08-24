@@ -111,6 +111,8 @@ type CustomAgentConfig struct {
 	// ContextTemplateID references a template ID in prompt_templates/ YAML files.
 	// If set and ContextTemplate is empty, the template content will be resolved at startup.
 	ContextTemplateID string `yaml:"context_template_id" json:"context_template_id,omitempty"`
+	// Whether chat clients display AG-UI reasoning/tool events and streamed answer updates.
+	AGUIEnabled bool `yaml:"agui_enabled" json:"agui_enabled"`
 
 	// ===== Model Settings =====
 	// Model ID to use for conversations

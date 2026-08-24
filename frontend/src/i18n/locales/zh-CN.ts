@@ -3633,6 +3633,10 @@ export default {
     },
   },
   agentEditor: {
+    agui: {
+      label: "显示 AG-UI 过程",
+      desc: "在对话和悬浮聊天框中展示思考、工具调用过程及流式打字效果",
+    },
     builtinHint: "这是内置智能体，名称和描述不可修改，但可以调整配置参数",
     placeholders: {
       available: "可用变量：",

@@ -111,7 +111,7 @@ import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
 import { getMessageList, generateSessionsTitle, getSession } from "@/api/chat/index";
-import { getSuggestedQuestions } from "@/api/agent/index";
+import { getAgentById, getSuggestedQuestions } from "@/api/agent/index";
 import { useStream } from '../../api/chat/streame'
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
@@ -129,6 +129,7 @@ const props = defineProps({
   agentId: { type: String, default: '' },
   kbIds: { type: Array, default: () => [] },
   embeddedMode: { type: Boolean, default: false },
+  aguiEnabled: { type: Boolean, default: false },
   suggestedQuestionsEnabled: { type: Boolean, default: true },
   embeddedSuggestedQuestions: {
     type: Array,
@@ -148,6 +149,7 @@ const router = useRouter();
 const session_id = ref(props.session_id || route.params.chatid);
 const sessionData = ref(null);
 const voiceConfig = ref({});
+const aguiDisplayEnabled = ref(false);
 const inputFieldRef = ref();
 const created_at = ref('');
 const limit = ref(20);
@@ -178,6 +180,24 @@ const handleKBEditorSuccess = (kbId) => {
 // ===== 推荐问题 =====
 const suggestedQuestions = ref([]);
 const suggestedQuestionsLoading = ref(false);
+
+const loadAgentDisplayConfig = async () => {
+    if (props.embeddedMode) {
+        aguiDisplayEnabled.value = props.aguiEnabled;
+        return;
+    }
+    const selectedAgentId = props.embeddedMode ? props.agentId : useSettingsStoreInstance.selectedAgentId;
+    if (!selectedAgentId) {
+        aguiDisplayEnabled.value = false;
+        return;
+    }
+    try {
+        const response = await getAgentById(selectedAgentId);
+        aguiDisplayEnabled.value = response?.data?.config?.agui_enabled === true;
+    } catch {
+        aguiDisplayEnabled.value = false;
+    }
+};
 let suggestedQuestionsFetchId = 0; // 用于取消过时的请求
 let suggestedDebounceTimer = null;
 
@@ -233,7 +253,10 @@ const debouncedFetchSuggestions = () => {
 // 监听 Agent / 知识库 / 文件切换，重新获取推荐问题
 watch(
     () => useSettingsStoreInstance.selectedAgentId,
-    debouncedFetchSuggestions,
+    () => {
+        debouncedFetchSuggestions();
+        void loadAgentDisplayConfig();
+    },
 );
 watch(
     () => useSettingsStoreInstance.settings.selectedKnowledgeBases,
@@ -432,7 +455,7 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
         
         // Check if this message has agent_steps from database (historical agent conversation)
         // If so, reconstruct the agentEventStream to restore the exact conversation state
-        if (item.agent_steps && Array.isArray(item.agent_steps) && item.agent_steps.length > 0) {
+        if (aguiDisplayEnabled.value && item.agent_steps && Array.isArray(item.agent_steps) && item.agent_steps.length > 0) {
             console.log('[Message Load] Reconstructing agent steps for message:', item.id, 'steps:', item.agent_steps.length);
             item.isAgentMode = true;
             item.agentEventStream = reconstructEventStreamFromSteps(item.agent_steps, item.content, item.is_completed, item.is_fallback, item.agent_duration_ms || 0);
@@ -449,16 +472,16 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
                 item.thinking = false;
             } else if (item.content.includes('<\/think>')) {
                 // 历史消息中包含完整的 <think>...</think> 标签，说明 thinking 已完成
-                item.showThink = true;
+                item.showThink = aguiDisplayEnabled.value;
                 item.thinking = false;  // 关键：标记 thinking 已完成，使 deepThink 默认折叠
                 const index = item.content.trim().lastIndexOf('<\/think>');
-                item.thinkContent = item.content.trim().substring(0, index).replace('<think>', '').trim();
+                item.thinkContent = aguiDisplayEnabled.value ? item.content.trim().substring(0, index).replace('<think>', '').trim() : '';
                 item.content = item.content.trim().substring(index + 8);
             } else if (item.content.includes('<think>')) {
                 // 内容包含 <think> 但没有 </think>，说明 thinking 还在进行中（不太可能出现在历史消息中）
-                item.showThink = true;
-                item.thinking = true;
-                item.thinkContent = item.content.replace('<think>', '').trim();
+                item.showThink = aguiDisplayEnabled.value;
+                item.thinking = aguiDisplayEnabled.value;
+                item.thinkContent = aguiDisplayEnabled.value ? item.content.replace('<think>', '').trim() : '';
                 item.content = '';
             }
         }
@@ -687,6 +710,10 @@ onChunk((data) => {
         // 不关闭 loading，等待实际内容
         return;
     }
+
+    if (!aguiDisplayEnabled.value && ['thinking', 'tool_call', 'tool_result', 'reflection'].includes(data.response_type)) {
+        return;
+    }
     
     // 判断是否是 Agent 模式的响应
     // 注意：'answer', 'complete', 'references' 类型可能在两种模式下都存在
@@ -776,6 +803,9 @@ onChunk((data) => {
     } else {
         fullContent.value += data.content;
     }
+    if (!aguiDisplayEnabled.value && !data.done) {
+        return;
+    }
     let obj = { ...data, content: '', role: 'assistant', showThink: false, is_completed: false };
 
     // 检查是否为 fallback 回答（未从知识库检索到内容）
@@ -784,17 +814,17 @@ onChunk((data) => {
     }
 
     if (fullContent.value.includes('<think>') && !fullContent.value.includes('<\/think>')) {
-        obj.thinking = true;
-        obj.showThink = true;
+        obj.thinking = aguiDisplayEnabled.value;
+        obj.showThink = aguiDisplayEnabled.value;
         obj.content = '';
-        obj.thinkContent = fullContent.value.replace('<think>', '').trim();
+        obj.thinkContent = aguiDisplayEnabled.value ? fullContent.value.replace('<think>', '').trim() : '';
     } else if (fullContent.value.includes('<think>') && fullContent.value.includes('<\/think>')) {
         obj.thinking = false;
-        obj.showThink = true;
+        obj.showThink = aguiDisplayEnabled.value;
         // Use lastIndexOf to handle edge cases with multiple </think> occurrences,
         // consistent with history loading logic (line 280)
         const index = fullContent.value.lastIndexOf('<\/think>');
-        obj.thinkContent = fullContent.value.substring(0, index).replace('<think>', '').trim();
+        obj.thinkContent = aguiDisplayEnabled.value ? fullContent.value.substring(0, index).replace('<think>', '').trim() : '';
         obj.content = fullContent.value.substring(index + 8).trim();
     } else {
         obj.content = fullContent.value;
@@ -1202,6 +1232,8 @@ onMounted(async () => {
     if (props.kbIds && props.kbIds.length > 0) {
         useSettingsStoreInstance.selectKnowledgeBases(props.kbIds);
     }
+
+    await loadAgentDisplayConfig();
     
     // 初始化状态：加载历史消息时不应显示loading
     loading.value = false;

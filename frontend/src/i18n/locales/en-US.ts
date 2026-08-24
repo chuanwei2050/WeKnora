@@ -3627,6 +3627,10 @@ export default {
     },
   },
   agentEditor: {
+    agui: {
+      label: 'Show AG-UI process',
+      desc: 'Show reasoning, tool activity, and streamed typing in chats and the floating widget',
+    },
     builtinHint: 'This is a built-in agent. Name and description cannot be modified, but configuration parameters can be adjusted.',
     placeholders: {
       available: 'Available variables: ',

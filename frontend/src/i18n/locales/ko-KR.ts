@@ -3609,6 +3609,10 @@ export default {
     },
   },
   agentEditor: {
+    agui: {
+      label: "AG-UI 과정 표시",
+      desc: "채팅과 플로팅 위젯에서 추론, 도구 호출 및 스트리밍 타이핑을 표시합니다",
+    },
     builtinHint: '내장 에이전트입니다. 이름과 설명은 수정할 수 없지만, 설정 매개변수는 조정할 수 있습니다.',
     placeholders: {
       available: '사용 가능한 변수: ',
