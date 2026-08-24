@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
@@ -1436,6 +1437,7 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	appendAndWrite(c.Request.Context(), "message.created", gin.H{"user_message_id": userMessage.ID, "selected_knowledge_base_ids": selected})
 	eventBus := event.NewEventBus()
 	var answer strings.Builder
+	var answerStream integrationUTF8Stream
 	var references types.References = types.References{}
 	retrievalCallID := "knowledge-retrieval-" + assistantMessage.ID
 	retrievalStartedAt := time.Now()
@@ -1448,7 +1450,9 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 		}
 		if data.Content != "" {
 			answer.WriteString(data.Content)
-			appendAndWrite(ctx, "answer.delta", gin.H{"content": data.Content})
+			if content := answerStream.Push(data.Content); content != "" {
+				appendAndWrite(ctx, "answer.delta", gin.H{"content": content})
+			}
 		}
 		if data.Done {
 			generationDoneOnce.Do(func() { generationDone <- nil })
@@ -1608,6 +1612,22 @@ func writeIntegrationSSEEvent(c *gin.Context, stored *integrationauth.StreamEven
 	data, _ := json.Marshal(envelope)
 	_, _ = c.Writer.Write([]byte("id: " + stored.EventID + "\nevent: " + stored.Event + "\ndata: " + string(data) + "\n\n"))
 	c.Writer.Flush()
+}
+
+type integrationUTF8Stream struct {
+	pending []byte
+}
+
+func (s *integrationUTF8Stream) Push(chunk string) string {
+	data := append(s.pending, []byte(chunk)...)
+	validEnd := 0
+	for validEnd < len(data) && utf8.FullRune(data[validEnd:]) {
+		_, size := utf8.DecodeRune(data[validEnd:])
+		validEnd += size
+	}
+	content := string(data[:validEnd])
+	s.pending = append(s.pending[:0], data[validEnd:]...)
+	return content
 }
 
 func (h *IntegrationHandler) GetMessageSnapshot(c *gin.Context) {
