@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -19,6 +20,49 @@ type PluginChatCompletionStream struct {
 
 func shouldExposeThinking(thinking *bool) bool {
 	return thinking == nil || *thinking
+}
+
+type thinkTagFilter struct {
+	pending string
+	inThink bool
+}
+
+func (f *thinkTagFilter) Write(content string, done bool) string {
+	const openTag = "<think>"
+	const closeTag = "</think>"
+	f.pending += content
+	var visible strings.Builder
+	for f.pending != "" {
+		tag := openTag
+		if f.inThink {
+			tag = closeTag
+		}
+		if index := strings.Index(f.pending, tag); index >= 0 {
+			if !f.inThink {
+				visible.WriteString(f.pending[:index])
+			}
+			f.pending = f.pending[index+len(tag):]
+			f.inThink = !f.inThink
+			continue
+		}
+		if done {
+			if !f.inThink {
+				visible.WriteString(f.pending)
+			}
+			f.pending = ""
+			break
+		}
+		keep := len(tag) - 1
+		if len(f.pending) <= keep {
+			break
+		}
+		if !f.inThink {
+			visible.WriteString(f.pending[:len(f.pending)-keep])
+		}
+		f.pending = f.pending[len(f.pending)-keep:]
+		break
+	}
+	return visible.String()
 }
 
 // NewPluginChatCompletionStream creates a new PluginChatCompletionStream instance
@@ -114,6 +158,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		var initialUsage types.TokenUsage
 		var thinkingStarted bool
 		var thinkingEnded bool
+		var embeddedThinkingFilter thinkTagFilter
 		verifiedMode := chatManage.VerifiedAnswer.Enabled
 
 		for {
@@ -217,6 +262,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				}
 
 				if response.ResponseType == types.ResponseTypeAnswer {
+					if !shouldExposeThinking(opt.Thinking) {
+						response.Content = embeddedThinkingFilter.Write(response.Content, response.Done)
+					}
 					if verifiedMode {
 						verifiedDraft += response.Content
 						continue
