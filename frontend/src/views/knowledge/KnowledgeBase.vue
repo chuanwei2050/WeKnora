@@ -3570,10 +3570,6 @@ async function createNewSession(value: string): Promise<void> {
     }
   }
 
-  .public-child-row {
-    padding-left: 26px;
-  }
-
   .root-folder-drop-zone {
     height: 12px;
     border-radius: 3px;
@@ -3644,6 +3640,10 @@ async function createNewSession(value: string): Promise<void> {
     text-align: left;
     cursor: pointer;
     transition: background-color 0.15s ease, color 0.15s ease;
+
+    &.public-child-row {
+      padding-left: 20px;
+    }
 
     &:hover {
       background: var(--td-bg-color-secondarycontainer);
