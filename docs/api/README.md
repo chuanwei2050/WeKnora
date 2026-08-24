@@ -1,4 +1,4 @@
-# WeKnora API 文档
+# FinOpsSys API 文档
 
 ## 目录
 
@@ -10,7 +10,7 @@
 
 ## 概述
 
-WeKnora 提供了一系列 RESTful API，用于创建和管理知识库、检索知识，以及进行基于知识的问答。本文档详细描述了这些 API 的使用方式。
+FinOpsSys 提供了一系列 RESTful API，用于创建和管理知识库、检索知识，以及进行基于知识的问答。本文档详细描述了这些 API 的使用方式。
 
 ## 基础信息
 
@@ -55,7 +55,7 @@ X-Request-ID: unique_request_id
 
 ## API 概览
 
-WeKnora API 按功能分为以下几类：
+FinOpsSys API 按功能分为以下几类：
 
 | 分类 | 描述 | 文档链接 |
 |------|------|----------|

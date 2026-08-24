@@ -1,6 +1,6 @@
 # IM 集成开发文档
 
-WeKnora 的 IM 集成模块将企业即时通讯平台（企业微信、飞书、Slack、Telegram、钉钉、Mattermost）接入 WeKnora 知识问答管道，支持在 IM 中直接向 AI 提问并获得实时流式回答。
+FinOpsSys 的 IM 集成模块将企业即时通讯平台（企业微信、飞书、Slack、Telegram、钉钉、Mattermost）接入 FinOpsSys 知识问答管道，支持在 IM 中直接向 AI 提问并获得实时流式回答。
 
 IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置通过前端 Agent 编辑器管理，存储在数据库中。
 
@@ -41,7 +41,7 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 
 ### 前置条件
 
-- WeKnora 已部署并运行
+- FinOpsSys 已部署并运行
 - 已创建至少一个 Agent（自定义智能体）
 - Agent 已配置好模型和知识库
 
@@ -60,7 +60,7 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
    - **BotID** — 机器人唯一标识
    - **BotSecret** — 机器人密钥（点击重置可重新生成）
 
-**第二步：在 WeKnora 中添加 IM 渠道**
+**第二步：在 FinOpsSys 中添加 IM 渠道**
 
 1. 进入 Agent 编辑器 → 左侧导航选择 **IM 集成** 标签页
 2. 点击 **添加渠道**
@@ -75,7 +75,7 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 
 **第三步：验证**
 
-保存后 WeKnora 会自动建立到企业微信的 WebSocket 长连接。日志中出现以下内容表示连接成功：
+保存后 FinOpsSys 会自动建立到企业微信的 WebSocket 长连接。日志中出现以下内容表示连接成功：
 
 ```
 [IM] WeCom WebSocket connecting (bot_id=xxx)...
@@ -97,7 +97,7 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
    - **AgentID** — 应用详情页中的 AgentId（整数）
    - **Secret** — 应用详情页中的 Secret
 
-**第二步：在 WeKnora 中添加 IM 渠道**
+**第二步：在 FinOpsSys 中添加 IM 渠道**
 
 1. 进入 Agent 编辑器 → **IM 集成** 标签页 → **添加渠道**
 2. 填写配置：
@@ -117,9 +117,9 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 1. 在应用详情页 → **接收消息** → **设置 API 接收**
 2. 填写：
    - **URL**：粘贴上一步复制的回调地址
-   - **Token**：填入在 WeKnora 中设置的 Token
-   - **EncodingAESKey**：填入在 WeKnora 中设置的 EncodingAESKey
-3. 点击保存，企业微信会发送 GET 验证请求，WeKnora 会自动响应
+   - **Token**：填入在 FinOpsSys 中设置的 Token
+   - **EncodingAESKey**：填入在 FinOpsSys 中设置的 EncodingAESKey
+3. 点击保存，企业微信会发送 GET 验证请求，FinOpsSys 会自动响应
 
 **第四步：配置可信域名（可选）**
 
@@ -189,7 +189,7 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 
 在 **版本管理与发布** 中创建版本并提交审核。审核通过后用户才能与机器人交互。
 
-**第四步：在 WeKnora 中添加 IM 渠道**
+**第四步：在 FinOpsSys 中添加 IM 渠道**
 
 1. 进入 Agent 编辑器 → **IM 集成** → **添加渠道**
 2. 填写配置：
@@ -214,7 +214,7 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 
 **前置步骤**同上（创建应用、开通权限），额外需要：
 
-**第一步：在 WeKnora 中添加 IM 渠道**
+**第一步：在 FinOpsSys 中添加 IM 渠道**
 
 1. 进入 Agent 编辑器 → **IM 集成** → **添加渠道**
 2. 填写配置：
@@ -228,9 +228,9 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 **第二步：配置飞书事件订阅**
 
 1. 在 **事件与回调** → **事件配置** 中，选择请求方式为 **将事件发送到开发者服务器**
-2. **请求地址**：粘贴从 WeKnora 复制的回调地址
+2. **请求地址**：粘贴从 FinOpsSys 复制的回调地址
 3. 添加事件 `im.message.receive_v1`
-4. 点击保存时飞书会发送 URL 验证请求（challenge），WeKnora 会自动响应
+4. 点击保存时飞书会发送 URL 验证请求（challenge），FinOpsSys 会自动响应
 
 ---
 
@@ -285,7 +285,7 @@ Slack 提供两种接入模式，推荐使用 WebSocket (Socket Mode) 模式，�
 3. 滚动到顶部，点击 **Install to Workspace**。
 4. 授权后，复制 **Bot User OAuth Token**（以 `xoxb-` 开头），这就是 **Bot Token**。
 
-**第六步：在 WeKnora 中添加 IM 渠道**
+**第六步：在 FinOpsSys 中添加 IM 渠道**
 
 1. 进入 Agent 编辑器 → **IM 集成** → **添加渠道**
 2. 填写配置：
@@ -314,7 +314,7 @@ Slack 提供两种接入模式，推荐使用 WebSocket (Socket Mode) 模式，�
 2. 在 **Basic Information** 页面，滚动到 **App Credentials** 区域，复制 **Signing Secret**。
 3. 在 **OAuth & Permissions** 页面，配置 Bot Token Scopes（同上），安装到 Workspace，复制 **Bot User OAuth Token**（Bot Token）。
 
-**第二步：在 WeKnora 中添加 IM 渠道**
+**第二步：在 FinOpsSys 中添加 IM 渠道**
 
 1. 进入 Agent 编辑器 → **IM 集成** → **添加渠道**
 2. 填写配置：
@@ -328,7 +328,7 @@ Slack 提供两种接入模式，推荐使用 WebSocket (Socket Mode) 模式，�
 
 1. 在 Slack App 设置页左侧导航栏选择 **Event Subscriptions**。
 2. 开启 **Enable Events** 开关。
-3. 在 **Request URL** 中粘贴从 WeKnora 复制的回调地址。Slack 会发送一个 challenge 请求，WeKnora 会自动响应并验证通过。
+3. 在 **Request URL** 中粘贴从 FinOpsSys 复制的回调地址。Slack 会发送一个 challenge 请求，FinOpsSys 会自动响应并验证通过。
 4. 展开 **Subscribe to bot events**，添加需要的事件（同上）。
 5. 点击 **Save Changes**。
 
@@ -348,7 +348,7 @@ Telegram 提供两种接入模式，推荐使用 WebSocket（长轮询）模式�
 2. 发送 `/newbot`，按提示填写 Bot 名称和用户名
 3. 创建完成后获取 **Bot Token**（格式如 `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11`）
 
-**第二步：在 WeKnora 中添加 IM 渠道**
+**第二步：在 FinOpsSys 中添加 IM 渠道**
 
 1. 进入 Agent 编辑器 → **IM 集成** → **添加渠道**
 2. 填写配置：
@@ -376,7 +376,7 @@ Telegram 提供两种接入模式，推荐使用 WebSocket（长轮询）模式�
 
 同上，通过 BotFather 创建 Bot 并获取 Bot Token。
 
-**第二步：在 WeKnora 中添加 IM 渠道**
+**第二步：在 FinOpsSys 中添加 IM 渠道**
 
 1. 进入 Agent 编辑器 → **IM 集成** → **添加渠道**
 2. 填写配置：
@@ -421,7 +421,7 @@ curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
 1. 在应用详情页 → **机器人** → 配置消息接收模式为 **Stream 模式**
 2.（可选）如需流式 AI 卡片效果，在 **互动卡片** 中创建一个 **AI 卡片模板**，记录 **Card Template ID**
 
-**第三步：在 WeKnora 中添加 IM 渠道**
+**第三步：在 FinOpsSys 中添加 IM 渠道**
 
 1. 进入 Agent 编辑器 → **IM 集成** → **添加渠道**
 2. 填写配置：
@@ -451,7 +451,7 @@ curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
 
 同上，创建应用并获取 Client ID 和 Client Secret。
 
-**第二步：在 WeKnora 中添加 IM 渠道**
+**第二步：在 FinOpsSys 中添加 IM 渠道**
 
 1. 进入 Agent 编辑器 → **IM 集成** → **添加渠道**
 2. 填写配置：
@@ -465,16 +465,16 @@ curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
 **第三步：配置钉钉事件订阅**
 
 1. 在应用详情页 → **机器人** → 配置消息接收模式为 **HTTP 模式**
-2. **消息接收地址**：粘贴从 WeKnora 复制的回调地址
+2. **消息接收地址**：粘贴从 FinOpsSys 复制的回调地址
 3. 钉钉会通过 HmacSHA256 签名验证回调请求
 
 ---
 
 ### Mattermost 接入
 
-Mattermost 为**自建部署**，当前仅支持 **Webhook** 模式：**出站 Webhook（Outgoing Webhook）** 将用户消息 POST 到 WeKnora，Bot 通过 **REST API v4** 发回频道/线程回复。与 Slack Events API 类似，回调需快速返回 `200`，实际回答由 Bot Token 异步调用接口完成。
+Mattermost 为**自建部署**，当前仅支持 **Webhook** 模式：**出站 Webhook（Outgoing Webhook）** 将用户消息 POST 到 FinOpsSys，Bot 通过 **REST API v4** 发回频道/线程回复。与 Slack Events API 类似，回调需快速返回 `200`，实际回答由 Bot Token 异步调用接口完成。
 
-> 需要公网或内网可达的回调 URL（Mattermost 服务器能访问 WeKnora 的 `/api/v1/im/callback/{channel_id}`）。若 WeKnora 在内网，请在 Mattermost 中配置 [Trusted Internal Connections](https://docs.mattermost.com/configure/environment-configuration-settings.html) 或将回调地址加入允许列表。
+> 需要公网或内网可达的回调 URL（Mattermost 服务器能访问 FinOpsSys 的 `/api/v1/im/callback/{channel_id}`）。若 FinOpsSys 在内网，请在 Mattermost 中配置 [Trusted Internal Connections](https://docs.mattermost.com/configure/environment-configuration-settings.html) 或将回调地址加入允许列表。
 
 #### 第一步：创建 Bot 账户并获取 Token
 
@@ -486,12 +486,12 @@ Mattermost 为**自建部署**，当前仅支持 **Webhook** 模式：**出站 W
 
 1. 打开 **产品菜单 → 集成 → 出站 Webhook**（若不可见，需系统管理员在 **系统控制台 → 集成** 中启用出站 Webhook）。
 2. 点击 **Add Outgoing Webhook**，填写标题与描述。
-3. **Content Type** 建议选择 **application/json**（也支持 `application/x-www-form-urlencoded`，WeKnora 两种均可解析）。
+3. **Content Type** 建议选择 **application/json**（也支持 `application/x-www-form-urlencoded`，FinOpsSys 两种均可解析）。
 4. 选择触发频道，或配置**触发词**（与频道组合规则以 Mattermost 说明为准）。
-5. **Callback URLs** 先留空或填占位；保存后在 WeKnora 创建渠道后会得到正式地址。
+5. **Callback URLs** 先留空或填占位；保存后在 FinOpsSys 创建渠道后会得到正式地址。
 6. 保存后复制页面上的 **Token**（出站 Webhook 密钥），即 **Outgoing Webhook Token**。
 
-#### 第三步：在 WeKnora 中添加 IM 渠道
+#### 第三步：在 FinOpsSys 中添加 IM 渠道
 
 1. 进入 Agent 编辑器 → **IM 集成** → **添加渠道**。
 2. 填写配置：
@@ -506,7 +506,7 @@ Mattermost 为**自建部署**，当前仅支持 **Webhook** 模式：**出站 W
 
 #### 第四步：验证
 
-在绑定频道发送触发出站 Webhook 的消息，应收到 WeKnora 的回复；回复默认出现在**触发帖所在线程**（使用 Mattermost 的 `root_id` 与触发 `post_id` 对齐）。
+在绑定频道发送触发出站 Webhook 的消息，应收到 FinOpsSys 的回复；回复默认出现在**触发帖所在线程**（使用 Mattermost 的 `root_id` 与触发 `post_id` 对齐）。
 
 **参考文档：** [Outgoing webhooks](https://developers.mattermost.com/integrate/webhooks/outgoing/)
 
@@ -583,7 +583,7 @@ IM 渠道在 Agent 编辑器的 **IM 集成** 标签页中管理（仅编辑模�
 │   ───────────────┼───────────────────────────────────────────────────────    │
 │                  ▼                                                           │
 │   ┌──────────────────────────────────────┐                                   │
-│   │     WeKnora Core (QA Pipeline)       │     核心层                       │
+│   │     FinOpsSys Core (QA Pipeline)       │     核心层                       │
 │   │   SessionService · MessageService    │                                   │
 │   │   TenantService  · AgentService      │                                   │
 │   │   KnowledgeService (文件保存)         │                                   │
@@ -649,7 +649,7 @@ CREATE TABLE im_channels (
 
 ### im_channel_sessions 表
 
-将 IM 渠道中的用户会话映射到 WeKnora 会话：
+将 IM 渠道中的用户会话映射到 FinOpsSys 会话：
 
 ```
 (im_channel_id, Platform, UserID, ChatID, TenantID)  →  SessionID
@@ -685,7 +685,7 @@ CREATE TABLE im_channels (
 
 ### IMChannel — IM 渠道
 
-每个 IM 渠道代表一个 IM 平台机器人与 WeKnora Agent 的绑定关系。一个 Agent 可以绑定多个渠道（如同时接入企业微信、飞书、Slack 与 Mattermost），同一平台也可以创建多个渠道（如不同的企业微信机器人）。
+每个 IM 渠道代表一个 IM 平台机器人与 FinOpsSys Agent 的绑定关系。一个 Agent 可以绑定多个渠道（如同时接入企业微信、飞书、Slack 与 Mattermost），同一平台也可以创建多个渠道（如不同的企业微信机器人）。
 
 渠道有一个计算字段 `BotIdentity`，由平台类型、模式和核心凭证推导，用于防止同一机器人被重复创建。
 
@@ -725,7 +725,7 @@ type ReplyMessage struct {
 
 ### ChannelSession — 会话映射
 
-将 IM 渠道 (渠道 ID + 用户 + 群聊) 映射到 WeKnora 会话，实现对话上下文持续性。首次交互自动创建，后续消息复用同一会话。并发创建通过唯一约束 + fallback 查询处理。存储于 `im_channel_sessions` 表。
+将 IM 渠道 (渠道 ID + 用户 + 群聊) 映射到 FinOpsSys 会话，实现对话上下文持续性。首次交互自动创建，后续消息复用同一会话。并发创建通过唯一约束 + fallback 查询处理。存储于 `im_channel_sessions` 表。
 
 ---
 
@@ -754,7 +754,7 @@ type ReplyMessage struct {
 │  4. 限流检查 (滑动窗口, 10次/60s)                 │
 │  5. 从渠道配置获取 agent_id、tenant_id            │
 │  6. 解析/创建 ChannelSession                     │
-│  7. 获取 WeKnora Session                         │
+│  7. 获取 FinOpsSys Session                         │
 │  8. 加载 Agent 配置（获取知识库、模型等信息）       │
 │  9. 文件消息？→ 下载并保存到知识库                  │
 │ 10. 提交到 qaQueue (有界队列, 异步执行)            │
@@ -1188,7 +1188,7 @@ EndStream:
 
 ### Mattermost
 
-仅支持 **Webhook** 模式：Mattermost **Outgoing Webhook** 将请求体 POST 到 WeKnora 统一回调地址；适配器实现 `Adapter`、`StreamSender`、`FileDownloader`（标准库 HTTP 调用 REST API，无第三方 SDK）。
+仅支持 **Webhook** 模式：Mattermost **Outgoing Webhook** 将请求体 POST 到 FinOpsSys 统一回调地址；适配器实现 `Adapter`、`StreamSender`、`FileDownloader`（标准库 HTTP 调用 REST API，无第三方 SDK）。
 
 #### Webhook 模式（Outgoing Webhook）
 

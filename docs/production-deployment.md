@@ -1,14 +1,14 @@
 # 生产环境 Docker Compose 部署指南
 
-本文面向将 WeKnora 标准版部署到远程 Linux 服务器的场景。快速本地体验请直接参考项目根目录的 [README](../README.md#-快速开始)；Kubernetes 和严格离线环境分别参考 [Helm Chart](../helm/README.md) 与[严格离线运行](./airgap-operations.md)。
+本文面向将 FinOpsSys 标准版部署到远程 Linux 服务器的场景。快速本地体验请直接参考项目根目录的 [README](../README.md#快速开始)；Kubernetes 和严格离线环境分别参考 [Helm Chart](../helm/README.md) 与[严格离线运行](./airgap-operations.md)。
 
 ## 1. 部署结果
 
-本文使用 `/opt/weknora` 作为安装目录，从当前源码构建 WeKnora 镜像，并由 Docker Compose 管理服务和持久化卷。
+本文使用 `/opt/weknora` 作为安装目录，从当前源码构建 FinOpsSys 镜像，并由 Docker Compose 管理服务和持久化卷。
 
 `COMPOSE_PROFILES=full` 会启动：
 
-- WeKnora App、Web UI、DocReader
+- FinOpsSys App、Web UI、DocReader
 - PostgreSQL、Redis、Elasticsearch、Milvus
 - MinIO、Qdrant、Neo4j、Jaeger、Dex
 - Langfuse Web/Worker、ClickHouse 和 Langfuse 专用 MinIO
@@ -56,18 +56,17 @@ sudo ss -lntup
 
 数据库、Redis 和 Elasticsearch 默认只绑定到 `127.0.0.1`。其余端口可能监听所有网卡；生产环境应通过云安全组或主机防火墙只开放 Web/网关所需端口。
 
-## 3. 安装源码
+## 3. 安装程序
 
 ```bash
 sudo mkdir -p /opt/weknora
 sudo chown "$(id -u):$(id -g)" /opt/weknora
-git clone https://github.com/Tencent/WeKnora.git /opt/weknora
 cd /opt/weknora
 cp .env.example .env
 chmod 600 .env
 ```
 
-如果通过发布包部署，将发布包解压到 `/opt/weknora`，再执行后续步骤。不要把本地 `.git`、`node_modules`、构建缓存或包含无关文件的整个工作目录上传到服务器。
+将交付包解压到 `/opt/weknora`，再执行后续步骤。不要把本地 `.git`、`node_modules`、构建缓存或包含无关文件的整个工作目录上传到服务器。
 
 ## 4. 配置生产环境
 
@@ -112,7 +111,7 @@ openssl rand -base64 32
 
 如果启用自建 Langfuse，还应设置 `LANGFUSE_SALT`、`LANGFUSE_ENCRYPTION_KEY`、`LANGFUSE_NEXTAUTH_SECRET`、ClickHouse 和 Langfuse MinIO 密码。不要提交真实 `.env`，也不要在工单、聊天或构建日志中输出其内容。
 
-服务容器启动并不代表 WeKnora 已选择该后端。以下变量决定实际使用的存储和检索引擎：
+服务容器启动并不代表 FinOpsSys 已选择该后端。以下变量决定实际使用的存储和检索引擎：
 
 ```env
 STORAGE_TYPE=minio
