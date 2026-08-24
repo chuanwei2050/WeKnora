@@ -17,6 +17,10 @@ type PluginChatCompletionStream struct {
 	modelService interfaces.ModelService // Interface for model operations
 }
 
+func shouldExposeThinking(thinking *bool) bool {
+	return thinking == nil || *thinking
+}
+
 // NewPluginChatCompletionStream creates a new PluginChatCompletionStream instance
 // and registers it with the EventManager
 func NewPluginChatCompletionStream(eventManager *EventManager,
@@ -180,6 +184,11 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				}
 
 				if response.ResponseType == types.ResponseTypeThinking {
+					if !shouldExposeThinking(opt.Thinking) {
+						// Some OpenAI-compatible providers return reasoning content even
+						// when they do not support an explicit disable parameter.
+						continue
+					}
 					if verifiedMode {
 						// Thinking is an internal draft and is never sent to the
 						// client when verification is enabled.

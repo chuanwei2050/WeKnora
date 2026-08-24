@@ -37,6 +37,7 @@ type IntegrationHandler struct {
 	sessions    interfaces.SessionService
 	messages    interfaces.MessageService
 	models      interfaces.ModelService
+	agents      interfaces.CustomAgentService
 	tenant      interfaces.TenantService
 	files       interfaces.FileService
 	duckdb      *sql.DB
@@ -52,9 +53,9 @@ type IntegrationHandler struct {
 // reverse-proxy deployments.
 const integrationBrowserCookiePath = "/"
 
-func NewIntegrationHandler(service *integrationauth.Service, kbs interfaces.KnowledgeBaseService, knowledges interfaces.KnowledgeService, sessions interfaces.SessionService, messages interfaces.MessageService, streams interfaces.StreamManager, files interfaces.FileService, models interfaces.ModelService, tenant interfaces.TenantService, duckdb *sql.DB, documents interfaces.DocumentReader, imageResolver *docparser.ImageResolver) *IntegrationHandler {
+func NewIntegrationHandler(service *integrationauth.Service, kbs interfaces.KnowledgeBaseService, knowledges interfaces.KnowledgeService, sessions interfaces.SessionService, messages interfaces.MessageService, streams interfaces.StreamManager, files interfaces.FileService, models interfaces.ModelService, agents interfaces.CustomAgentService, tenant interfaces.TenantService, duckdb *sql.DB, documents interfaces.DocumentReader, imageResolver *docparser.ImageResolver) *IntegrationHandler {
 	return &IntegrationHandler{
-		service: service, kbs: kbs, knowledges: knowledges, sessions: sessions, messages: messages, models: models, tenant: tenant, files: files, duckdb: duckdb, streams: streams,
+		service: service, kbs: kbs, knowledges: knowledges, sessions: sessions, messages: messages, models: models, agents: agents, tenant: tenant, files: files, duckdb: duckdb, streams: streams,
 		attachments: session.NewAttachmentProcessor(files, documents, imageResolver, models),
 		limiter:     newIntegrationRateLimiter(), limits: loadIntegrationLimits(),
 	}
@@ -1299,6 +1300,7 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	}
 	var req struct {
 		Query                    string    `json:"query" binding:"required"`
+		AgentID                  string    `json:"agent_id"`
 		SelectedKnowledgeBaseIDs *[]string `json:"selected_knowledge_base_ids"`
 		Images                   []struct {
 			Data string `json:"data"`
@@ -1318,6 +1320,19 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 		integrationError(c, http.StatusBadRequest, "invalid_attachment", "at most 5 images and 5 files are allowed")
 		return
 	}
+	var customAgent *types.CustomAgent
+	if req.AgentID != "" {
+		if !regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`).MatchString(req.AgentID) {
+			integrationError(c, http.StatusBadRequest, "invalid_agent", "agent_id is invalid")
+			return
+		}
+		customAgent, err = h.agents.GetAgentByID(c.Request.Context(), req.AgentID)
+		if err != nil || customAgent == nil {
+			integrationError(c, http.StatusForbidden, "agent_denied", "agent access denied")
+			return
+		}
+	}
+	agentMode := customAgent != nil && customAgent.IsAgentMode()
 	imageURLs := make([]string, 0, len(req.Images))
 	messageImages := make(types.MessageImages, 0, len(req.Images))
 	for _, image := range req.Images {
@@ -1429,6 +1444,42 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 		}
 		return nil
 	})
+	eventBus.On(event.EventAgentThought, func(ctx context.Context, evt event.Event) error {
+		if !agentMode {
+			return nil
+		}
+		if data, ok := evt.Data.(event.AgentThoughtData); ok {
+			_, _ = h.service.AppendStreamEvent(ctx, binding.SessionID, assistantMessage.ID, "thinking", gin.H{"content": data.Content, "iteration": data.Iteration, "done": data.Done, "event_id": evt.ID})
+		}
+		return nil
+	})
+	eventBus.On(event.EventAgentToolCall, func(ctx context.Context, evt event.Event) error {
+		if !agentMode {
+			return nil
+		}
+		if data, ok := evt.Data.(event.AgentToolCallData); ok {
+			_, _ = h.service.AppendStreamEvent(ctx, binding.SessionID, assistantMessage.ID, "tool_call", data)
+		}
+		return nil
+	})
+	eventBus.On(event.EventAgentToolResult, func(ctx context.Context, evt event.Event) error {
+		if !agentMode {
+			return nil
+		}
+		if data, ok := evt.Data.(event.AgentToolResultData); ok {
+			_, _ = h.service.AppendStreamEvent(ctx, binding.SessionID, assistantMessage.ID, "tool_result", data)
+		}
+		return nil
+	})
+	eventBus.On(event.EventAgentReflection, func(ctx context.Context, evt event.Event) error {
+		if !agentMode {
+			return nil
+		}
+		if data, ok := evt.Data.(event.AgentReflectionData); ok {
+			_, _ = h.service.AppendStreamEvent(ctx, binding.SessionID, assistantMessage.ID, "reflection", data)
+		}
+		return nil
+	})
 	generationCtx, cancelGeneration := newIntegrationGenerationContext(c.Request.Context())
 	generationKey := binding.SessionID + ":" + assistantMessage.ID
 	h.generations.Store(generationKey, cancelGeneration)
@@ -1438,7 +1489,12 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	}()
 	session, err := h.sessions.GetSession(generationCtx, binding.SessionID)
 	if err == nil {
-		err = h.sessions.KnowledgeQA(generationCtx, &types.QARequest{Session: session, Query: req.Query, AssistantMessageID: assistantMessage.ID, KnowledgeBaseIDs: selected, UserMessageID: userMessage.ID, ImageURLs: imageURLs, Attachments: processedAttachments}, eventBus)
+		qaRequest := &types.QARequest{Session: session, Query: req.Query, AssistantMessageID: assistantMessage.ID, KnowledgeBaseIDs: selected, UserMessageID: userMessage.ID, ImageURLs: imageURLs, Attachments: processedAttachments, CustomAgent: customAgent}
+		if agentMode {
+			err = h.sessions.AgentQA(generationCtx, qaRequest, eventBus)
+		} else {
+			err = h.sessions.KnowledgeQA(generationCtx, qaRequest, eventBus)
+		}
 	}
 	if err == nil {
 		select {

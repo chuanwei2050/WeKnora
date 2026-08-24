@@ -78,6 +78,14 @@ func TestVerifiedVisibleTextIncludesConservativeNote(t *testing.T) {
 	}
 }
 
+func TestThinkingVisibilityHonorsExplicitModelSetting(t *testing.T) {
+	enabled := true
+	disabled := false
+	if !shouldExposeThinking(nil) || !shouldExposeThinking(&enabled) || shouldExposeThinking(&disabled) {
+		t.Fatal("thinking visibility did not honor the explicit model setting")
+	}
+}
+
 func TestVerifiedAnswerDisabledPreservesDefaultCompletion(t *testing.T) {
 	chatManage := &types.ChatManage{
 		PipelineState: types.PipelineState{ChatResponse: &types.ChatResponse{Content: "ordinary answer"}},

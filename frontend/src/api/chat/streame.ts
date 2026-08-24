@@ -5,6 +5,7 @@ import { createIdempotencyKey } from '@/utils/idempotency-key';
 import i18n from '@/i18n';
 import { getApiBaseUrl } from '@/utils/api-base';
 import { getEmbeddedCSRFToken, getEmbeddedSessionToken, getRuntimeMode } from '@/utils/embedded-runtime';
+import { buildIntegrationMessageBody, mapIntegrationEvent, type StreamRequestParams } from './integration-stream';
 
 
 
@@ -32,7 +33,7 @@ export function useStream() {
   let renderTimer: number | null = null
 
   // 启动流式请求
-  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; agent_enabled?: boolean; agent_id?: string; web_search_enabled?: boolean; enable_memory?: boolean; summary_model_id?: string; mcp_service_ids?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; voice_metadata?: Record<string, string>; method: string; url: string }) => {
+  const startStream = async (params: StreamRequestParams) => {
     // 重置状态
     output.value = '';
     error.value = null;
@@ -86,13 +87,7 @@ export function useStream() {
       
       // Prepare POST body with required fields for agent-chat
       // knowledge_base_ids array and agent_enabled can update Session's SessionAgentConfig
-      const postBody: any = isIntegrationWidget ? {
-        query: params.query,
-        ...(params.knowledge_base_ids?.length ? { selected_knowledge_base_ids: params.knowledge_base_ids } : {}),
-        ...(params.images?.length ? { images: params.images } : {}),
-        ...(params.attachment_uploads?.length ? { attachment_uploads: params.attachment_uploads } : {}),
-        ...(params.voice_metadata && Object.keys(params.voice_metadata).length > 0 ? { voice_metadata: params.voice_metadata } : {}),
-      } : {
+      const postBody: any = isIntegrationWidget ? buildIntegrationMessageBody(params) : {
         query: params.query,
         agent_enabled: params.agent_enabled !== undefined ? params.agent_enabled : true
       };
@@ -218,21 +213,5 @@ export function useStream() {
     onChunk,
     startStream,     // 启动流
     stopStream       // 手动停止
-  }
-}
-
-function mapIntegrationEvent(envelope: any): any | null {
-  const data = envelope?.data || {};
-  switch (envelope?.event) {
-    case 'message.created':
-      return { response_type: 'agent_query', assistant_message_id: envelope.message_id, session_id: envelope.session_id, data };
-    case 'answer.delta':
-      return { response_type: 'answer', id: envelope.message_id, content: data.content || '', done: false };
-    case 'answer.completed':
-      return { response_type: 'complete', id: envelope.message_id, content: data.answer || '', done: true, knowledge_references: data.references || [] };
-    case 'error':
-      return { response_type: 'error', id: envelope.message_id, content: data.code || 'integration_error', done: true, data };
-    default:
-      return null;
   }
 }

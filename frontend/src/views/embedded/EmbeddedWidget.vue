@@ -12,8 +12,10 @@ const noticeMessage = ref('')
 const params = new URLSearchParams(window.location.search)
 const configuredParentOrigin = params.get('parent_origin')
 const allowedParentOrigin = resolveEmbeddedParentOrigin(configuredParentOrigin, document.referrer, window.location.origin)
-// 悬浮窗固定使用「快速问答」智能体，不跟随 URL agent_id 或其他智能体配置
-const widgetAgentId = BUILTIN_QUICK_ANSWER_ID
+const configuredAgentId = params.get('agent_id')
+const widgetAgentId = configuredAgentId && /^[a-zA-Z0-9_-]{1,128}$/.test(configuredAgentId)
+  ? configuredAgentId
+  : BUILTIN_QUICK_ANSWER_ID
 const knowledgeBaseIds = ref<string[]>(params.getAll('knowledge_base_id'))
 const selectionMode = ref<'selected' | 'all-allowed'>('selected')
 const widgetMode = ref<'fixed' | 'selectable' | 'all-allowed'>('fixed')

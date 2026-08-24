@@ -45,4 +45,14 @@ describe('embedded widget capabilities', () => {
     expect(inputField).toContain('submissionPending = true;')
     expect(inputField).toContain('if (!isReplying) submissionPending = false;')
   })
+
+  it('uses the configured agent and lets the backend select its execution mode', () => {
+    const embeddedWidget = source('../src/views/embedded/EmbeddedWidget.vue')
+    const chatView = source('../src/views/chat/index.vue')
+
+    expect(embeddedWidget).toContain("params.get('agent_id')")
+    expect(embeddedWidget).toContain(':agentId="widgetAgentId"')
+    expect(chatView).toContain('props.embeddedMode ? true : useSettingsStoreInstance.isAgentEnabled')
+    expect(chatView).toContain('props.embeddedMode ? props.agentId :')
+  })
 })
