@@ -36,7 +36,7 @@ export function mapIntegrationEvent(envelope: any): any | null {
     case 'answer.delta':
       return { response_type: 'answer', id: envelope.message_id, content: data.content || '', done: false }
     case 'answer.completed':
-      return { response_type: 'complete', id: envelope.message_id, content: data.answer || '', done: true, knowledge_references: data.references || [] }
+      return { response_type: 'complete', id: envelope.message_id, content: '', done: true, knowledge_references: data.references || [] }
     case 'thinking':
     case 'tool_call':
     case 'tool_result':

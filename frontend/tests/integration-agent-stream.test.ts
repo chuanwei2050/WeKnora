@@ -25,4 +25,18 @@ describe('integration agent stream', () => {
       data: { tool_name: 'knowledge_search', tool_call_id: 'tool-1' },
     })
   })
+
+  it('does not append the completed answer after streaming deltas', () => {
+    expect(mapIntegrationEvent({
+      event: 'answer.completed',
+      message_id: 'message-1',
+      data: { answer: 'already streamed', references: [] },
+    })).toEqual({
+      response_type: 'complete',
+      id: 'message-1',
+      content: '',
+      done: true,
+      knowledge_references: [],
+    })
+  })
 })
