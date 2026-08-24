@@ -1838,7 +1838,6 @@ const defaultFormData = {
     rerank_model_id: '',
     temperature: 0.7,
     max_completion_tokens: 2048,
-    thinking: false, // 默认禁用思考模式
     // Agent模式设置
     max_iterations: 10,
     llm_call_timeout: 120,  // 120 seconds
@@ -2164,12 +2163,6 @@ const onAgentTypeChange = (val: AgentType) => {
     );
   }
 };
-
-// 思考模式计算属性（直接绑定 boolean）
-const thinkingEnabled = computed({
-  get: () => formData.value.config.thinking === true,
-  set: (val: boolean) => { formData.value.config.thinking = val; }
-});
 
 // 是否为内置智能体
 const isBuiltinAgent = computed(() => {

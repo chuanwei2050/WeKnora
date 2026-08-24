@@ -86,7 +86,7 @@ func (s *sessionService) resolveRetrievalTenantID(
 
 // applyAgentOverridesToChatManage applies custom agent configuration overrides
 // to a ChatManage object that was initialized with system defaults.
-// This covers: system prompt, context template, temperature, max tokens, thinking,
+// This covers: system prompt, context template, temperature, max tokens,
 // retrieval thresholds, rewrite settings, fallback settings, FAQ strategy, and history turns.
 func (s *sessionService) applyAgentOverridesToChatManage(
 	ctx context.Context,
@@ -121,11 +121,6 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 		cm.SummaryConfig.MaxCompletionTokens = customAgent.Config.MaxCompletionTokens
 		logger.Infof(ctx, "Using custom agent's max_completion_tokens: %d", customAgent.Config.MaxCompletionTokens)
 	}
-	if customAgent.Config.Thinking != nil {
-		cm.SummaryConfig.Thinking = customAgent.Config.Thinking
-		logger.Infof(ctx, "Using custom agent's thinking: %v", *customAgent.Config.Thinking)
-	}
-
 	// Override retrieval strategy settings
 	if customAgent.Config.EmbeddingTopK > 0 {
 		cm.EmbeddingTopK = customAgent.Config.EmbeddingTopK

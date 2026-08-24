@@ -23,7 +23,6 @@ export interface CustomAgentConfig {
   rerank_model_id?: string;         // ReRank 模型 ID
   temperature?: number;
   max_completion_tokens?: number;   // 最大生成token数（普通模式）
-  thinking?: boolean;                      // 是否启用思考模式（支持扩展思考的模型）
 
   // ===== Agent模式设置 =====
   max_iterations?: number;          // 最大迭代次数

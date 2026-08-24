@@ -49,7 +49,7 @@ func (s *sessionService) KnowledgeQA(
 		Temperature:         s.cfg.Conversation.Summary.Temperature,
 		NoMatchPrefix:       s.cfg.Conversation.Summary.NoMatchPrefix,
 		MaxCompletionTokens: s.cfg.Conversation.Summary.MaxCompletionTokens,
-		Thinking:            s.cfg.Conversation.Summary.Thinking,
+		Thinking:            nil,
 	}
 	fallbackStrategy := types.FallbackStrategy(s.cfg.Conversation.FallbackStrategy)
 	if fallbackStrategy == "" {
@@ -63,10 +63,8 @@ func (s *sessionService) KnowledgeQA(
 	if chatModelID != "" {
 		if chatModelInfo, err := s.modelService.GetModelByID(ctx, chatModelID); err == nil && chatModelInfo != nil {
 			chatModelSupportsVision = chatModelInfo.Parameters.SupportsVision
-			if chatModelInfo.Parameters.HasThinkingSetting() {
-				modelThinking := chatModelInfo.Parameters.Thinking
-				summaryConfig.Thinking = &modelThinking
-			}
+			modelThinking := chatModelInfo.Parameters.Thinking
+			summaryConfig.Thinking = &modelThinking
 		}
 	}
 	if model, defaultErr := s.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm"); defaultErr == nil {

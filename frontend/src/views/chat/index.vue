@@ -567,7 +567,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     scrollToBottom(true);
     
     // Get agent mode status from settings store
-    const agentEnabled = props.embeddedMode ? true : useSettingsStoreInstance.isAgentEnabled;
+    const agentEnabled = props.embeddedMode ? false : useSettingsStoreInstance.isAgentEnabled;
     
     // Get web search status from settings store
     const webSearchEnabled = props.embeddedMode ? false : useSettingsStoreInstance.isWebSearchEnabled;

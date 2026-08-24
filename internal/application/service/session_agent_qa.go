@@ -151,10 +151,8 @@ func (s *sessionService) AgentQA(
 	if effectiveModelID != "" {
 		if modelInfo, err := s.modelService.GetModelByID(ctx, effectiveModelID); err == nil && modelInfo != nil {
 			agentModelSupportsVision = modelInfo.Parameters.SupportsVision
-			if agentConfig.Thinking == nil && modelInfo.Parameters.HasThinkingSetting() {
-				modelThinking := modelInfo.Parameters.Thinking
-				agentConfig.Thinking = &modelThinking
-			}
+			modelThinking := modelInfo.Parameters.Thinking
+			agentConfig.Thinking = &modelThinking
 		}
 	}
 
@@ -483,7 +481,6 @@ func (s *sessionService) buildAgentConfig(
 		HistoryTurns:                customAgent.Config.HistoryTurns,
 		MCPSelectionMode:            customAgent.Config.MCPSelectionMode,
 		MCPServices:                 customAgent.Config.MCPServices,
-		Thinking:                    customAgent.Config.Thinking,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
