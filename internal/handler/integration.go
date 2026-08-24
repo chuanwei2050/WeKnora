@@ -1110,6 +1110,19 @@ func (h *IntegrationHandler) ListChatSessions(c *gin.Context) {
 	integrationData(c, http.StatusOK, sessions)
 }
 
+func (h *IntegrationHandler) ListFrequentQuestions(c *gin.Context) {
+	if !h.requireScope(c, "chat:read") {
+		return
+	}
+	principal := integrationPrincipal(c)
+	questions, err := h.messages.GetFrequentlyAskedQuestions(c.Request.Context(), principal.ClientID, principal.UserID, 3)
+	if err != nil {
+		integrationError(c, http.StatusInternalServerError, "frequent_questions_failed", "failed to list frequent questions")
+		return
+	}
+	integrationData(c, http.StatusOK, gin.H{"questions": questions})
+}
+
 func (h *IntegrationHandler) GetChatSession(c *gin.Context) {
 	if !h.requireScope(c, "chat:read") {
 		return

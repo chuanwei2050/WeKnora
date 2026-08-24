@@ -812,7 +812,7 @@ const loadTTSVoiceOptions = async () => {
   try {
     const result = await listTTSVoices({
       modelName,
-      baseUrl,
+      baseUrl: baseUrl || '',
       apiKey: formData.value.apiKey || '',
       provider: formData.value.provider || '',
       ...buildCustomHeaderPayload(),

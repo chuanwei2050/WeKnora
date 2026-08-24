@@ -217,6 +217,7 @@ func RegisterIntegrationPublicRoutes(r *gin.Engine, h *handler.IntegrationHandle
 	integration.POST("/rag/search-batch", h.SearchBatch)
 	integration.POST("/tables/analyze", h.AnalyzeKnowledgeTable)
 	integration.GET("/chat/sessions", h.ListChatSessions)
+	integration.GET("/chat/frequent-questions", h.ListFrequentQuestions)
 	integration.POST("/chat/sessions", h.CreateChatSession)
 	integration.GET("/chat/sessions/:session_id", h.GetChatSession)
 	integration.PATCH("/chat/sessions/:session_id", h.UpdateChatSession)

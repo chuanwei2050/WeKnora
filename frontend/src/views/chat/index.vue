@@ -26,9 +26,7 @@
                         <h2>你好，我是知识助手</h2>
                         <p>我会基于当前授权知识库回答，并在答案中保留引用来源。</p>
                         <div class="embedded-starters" aria-label="快捷问题">
-                            <button type="button" @click="handleSuggestedQuestionClick('总结当前知识库的主要内容')">总结知识库</button>
-                            <button type="button" @click="handleSuggestedQuestionClick('列出当前知识库中的关键事实')">提取关键事实</button>
-                            <button type="button" @click="handleSuggestedQuestionClick('帮我查找与当前项目相关的资料')">查找相关资料</button>
+                            <button v-for="question in embeddedSuggestedQuestions" :key="question" type="button" @click="handleSuggestedQuestionClick(question)">{{ question }}</button>
                         </div>
                     </div>
                     <!-- 骨架屏占位 -->
@@ -131,7 +129,11 @@ const props = defineProps({
   agentId: { type: String, default: '' },
   kbIds: { type: Array, default: () => [] },
   embeddedMode: { type: Boolean, default: false },
-  suggestedQuestionsEnabled: { type: Boolean, default: true }
+  suggestedQuestionsEnabled: { type: Boolean, default: true },
+  embeddedSuggestedQuestions: {
+    type: Array,
+    default: () => [],
+  },
 });
 
 const usemenuStore = useMenuStore();

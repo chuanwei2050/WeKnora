@@ -458,6 +458,15 @@ func (s *messageService) GetChatHistoryKBStats(ctx context.Context) (*types.Chat
 	return stats, nil
 }
 
+// GetFrequentlyAskedQuestions returns the most repeated user questions for the current tenant.
+func (s *messageService) GetFrequentlyAskedQuestions(ctx context.Context, clientID, userID string, limit int) ([]string, error) {
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("tenant ID not found in context")
+	}
+	return s.messageRepo.GetFrequentlyAskedQuestions(ctx, tenantID, clientID, userID, limit)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Message Search (Hybrid: Keyword + KB Vector Search)
 // ─────────────────────────────────────────────────────────────────────────────

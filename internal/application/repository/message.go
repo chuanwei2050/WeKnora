@@ -181,6 +181,45 @@ func (r *messageRepository) SearchMessagesByKeyword(
 	return results, nil
 }
 
+// GetFrequentlyAskedQuestions returns tenant-wide user questions ordered by
+// frequency, using the most recently asked question to break ties.
+func (r *messageRepository) GetFrequentlyAskedQuestions(
+	ctx context.Context, tenantID uint64, clientID, userID string, limit int,
+) ([]string, error) {
+	if limit <= 0 {
+		return []string{}, nil
+	}
+
+	type frequentQuestionRow struct {
+		Question string
+	}
+	rows := make([]frequentQuestionRow, 0, limit)
+	err := r.db.WithContext(ctx).
+		Table("messages").
+		Select("MIN(TRIM(messages.content)) AS question").
+		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
+		Joins("INNER JOIN integration_chat_bindings ON integration_chat_bindings.session_id = sessions.id AND integration_chat_bindings.source = ?", "widget").
+		Where("sessions.tenant_id = ?", tenantID).
+		Where("integration_chat_bindings.client_id = ?", clientID).
+		Where("integration_chat_bindings.user_id = ?", userID).
+		Where("messages.role = ?", "user").
+		Where("messages.deleted_at IS NULL").
+		Where("TRIM(messages.content) <> ''").
+		Group("LOWER(TRIM(messages.content))").
+		Order("COUNT(*) DESC, MAX(messages.created_at) DESC").
+		Limit(limit).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	questions := make([]string, 0, len(rows))
+	for _, row := range rows {
+		questions = append(questions, row.Question)
+	}
+	return questions, nil
+}
+
 // GetMessagesByKnowledgeIDs retrieves messages by their associated Knowledge IDs
 func (r *messageRepository) GetMessagesByKnowledgeIDs(
 	ctx context.Context, knowledgeIDs []string,

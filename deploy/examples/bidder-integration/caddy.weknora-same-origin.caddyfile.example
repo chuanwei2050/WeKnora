@@ -1,30 +1,51 @@
-# bidder-agent Caddy 同域反代片段示例
+# 宿主 Caddy 同域反代 WeKnora 示例
 #
 # 将 WeKnora Widget 与嵌入知识库页挂到宿主公网 Origin，避免浏览器 Private Network Access
 # 拦截内网地址（如 http://192.168.x.x:8089）。
 #
 # WEKNORA_UPSTREAM：宿主能访问到的 WeKnora frontend 地址。
 #   - 同机部署常用宿主机映射端口，如 127.0.0.1:8089 或 192.168.x.x:8089
-#   - 若 Caddy 与 WeKnora frontend 在同一 Docker 网络，可改为 frontend 服务名
+#   - 若 Caddy 与 WeKnora frontend 在同一 Docker 网络，可改为 WeKnora-frontend:80
 #
-# 完整 Caddyfile 还须：
-#   - 对 /widget/*、/knowledge/* 排除全局 frame-ancestors 'none'
-#   - 在 frame-src / script-src 中允许 WeKnora 相关 Origin（若使用 CSP）
+# 使用前：
+#   1. 将 host-project.example.com 换成宿主域名；仅使用 HTTP 时写成 http://宿主地址。
+#   2. 设置 WEKNORA_UPSTREAM，或把默认的 127.0.0.1:8089 换成实际 frontend 地址。
+#   3. 把宿主原有 /api、SPA 等路由放进最后一个 handle。
+#
+# 关键边界：宿主的 frame-ancestors 'none' 只能放在 fallback handle 内，不能放在站点级
+# header 中，否则它会叠加到 /widget、/knowledge 响应并阻止 iframe。WeKnora 上游返回的
+# Content-Security-Policy（含 FRAME_ANCESTORS）应原样保留。
 
-{
-	# 示例：仅展示 WeKnora 相关 handle，其余路由按宿主现有规则配置
-}
-
-:443 {
+https://host-project.example.com {
 	# WeKnora Widget 静态资源
 	handle /widget/* {
-		reverse_proxy {$WEKNORA_UPSTREAM:127.0.0.1:8089}
+		reverse_proxy {$WEKNORA_UPSTREAM:127.0.0.1:8089} {
+			# Widget/聊天包含 SSE；禁用代理端缓冲，及时向浏览器转发事件。
+			flush_interval -1
+		}
 	}
 
 	# WeKnora 嵌入站（页面、/knowledge/embed/assets、/knowledge/api、/knowledge/files）
 	handle /knowledge/* {
-		reverse_proxy {$WEKNORA_UPSTREAM:127.0.0.1:8089}
+		reverse_proxy {$WEKNORA_UPSTREAM:127.0.0.1:8089} {
+			flush_interval -1
+		}
 	}
 
-	# 宿主 SPA / /api/* 等按现有配置继续 ...
+	# 宿主自身路由必须放在 WeKnora handle 之后。
+	# 这里只展示 CSP 边界；请合并宿主原有 /api、SPA、对象存储等配置。
+	handle {
+		header {
+			Content-Security-Policy "default-src 'self'; frame-ancestors 'none'"
+		}
+
+		# reverse_proxy host-app:8000
+		# 或 root /srv/host-web + try_files/file_server
+		respond "Replace this fallback with the host application routes" 501
+	}
 }
+
+# 仅有 HTTP 入口时，将上面的站点地址改为：
+# http://192.0.2.10:8080 {
+#     ...同样的 handle 配置...
+# }

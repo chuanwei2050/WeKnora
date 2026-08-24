@@ -57,6 +57,9 @@ type MessageService interface {
 
 	// GetChatHistoryKBStats returns statistics about the chat history knowledge base (indexed message count, etc.)
 	GetChatHistoryKBStats(ctx context.Context) (*types.ChatHistoryKBStats, error)
+
+	// GetFrequentlyAskedQuestions returns the most repeated user questions across the current tenant.
+	GetFrequentlyAskedQuestions(ctx context.Context, clientID, userID string, limit int) ([]string, error)
 }
 
 // MessageRepository defines the message repository interface
@@ -87,6 +90,8 @@ type MessageRepository interface {
 	GetFirstMessageOfUser(ctx context.Context, sessionID string) (*types.Message, error)
 	// SearchMessagesByKeyword searches messages by keyword (ILIKE) across sessions for a tenant
 	SearchMessagesByKeyword(ctx context.Context, tenantID uint64, keyword string, sessionIDs []string, limit int) ([]*types.MessageWithSession, error)
+	// GetFrequentlyAskedQuestions returns the most repeated user questions across a tenant.
+	GetFrequentlyAskedQuestions(ctx context.Context, tenantID uint64, clientID, userID string, limit int) ([]string, error)
 	// GetMessagesByKnowledgeIDs retrieves messages by their associated Knowledge IDs
 	GetMessagesByKnowledgeIDs(ctx context.Context, knowledgeIDs []string) ([]*types.MessageWithSession, error)
 	// GetMessagesByRequestIDs retrieves messages by their request IDs (used to fetch Q&A pair partners)

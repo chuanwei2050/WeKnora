@@ -1,9 +1,10 @@
 # WeKnora 与 bidder-agent（或其它宿主）同机 Docker 部署时的网络 override 示例。
 #
 # 用法：
-#   cp docker-compose.bidder-integration.override.example.yml docker-compose.override.yml
+#   cp deploy/examples/bidder-integration/docker-compose.bidder-integration.override.example.yml docker-compose.override.yml
 #   # 编辑 FRAME_ANCESTORS、external network 名称后：
-#   docker compose up -d app frontend
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml config
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml up -d app frontend
 #
 # 作用：
 #   1. 将 WeKnora app 加入宿主 Docker 网络，并注册 DNS 别名 external-weknora
@@ -27,6 +28,8 @@ services:
           - external-weknora
 
   frontend:
+    # 基础 docker-compose.yml 已提供官方镜像。仅需锁定自建版本时再取消下一行注释并替换标签。
+    # image: wechatopenai/weknora-ui:<version>
     networks:
       - bidder-agent-v12_core
     environment:
