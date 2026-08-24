@@ -33,7 +33,13 @@ export async function refreshIntegrationSession(): Promise<{ csrf_token: string;
     credentials: 'include',
     headers: getEmbeddedAuthHeaders({ csrf: true }),
   })
-  if (!response.ok) throw new Error(`session refresh failed: ${response.status}`)
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null)
+    const error = payload && typeof payload === 'object' && 'error' in payload ? payload.error : null
+    const rawCode = error && typeof error === 'object' && 'code' in error ? error.code : null
+    const code = typeof rawCode === 'string' ? ` ${rawCode}` : ''
+    throw new Error(`session refresh failed: ${response.status}${code}`)
+  }
   const payload = await response.json() as { data?: { csrf_token?: string; user?: ExchangeResponse['user'] } }
   if (!payload.data?.csrf_token) throw new Error('invalid session refresh response')
   setEmbeddedCSRFToken(payload.data.csrf_token)
@@ -94,6 +100,19 @@ export async function listIntegrationChatSessions(): Promise<IntegrationChatSess
   if (!response.ok) throw new Error(`chat session list failed: ${response.status}`)
   const payload = await response.json() as { data: IntegrationChatSession[] }
   return payload.data
+}
+
+export async function listIntegrationFrequentQuestions(): Promise<string[]> {
+  const response = await fetch(`${getApiBaseUrl()}/api/integration/v1/chat/frequent-questions`, {
+    credentials: 'include',
+    headers: getEmbeddedAuthHeaders(),
+  })
+  if (!response.ok) throw new Error(`frequent question list failed: ${response.status}`)
+  const payload: unknown = await response.json()
+  if (!payload || typeof payload !== 'object' || !('data' in payload)) return []
+  const data = payload.data
+  if (!data || typeof data !== 'object' || !('questions' in data) || !Array.isArray(data.questions)) return []
+  return data.questions.filter((question): question is string => typeof question === 'string' && question.trim() !== '')
 }
 
 export async function renameIntegrationChatSession(sessionId: string, title: string): Promise<void> {

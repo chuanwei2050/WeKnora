@@ -125,6 +125,7 @@ type ChatBinding struct {
 	ClientID                    string `gorm:"type:varchar(64);not null;index:idx_integration_chat_subject"`
 	TenantID                    uint64 `gorm:"not null;index:idx_integration_chat_subject"`
 	UserID                      string `gorm:"type:varchar(36);not null;index:idx_integration_chat_subject"`
+	Source                      string `gorm:"type:varchar(16);not null"`
 	KnowledgeBaseMode           string `gorm:"type:varchar(16);not null"`
 	AllowedKnowledgeBaseIDsJSON string `gorm:"type:text;not null"`
 	CreatedAt                   time.Time

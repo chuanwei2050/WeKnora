@@ -511,11 +511,13 @@ func TestListChatBindingsOnlyReturnsCurrentSubject(t *testing.T) {
 	other.UserID = "other-user"
 	require.NoError(t, svc.CreateChatBinding(context.Background(), owner, "owner-session", "selected", []string{"kb-1"}))
 	require.NoError(t, svc.CreateChatBinding(context.Background(), other, "other-session", "selected", []string{"kb-1"}))
+	require.NoError(t, svc.db.Create(&ChatBinding{SessionID: "non-widget-session", ClientID: owner.ClientID, TenantID: owner.TenantID, UserID: owner.UserID, Source: "", KnowledgeBaseMode: "selected", AllowedKnowledgeBaseIDsJSON: `["kb-1"]`}).Error)
 
 	bindings, err := svc.ListChatBindings(context.Background(), owner)
 	require.NoError(t, err)
 	require.Len(t, bindings, 1)
 	require.Equal(t, "owner-session", bindings[0].SessionID)
+	require.Equal(t, "widget", bindings[0].Source)
 }
 
 func TestDeleteChatBindingOnlyDeletesCurrentSubject(t *testing.T) {

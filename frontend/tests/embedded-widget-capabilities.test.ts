@@ -7,12 +7,25 @@ function source(relativePath: string) {
 }
 
 describe('embedded widget capabilities', () => {
-  it('disables legacy suggested-question requests without changing the standalone default', () => {
+  it('uses tenant-wide frequent questions without enabling the legacy suggestion endpoint', () => {
     const chatView = source('../src/views/chat/index.vue')
     const embeddedWidget = source('../src/views/embedded/EmbeddedWidget.vue')
 
     expect(chatView).toContain('suggestedQuestionsEnabled: { type: Boolean, default: true }')
     expect(chatView).toContain('if (!props.suggestedQuestionsEnabled)')
     expect(embeddedWidget).toContain(':suggestedQuestionsEnabled="false"')
+    expect(embeddedWidget).toContain('listIntegrationFrequentQuestions')
+    expect(embeddedWidget).toContain(':embeddedSuggestedQuestions="frequentQuestions"')
+    expect(embeddedWidget).toContain('questions.slice(0, 3)')
+    expect(embeddedWidget).toContain('frequentQuestions.value = []')
+  })
+
+  it('drops stale authentication before requesting a new host ticket', () => {
+    const embeddedWidget = source('../src/views/embedded/EmbeddedWidget.vue')
+
+    expect(embeddedWidget).toContain('function expireAuthentication()')
+    expect(embeddedWidget).toContain('authenticated.value = false')
+    expect(embeddedWidget).toContain('clearEmbeddedAuth()')
+    expect(embeddedWidget).toContain("notifyEmbeddedHost('unauthorized')")
   })
 })

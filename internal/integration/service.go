@@ -968,7 +968,7 @@ func (s *Service) CreateChatBinding(ctx context.Context, principal *Principal, s
 		}
 		allowed = slices.Clone(principal.KnowledgeBaseIDs)
 	}
-	return s.db.WithContext(ctx).Create(&ChatBinding{SessionID: sessionID, ClientID: principal.ClientID, TenantID: principal.TenantID, UserID: principal.UserID, KnowledgeBaseMode: mode, AllowedKnowledgeBaseIDsJSON: encodeStrings(allowed)}).Error
+	return s.db.WithContext(ctx).Create(&ChatBinding{SessionID: sessionID, ClientID: principal.ClientID, TenantID: principal.TenantID, UserID: principal.UserID, Source: "widget", KnowledgeBaseMode: mode, AllowedKnowledgeBaseIDsJSON: encodeStrings(allowed)}).Error
 }
 
 func (s *Service) GetChatBinding(ctx context.Context, principal *Principal, sessionID string) (*ChatBinding, error) {
@@ -976,7 +976,7 @@ func (s *Service) GetChatBinding(ctx context.Context, principal *Principal, sess
 		return nil, ErrForbidden
 	}
 	var binding ChatBinding
-	err := s.db.WithContext(ctx).Where("session_id = ? AND client_id = ? AND tenant_id = ? AND user_id = ?", sessionID, principal.ClientID, principal.TenantID, principal.UserID).First(&binding).Error
+	err := s.db.WithContext(ctx).Where("session_id = ? AND client_id = ? AND tenant_id = ? AND user_id = ? AND source = ?", sessionID, principal.ClientID, principal.TenantID, principal.UserID, "widget").First(&binding).Error
 	if err != nil {
 		return nil, ErrForbidden
 	}
@@ -989,7 +989,7 @@ func (s *Service) ListChatBindings(ctx context.Context, principal *Principal) ([
 	}
 	var bindings []ChatBinding
 	err := s.db.WithContext(ctx).
-		Where("client_id = ? AND tenant_id = ? AND user_id = ?", principal.ClientID, principal.TenantID, principal.UserID).
+		Where("client_id = ? AND tenant_id = ? AND user_id = ? AND source = ?", principal.ClientID, principal.TenantID, principal.UserID, "widget").
 		Order("created_at DESC").
 		Limit(100).
 		Find(&bindings).Error
@@ -998,7 +998,7 @@ func (s *Service) ListChatBindings(ctx context.Context, principal *Principal) ([
 
 func (s *Service) DeleteChatBinding(ctx context.Context, principal *Principal, sessionID string) error {
 	return s.db.WithContext(ctx).
-		Where("session_id = ? AND client_id = ? AND tenant_id = ? AND user_id = ?", sessionID, principal.ClientID, principal.TenantID, principal.UserID).
+		Where("session_id = ? AND client_id = ? AND tenant_id = ? AND user_id = ? AND source = ?", sessionID, principal.ClientID, principal.TenantID, principal.UserID, "widget").
 		Delete(&ChatBinding{}).Error
 }
 

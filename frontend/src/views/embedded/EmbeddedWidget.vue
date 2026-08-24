@@ -2,8 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import ChatView from '@/views/chat/index.vue'
 import { BUILTIN_QUICK_ANSWER_ID } from '@/api/agent'
-import { createIntegrationChatSession, deleteIntegrationChatSession, exchangeBootstrapTicket, getIntegrationChatSession, listIntegrationChatSessions, listIntegrationKnowledgeBases, refreshIntegrationSession, renameIntegrationChatSession, type IntegrationChatSession } from '@/api/integration'
-import { isIntegrationAuthFailure, notifyEmbeddedHost, parseEmbeddedMessage, resolveEmbeddedParentOrigin } from '@/utils/embedded-runtime'
+import { createIntegrationChatSession, deleteIntegrationChatSession, exchangeBootstrapTicket, getIntegrationChatSession, listIntegrationChatSessions, listIntegrationFrequentQuestions, listIntegrationKnowledgeBases, refreshIntegrationSession, renameIntegrationChatSession, type IntegrationChatSession } from '@/api/integration'
+import { clearEmbeddedAuth, isIntegrationAuthFailure, notifyEmbeddedHost, parseEmbeddedMessage, resolveEmbeddedParentOrigin } from '@/utils/embedded-runtime'
 
 const authenticated = ref(false)
 const sessionId = ref('')
@@ -24,6 +24,7 @@ const selectedKnowledgeBases = computed(() => {
 })
 const selectionReady = computed(() => selectionMode.value === 'all-allowed' || knowledgeBaseIds.value.length > 0)
 const conversations = ref<IntegrationChatSession[]>([])
+const frequentQuestions = ref<string[]>([])
 const compatibleConversations = computed(() => conversations.value.filter(isCompatibleConversation))
 const conversationsOpen = ref(false)
 const editingConversationId = ref('')
@@ -40,6 +41,17 @@ function showNotice(message: string) {
   noticeMessage.value = message
   if (noticeTimer !== undefined) window.clearTimeout(noticeTimer)
   noticeTimer = window.setTimeout(() => { noticeMessage.value = '' }, 1600)
+}
+
+function expireAuthentication() {
+  if (!authenticated.value) return
+  authenticated.value = false
+  clearEmbeddedAuth()
+  if (refreshTimer !== undefined) {
+    window.clearInterval(refreshTimer)
+    refreshTimer = undefined
+  }
+  notifyEmbeddedHost('unauthorized')
 }
 
 async function createChatSession() {
@@ -113,6 +125,11 @@ async function deleteConversation(conversation: IntegrationChatSession) {
 
 async function refreshConversations() {
   conversations.value = await listIntegrationChatSessions()
+}
+
+async function refreshFrequentQuestions() {
+  const questions = await listIntegrationFrequentQuestions()
+  frequentQuestions.value = questions.slice(0, 3)
 }
 
 function isCompatibleConversation(conversation: IntegrationChatSession) {
@@ -199,16 +216,22 @@ async function onMessage(event: MessageEvent) {
     }
     authenticated.value = true
     if (readyTimer !== undefined) window.clearInterval(readyTimer)
-    await refreshConversations()
+    await Promise.all([
+      refreshConversations(),
+      refreshFrequentQuestions().catch(() => { frequentQuestions.value = [] }),
+    ])
     if (refreshTimer !== undefined) window.clearInterval(refreshTimer)
     refreshTimer = window.setInterval(() => {
       refreshIntegrationSession().catch((error) => {
-        if (isIntegrationAuthFailure(error)) notifyEmbeddedHost('unauthorized')
+        if (isIntegrationAuthFailure(error)) expireAuthentication()
       })
     }, 10 * 60 * 1000)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '认证失败'
-    if (isIntegrationAuthFailure(error)) notifyEmbeddedHost('unauthorized')
+    if (isIntegrationAuthFailure(error)) {
+      clearEmbeddedAuth()
+      notifyEmbeddedHost('unauthorized')
+    }
   } finally {
     authenticating = false
   }
@@ -277,7 +300,7 @@ onBeforeUnmount(() => {
       <span v-else-if="widgetMode === 'all-allowed'" class="embedded-widget__scope-chip">全部授权知识库（{{ availableKnowledgeBases.length }}）</span>
       <span v-for="kb in selectedKnowledgeBases" v-else :key="kb.id" class="embedded-widget__scope-chip" :title="kb.name">{{ kb.name }}</span>
     </section>
-    <ChatView v-if="authenticated && selectionReady" :key="sessionId" :session_id="sessionId" :agentId="widgetAgentId" :kbIds="selectionMode === 'all-allowed' ? [] : knowledgeBaseIds" :embeddedMode="true" :suggestedQuestionsEnabled="false" @answer-completed="refreshConversations" />
+    <ChatView v-if="authenticated && selectionReady" :key="sessionId" :session_id="sessionId" :agentId="widgetAgentId" :kbIds="selectionMode === 'all-allowed' ? [] : knowledgeBaseIds" :embeddedMode="true" :embeddedSuggestedQuestions="frequentQuestions" :suggestedQuestionsEnabled="false" @answer-completed="refreshConversations" />
     <div v-else-if="authenticated" class="embedded-widget__status" role="status">请至少选择一个知识库</div>
     <div v-else class="embedded-widget__status" role="status">
       {{ errorMessage || '正在等待宿主认证…' }}
