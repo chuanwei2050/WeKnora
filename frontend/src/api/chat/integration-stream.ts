@@ -28,6 +28,15 @@ export function buildIntegrationMessageBody(params: StreamRequestParams) {
   }
 }
 
+interface StreamContentEvent {
+  content?: string
+  data?: { replace_content?: boolean }
+}
+
+export function mergeStreamContent(current: string, event: StreamContentEvent): string {
+  return event?.data?.replace_content ? event.content || '' : current + (event?.content || '')
+}
+
 export function mapIntegrationEvent(envelope: any): any | null {
   const data = envelope?.data || {}
   switch (envelope?.event) {
@@ -36,7 +45,7 @@ export function mapIntegrationEvent(envelope: any): any | null {
     case 'answer.delta':
       return { response_type: 'answer', id: envelope.message_id, content: data.content || '', done: false }
     case 'answer.completed':
-      return { response_type: 'complete', id: envelope.message_id, content: data.answer || '', done: true, knowledge_references: data.references || [], data: { replace_content: true } }
+      return { response_type: 'answer', id: envelope.message_id, content: data.answer || '', done: true, knowledge_references: data.references || [], data: { replace_content: true } }
     case 'thinking':
     case 'tool_call':
     case 'tool_result':

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { buildIntegrationMessageBody, mapIntegrationEvent } from '../src/api/chat/integration-stream'
+import { buildIntegrationMessageBody, mapIntegrationEvent, mergeStreamContent } from '../src/api/chat/integration-stream'
 
 const readSource = (relativePath: string) => readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), 'utf8')
 
@@ -36,7 +36,7 @@ describe('integration agent stream', () => {
       message_id: 'message-1',
       data: { answer: 'already streamed', references: [] },
     })).toEqual({
-      response_type: 'complete',
+      response_type: 'answer',
       id: 'message-1',
       content: 'already streamed',
       done: true,
@@ -45,7 +45,17 @@ describe('integration agent stream', () => {
     })
 
     const chatView = readSource('../src/views/chat/index.vue')
-    expect(chatView).toContain('if (data.data?.replace_content)')
-    expect(chatView).toContain('fullContent.value = data.content;')
+    expect(chatView).toContain('message.content = mergeStreamContent(message.content || \'\', data);')
+    expect(chatView).toContain('message.is_completed = true;')
+  })
+
+  it('replaces corrupted deltas with the valid completed UTF-8 answer', () => {
+    const completed = mapIntegrationEvent({
+      event: 'answer.completed',
+      message_id: 'message-1',
+      data: { answer: '你好，我是智能助手。', references: [] },
+    })
+
+    expect(mergeStreamContent('你���，我是智���助手。', completed)).toBe('你好，我是智能助手。')
   })
 })

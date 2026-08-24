@@ -113,6 +113,7 @@ import usermsg from './components/usermsg.vue';
 import { getMessageList, generateSessionsTitle, getSession } from "@/api/chat/index";
 import { getAgentById, getSuggestedQuestions } from "@/api/agent/index";
 import { useStream } from '../../api/chat/streame'
+import { mergeStreamContent } from '../../api/chat/integration-stream'
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -811,11 +812,7 @@ onChunk((data) => {
         return;
     }
     
-    if (data.data?.replace_content) {
-        fullContent.value = data.content;
-    } else {
-        fullContent.value += data.content;
-    }
+    fullContent.value = mergeStreamContent(fullContent.value, data);
     if (!aguiDisplayEnabled.value && !data.done) {
         return;
     }
@@ -1107,9 +1104,9 @@ const handleAgentChunk = (data) => {
             });
             
             // 只有当有实际内容时才追加，避免空内容覆盖
-            if (data.content) {
-                message.content = (message.content || '') + data.content;
-                fullContent.value += data.content;
+            if (data.content || data.data?.replace_content) {
+                message.content = mergeStreamContent(message.content || '', data);
+                fullContent.value = mergeStreamContent(fullContent.value, data);
                 console.log('[Answer] Content appended, new length:', message.content.length);
             }
             
@@ -1142,6 +1139,8 @@ const handleAgentChunk = (data) => {
             // 只在第一次收到 done:true 时标记完成，忽略后续重复的完成事件
             if (data.done && !answerEvent.done) {
                 answerEvent.done = true;
+                message.is_completed = true;
+                message.knowledge_references = data.knowledge_references || message.knowledge_references || [];
                 console.log('[Agent] Answer done, content length:', message.content?.length || 0, 'answerEvent.content length:', answerEvent.content?.length || 0);
                 
                 // 完成 - 关闭所有状态
@@ -1150,6 +1149,10 @@ const handleAgentChunk = (data) => {
                 fullContent.value = '';
                 // 清空当前 assistant message ID
                 currentAssistantMessageId.value = '';
+                if (props.embeddedMode && data.id) {
+                    emit('answer-completed', { messageId: data.id });
+                    notifyEmbeddedHost('answer-completed', { messageId: data.id });
+                }
                 
                 // 标题生成已改为异步事件推送，不再需要在这里手动调用
                 // 如果标题还未生成，前端会通过 SSE 事件接收
