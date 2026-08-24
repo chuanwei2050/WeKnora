@@ -1434,7 +1434,11 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 		}
 		writeIntegrationSSEEvent(c, stored)
 	}
-	appendAndWrite(c.Request.Context(), "message.created", gin.H{"user_message_id": userMessage.ID, "selected_knowledge_base_ids": selected})
+	executionMode := "quick-answer"
+	if agentMode {
+		executionMode = "smart-reasoning"
+	}
+	appendAndWrite(c.Request.Context(), "message.created", gin.H{"user_message_id": userMessage.ID, "selected_knowledge_base_ids": selected, "agui_enabled": aguiEnabled, "execution_mode": executionMode})
 	eventBus := event.NewEventBus()
 	var answer strings.Builder
 	var answerStream integrationUTF8Stream

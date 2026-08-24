@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { buildIntegrationMessageBody, mapIntegrationEvent, mergeStreamContent } from '../src/api/chat/integration-stream'
+import { buildIntegrationMessageBody, isAGUITerminalEvent, mapIntegrationEvent, mergeStreamContent, shouldUseIntegrationAGUI } from '../src/api/chat/integration-stream'
 
 const readSource = (relativePath: string) => readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), 'utf8')
 
@@ -28,6 +28,59 @@ describe('integration agent stream', () => {
       done: false,
       data: { tool_name: 'knowledge_search', tool_call_id: 'tool-1' },
     })
+  })
+
+  it('marks the created message with its explicit AG-UI execution mode', () => {
+    expect(mapIntegrationEvent({
+      event: 'message.created',
+      message_id: 'message-1',
+      session_id: 'session-1',
+      data: { agui_enabled: true, execution_mode: 'quick-answer' },
+    })).toEqual({
+      response_type: 'agent_query',
+      id: 'message-1',
+      assistant_message_id: 'message-1',
+      session_id: 'session-1',
+      data: { agui_enabled: true, execution_mode: 'quick-answer' },
+    })
+  })
+
+  it('maps cancellation events to the shared AG-UI stop state', () => {
+    expect(mapIntegrationEvent({
+      event: 'stop',
+      message_id: 'message-1',
+      data: { reason: 'integration_cancel' },
+    })).toEqual({
+      response_type: 'stop',
+      id: 'message-1',
+      done: true,
+      data: { reason: 'integration_cancel' },
+    })
+
+    expect(mapIntegrationEvent({
+      event: 'error',
+      message_id: 'message-1',
+      data: { code: 'cancelled', status: 'cancelled' },
+    })).toEqual({
+      response_type: 'stop',
+      id: 'message-1',
+      done: true,
+      data: { reason: 'cancelled' },
+    })
+  })
+
+  it('ends the shared AG-UI for every terminal state', () => {
+    expect(isAGUITerminalEvent({ type: 'answer', done: true })).toBe(true)
+    expect(isAGUITerminalEvent({ type: 'error', done: true })).toBe(true)
+    expect(isAGUITerminalEvent({ type: 'stop' })).toBe(true)
+    expect(isAGUITerminalEvent({ type: 'answer', done: false })).toBe(false)
+    expect(isAGUITerminalEvent({ type: 'tool_call' })).toBe(false)
+  })
+
+  it('respects the client display switch before sharing AG-UI', () => {
+    expect(shouldUseIntegrationAGUI(true, true)).toBe(true)
+    expect(shouldUseIntegrationAGUI(true, false)).toBe(false)
+    expect(shouldUseIntegrationAGUI(false, true)).toBe(false)
   })
 
   it('replaces streamed deltas with the authoritative completed answer', () => {

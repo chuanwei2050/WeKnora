@@ -33,6 +33,19 @@ interface StreamContentEvent {
   data?: { replace_content?: boolean }
 }
 
+interface AGUITerminalEvent {
+  type?: string
+  done?: boolean
+}
+
+export function isAGUITerminalEvent(event: AGUITerminalEvent): boolean {
+  return event.type === 'stop' || (event.type === 'error' && event.done === true) || (event.type === 'answer' && event.done === true)
+}
+
+export function shouldUseIntegrationAGUI(serverEnabled: boolean, displayEnabled: boolean): boolean {
+  return serverEnabled && displayEnabled
+}
+
 export function mergeStreamContent(current: string, event: StreamContentEvent): string {
   return event?.data?.replace_content ? event.content || '' : current + (event?.content || '')
 }
@@ -41,7 +54,7 @@ export function mapIntegrationEvent(envelope: any): any | null {
   const data = envelope?.data || {}
   switch (envelope?.event) {
     case 'message.created':
-      return { response_type: 'agent_query', assistant_message_id: envelope.message_id, session_id: envelope.session_id, data }
+      return { response_type: 'agent_query', id: envelope.message_id, assistant_message_id: envelope.message_id, session_id: envelope.session_id, data }
     case 'answer.delta':
       return { response_type: 'answer', id: envelope.message_id, content: data.content || '', done: false }
     case 'answer.completed':
@@ -52,7 +65,12 @@ export function mapIntegrationEvent(envelope: any): any | null {
     case 'reflection':
       return { response_type: envelope.event, id: envelope.message_id, content: data.content || '', done: data.done === true, data }
     case 'error':
+      if (data.status === 'cancelled' || data.code === 'cancelled') {
+        return { response_type: 'stop', id: envelope.message_id, done: true, data: { reason: 'cancelled' } }
+      }
       return { response_type: 'error', id: envelope.message_id, content: data.code || 'integration_error', done: true, data }
+    case 'stop':
+      return { response_type: 'stop', id: envelope.message_id, done: true, data }
     default:
       return null
   }

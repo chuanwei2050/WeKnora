@@ -113,7 +113,7 @@ import usermsg from './components/usermsg.vue';
 import { getMessageList, generateSessionsTitle, getSession } from "@/api/chat/index";
 import { getAgentById, getSuggestedQuestions } from "@/api/agent/index";
 import { useStream } from '../../api/chat/streame'
-import { mergeStreamContent } from '../../api/chat/integration-stream'
+import { mergeStreamContent, shouldUseIntegrationAGUI } from '../../api/chat/integration-stream'
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -543,6 +543,8 @@ const handleStopGeneration = () => {
     // API 调用成功后，后端的 stop 事件会清空它
 };
 
+const aguiMessageIds = new Set();
+
 const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], voiceMetadata = undefined) => {
     await loadAgentDisplayConfig();
     userquery.value = value;
@@ -695,6 +697,10 @@ onChunk((data) => {
             query: data.data?.query,
             request_id: data.data?.request_id
         });
+
+        if (shouldUseIntegrationAGUI(data.data?.agui_enabled === true, aguiDisplayEnabled.value) && data.assistant_message_id) {
+            aguiMessageIds.add(data.assistant_message_id);
+        }
         
         // 检查是否是继续流式传输（消息已存在）
         const existingMessage = messagesList.findLast((item) => item.id === data.id || item.request_id === data.id);
@@ -737,9 +743,9 @@ onChunk((data) => {
                                data.response_type === 'tool_result' ||
                                data.response_type === 'reflection';
     
-    // 检查当前消息是否已经是 Agent 模式
-    const lastMessage = messagesList[messagesList.length - 1];
-    const isCurrentlyAgentMode = lastMessage?.isAgentMode === true;
+    // 按事件所属消息判断展示模式，避免迟到或恢复的事件串到最后一条消息
+    const eventMessage = messagesList.findLast((item) => item.request_id === data.id || item.id === data.id);
+    const isCurrentlyAgentMode = eventMessage?.isAgentMode === true || aguiMessageIds.has(data.id);
     
     // 如果是 Agent 专有的响应类型，或者当前消息已经是 Agent 模式，则走 Agent 处理
     const shouldHandleAsAgent = isAgentOnlyResponse || isCurrentlyAgentMode;
@@ -1064,6 +1070,15 @@ const handleAgentChunk = (data) => {
                 if (data.response_type === 'error' && !toolName) {
                     const errorMsg = data.content || t('chat.processError');
                     message.content = errorMsg;
+                    message.is_completed = true;
+                    message.agentEventStream.push({ type: 'error', content: errorMsg, done: true });
+                    message._pendingToolCalls?.forEach((event) => {
+                        event.pending = false;
+                        event.success = false;
+                    });
+                    message._pendingToolCalls?.clear();
+                    aguiMessageIds.delete(data.id);
+                    currentAssistantMessageId.value = '';
                     isReplying.value = false;
                     loading.value = false;
                     MessagePlugin.error(errorMsg);
@@ -1073,6 +1088,15 @@ const handleAgentChunk = (data) => {
                 // Generic error without tool context
                 const errorMsg = data.content || t('chat.processError');
                 message.content = errorMsg;
+                message.is_completed = true;
+                message.agentEventStream.push({ type: 'error', content: errorMsg, done: true });
+                message._pendingToolCalls?.forEach((event) => {
+                    event.pending = false;
+                    event.success = false;
+                });
+                message._pendingToolCalls?.clear();
+                aguiMessageIds.delete(data.id);
+                currentAssistantMessageId.value = '';
                 isReplying.value = false;
                 loading.value = false;
                 MessagePlugin.error(errorMsg);
@@ -1149,6 +1173,7 @@ const handleAgentChunk = (data) => {
                 fullContent.value = '';
                 // 清空当前 assistant message ID
                 currentAssistantMessageId.value = '';
+                aguiMessageIds.delete(data.id);
                 if (props.embeddedMode && data.id) {
                     emit('answer-completed', { messageId: data.id });
                     notifyEmbeddedHost('answer-completed', { messageId: data.id });
@@ -1182,14 +1207,23 @@ const handleAgentChunk = (data) => {
             if (!message.agentEventStream) message.agentEventStream = [];
             
             // Add stop event to stream
-            message.agentEventStream.push({
-                type: 'stop',
-                timestamp: Date.now(),
-                reason: data.data?.reason || 'user_requested'
-            });
+            if (!message.agentEventStream.some((event) => event.type === 'stop')) {
+                message.agentEventStream.push({
+                    type: 'stop',
+                    timestamp: Date.now(),
+                    reason: data.data?.reason || 'user_requested'
+                });
+            }
             
             // Mark conversation as stopped
             isReplying.value = false;
+            message.is_completed = true;
+            message._pendingToolCalls?.forEach((event) => {
+                event.pending = false;
+                event.success = false;
+            });
+            message._pendingToolCalls?.clear();
+            aguiMessageIds.delete(data.id);
             fullContent.value = '';
             break;
     }

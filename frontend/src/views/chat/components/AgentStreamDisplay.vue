@@ -224,6 +224,10 @@
           </div>
         </div>
 
+        <div v-else-if="event.type === 'error'" class="agent-error-message">
+          {{ event.content }}
+        </div>
+
         <!-- Tool Call Event (non-thinking) -->
         <div v-else-if="event.type === 'tool_call'" class="tool-event">
         <div
@@ -369,6 +373,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { isAGUITerminalEvent } from '../../../api/chat/integration-stream';
 import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
 import markedKatex from 'marked-katex-extension';
@@ -861,20 +866,8 @@ const isConversationDone = computed(() => {
     return false;
   }
   
-  // Check for stop event (user cancelled)
-  const stopEvent = stream.find((e: any) => e.type === 'stop');
-  if (stopEvent) {
-    console.log('[Collapse] Found stop event, conversation done');
-    return true;
-  }
-  
-  // Check for answer event with done=true
-  const answerEvents = stream.filter((e: any) => e.type === 'answer');
-  const doneAnswer = answerEvents.find((e: any) => e.done === true);
-  
-  console.log('[Collapse] Answer events:', answerEvents.length, 'Done answer:', !!doneAnswer);
-  
-  return !!doneAnswer;
+  // Check for terminal events (user cancelled, generation failed, or answer completed)
+  return stream.some(isAGUITerminalEvent);
 });
 
 // Find the final content to display (last thinking or answer)
