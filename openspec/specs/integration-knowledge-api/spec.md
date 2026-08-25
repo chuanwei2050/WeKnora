@@ -57,7 +57,7 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 - **THEN** 系统返回 `403` 且不暴露文件夹名称或 ID
 
 ### Requirement: RAG 搜索必须支持多个授权知识库
-系统 MUST 要求请求显式提交至少一个 `knowledge_base_id`，对所有授权知识库执行统一召回和统一重排，并返回全局 Top K；字段缺失、null 或空数组 MUST 返回 `400`，MUST NOT 被解释为全部知识库。系统 MUST 接受可选的 `folder_ids` 多选字段：字段缺失、null 或空数组时不得按文件夹筛选；字段为非空数组时，最终检索范围 MUST 为显式文件夹与所有所选知识库公共子文件夹的并集。
+系统 MUST 要求请求显式提交至少一个 `knowledge_base_id`，对所有授权知识库执行统一召回和统一重排，并返回全局 Top K；字段缺失、null 或空数组 MUST 返回 `400`，MUST NOT 被解释为全部知识库。系统 MUST 接受可选的 `folder_ids` 多选字段：字段缺失、null 或空数组时不得按文件夹筛选；字段为非空数组时，最终检索范围 MUST 为显式文件夹及其全部子文件夹，与这些显式文件夹所属知识库的公共子文件夹的并集。
 
 #### Scenario: 搜索两个授权知识库
 - **WHEN** 具有 `rag:search` scope 的主体提交两个授权知识库、query 和合法 `top_k`
@@ -77,7 +77,8 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 
 #### Scenario: 按多个文件夹搜索
 - **WHEN** 主体提交属于所选知识库的非空 `folder_ids`
-- **THEN** 系统检索显式文件夹以及每个所选知识库内全部公共子文件夹
+- **THEN** 系统检索显式文件夹及其全部子文件夹
+- **AND** 系统检索这些显式文件夹所属知识库内的全部公共子文件夹
 - **AND** 对重复的公共子文件夹 ID 去重
 
 #### Scenario: 文件夹不属于所选知识库
@@ -103,7 +104,7 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 
 #### Scenario: 批量查询使用不同文件夹范围
 - **WHEN** 批量内不同查询分别提交不同的非空 `folder_ids`
-- **THEN** 系统分别使用各自显式文件夹与共享知识库范围内全部公共子文件夹的并集
+- **THEN** 系统分别使用各自显式文件夹及其全部子文件夹，与显式文件夹所属知识库内全部公共子文件夹的并集
 
 #### Scenario: 批量查询未提供文件夹筛选
 - **WHEN** 某个查询的 `folder_ids` 缺失、为 null 或为空数组

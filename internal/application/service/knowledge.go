@@ -88,7 +88,8 @@ func (s *knowledgeService) listAllIntegrationTags(ctx context.Context, tenantID 
 	}
 }
 
-// ResolveIntegrationFolderIDs validates explicit folders and adds public folders from their knowledge bases.
+// ResolveIntegrationFolderIDs validates explicit folders, expands their descendants,
+// and adds public folders from the knowledge bases that own the explicit folders.
 func (s *knowledgeService) ResolveIntegrationFolderIDs(ctx context.Context, tenantID uint64, kbIDs, explicitIDs, knowledgeIDs []string) ([]string, error) {
 	allowedKBs := make(map[string]struct{}, len(kbIDs))
 	for _, kbID := range kbIDs {
@@ -120,6 +121,21 @@ func (s *knowledgeService) ResolveIntegrationFolderIDs(ctx context.Context, tena
 		for _, tag := range tags {
 			if tag != nil && tag.IsPublic {
 				resolved[tag.ID] = struct{}{}
+			}
+		}
+		for changed := true; changed; {
+			changed = false
+			for _, tag := range tags {
+				if tag == nil || tag.ParentID == nil {
+					continue
+				}
+				if _, parentSelected := resolved[*tag.ParentID]; !parentSelected {
+					continue
+				}
+				if _, alreadySelected := resolved[tag.ID]; !alreadySelected {
+					resolved[tag.ID] = struct{}{}
+					changed = true
+				}
 			}
 		}
 	}
