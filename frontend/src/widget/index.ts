@@ -12,8 +12,8 @@ import { parseFrameMessage, parseStoredLayout, parseWidgetConfig } from './valid
 const instances = new Map<string, WidgetInstance>()
 const MIN_SIZE: WidgetSize = { width: 360, height: 480 }
 const DEFAULT_SIZE: WidgetSize = { width: 460, height: 700 }
-const LAUNCHER_SIZE = 64
-const DOCKED_LAUNCHER_WIDTH = 46
+const LAUNCHER_SIZE = 72
+const DOCKED_LAUNCHER_WIDTH = 52
 const DOCK_DISTANCE = 72
 const LAUNCHER_DRAG_THRESHOLD = 5
 const EDGE_GAP = 16
@@ -93,7 +93,7 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
     .weknora-launcher[data-docked] { background: linear-gradient(160deg,#e9faff,#c8eff9) !important; box-shadow: 0 8px 24px rgba(16,91,125,.24) !important; }
     .weknora-launcher[data-docked="left"] { border-radius: 0 18px 18px 0 !important; }
     .weknora-launcher[data-docked="right"] { border-radius: 18px 0 0 18px !important; }
-    .weknora-launcher[data-docked] img { width: 42px !important; height: 42px !important; animation: none !important; }
+    .weknora-launcher[data-docked] img { width: 52px !important; height: 52px !important; animation: none !important; }
     .weknora-launcher:hover img { transform: translateY(-2px) scale(1.06); }
     .weknora-shell-button:hover { color: #0b5f8a !important; background: #e5f2f7 !important; }
     .weknora-shell-button:focus-visible, .weknora-launcher:focus-visible { outline: 3px solid rgba(32,184,216,.42); outline-offset: 2px; }
@@ -108,7 +108,7 @@ export function initWidget(rawConfig: WidgetConfig): WidgetInstance {
   const icon = document.createElement('img')
   icon.src = new URL(config.theme?.iconUrl || DEFAULT_ICON_URL, window.location.href).href
   icon.alt = ''
-  applyStyles(icon, { width: '56px', height: '56px', objectFit: 'contain', pointerEvents: 'none', transition: 'transform .22s ease', animation: 'weknora-assistant-float 3.6s ease-in-out infinite' })
+  applyStyles(icon, { width: '68px', height: '68px', objectFit: 'contain', pointerEvents: 'none', transition: 'transform .22s ease', animation: 'weknora-assistant-float 3.6s ease-in-out infinite' })
   launcher.append(icon)
   applyStyles(launcher, {
     position: 'fixed', right: '24px', bottom: '24px', width: `${LAUNCHER_SIZE}px`, height: `${LAUNCHER_SIZE}px`, padding: '0', borderRadius: '22px',
