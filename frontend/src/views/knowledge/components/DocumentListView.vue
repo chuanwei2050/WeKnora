@@ -2,6 +2,8 @@
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatFileSize, getFileIcon } from '@/utils/files';
+import FolderMoveCascader from './FolderMoveCascader.vue';
+import type { FolderCascaderOption } from './document-folder-organization';
 import {
   canOperateGovernanceRow,
   getGovernanceRowActions,
@@ -41,6 +43,7 @@ const props = defineProps<{
   canEdit: boolean;
   canManage?: boolean;
   tagList: Tag[];
+  folderTargets: FolderCascaderOption[];
   loading?: boolean;
   canGenerateSummary?: boolean;
   governanceEnabled?: boolean;
@@ -158,10 +161,6 @@ const onHeaderToggle = (e: Event) => {
   const checked = (e.target as HTMLInputElement).checked;
   emit('toggle-all', checked, selectableIds.value);
 };
-const getFolderTargets = (item: KnowledgeItem) => props.tagList
-  .filter(tag => String(tag.id) !== String(item.tag_id ?? ''))
-  .map(tag => ({ content: tag.name, value: String(tag.id) }));
-
 const onRowToggle = (item: KnowledgeItem, e: MouseEvent) => {
   if (!canOperateItem(item)) return;
   const checked = !props.selectedIds.has(item.id);
@@ -288,16 +287,15 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
             <button v-if="canEdit && item.parse_status !== 'pending_review'" class="row-action-btn" type="button" @click="handleAction('reparse', item)">
               {{ t('knowledgeBase.rowRebuild') }}
             </button>
-            <t-dropdown
-              v-if="canEdit && getFolderTargets(item).length"
-              :options="getFolderTargets(item)"
-              trigger="click"
-              @click="(data: { value: string | number }) => emit('move-folder', item, String(data.value))"
+            <FolderMoveCascader
+              v-if="canEdit && folderTargets.length"
+              :options="folderTargets"
+              @select="(folderId: string) => emit('move-folder', item, folderId)"
             >
               <button class="row-action-btn" type="button">
                 {{ t('knowledgeBase.rowMove') }}
               </button>
-            </t-dropdown>
+            </FolderMoveCascader>
             <button
               v-if="canManage && !hasGovernanceAction(item, 'delete')"
               class="row-action-btn danger"

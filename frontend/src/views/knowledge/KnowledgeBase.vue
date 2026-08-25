@@ -54,10 +54,11 @@ import {
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
+import FolderMoveCascader from './components/FolderMoveCascader.vue';
 import {
   UNTAGGED_TAG_NAME,
+  folderCascaderOptions,
   folderSiblingKey,
-  folderMoveTargets,
   ordinaryFolderBranches,
   ordinaryFolderChildOrders,
   placeFolder,
@@ -293,12 +294,6 @@ type FolderCreatePlacement =
   | { kind: 'root' }
   | { kind: 'public' }
   | { kind: 'ordinary-child'; parentId: string };
-const tagDropdownOptions = computed(() =>
-  tagList.value.map((tag: any) => ({
-    content: tag.name,
-    value: tag.id,
-  })),
-);
 const tagMap = computed<Record<string, any>>(() => {
   const map: Record<string, any> = {};
   tagList.value.forEach((tag) => {
@@ -306,6 +301,10 @@ const tagMap = computed<Record<string, any>>(() => {
   });
   return map;
 });
+const folderMoveOptions = computed(() => folderCascaderOptions(
+  tagList.value,
+  t('knowledgeBase.publicFilesFolder'),
+));
 const untaggedTag = computed(() => tagList.value.find(tag => tag.name === UNTAGGED_TAG_NAME));
 const ordinaryTags = computed(() => tagList.value.filter(tag => tag.name !== UNTAGGED_TAG_NAME));
 const ordinaryBranches = computed(() => ordinaryFolderBranches(ordinaryTags.value));
@@ -1116,13 +1115,15 @@ const onCardMouseMove = (ev: MouseEvent) => {
   }
 };
 
-const onCardMouseLeave = () => {
+const hideCardPopover = () => {
   if (cardHoverTimer) {
     clearTimeout(cardHoverTimer);
     cardHoverTimer = null;
   }
   hoveredCardItem.value = null;
 };
+
+const onCardMouseLeave = hideCardPopover;
 
 const delCard = (index: number, item: KnowledgeCard) => {
   if (isKnowledgeDeleteDisabled(item, knowledgeDeleteOptions.value)) return;
@@ -1821,7 +1822,7 @@ const selectedKnowledgeItems = computed(() => (
 
 const batchFolderTargets = computed(() => {
   if (!canEdit.value || selectedIds.value.size === 0) return [];
-  return folderMoveTargets(tagList.value, selectedTagId.value);
+  return folderMoveOptions.value;
 });
 
 const handleBatchMoveToFolder = async (targetTagId: string) => {
@@ -2340,6 +2341,7 @@ async function createNewSession(value: string): Promise<void> {
                   'public-child-row': tag.is_public,
                   'ordinary-child-row': Boolean(tag.parent_id),
                   'root-folder-row': !tag.is_public && !tag.parent_id,
+                  'public-section-boundary': !tag.is_public && !tag.parent_id && tag.id === rootTags[0]?.id,
                 }"
                 role="listitem"
                 :draggable="canReorderFolders && !folderOrderSaving"
@@ -2783,16 +2785,16 @@ async function createNewSession(value: string): Promise<void> {
                       <span class="card-time">{{ formatDocTime(item.updated_at) }}</span>
                       <div class="card-bottom-right">
                         <div v-if="tagList.length" class="card-tag-selector" @click.stop>
-                          <t-dropdown
+                          <FolderMoveCascader
                             v-if="canEdit"
-                            :options="tagDropdownOptions"
-                            trigger="click"
-                            @click="(data: any) => handleKnowledgeTagChange(item.id, data.value as string)"
+                            :options="folderMoveOptions"
+                            @select="(folderId: string) => handleKnowledgeTagChange(item.id, folderId)"
+                            @visible-change="(visible: boolean) => { if (visible) hideCardPopover() }"
                           >
                             <t-tag size="small" variant="light-outline">
                               <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
                             </t-tag>
-                          </t-dropdown>
+                          </FolderMoveCascader>
                           <t-tag v-else size="small" variant="light-outline">
                             <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
                           </t-tag>
@@ -2856,6 +2858,7 @@ async function createNewSession(value: string): Promise<void> {
                   :items="cardList"
                   :selected-ids="selectedIds"
                   :tag-list="tagList"
+                  :folder-targets="folderMoveOptions"
                   :can-edit="canEdit"
                   :can-manage="canManage"
                   :governance-enabled="Boolean(kbInfo?.governance?.enabled)"
@@ -3777,6 +3780,21 @@ async function createNewSession(value: string): Promise<void> {
 
     &.ordinary-child-row {
       padding-left: 20px;
+    }
+
+    &.public-section-boundary {
+      margin-top: 8px;
+
+      &::before {
+        content: '';
+        position: absolute;
+        top: -5px;
+        left: 6px;
+        right: 6px;
+        height: 1px;
+        background: var(--td-component-stroke, #e7e7e7);
+        pointer-events: none;
+      }
     }
 
     &:hover {

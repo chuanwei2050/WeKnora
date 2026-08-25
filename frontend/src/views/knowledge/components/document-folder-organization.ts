@@ -18,6 +18,13 @@ export interface OrdinaryFolderBranch<T> {
   children: T[]
 }
 
+export interface FolderCascaderOption {
+  label: string
+  value: string
+  selectable: boolean
+  children?: FolderCascaderOption[]
+}
+
 export function folderSiblingKey(folder?: DocumentFolderRef): string {
   if (!folder) return ''
   if (folder.parent_id) return `child:${folder.parent_id}`
@@ -102,4 +109,41 @@ export function folderMoveTargets<T extends DocumentFolderRef>(
   return folders
     .filter(folder => folder.id !== currentFolderId)
     .map(folder => ({ content: folder.name, value: folder.id }))
+}
+
+export function folderCascaderOptions<T extends DocumentFolderRef>(
+  folders: readonly T[],
+  publicFolderLabel: string,
+): FolderCascaderOption[] {
+  const publicFolders = folders.filter(folder => folder.is_public)
+  const ordinaryFolders = folders.filter(
+    folder => folder.name !== UNTAGGED_TAG_NAME && !folder.is_public,
+  )
+
+  const options: FolderCascaderOption[] = []
+  if (publicFolders.length) {
+    options.push({
+      label: publicFolderLabel,
+      value: '__public_folder_group__',
+      selectable: false,
+      children: publicFolders.map(folder => ({
+        label: folder.name,
+        value: folder.id,
+        selectable: true,
+      })),
+    })
+  }
+  options.push(...ordinaryFolderBranches(ordinaryFolders).map(({ root, children }) => ({
+    label: root.name,
+    value: root.id,
+    selectable: true,
+    ...(children.length ? {
+      children: children.map(child => ({
+        label: child.name,
+        value: child.id,
+        selectable: true,
+      })),
+    } : {}),
+  })))
+  return options
 }

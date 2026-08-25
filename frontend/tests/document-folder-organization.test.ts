@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  folderCascaderOptions,
   folderMoveTargets,
   ordinaryFolderChildOrders,
   ordinaryFolderBranches,
@@ -36,6 +37,30 @@ describe('document folder organization', () => {
     expect(folderMoveTargets(folders, 'untagged')).toEqual([
       { content: '1.1-投标文件', value: 'a' },
       { content: '产品资料', value: 'b' },
+    ])
+  })
+
+  it('builds cascader targets for public and ordinary folders without untagged', () => {
+    expect(folderCascaderOptions([
+      { id: 'untagged', name: '未分类' },
+      { id: 'public-a', name: '共享资料', is_public: true },
+      { id: 'root-a', name: '一级 A' },
+      { id: 'child-a', name: '二级 A-1', parent_id: 'root-a' },
+      { id: 'root-b', name: '一级 B' },
+    ], '公共知识')).toEqual([
+      {
+        label: '公共知识',
+        value: '__public_folder_group__',
+        selectable: false,
+        children: [{ label: '共享资料', value: 'public-a', selectable: true }],
+      },
+      {
+        label: '一级 A',
+        value: 'root-a',
+        selectable: true,
+        children: [{ label: '二级 A-1', value: 'child-a', selectable: true }],
+      },
+      { label: '一级 B', value: 'root-b', selectable: true },
     ])
   })
 

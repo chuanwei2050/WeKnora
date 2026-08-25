@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n';
 import type { DocumentBatchAction, GovernanceRowAction } from './knowledge-governance-actions';
+import FolderMoveCascader from './FolderMoveCascader.vue';
+import type { FolderCascaderOption } from './document-folder-organization';
 
 defineProps<{
   count: number;
   actions: DocumentBatchAction[];
   loadingAction?: GovernanceRowAction | null;
-  folderTargets?: Array<{ content: string; value: string }>;
+  folderTargets?: FolderCascaderOption[];
   movingFolder?: boolean;
 }>();
 
@@ -49,12 +51,11 @@ const actionLabelKeys: Record<GovernanceRowAction, string> = {
         >
           {{ t(actionLabelKeys[item.action]) }}（{{ item.count }}）
         </t-button>
-        <t-dropdown
+        <FolderMoveCascader
           v-if="folderTargets?.length"
           :options="folderTargets"
-          trigger="click"
           placement="top-right"
-          @click="(data: { value: string | number }) => emit('move-folder', String(data.value))"
+          @select="(folderId: string) => emit('move-folder', folderId)"
         >
           <t-button
             theme="primary"
@@ -65,7 +66,7 @@ const actionLabelKeys: Record<GovernanceRowAction, string> = {
           >
             {{ t('knowledgeBase.moveToFolder') }}（{{ count }}）
           </t-button>
-        </t-dropdown>
+        </FolderMoveCascader>
       </div>
     </div>
   </transition>
