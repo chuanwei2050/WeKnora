@@ -358,10 +358,49 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 	if err != nil {
 		return err
 	}
-
 	kCount, cCount, err := s.repo.CountReferences(ctx, tenantID, tag.KnowledgeBaseID, tag.ID)
 	if err != nil {
 		return err
+	}
+	if kb.Type == types.KnowledgeBaseTypeDocument && kCount == 0 && cCount > 0 {
+		chunkTagUpdates, err := s.chunkRepo.ReconcileDocumentChunkTags(ctx, tenantID, kb.ID, tag.ID)
+		if err != nil {
+			return err
+		}
+		kCount, cCount, err = s.repo.CountReferences(ctx, tenantID, tag.KnowledgeBaseID, tag.ID)
+		if err != nil {
+			return err
+		}
+		if kCount == 0 && cCount > 0 {
+			emptyTagID := ""
+			chunkIDs, err := s.chunkRepo.UpdateChunkFieldsByTagID(
+				ctx, tenantID, kb.ID, tag.ID, nil, 0, 0, &emptyTagID, nil,
+			)
+			if err != nil {
+				return err
+			}
+			if chunkTagUpdates == nil {
+				chunkTagUpdates = make(map[string]string, len(chunkIDs))
+			}
+			for _, chunkID := range chunkIDs {
+				chunkTagUpdates[chunkID] = emptyTagID
+			}
+			kCount, cCount, err = s.repo.CountReferences(ctx, tenantID, tag.KnowledgeBaseID, tag.ID)
+			if err != nil {
+				return err
+			}
+		}
+		if len(chunkTagUpdates) > 0 {
+			tenantInfo, ok := types.TenantInfoFromContext(ctx)
+			if ok {
+				retrieveEngine, engineErr := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
+				if engineErr != nil {
+					logger.Warnf(ctx, "failed to initialize retriever while deleting empty folder %s: %v", tag.ID, engineErr)
+				} else if engineErr = retrieveEngine.BatchUpdateChunkTagID(ctx, chunkTagUpdates); engineErr != nil {
+					logger.Warnf(ctx, "failed to sync repaired chunk tags while deleting empty folder %s: %v", tag.ID, engineErr)
+				}
+			}
+		}
 	}
 
 	// Get tenant info for effective engines

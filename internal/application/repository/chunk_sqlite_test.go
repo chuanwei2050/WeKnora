@@ -17,8 +17,64 @@ func setupChunkTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.Chunk{}, &types.KnowledgeTag{}))
+	require.NoError(t, db.AutoMigrate(&types.Chunk{}, &types.KnowledgeTag{}, &types.Knowledge{}))
 	return db
+}
+
+func TestMoveChunksByKnowledgeIDClearsFolderTag(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	chunk := makeChunk("source-kb", "knowledge-1", types.ChunkTypeText)
+	chunk.TagID = "source-folder"
+	require.NoError(t, db.Create(chunk).Error)
+
+	require.NoError(t, repo.MoveChunksByKnowledgeID(t.Context(), 1, "knowledge-1", "target-kb"))
+
+	var moved types.Chunk
+	require.NoError(t, db.First(&moved, "id = ?", chunk.ID).Error)
+	require.Equal(t, "target-kb", moved.KnowledgeBaseID)
+	require.Empty(t, moved.TagID)
+}
+
+func TestReconcileDocumentChunkTagsUsesOwningDocumentFolder(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	knowledge := &types.Knowledge{
+		ID: "knowledge-1", TenantID: 1, KnowledgeBaseID: "kb-1", TagID: "target-folder",
+	}
+	chunk := makeChunk("kb-1", knowledge.ID, types.ChunkTypeText)
+	chunk.TagID = "source-folder"
+	require.NoError(t, db.Create(knowledge).Error)
+	require.NoError(t, db.Create(chunk).Error)
+
+	changed, err := repo.ReconcileDocumentChunkTags(t.Context(), 1, "kb-1", "source-folder")
+
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{chunk.ID: "target-folder"}, changed)
+	var repaired types.Chunk
+	require.NoError(t, db.First(&repaired, "id = ?", chunk.ID).Error)
+	require.Equal(t, "target-folder", repaired.TagID)
+}
+
+func TestReconcileDocumentChunkTagsDetachesDeletingDocument(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	knowledge := &types.Knowledge{
+		ID: "knowledge-deleting", TenantID: 1, KnowledgeBaseID: "kb-1",
+		TagID: "source-folder", ParseStatus: types.ParseStatusDeleting,
+	}
+	chunk := makeChunk("kb-1", knowledge.ID, types.ChunkTypeText)
+	chunk.TagID = "source-folder"
+	require.NoError(t, db.Create(knowledge).Error)
+	require.NoError(t, db.Create(chunk).Error)
+
+	changed, err := repo.ReconcileDocumentChunkTags(t.Context(), 1, "kb-1", "source-folder")
+
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{chunk.ID: ""}, changed)
+	var repaired types.Chunk
+	require.NoError(t, db.First(&repaired, "id = ?", chunk.ID).Error)
+	require.Empty(t, repaired.TagID)
 }
 
 func makeChunk(kbID, knowledgeID string, chunkType string) *types.Chunk {

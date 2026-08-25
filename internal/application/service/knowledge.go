@@ -6293,6 +6293,8 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 
 	// Update knowledge items
 	knowledgeToUpdate := make([]*types.Knowledge, 0)
+	chunksToUpdate := make([]*types.Chunk, 0)
+	chunkTagUpdates := make(map[string]string)
 	for _, knowledge := range knowledgeList {
 		tagID, exists := updates[knowledge.ID]
 		if !exists {
@@ -6311,12 +6313,51 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 			resolvedTagID = tag.ID
 		}
 
-		knowledge.TagID = resolvedTagID
-		knowledgeToUpdate = append(knowledgeToUpdate, knowledge)
+		chunks, err := s.chunkRepo.ListChunksByKnowledgeID(ctx, tenantID, knowledge.ID)
+		if err != nil {
+			return err
+		}
+		for _, chunk := range chunks {
+			chunkTagUpdates[chunk.ID] = resolvedTagID
+			if chunk.TagID == resolvedTagID {
+				continue
+			}
+			chunk.TagID = resolvedTagID
+			chunk.UpdatedAt = time.Now()
+			chunksToUpdate = append(chunksToUpdate, chunk)
+		}
+
+		if knowledge.TagID != resolvedTagID {
+			knowledge.TagID = resolvedTagID
+			knowledgeToUpdate = append(knowledgeToUpdate, knowledge)
+		}
 	}
 
 	if len(knowledgeToUpdate) > 0 {
-		return s.repo.UpdateKnowledgeBatch(ctx, knowledgeToUpdate)
+		if err := s.repo.UpdateKnowledgeBatch(ctx, knowledgeToUpdate); err != nil {
+			return err
+		}
+	}
+	if len(chunksToUpdate) > 0 {
+		if err := s.chunkRepo.UpdateChunks(ctx, chunksToUpdate); err != nil {
+			return err
+		}
+	}
+	if len(chunkTagUpdates) > 0 {
+		tenantInfo, ok := types.TenantInfoFromContext(ctx)
+		if !ok {
+			return werrors.NewUnauthorizedError("tenant info not found in context")
+		}
+		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
+			s.retrieveEngine,
+			tenantInfo.GetEffectiveEngines(),
+		)
+		if err != nil {
+			return err
+		}
+		if err := retrieveEngine.BatchUpdateChunkTagID(ctx, chunkTagUpdates); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -10034,6 +10075,20 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 	// 3. Update chunks' knowledge_base_id in DB
 	if err := s.chunkRepo.MoveChunksByKnowledgeID(ctx, tenantID, knowledge.ID, targetKB.ID); err != nil {
 		return fmt.Errorf("failed to move chunks: %w", err)
+	}
+	if len(oldChunks) > 0 && knowledge.EmbeddingModelID != "" {
+		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
+		if err != nil {
+			logger.Warnf(ctx, "moveKnowledgeReuseVectors: failed to init retrieve engine for clearing moved chunk tags: %v", err)
+		} else {
+			chunkTagUpdates := make(map[string]string, len(oldChunks))
+			for _, chunk := range oldChunks {
+				chunkTagUpdates[chunk.ID] = ""
+			}
+			if err := retrieveEngine.BatchUpdateChunkTagID(ctx, chunkTagUpdates); err != nil {
+				logger.Warnf(ctx, "moveKnowledgeReuseVectors: failed to clear moved chunk tags for knowledge %s: %v", knowledge.ID, err)
+			}
+		}
 	}
 
 	// 4. Update knowledge record

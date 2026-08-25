@@ -466,11 +466,54 @@ func (r *chunkRepository) DeleteByKnowledgeList(ctx context.Context, tenantID ui
 	).Delete(&types.Chunk{}).Error
 }
 
-// MoveChunksByKnowledgeID updates knowledge_base_id for all chunks of a knowledge item
+// MoveChunksByKnowledgeID moves chunks to another knowledge base and clears the KB-scoped tag ID.
 func (r *chunkRepository) MoveChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string, targetKBID string) error {
 	return r.db.WithContext(ctx).Model(&types.Chunk{}).
 		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
-		Update("knowledge_base_id", targetKBID).Error
+		Updates(map[string]interface{}{"knowledge_base_id": targetKBID, "tag_id": ""}).Error
+}
+
+// ReconcileDocumentChunkTags aligns chunks that still reference tagID with their owning documents.
+func (r *chunkRepository) ReconcileDocumentChunkTags(
+	ctx context.Context, tenantID uint64, kbID string, tagID string,
+) (map[string]string, error) {
+	type chunkTag struct {
+		ID    string `gorm:"column:id"`
+		TagID string `gorm:"column:tag_id"`
+	}
+
+	var changes []chunkTag
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT c.id, COALESCE(k.tag_id, '') AS tag_id
+		FROM chunks c
+		LEFT JOIN knowledges k
+			ON k.tenant_id = c.tenant_id
+			AND k.id = c.knowledge_id
+			AND k.deleted_at IS NULL
+			AND k.parse_status <> ?
+		WHERE c.tenant_id = ?
+			AND c.knowledge_base_id = ?
+			AND c.tag_id = ?
+			AND c.deleted_at IS NULL
+			AND COALESCE(k.tag_id, '') <> c.tag_id`, types.ParseStatusDeleting, tenantID, kbID, tagID).
+		Scan(&changes).Error
+	if err != nil || len(changes) == 0 {
+		return nil, err
+	}
+
+	changed := make(map[string]string, len(changes))
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, change := range changes {
+			if err := tx.Model(&types.Chunk{}).
+				Where("tenant_id = ? AND id = ?", tenantID, change.ID).
+				Update("tag_id", change.TagID).Error; err != nil {
+				return err
+			}
+			changed[change.ID] = change.TagID
+		}
+		return nil
+	})
+	return changed, err
 }
 
 // DeleteChunksByTagID deletes all chunks with the specified tag ID

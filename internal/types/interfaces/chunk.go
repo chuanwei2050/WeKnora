@@ -66,8 +66,11 @@ type ChunkRepository interface {
 	DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error
 	// ListImageInfoByKnowledgeIDs returns non-empty (knowledge_id, image_info) pairs for image cleanup.
 	ListImageInfoByKnowledgeIDs(ctx context.Context, tenantID uint64, knowledgeIDs []string) ([]ChunkImageInfo, error)
-	// MoveChunksByKnowledgeID updates knowledge_base_id for all chunks of a knowledge item
+	// MoveChunksByKnowledgeID moves chunks to another knowledge base and clears the KB-scoped tag ID.
 	MoveChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string, targetKBID string) error
+	// ReconcileDocumentChunkTags aligns stale chunk tag IDs with their owning documents.
+	// It returns the changed chunk IDs and their current tag IDs for retriever synchronization.
+	ReconcileDocumentChunkTags(ctx context.Context, tenantID uint64, kbID string, tagID string) (map[string]string, error)
 	// DeleteChunksByTagID deletes all chunks with the specified tag ID
 	// Returns the IDs of deleted chunks for index cleanup
 	DeleteChunksByTagID(ctx context.Context, tenantID uint64, kbID string, tagID string, excludeIDs []string) ([]string, error)

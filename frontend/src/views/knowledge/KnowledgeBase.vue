@@ -330,9 +330,7 @@ const filteredDisplayTags = computed(() => {
   });
   return [...publicMatches, ...ordinaryMatches];
 });
-const isFolderNotEmpty = (tag: any) => (
-  Number(tag.knowledge_count || 0) > 0 || Number(tag.chunk_count || 0) > 0
-);
+const isFolderNotEmpty = (tag: any) => Number(isFAQ.value ? tag.chunk_count : tag.knowledge_count) > 0;
 const hasFolderChildren = (tagId: string) => ordinaryChildTags.value.some(tag => tag.parent_id === tagId);
 const toggleOrdinaryFolder = (tagId: string) => {
   const next = new Set(collapsedOrdinaryFolderIds.value);
@@ -1216,6 +1214,7 @@ const handleMoveConfirm = async () => {
       moveSubmitting.value = false;
       page = 1; // Reset page counter when reloading files after move
       loadKnowledgeFiles(kbId.value);
+      loadTags(kbId.value);
     }
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('knowledgeBase.moveFailed'));
@@ -1241,6 +1240,7 @@ const startMovePoll = (taskId: string) => {
         }
         page = 1; // Reset page counter when reloading files after move completion
         loadKnowledgeFiles(kbId.value);
+        loadTags(kbId.value);
       } else if (data.status === 'failed') {
         stopMovePoll();
         moveSubmitting.value = false;
