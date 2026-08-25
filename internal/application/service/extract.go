@@ -627,6 +627,7 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 		TenantID:        resources.knowledge.TenantID,
 		KnowledgeID:     resources.knowledge.ID,
 		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,
+		TagID:           resources.knowledge.TagID,
 		Content:         tableDescription,
 		ChunkIndex:      0,
 		IsEnabled:       true,
@@ -641,6 +642,7 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 		TenantID:        resources.knowledge.TenantID,
 		KnowledgeID:     resources.knowledge.ID,
 		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,
+		TagID:           resources.knowledge.TagID,
 		Content:         columnDescription,
 		ChunkIndex:      1,
 		IsEnabled:       true,
@@ -667,15 +669,7 @@ func (s *DataTableSummaryService) indexToVectorDB(
 	// 构建索引信息列表
 	indexInfoList := make([]*types.IndexInfo, 0, len(chunks))
 	for _, chunk := range chunks {
-		indexInfoList = append(indexInfoList, &types.IndexInfo{
-			Content:         chunk.Content,
-			SourceID:        chunk.ID,
-			SourceType:      types.ChunkSourceType,
-			ChunkID:         chunk.ID,
-			KnowledgeID:     chunk.KnowledgeID,
-			KnowledgeBaseID: chunk.KnowledgeBaseID,
-			IsEnabled:       true,
-		})
+		indexInfoList = append(indexInfoList, documentChunkIndexInfo(chunk, chunk.Content, chunk.ID))
 	}
 
 	// 保存到数据库

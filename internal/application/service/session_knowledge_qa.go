@@ -485,9 +485,16 @@ func (s *sessionService) buildSearchTargets(
 	type searchableTagProvider interface {
 		SearchableTagIDs(context.Context, uint64, string) ([]string, error)
 	}
+	type integrationFolderScopeProvider interface {
+		IntegrationFolderIDsForKnowledgeBase(context.Context, uint64, string, []string) ([]string, error)
+	}
 	searchableTags := func(scopeTenantID uint64, kbID string) ([]string, error) {
 		if len(explicitTagIDs) > 0 {
-			return explicitTagIDs[0], nil
+			provider, ok := s.knowledgeService.(integrationFolderScopeProvider)
+			if !ok {
+				return nil, errors.New("integration folder scope is unavailable")
+			}
+			return provider.IntegrationFolderIDsForKnowledgeBase(ctx, scopeTenantID, kbID, explicitTagIDs[0])
 		}
 		if !filterDisabledFolders {
 			return nil, nil

@@ -25,6 +25,18 @@ type searchTargetKnowledgeService struct {
 	searchableTagIDs []string
 }
 
+type scopedSearchTargetKnowledgeService struct {
+	searchTargetKnowledgeService
+	foldersByKB map[string][]string
+}
+
+func (s scopedSearchTargetKnowledgeService) IntegrationFolderIDsForKnowledgeBase(_ context.Context, _ uint64, kbID string, _ []string) ([]string, error) {
+	if folders, ok := s.foldersByKB[kbID]; ok {
+		return folders, nil
+	}
+	return []string{}, nil
+}
+
 func (s searchTargetKnowledgeService) GetKnowledgeBatchWithSharedAccess(context.Context, uint64, []string) ([]*types.Knowledge, error) {
 	return s.items, nil
 }
@@ -51,7 +63,9 @@ func TestBuildSearchTargetsFiltersFoldersOnlyWhenRequested(t *testing.T) {
 func TestBuildSearchTargetsAppliesExplicitIntegrationFolders(t *testing.T) {
 	service := &sessionService{
 		knowledgeBaseService: searchTargetKnowledgeBaseService{items: []*types.KnowledgeBase{{ID: "kb-1", TenantID: 7}}},
-		knowledgeService:     searchTargetKnowledgeService{},
+		knowledgeService: scopedSearchTargetKnowledgeService{
+			foldersByKB: map[string][]string{"kb-1": {"ordinary-1", "public-1"}},
+		},
 	}
 
 	targets, err := service.buildSearchTargets(context.Background(), 7, []string{"kb-1"}, nil, false, []string{"ordinary-1", "public-1"})
@@ -60,17 +74,56 @@ func TestBuildSearchTargetsAppliesExplicitIntegrationFolders(t *testing.T) {
 	require.Equal(t, []string{"ordinary-1", "public-1"}, targets[0].TagIDs)
 }
 
+func TestBuildSearchTargetsKeepsExplicitFoldersOnOwningKnowledgeBase(t *testing.T) {
+	service := &sessionService{
+		knowledgeBaseService: searchTargetKnowledgeBaseService{items: []*types.KnowledgeBase{
+			{ID: "kb-a", TenantID: 7},
+			{ID: "kb-b", TenantID: 7},
+			{ID: "kb-c", TenantID: 7},
+		}},
+		knowledgeService: scopedSearchTargetKnowledgeService{
+			foldersByKB: map[string][]string{"kb-a": {"ordinary-a", "public-a"}},
+		},
+	}
+
+	targets, err := service.buildSearchTargets(context.Background(), 7, []string{"kb-a", "kb-b", "kb-c"}, nil, false, []string{"ordinary-a", "public-a"})
+
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	require.Equal(t, "kb-a", targets[0].KnowledgeBaseID)
+	require.Equal(t, []string{"ordinary-a", "public-a"}, targets[0].TagIDs)
+}
+
 func TestBuildSearchTargetsRejectsDirectDocumentOutsideExplicitFolders(t *testing.T) {
 	service := &sessionService{
 		knowledgeBaseService: searchTargetKnowledgeBaseService{items: []*types.KnowledgeBase{{ID: "kb-1", TenantID: 7}}},
-		knowledgeService: searchTargetKnowledgeService{items: []*types.Knowledge{
-			{ID: "doc-1", KnowledgeBaseID: "kb-1", TenantID: 7, TagID: "outside"},
-		}},
+		knowledgeService: scopedSearchTargetKnowledgeService{
+			searchTargetKnowledgeService: searchTargetKnowledgeService{items: []*types.Knowledge{
+				{ID: "doc-1", KnowledgeBaseID: "kb-1", TenantID: 7, TagID: "outside"},
+			}},
+			foldersByKB: map[string][]string{"kb-1": {"ordinary-1", "public-1"}},
+		},
 	}
 
 	_, err := service.buildSearchTargets(context.Background(), 7, []string{"kb-1"}, []string{"doc-1"}, false, []string{"ordinary-1", "public-1"})
 
 	require.EqualError(t, err, "invalid_knowledge_folder_scope")
+}
+
+func TestDocumentChunkIndexInfoPreservesFolderScope(t *testing.T) {
+	chunk := &types.Chunk{
+		ID: "chunk-1", KnowledgeID: "doc-1", KnowledgeBaseID: "kb-1",
+		TagID: "folder-1", IsEnabled: true,
+	}
+
+	info := documentChunkIndexInfo(chunk, "derived content", "derived-source")
+
+	require.Equal(t, "folder-1", info.TagID)
+	require.Equal(t, "kb-1", info.KnowledgeBaseID)
+	require.Equal(t, "doc-1", info.KnowledgeID)
+	require.Equal(t, "chunk-1", info.ChunkID)
+	require.Equal(t, "derived-source", info.SourceID)
+	require.True(t, info.IsEnabled)
 }
 
 func TestBuildSearchTargetsSkipsKnowledgeBaseWhenAllFoldersAreDisabled(t *testing.T) {

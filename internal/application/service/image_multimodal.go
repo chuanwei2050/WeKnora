@@ -106,6 +106,13 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	if payload.Language != "" {
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
+	knowledge, err := s.knowledgeRepo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
+	if err != nil {
+		return fmt.Errorf("get knowledge for image multimodal task: %w", err)
+	}
+	if knowledge.KnowledgeBaseID != payload.KnowledgeBaseID {
+		return fmt.Errorf("image multimodal task knowledge base mismatch")
+	}
 
 	vlmModel, err := s.resolveVLM(ctx, payload.KnowledgeBaseID)
 	if err != nil {
@@ -193,6 +200,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
+			TagID:           knowledge.TagID,
 			Content:         imageInfo.OCRText,
 			ChunkType:       types.ChunkTypeImageOCR,
 			ParentChunkID:   payload.ChunkID,
@@ -210,6 +218,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
+			TagID:           knowledge.TagID,
 			Content:         imageInfo.Caption,
 			ChunkType:       types.ChunkTypeImageCaption,
 			ParentChunkID:   payload.ChunkID,
@@ -300,14 +309,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 
 	indexInfoList := make([]*types.IndexInfo, 0, len(chunks))
 	for _, chunk := range chunks {
-		indexInfoList = append(indexInfoList, &types.IndexInfo{
-			Content:         chunk.Content,
-			SourceID:        chunk.ID,
-			SourceType:      types.ChunkSourceType,
-			ChunkID:         chunk.ID,
-			KnowledgeID:     chunk.KnowledgeID,
-			KnowledgeBaseID: chunk.KnowledgeBaseID,
-		})
+		indexInfoList = append(indexInfoList, documentChunkIndexInfo(chunk, chunk.Content, chunk.ID))
 	}
 
 	if err := engine.BatchIndex(ctx, embeddingModel, indexInfoList); err != nil {

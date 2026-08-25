@@ -114,7 +114,7 @@ func TestIntegrationFolderScopeReadsAllPages(t *testing.T) {
 
 	ids, err := service.ResolveIntegrationFolderIDs(t.Context(), 1, []string{"kb-1", "kb-2"}, []string{"ordinary-1"}, nil)
 	require.NoError(t, err)
-	require.Equal(t, []string{"ordinary-1", "public-1", "public-2"}, ids)
+	require.Equal(t, []string{"ordinary-1", "public-1"}, ids)
 }
 
 func TestListIntegrationFoldersReturnsOnlyOrdinaryFolders(t *testing.T) {
@@ -124,7 +124,7 @@ func TestListIntegrationFoldersReturnsOnlyOrdinaryFolders(t *testing.T) {
 	require.Equal(t, []string{"ordinary-1"}, []string{folders[0].ID})
 }
 
-func TestResolveIntegrationFolderIDsMergesPublicFoldersAcrossKBs(t *testing.T) {
+func TestResolveIntegrationFolderIDsMergesPublicFoldersFromExplicitFolderKBs(t *testing.T) {
 	service := integrationFolderServiceFixture()
 	ids, err := service.ResolveIntegrationFolderIDs(t.Context(), 1, []string{"kb-1", "kb-2"}, []string{"ordinary-1", "ordinary-2", "public-1"}, []string{"doc-in", "doc-public"})
 	require.NoError(t, err)

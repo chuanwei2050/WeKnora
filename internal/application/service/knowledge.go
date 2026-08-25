@@ -88,13 +88,14 @@ func (s *knowledgeService) listAllIntegrationTags(ctx context.Context, tenantID 
 	}
 }
 
-// ResolveIntegrationFolderIDs validates explicit folders and adds public folders in the selected KBs.
+// ResolveIntegrationFolderIDs validates explicit folders and adds public folders from their knowledge bases.
 func (s *knowledgeService) ResolveIntegrationFolderIDs(ctx context.Context, tenantID uint64, kbIDs, explicitIDs, knowledgeIDs []string) ([]string, error) {
 	allowedKBs := make(map[string]struct{}, len(kbIDs))
 	for _, kbID := range kbIDs {
 		allowedKBs[kbID] = struct{}{}
 	}
 	resolved := make(map[string]struct{}, len(explicitIDs))
+	selectedKBs := make(map[string]struct{})
 	if len(explicitIDs) > 0 {
 		tags, err := s.tagRepo.GetByIDs(ctx, tenantID, explicitIDs)
 		if err != nil || len(tags) != len(explicitIDs) {
@@ -108,9 +109,10 @@ func (s *knowledgeService) ResolveIntegrationFolderIDs(ctx context.Context, tena
 				return nil, errors.New("invalid_folder_ids")
 			}
 			resolved[tag.ID] = struct{}{}
+			selectedKBs[tag.KnowledgeBaseID] = struct{}{}
 		}
 	}
-	for _, kbID := range kbIDs {
+	for kbID := range selectedKBs {
 		tags, err := s.listAllIntegrationTags(ctx, tenantID, kbID)
 		if err != nil {
 			return nil, err
@@ -141,6 +143,36 @@ func (s *knowledgeService) ResolveIntegrationFolderIDs(ctx context.Context, tena
 		}
 	}
 	return ids, nil
+}
+
+// IntegrationFolderIDsForKnowledgeBase keeps an already validated folder scope
+// attached to the knowledge base that owns each folder.
+func (s *knowledgeService) IntegrationFolderIDsForKnowledgeBase(ctx context.Context, tenantID uint64, kbID string, folderIDs []string) ([]string, error) {
+	tags, err := s.tagRepo.GetByIDs(ctx, tenantID, folderIDs)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		if tag != nil && tag.KnowledgeBaseID == kbID {
+			result = append(result, tag.ID)
+		}
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func documentChunkIndexInfo(chunk *types.Chunk, content, sourceID string) *types.IndexInfo {
+	return &types.IndexInfo{
+		Content:         content,
+		SourceID:        sourceID,
+		SourceType:      types.ChunkSourceType,
+		ChunkID:         chunk.ID,
+		KnowledgeID:     chunk.KnowledgeID,
+		KnowledgeBaseID: chunk.KnowledgeBaseID,
+		TagID:           chunk.TagID,
+		IsEnabled:       chunk.IsEnabled,
+	}
 }
 
 // knowledgeService implements the knowledge service interface
@@ -2309,6 +2341,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				TenantID:           knowledge.TenantID,
 				KnowledgeID:        knowledge.ID,
 				KnowledgeBaseID:    knowledge.KnowledgeBaseID,
+				TagID:              knowledge.TagID,
 				Content:            pc.Content,
 				ChunkIndex:         pc.Seq,
 				IsEnabled:          true,
@@ -2349,6 +2382,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			TenantID:           knowledge.TenantID,
 			KnowledgeID:        knowledge.ID,
 			KnowledgeBaseID:    knowledge.KnowledgeBaseID,
+			TagID:              knowledge.TagID,
 			Content:            chunkData.Content,
 			ChunkIndex:         int(chunkData.Seq),
 			IsEnabled:          true,
@@ -2433,15 +2467,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 		for _, chunk := range textChunks {
 			indexContent := titlePrefix + chunk.Content
-			indexInfoList = append(indexInfoList, &types.IndexInfo{
-				Content:         indexContent,
-				SourceID:        chunk.ID,
-				SourceType:      types.ChunkSourceType,
-				ChunkID:         chunk.ID,
-				KnowledgeID:     knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID,
-				IsEnabled:       true,
-			})
+			indexInfoList = append(indexInfoList, documentChunkIndexInfo(chunk, indexContent, chunk.ID))
 		}
 
 		if embeddingModel != nil {
@@ -2886,6 +2912,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
+			TagID:           knowledge.TagID,
 			Content:         fmt.Sprintf("# Document\n%s\n\n# Summary\n%s", knowledge.FileName, summary),
 			ChunkIndex:      maxChunkIndex + 1,
 			IsEnabled:       true,
@@ -2923,15 +2950,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			return fmt.Errorf("failed to get embedding model: %w", err)
 		}
 
-		indexInfo := []*types.IndexInfo{{
-			Content:         summaryChunk.Content,
-			SourceID:        summaryChunk.ID,
-			SourceType:      types.ChunkSourceType,
-			ChunkID:         summaryChunk.ID,
-			KnowledgeID:     knowledge.ID,
-			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			IsEnabled:       true,
-		}}
+		indexInfo := []*types.IndexInfo{documentChunkIndexInfo(summaryChunk, summaryChunk.Content, summaryChunk.ID)}
 
 		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfo); err != nil {
 			logger.Errorf(ctx, "Failed to index summary chunk: %v", err)
@@ -3183,15 +3202,7 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 			chunkIndexEntries := make([]*types.IndexInfo, 0, len(generatedQuestions))
 			for _, gq := range generatedQuestions {
 				sourceID := fmt.Sprintf("%s-%s", chunk.ID, gq.ID)
-				chunkIndexEntries = append(chunkIndexEntries, &types.IndexInfo{
-					Content:         gq.Question,
-					SourceID:        sourceID,
-					SourceType:      types.ChunkSourceType,
-					ChunkID:         chunk.ID,
-					KnowledgeID:     knowledge.ID,
-					KnowledgeBaseID: knowledge.KnowledgeBaseID,
-					IsEnabled:       true,
-				})
+				chunkIndexEntries = append(chunkIndexEntries, documentChunkIndexInfo(chunk, gq.Question, sourceID))
 			}
 
 			statsMu.Lock()
@@ -3948,15 +3959,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			logger.Warnf(ctx, "Knowledge base ID mismatch: %s != %s", chunk.KnowledgeBaseID, kbID)
 			continue
 		}
-		indexInfo = append(indexInfo, &types.IndexInfo{
-			Content:         chunk.Content,
-			SourceID:        chunk.ID,
-			SourceType:      types.ChunkSourceType,
-			ChunkID:         chunk.ID,
-			KnowledgeID:     chunk.KnowledgeID,
-			KnowledgeBaseID: chunk.KnowledgeBaseID,
-			IsEnabled:       true,
-		})
+		indexInfo = append(indexInfo, documentChunkIndexInfo(chunk, chunk.Content, chunk.ID))
 		ids = append(ids, chunk.ID)
 	}
 
@@ -4003,6 +4006,9 @@ func (s *knowledgeService) UpdateImageInfo(
 		logger.Errorf(ctx, "Failed to get chunk: %v", err)
 		return err
 	}
+	if chunk.KnowledgeID != knowledgeID {
+		return errors.New("chunk does not belong to knowledge")
+	}
 	chunk.ImageInfo = imageInfo
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	chunkChildren, err := s.chunkService.ListChunkByParentID(ctx, tenantID, chunkID)
@@ -4024,6 +4030,8 @@ func (s *knowledgeService) UpdateImageInfo(
 	hasCaptionChunk := false
 
 	for i, child := range chunkChildren {
+		tagChanged := child.TagID != chunk.TagID
+		child.TagID = chunk.TagID
 		// Skip chunks that are not image types
 		var cImageInfo []*types.ImageInfo
 		err = json.Unmarshal([]byte(child.ImageInfo), &cImageInfo)
@@ -4045,17 +4053,23 @@ func (s *knowledgeService) UpdateImageInfo(
 		case types.ChunkTypeImageCaption:
 			hasCaptionChunk = true
 			// Update caption if it has changed
-			if image.Caption != cImageInfo[0].Caption {
+			captionChanged := image.Caption != cImageInfo[0].Caption
+			if captionChanged {
 				child.Content = image.Caption
 				child.ImageInfo = imageInfo
+			}
+			if captionChanged || tagChanged {
 				updateChunk = append(updateChunk, chunkChildren[i])
 			}
 		case types.ChunkTypeImageOCR:
 			hasOCRChunk = true
 			// Update OCR if it has changed
-			if image.OCRText != cImageInfo[0].OCRText {
+			ocrChanged := image.OCRText != cImageInfo[0].OCRText
+			if ocrChanged {
 				child.Content = image.OCRText
 				child.ImageInfo = imageInfo
+			}
+			if ocrChanged || tagChanged {
 				updateChunk = append(updateChunk, chunkChildren[i])
 			}
 		}
@@ -4068,9 +4082,11 @@ func (s *knowledgeService) UpdateImageInfo(
 			TenantID:        tenantID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
+			TagID:           chunk.TagID,
 			Content:         image.Caption,
 			ChunkType:       types.ChunkTypeImageCaption,
 			ParentChunkID:   chunk.ID,
+			IsEnabled:       true,
 			ImageInfo:       imageInfo,
 		}
 		addChunk = append(addChunk, captionChunk)
@@ -4084,9 +4100,11 @@ func (s *knowledgeService) UpdateImageInfo(
 			TenantID:        tenantID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
+			TagID:           chunk.TagID,
 			Content:         image.OCRText,
 			ChunkType:       types.ChunkTypeImageOCR,
 			ParentChunkID:   chunk.ID,
+			IsEnabled:       true,
 			ImageInfo:       imageInfo,
 		}
 		addChunk = append(addChunk, ocrChunk)
