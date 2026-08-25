@@ -2349,10 +2349,6 @@ async function createNewSession(value: string): Promise<void> {
                 @drop="handleFolderDrop($event, tag.id)"
                 @dragend="resetFolderDrag"
               >
-                <span v-if="canEdit" class="folder-drag-handle" :class="{ disabled: !canReorderFolders }" aria-hidden="true">
-                  <t-icon name="move" size="14px" />
-                </span>
-                <span v-else class="folder-drag-placeholder" />
                 <button
                   v-if="!tag.is_public && !tag.parent_id && hasFolderChildren(tag.id)"
                   type="button"
@@ -2446,6 +2442,9 @@ async function createNewSession(value: string): Promise<void> {
                       </template>
                     </t-popup>
                   </div>
+                  <span v-if="canEdit" class="folder-drag-handle" :class="{ disabled: !canReorderFolders }" aria-hidden="true">
+                    <t-icon name="move" size="14px" />
+                  </span>
                 </div>
               </div>
               <div
@@ -3688,10 +3687,6 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .folder-drag-handle {
-    position: absolute;
-    right: 54px;
-    z-index: 1;
-    flex: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
