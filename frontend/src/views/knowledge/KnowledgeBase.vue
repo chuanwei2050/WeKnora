@@ -3284,7 +3284,6 @@ async function createNewSession(value: string): Promise<void> {
         display: flex;
         align-items: center;
         justify-content: center;
-        color: var(--td-text-color-secondary);
         transition: all 0.2s ease;
 
         .t-icon {
@@ -3600,7 +3599,7 @@ async function createNewSession(value: string): Promise<void> {
 
   .folder-row {
     min-height: 36px;
-    gap: 7px;
+    gap: 5px;
     padding: 4px 6px;
 
     &.dragging {
@@ -3697,6 +3696,7 @@ async function createNewSession(value: string): Promise<void> {
 
     .public-folder-add {
       margin-left: auto;
+      padding: 0;
     }
   }
 
