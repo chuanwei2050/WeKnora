@@ -30,6 +30,13 @@ type AgentConfig struct {
 	HistoryTurns            int           `json:"history_turns"`                        // Number of history turns to keep in context
 	SearchTargets           SearchTargets `json:"-"`                                    // Pre-computed unified search targets (runtime only)
 	RerankTopK              int           `json:"rerank_top_k"`                         // Maximum number of results retained after reranking
+	EmbeddingTopK           int           `json:"embedding_top_k"`
+	VectorRecallTopK        int           `json:"vector_recall_top_k"`
+	KeywordRecallTopK       int           `json:"keyword_recall_top_k"`
+	RRFVectorWeight         float64       `json:"rrf_vector_weight"`
+	RerankCandidateTopK     int           `json:"rerank_candidate_top_k"`
+	VectorThreshold         float64       `json:"vector_threshold"`
+	KeywordThreshold        float64       `json:"keyword_threshold"`
 	// MCP service selection
 	MCPSelectionMode string   `json:"mcp_selection_mode"` // MCP selection mode: "all", "selected", "none"
 	MCPServices      []string `json:"mcp_services"`       // Selected MCP service IDs (when mode is "selected")

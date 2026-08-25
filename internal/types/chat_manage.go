@@ -14,18 +14,22 @@ type PipelineRequest struct {
 	MaxRounds    int    `json:"max_rounds"`
 
 	// Knowledge base retrieval parameters
-	KnowledgeBaseIDs []string      `json:"knowledge_base_ids"`
-	KnowledgeIDs     []string      `json:"knowledge_ids,omitempty"`
-	SearchTargets    SearchTargets `json:"-"`
-	VectorThreshold  float64       `json:"vector_threshold"`
-	KeywordThreshold float64       `json:"keyword_threshold"`
-	EmbeddingTopK    int           `json:"embedding_top_k"`
-	VectorDatabase   string        `json:"vector_database"`
+	KnowledgeBaseIDs  []string      `json:"knowledge_base_ids"`
+	KnowledgeIDs      []string      `json:"knowledge_ids,omitempty"`
+	SearchTargets     SearchTargets `json:"-"`
+	VectorThreshold   float64       `json:"vector_threshold"`
+	KeywordThreshold  float64       `json:"keyword_threshold"`
+	EmbeddingTopK     int           `json:"embedding_top_k"`
+	VectorRecallTopK  int           `json:"vector_recall_top_k"`
+	KeywordRecallTopK int           `json:"keyword_recall_top_k"`
+	RRFVectorWeight   float64       `json:"rrf_vector_weight"`
+	VectorDatabase    string        `json:"vector_database"`
 
 	// Rerank parameters
-	RerankModelID   string  `json:"rerank_model_id"`
-	RerankTopK      int     `json:"rerank_top_k"`
-	RerankThreshold float64 `json:"rerank_threshold"`
+	RerankModelID       string  `json:"rerank_model_id"`
+	RerankTopK          int     `json:"rerank_top_k"`
+	RerankCandidateTopK int     `json:"rerank_candidate_top_k"`
+	RerankThreshold     float64 `json:"rerank_threshold"`
 
 	// Chat model parameters
 	ChatModelID      string           `json:"chat_model_id"`
@@ -212,9 +216,13 @@ func (c *ChatManage) Clone() *ChatManage {
 			VectorThreshold:          c.VectorThreshold,
 			KeywordThreshold:         c.KeywordThreshold,
 			EmbeddingTopK:            c.EmbeddingTopK,
+			VectorRecallTopK:         c.VectorRecallTopK,
+			KeywordRecallTopK:        c.KeywordRecallTopK,
+			RRFVectorWeight:          c.RRFVectorWeight,
 			VectorDatabase:           c.VectorDatabase,
 			RerankModelID:            c.RerankModelID,
 			RerankTopK:               c.RerankTopK,
+			RerankCandidateTopK:      c.RerankCandidateTopK,
 			RerankThreshold:          c.RerankThreshold,
 			ChatModelID:              c.ChatModelID,
 			SummaryConfig:            c.SummaryConfig,

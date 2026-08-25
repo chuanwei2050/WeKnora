@@ -130,10 +130,21 @@ type KnowledgeSearchTool struct {
 	rerankModel          rerank.Reranker
 	chatModel            chat.Chat      // Optional chat model for LLM-based reranking
 	config               *config.Config // Global config for fallback values
+	retrievalConfig      *types.AgentConfig
 	rerankTopK           int
 
 	seenMu     sync.Mutex
 	seenChunks map[string]bool
+}
+
+type knowledgeSearchParams struct {
+	topK              int
+	vectorRecallTopK  int
+	keywordRecallTopK int
+	rrfVectorWeight   float64
+	vectorThreshold   float64
+	keywordThreshold  float64
+	minScore          float64
 }
 
 // NewKnowledgeSearchTool creates a new knowledge search tool
@@ -145,6 +156,7 @@ func NewKnowledgeSearchTool(
 	rerankModel rerank.Reranker,
 	chatModel chat.Chat,
 	cfg *config.Config,
+	retrievalConfig *types.AgentConfig,
 	rerankTopK int,
 ) *KnowledgeSearchTool {
 	if rerankTopK <= 0 {
@@ -159,6 +171,7 @@ func NewKnowledgeSearchTool(
 		rerankModel:          rerankModel,
 		chatModel:            chatModel,
 		config:               cfg,
+		retrievalConfig:      retrievalConfig,
 		rerankTopK:           rerankTopK,
 		seenChunks:           make(map[string]bool),
 	}
@@ -228,63 +241,21 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Queries: %v", queries)
 
-	// Get search parameters from tenant conversation config, fallback to global config
-	var topK int
-	var vectorThreshold, keywordThreshold, minScore float64
-
-	// Try to get from tenant conversation config
-	if tenantVal := ctx.Value(types.TenantInfoContextKey); tenantVal != nil {
-		if tenant, ok := tenantVal.(*types.Tenant); ok && tenant != nil && tenant.ConversationConfig != nil {
-			cc := tenant.ConversationConfig
-			if cc.EmbeddingTopK > 0 {
-				topK = cc.EmbeddingTopK
-			}
-			if cc.VectorThreshold > 0 {
-				vectorThreshold = cc.VectorThreshold
-			}
-			if cc.KeywordThreshold > 0 {
-				keywordThreshold = cc.KeywordThreshold
-			}
-			// minScore is not in ConversationConfig, use default or config
-			minScore = 0.3
-		}
-	}
-
-	// Fallback to global config if not set
-	if topK == 0 && t.config != nil {
-		topK = t.config.Conversation.EmbeddingTopK
-	}
-	if vectorThreshold == 0 && t.config != nil {
-		vectorThreshold = t.config.Conversation.VectorThreshold
-	}
-	if keywordThreshold == 0 && t.config != nil {
-		keywordThreshold = t.config.Conversation.KeywordThreshold
-	}
-
-	// Final fallback to hardcoded defaults if config is not available
-	if topK == 0 {
-		topK = 5
-	}
-	if vectorThreshold == 0 {
-		vectorThreshold = 0.6
-	}
-	if keywordThreshold == 0 {
-		keywordThreshold = 0.5
-	}
-	if minScore == 0 {
-		minScore = 0.3
-	}
-	if routedTopK, ok := ctx.Value(types.RetrievalTopKContextKey).(int); ok && routedTopK > 0 && routedTopK < topK {
-		topK = routedTopK
+	params := t.resolveSearchParams(ctx)
+	if routedTopK, ok := ctx.Value(types.RetrievalTopKContextKey).(int); ok && routedTopK > 0 && routedTopK < params.topK {
+		params.topK = routedTopK
 	}
 
 	logger.Infof(
 		ctx,
-		"[Tool][KnowledgeSearch] Search params: top_k=%d, vector_threshold=%.2f, keyword_threshold=%.2f, min_score=%.2f",
-		topK,
-		vectorThreshold,
-		keywordThreshold,
-		minScore,
+		"[Tool][KnowledgeSearch] Search params: fusion_top_k=%d, vector_recall_top_k=%d, keyword_recall_top_k=%d, rrf_vector_weight=%.2f, vector_threshold=%.2f, keyword_threshold=%.2f, min_score=%.2f",
+		params.topK,
+		params.vectorRecallTopK,
+		params.keywordRecallTopK,
+		params.rrfVectorWeight,
+		params.vectorThreshold,
+		params.keywordThreshold,
+		params.minScore,
 	)
 
 	// Execute concurrent search using pre-computed search targets
@@ -293,7 +264,8 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	kbTypeMap := t.getKnowledgeBaseTypes(ctx, kbIDs)
 
 	allResults := t.concurrentSearchByTargets(ctx, queries, searchTargets,
-		topK, vectorThreshold, keywordThreshold, kbTypeMap)
+		params.topK, params.vectorRecallTopK, params.keywordRecallTopK, params.rrfVectorWeight,
+		params.vectorThreshold, params.keywordThreshold, kbTypeMap)
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Concurrent search completed: %d raw results", len(allResults))
 
 	// Note: HybridSearch now uses RRF (Reciprocal Rank Fusion) which produces normalized scores
@@ -302,6 +274,13 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 
 	// Deduplicate before reranking to reduce processing overhead
 	deduplicatedBeforeRerank := t.deduplicateResults(allResults)
+
+	if t.retrievalConfig != nil {
+		limit := t.retrievalConfig.RerankCandidateTopK
+		if limit > 0 && len(deduplicatedBeforeRerank) > limit {
+			deduplicatedBeforeRerank = deduplicatedBeforeRerank[:limit]
+		}
+	}
 
 	// Apply ReRank if model is configured
 	// Prefer rerankModel; fall back to chatModel (LLM-based reranking) if unavailable
@@ -410,6 +389,61 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	return result, nil
 }
 
+// resolveSearchParams keeps per-agent retrieval settings authoritative while
+// retaining tenant/global fallbacks for legacy runtime configurations.
+func (t *KnowledgeSearchTool) resolveSearchParams(ctx context.Context) knowledgeSearchParams {
+	params := knowledgeSearchParams{minScore: 0.3, rrfVectorWeight: 0.7}
+	if t.config != nil {
+		params.topK = t.config.Conversation.EmbeddingTopK
+		params.vectorThreshold = t.config.Conversation.VectorThreshold
+		params.keywordThreshold = t.config.Conversation.KeywordThreshold
+	}
+	if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil && tenant.ConversationConfig != nil {
+		cc := tenant.ConversationConfig
+		if cc.EmbeddingTopK > 0 {
+			params.topK = cc.EmbeddingTopK
+		}
+		if cc.VectorThreshold > 0 {
+			params.vectorThreshold = cc.VectorThreshold
+		}
+		if cc.KeywordThreshold > 0 {
+			params.keywordThreshold = cc.KeywordThreshold
+		}
+	}
+	if rc := t.retrievalConfig; rc != nil {
+		if rc.EmbeddingTopK > 0 {
+			params.topK = rc.EmbeddingTopK
+		}
+		if rc.VectorRecallTopK > 0 {
+			params.vectorRecallTopK = rc.VectorRecallTopK
+		}
+		if rc.KeywordRecallTopK > 0 {
+			params.keywordRecallTopK = rc.KeywordRecallTopK
+		}
+		if rc.RRFVectorWeight > 0 {
+			params.rrfVectorWeight = rc.RRFVectorWeight
+		}
+		params.vectorThreshold = rc.VectorThreshold
+		params.keywordThreshold = rc.KeywordThreshold
+	}
+	if params.topK <= 0 {
+		params.topK = 30
+	}
+	if params.vectorRecallTopK <= 0 {
+		params.vectorRecallTopK = 50
+	}
+	if params.keywordRecallTopK <= 0 {
+		params.keywordRecallTopK = 50
+	}
+	if t.retrievalConfig == nil && params.vectorThreshold == 0 {
+		params.vectorThreshold = 0.6
+	}
+	if t.retrievalConfig == nil && params.keywordThreshold == 0 {
+		params.keywordThreshold = 0.5
+	}
+	return params
+}
+
 // getKnowledgeBaseTypes fetches knowledge base types for the given IDs
 func (t *KnowledgeSearchTool) getKnowledgeBaseTypes(ctx context.Context, kbIDs []string) map[string]string {
 	kbTypeMap := make(map[string]string, len(kbIDs))
@@ -442,8 +476,8 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 	ctx context.Context,
 	queries []string,
 	searchTargets types.SearchTargets,
-	topK int,
-	vectorThreshold, keywordThreshold float64,
+	topK, vectorRecallTopK, keywordRecallTopK int,
+	rrfVectorWeight, vectorThreshold, keywordThreshold float64,
 	kbTypeMap map[string]string,
 ) []*searchResultWithMeta {
 	// Batch-fetch KB records for embedding model grouping
@@ -543,13 +577,16 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 					go func() {
 						defer innerWg.Done()
 						searchParams := types.SearchParams{
-							QueryText:        q,
-							QueryEmbedding:   queryEmbedding,
-							KnowledgeBaseIDs: fullKBIDs,
-							TagIDs:           fullTagIDs,
-							MatchCount:       topK,
-							VectorThreshold:  vectorThreshold,
-							KeywordThreshold: keywordThreshold,
+							QueryText:         q,
+							QueryEmbedding:    queryEmbedding,
+							KnowledgeBaseIDs:  fullKBIDs,
+							TagIDs:            fullTagIDs,
+							MatchCount:        topK,
+							VectorMatchCount:  vectorRecallTopK,
+							KeywordMatchCount: keywordRecallTopK,
+							RRFVectorWeight:   rrfVectorWeight,
+							VectorThreshold:   vectorThreshold,
+							KeywordThreshold:  keywordThreshold,
 						}
 						kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], searchParams)
 						if err != nil {
@@ -577,13 +614,16 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 					go func() {
 						defer innerWg.Done()
 						searchParams := types.SearchParams{
-							QueryText:        q,
-							QueryEmbedding:   queryEmbedding,
-							MatchCount:       topK,
-							VectorThreshold:  vectorThreshold,
-							KeywordThreshold: keywordThreshold,
-							KnowledgeIDs:     st.KnowledgeIDs,
-							TagIDs:           st.TagIDs,
+							QueryText:         q,
+							QueryEmbedding:    queryEmbedding,
+							MatchCount:        topK,
+							VectorMatchCount:  vectorRecallTopK,
+							KeywordMatchCount: keywordRecallTopK,
+							RRFVectorWeight:   rrfVectorWeight,
+							VectorThreshold:   vectorThreshold,
+							KeywordThreshold:  keywordThreshold,
+							KnowledgeIDs:      st.KnowledgeIDs,
+							TagIDs:            st.TagIDs,
 						}
 						kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, st.KnowledgeBaseID, searchParams)
 						if err != nil {
@@ -1010,6 +1050,15 @@ func (t *KnowledgeSearchTool) rerankWithModel(
 // deduplicateResults removes duplicate chunks, keeping the highest score
 // Uses multiple keys (ID, parent chunk ID, knowledge+index) and content signature for deduplication
 func (t *KnowledgeSearchTool) deduplicateResults(results []*searchResultWithMeta) []*searchResultWithMeta {
+	sort.SliceStable(results, func(i, j int) bool {
+		if results[i].Score != results[j].Score {
+			return results[i].Score > results[j].Score
+		}
+		if results[i].ID != results[j].ID {
+			return results[i].ID < results[j].ID
+		}
+		return results[i].KnowledgeID < results[j].KnowledgeID
+	})
 	seen := make(map[string]bool)
 	contentSig := make(map[string]bool)
 	uniqueResults := make([]*searchResultWithMeta, 0)
@@ -1053,27 +1102,7 @@ func (t *KnowledgeSearchTool) deduplicateResults(results []*searchResultWithMeta
 		uniqueResults = append(uniqueResults, r)
 	}
 
-	// If we have duplicates by ID but different scores, keep the highest score
-	// This handles cases where the same chunk appears multiple times with different scores
-	seenByID := make(map[string]*searchResultWithMeta)
-	for _, r := range uniqueResults {
-		if existing, ok := seenByID[r.ID]; ok {
-			// Keep the result with higher score
-			if r.Score > existing.Score {
-				seenByID[r.ID] = r
-			}
-		} else {
-			seenByID[r.ID] = r
-		}
-	}
-
-	// Convert back to slice
-	deduplicated := make([]*searchResultWithMeta, 0, len(seenByID))
-	for _, r := range seenByID {
-		deduplicated = append(deduplicated, r)
-	}
-
-	return deduplicated
+	return uniqueResults
 }
 
 // buildContentSignature creates a normalized signature for content to detect near-duplicates

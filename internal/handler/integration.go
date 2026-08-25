@@ -580,7 +580,13 @@ func (h *IntegrationHandler) ListKnowledgeBaseFolders(c *gin.Context) {
 			return
 		}
 		for _, folder := range folders {
-			data = append(data, gin.H{"knowledge_base_id": knowledgeBaseID, "id": folder.ID, "name": folder.Name, "sort_order": folder.SortOrder})
+			data = append(data, gin.H{
+				"knowledge_base_id": knowledgeBaseID,
+				"id":                folder.ID,
+				"name":              folder.Name,
+				"parent_id":         folder.ParentID,
+				"sort_order":        folder.SortOrder,
+			})
 		}
 	}
 	h.service.AuditResources(c.Request.Context(), principal, "api.knowledge_base.folders", "allowed", "", knowledgeBaseIDs)

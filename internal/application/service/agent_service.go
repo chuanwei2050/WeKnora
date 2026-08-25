@@ -524,6 +524,7 @@ func (s *agentService) registerTools(
 				rerankModel,
 				chatModel,
 				s.cfg,
+				config,
 				config.RerankTopK,
 			)
 		case tools.ToolGrepChunks:

@@ -29,7 +29,11 @@ func classifyRetrievalResults(ctx context.Context, retrieveResults []*types.Retr
 }
 
 // fuseOrDeduplicate either fuses vector+keyword results via RRF or deduplicates vector-only results.
-func fuseOrDeduplicate(ctx context.Context, vectorResults, keywordResults []*types.IndexWithScore) []*types.IndexWithScore {
+func fuseOrDeduplicate(
+	ctx context.Context,
+	vectorResults, keywordResults []*types.IndexWithScore,
+	vectorWeight float64,
+) []*types.IndexWithScore {
 	if len(keywordResults) == 0 {
 		// Vector-only: keep original embedding scores (important for FAQ)
 		result := deduplicateByScore(vectorResults)
@@ -43,7 +47,7 @@ func fuseOrDeduplicate(ctx context.Context, vectorResults, keywordResults []*typ
 		return result
 	}
 	// Hybrid: use RRF fusion to merge vector + keyword results
-	result := fuseWithRRF(ctx, vectorResults, keywordResults)
+	result := fuseWithRRF(ctx, vectorResults, keywordResults, vectorWeight)
 	logger.Infof(ctx, "Result count after RRF fusion: %d", len(result))
 	return result
 }
@@ -79,10 +83,16 @@ func deduplicateByScore(results []*types.IndexWithScore) []*types.IndexWithScore
 // fuseWithRRF merges vector and keyword retrieval results using Reciprocal Rank Fusion.
 // RRF score = vectorWeight/(k+vectorRank) + keywordWeight/(k+keywordRank), with k=60.
 // The merged results are sorted by RRF score descending.
-func fuseWithRRF(ctx context.Context, vectorResults, keywordResults []*types.IndexWithScore) []*types.IndexWithScore {
+func fuseWithRRF(
+	ctx context.Context,
+	vectorResults, keywordResults []*types.IndexWithScore,
+	vectorWeight float64,
+) []*types.IndexWithScore {
 	const rrfK = 60
-	const vectorWeight = 0.7
-	const keywordWeight = 0.3
+	if vectorWeight <= 0 || vectorWeight >= 1 {
+		vectorWeight = 0.7
+	}
+	keywordWeight := 1 - vectorWeight
 
 	// Build rank maps for each retriever (already sorted by score from retriever)
 	vectorRanks := make(map[string]int, len(vectorResults))
@@ -121,8 +131,11 @@ func fuseWithRRF(ctx context.Context, vectorResults, keywordResults []*types.Ind
 		if rank, ok := keywordRanks[chunkID]; ok {
 			rrfScore += keywordWeight / float64(rrfK+rank)
 		}
-		info.Score = rrfScore
-		result = append(result, info)
+		// Keep the retrievers' original scores intact. Their ranked lists are
+		// reused below to preserve strong single-channel candidates for rerank.
+		fusedInfo := *info
+		fusedInfo.Score = rrfScore
+		result = append(result, &fusedInfo)
 	}
 	slices.SortFunc(result, sortByScoreDesc)
 
@@ -135,6 +148,47 @@ func fuseWithRRF(ctx context.Context, vectorResults, keywordResults []*types.Ind
 		kRank, kOk := keywordRanks[chunk.ChunkID]
 		logger.Debugf(ctx, "RRF rank %d: chunk_id=%s, rrf_score=%.6f, vector_rank=%v(%v), keyword_rank=%v(%v)",
 			i, chunk.ChunkID, chunk.Score, vRank, vOk, kRank, kOk)
+	}
+
+	return result
+}
+
+// preserveRetrieverLeaders keeps the strongest candidates from both retrieval
+// channels near the front of the list so the downstream reranker can evaluate
+// them. RRF alone can otherwise bury a high-ranked single-channel match behind
+// weaker chunks that happen to occur in both channels.
+func preserveRetrieverLeaders(
+	fused, vectorResults, keywordResults []*types.IndexWithScore,
+	limit int,
+) []*types.IndexWithScore {
+	if limit <= 0 || len(fused) <= limit {
+		return fused
+	}
+
+	leadersPerChannel := min(5, max(1, limit/3))
+	result := make([]*types.IndexWithScore, 0, limit)
+	seen := make(map[string]struct{}, limit)
+	appendUnique := func(candidate *types.IndexWithScore) {
+		if candidate == nil || len(result) >= limit {
+			return
+		}
+		if _, exists := seen[candidate.ChunkID]; exists {
+			return
+		}
+		seen[candidate.ChunkID] = struct{}{}
+		result = append(result, candidate)
+	}
+
+	for i := 0; i < leadersPerChannel; i++ {
+		if i < len(vectorResults) {
+			appendUnique(vectorResults[i])
+		}
+		if i < len(keywordResults) {
+			appendUnique(keywordResults[i])
+		}
+	}
+	for _, candidate := range fused {
+		appendUnique(candidate)
 	}
 
 	return result

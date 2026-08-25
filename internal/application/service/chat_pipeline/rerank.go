@@ -200,6 +200,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		reranked = append(reranked, sr)
 	}
 	final := applyMMR(ctx, reranked, chatManage, min(len(reranked), max(1, chatManage.RerankTopK)), 0.7)
+	final = preserveStrongKeywordResults(final, chatManage.SearchResult, chatManage.RerankTopK)
 	chatManage.RerankResult = final
 
 	// Log composite top scores and MMR selection summary
@@ -226,6 +227,51 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	return next()
 }
 
+// preserveStrongKeywordResults prevents the semantic reranker from completely
+// vetoing high-confidence lexical matches. Keyword scores are only compared
+// with other keyword scores from the same retrieval request.
+func preserveStrongKeywordResults(
+	reranked, candidates []*types.SearchResult,
+	limit int,
+) []*types.SearchResult {
+	if limit <= 0 || len(candidates) == 0 {
+		return reranked
+	}
+	maxKeywordScore := 0.0
+	for _, candidate := range candidates {
+		if candidate.MatchType == types.MatchTypeKeywords && candidate.Score > maxKeywordScore {
+			maxKeywordScore = candidate.Score
+		}
+	}
+	if maxKeywordScore <= 0 {
+		return reranked
+	}
+
+	seen := make(map[string]struct{}, len(reranked))
+	for _, result := range reranked {
+		seen[result.ID] = struct{}{}
+	}
+	strongCutoff := maxKeywordScore * 0.9
+	for _, candidate := range candidates {
+		if candidate.MatchType != types.MatchTypeKeywords || candidate.Score < strongCutoff {
+			continue
+		}
+		if _, exists := seen[candidate.ID]; exists {
+			continue
+		}
+		candidate.Metadata = ensureMetadata(candidate.Metadata)
+		candidate.Metadata["base_score"] = fmt.Sprintf("%.4f", candidate.Score)
+		candidate.Metadata["keyword_preserved"] = "true"
+		candidate.Score = 1.0
+		if len(reranked) >= limit {
+			reranked = reranked[:limit-1]
+		}
+		reranked = append(reranked, candidate)
+		seen[candidate.ID] = struct{}{}
+	}
+	return reranked
+}
+
 // prepareRerankCandidates removes duplicate chunks/content before model inference
 // and keeps the candidate count within the configured retrieval budget.
 func prepareRerankCandidates(results []*types.SearchResult, limit int) []*types.SearchResult {
@@ -240,6 +286,9 @@ func adaptiveRerankCandidateLimit(chatManage *types.ChatManage) int {
 	configuredMax := chatManage.EmbeddingTopK
 	if configuredMax <= 0 {
 		configuredMax = 30
+	}
+	if chatManage.RerankCandidateTopK > 0 {
+		return min(configuredMax, chatManage.RerankCandidateTopK)
 	}
 
 	target := 25

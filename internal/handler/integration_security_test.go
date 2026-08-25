@@ -215,10 +215,14 @@ func TestIntegrationFoldersByIDsRequiresBothScopes(t *testing.T) {
 }
 
 func TestIntegrationFoldersByIDsReturnsStableOrdinaryFolderDTOAndAudits(t *testing.T) {
+	parentID := "folder-1"
 	handler, db := newFolderEndpointHandler(t, map[string]*types.KnowledgeBase{
 		"kb-1": {ID: "kb-1", TenantID: 1},
 		"kb-2": {ID: "kb-2", TenantID: 1},
-	}, []*types.KnowledgeTag{{ID: "folder-1", Name: "普通文件夹", SortOrder: 3}})
+	}, []*types.KnowledgeTag{
+		{ID: "folder-1", Name: "普通文件夹", SortOrder: 3},
+		{ID: "folder-2", Name: "二级文件夹", ParentID: &parentID, SortOrder: 4},
+	})
 	principal := &integrationauth.Principal{ClientID: "client-1", TenantID: 1, KnowledgeBaseIDs: []string{"kb-1", "kb-2"}, Scopes: []string{"kb:list", "knowledge:read"}}
 	ctx, recorder := folderEndpointContext(http.MethodGet, "/api/integration/v1/knowledge-bases/folders", "kb-1,kb-2", principal)
 
@@ -232,8 +236,10 @@ func TestIntegrationFoldersByIDsReturnsStableOrdinaryFolderDTOAndAudits(t *testi
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	require.True(t, response.Success)
 	require.Equal(t, []map[string]any{
-		{"knowledge_base_id": "kb-1", "id": "folder-1", "name": "普通文件夹", "sort_order": float64(3)},
-		{"knowledge_base_id": "kb-2", "id": "folder-1", "name": "普通文件夹", "sort_order": float64(3)},
+		{"knowledge_base_id": "kb-1", "id": "folder-1", "name": "普通文件夹", "parent_id": nil, "sort_order": float64(3)},
+		{"knowledge_base_id": "kb-1", "id": "folder-2", "name": "二级文件夹", "parent_id": "folder-1", "sort_order": float64(4)},
+		{"knowledge_base_id": "kb-2", "id": "folder-1", "name": "普通文件夹", "parent_id": nil, "sort_order": float64(3)},
+		{"knowledge_base_id": "kb-2", "id": "folder-2", "name": "二级文件夹", "parent_id": "folder-1", "sort_order": float64(4)},
 	}, response.Data)
 	require.NotContains(t, recorder.Body.String(), "is_public")
 

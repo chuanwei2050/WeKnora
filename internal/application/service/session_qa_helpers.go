@@ -125,14 +125,22 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	if customAgent.Config.EmbeddingTopK > 0 {
 		cm.EmbeddingTopK = customAgent.Config.EmbeddingTopK
 	}
-	if customAgent.Config.KeywordThreshold > 0 {
-		cm.KeywordThreshold = customAgent.Config.KeywordThreshold
+	if customAgent.Config.VectorRecallTopK > 0 {
+		cm.VectorRecallTopK = customAgent.Config.VectorRecallTopK
 	}
-	if customAgent.Config.VectorThreshold > 0 {
-		cm.VectorThreshold = customAgent.Config.VectorThreshold
+	if customAgent.Config.KeywordRecallTopK > 0 {
+		cm.KeywordRecallTopK = customAgent.Config.KeywordRecallTopK
 	}
+	if customAgent.Config.RRFVectorWeight > 0 && customAgent.Config.RRFVectorWeight < 1 {
+		cm.RRFVectorWeight = customAgent.Config.RRFVectorWeight
+	}
+	cm.KeywordThreshold = customAgent.Config.KeywordThreshold
+	cm.VectorThreshold = customAgent.Config.VectorThreshold
 	if customAgent.Config.RerankTopK > 0 {
 		cm.RerankTopK = customAgent.Config.RerankTopK
+	}
+	if customAgent.Config.RerankCandidateTopK > 0 {
+		cm.RerankCandidateTopK = customAgent.Config.RerankCandidateTopK
 	}
 	cm.RerankThreshold = customAgent.Config.RerankThreshold
 

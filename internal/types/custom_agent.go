@@ -206,12 +206,19 @@ type CustomAgentConfig struct {
 	// ===== Retrieval Strategy Settings (for both modes) =====
 	// Embedding/Vector retrieval top K
 	EmbeddingTopK int `yaml:"embedding_top_k" json:"embedding_top_k"`
+	// Per-channel retrieval budgets before fusion
+	VectorRecallTopK  int `yaml:"vector_recall_top_k" json:"vector_recall_top_k"`
+	KeywordRecallTopK int `yaml:"keyword_recall_top_k" json:"keyword_recall_top_k"`
+	// Vector share of RRF; keyword share is 1 minus this value
+	RRFVectorWeight float64 `yaml:"rrf_vector_weight" json:"rrf_vector_weight"`
 	// Keyword retrieval threshold
 	KeywordThreshold float64 `yaml:"keyword_threshold" json:"keyword_threshold"`
 	// Vector retrieval threshold
 	VectorThreshold float64 `yaml:"vector_threshold" json:"vector_threshold"`
 	// Rerank top K
 	RerankTopK int `yaml:"rerank_top_k" json:"rerank_top_k"`
+	// Maximum number of fused candidates sent to rerank
+	RerankCandidateTopK int `yaml:"rerank_candidate_top_k" json:"rerank_candidate_top_k"`
 	// Rerank threshold
 	RerankThreshold float64 `yaml:"rerank_threshold" json:"rerank_threshold"`
 
@@ -336,7 +343,16 @@ func (a *CustomAgent) EnsureDefaults() {
 	}
 	// Retrieval strategy defaults
 	if a.Config.EmbeddingTopK == 0 {
-		a.Config.EmbeddingTopK = 10
+		a.Config.EmbeddingTopK = 30
+	}
+	if a.Config.VectorRecallTopK == 0 {
+		a.Config.VectorRecallTopK = 50
+	}
+	if a.Config.KeywordRecallTopK == 0 {
+		a.Config.KeywordRecallTopK = 50
+	}
+	if a.Config.RRFVectorWeight == 0 {
+		a.Config.RRFVectorWeight = 0.7
 	}
 	if a.Config.KeywordThreshold == 0 && !a.Config.keywordThresholdSet {
 		a.Config.KeywordThreshold = 0.3
@@ -345,6 +361,20 @@ func (a *CustomAgent) EnsureDefaults() {
 		a.Config.VectorThreshold = 0.5
 	}
 	if a.Config.RerankTopK == 0 {
+		a.Config.RerankTopK = 5
+	}
+	if a.Config.RerankCandidateTopK == 0 {
+		a.Config.RerankCandidateTopK = min(20, a.Config.EmbeddingTopK)
+	}
+	usesPreviousRetrievalDefaults := a.Config.EmbeddingTopK == 10 &&
+		a.Config.VectorRecallTopK == 50 &&
+		a.Config.KeywordRecallTopK == 50 &&
+		a.Config.RRFVectorWeight == 0.7 &&
+		a.Config.RerankCandidateTopK == 10 &&
+		(a.Config.RerankTopK == 5 || a.Config.RerankTopK == 10)
+	if usesPreviousRetrievalDefaults {
+		a.Config.EmbeddingTopK = 30
+		a.Config.RerankCandidateTopK = 20
 		a.Config.RerankTopK = 5
 	}
 	// Advanced settings defaults
@@ -365,6 +395,24 @@ func (a *CustomAgent) EnsureDefaults() {
 // Validate checks routing and verification settings at the persistence
 // boundary. New agents default these features on; legacy agents keep saved values.
 func (c CustomAgentConfig) Validate() error {
+	if c.EmbeddingTopK <= 0 || c.EmbeddingTopK > 50 {
+		return fmt.Errorf("embedding_top_k must be between 1 and 50")
+	}
+	if c.VectorRecallTopK <= 0 || c.VectorRecallTopK > 500 {
+		return fmt.Errorf("vector_recall_top_k must be between 1 and 500")
+	}
+	if c.KeywordRecallTopK <= 0 || c.KeywordRecallTopK > 500 {
+		return fmt.Errorf("keyword_recall_top_k must be between 1 and 500")
+	}
+	if c.RRFVectorWeight < 0.1 || c.RRFVectorWeight > 0.9 {
+		return fmt.Errorf("rrf_vector_weight must be between 0.1 and 0.9")
+	}
+	if c.RerankCandidateTopK <= 0 || c.RerankCandidateTopK > c.EmbeddingTopK {
+		return fmt.Errorf("rerank_candidate_top_k must be between 1 and embedding_top_k")
+	}
+	if c.RerankTopK <= 0 || c.RerankTopK > c.RerankCandidateTopK {
+		return fmt.Errorf("rerank_top_k must be between 1 and rerank_candidate_top_k")
+	}
 	if c.ComplexityRouting.Enabled {
 		if err := c.ComplexityRouting.Validate(); err != nil {
 			return fmt.Errorf("complexity_routing: %w", err)

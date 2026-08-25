@@ -1184,7 +1184,7 @@
                       </div>
                     </div>
 
-                    <!-- 向量召回TopK -->
+                    <!-- 融合候选数量（沿用 embedding_top_k 字段兼容旧配置） -->
                     <div class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.embeddingTopK') }}</label>
@@ -1192,6 +1192,39 @@
                       </div>
                       <div class="setting-control">
                         <t-input-number v-model="formData.config.embedding_top_k" :min="1" :max="50" theme="column" />
+                      </div>
+                    </div>
+
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.vectorRecallTopK') }}</label>
+                        <p class="desc">{{ $t('agentEditor.desc.vectorRecallTopK') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-input-number v-model="formData.config.vector_recall_top_k" :min="1" :max="500" theme="column" />
+                      </div>
+                    </div>
+
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.keywordRecallTopK') }}</label>
+                        <p class="desc">{{ $t('agentEditor.desc.keywordRecallTopK') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-input-number v-model="formData.config.keyword_recall_top_k" :min="1" :max="500" theme="column" />
+                      </div>
+                    </div>
+
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.rrfVectorWeight') }}</label>
+                        <p class="desc">{{ $t('agentEditor.desc.rrfVectorWeight') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <div class="slider-wrapper">
+                          <t-slider v-model="formData.config.rrf_vector_weight" :min="0.1" :max="0.9" :step="0.05" />
+                          <span class="slider-value">{{ formData.config.rrf_vector_weight?.toFixed(2) }} / {{ (1 - (formData.config.rrf_vector_weight ?? 0.7)).toFixed(2) }}</span>
+                        </div>
                       </div>
                     </div>
 
@@ -1226,11 +1259,32 @@
                     <!-- 重排TopK -->
                     <div class="setting-row">
                       <div class="setting-info">
+                        <label>{{ $t('agent.editor.rerankCandidateTopK') }}</label>
+                        <p class="desc">{{ $t('agentEditor.desc.rerankCandidateTopK') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-input-number
+                          v-model="formData.config.rerank_candidate_top_k"
+                          :min="1"
+                          :max="formData.config.embedding_top_k || 50"
+                          theme="column"
+                        />
+                      </div>
+                    </div>
+
+                    <!-- 重排TopK -->
+                    <div class="setting-row">
+                      <div class="setting-info">
                         <label>{{ $t('agent.editor.rerankTopK') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.rerankTopK') }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-input-number v-model="formData.config.rerank_top_k" :min="1" :max="20" theme="column" />
+                        <t-input-number
+                          v-model="formData.config.rerank_top_k"
+                          :min="1"
+                          :max="formData.config.rerank_candidate_top_k || 20"
+                          theme="column"
+                        />
                       </div>
                     </div>
 
@@ -1503,10 +1557,8 @@ const defaultRewritePromptUser = ref('');
 const defaultFallbackPrompt = ref('');
 const defaultFallbackResponse = ref('');
 // 默认检索参数
-const defaultEmbeddingTopK = ref(10);
 const defaultKeywordThreshold = ref(0.3);
 const defaultVectorThreshold = ref(0.5);
-const defaultRerankTopK = ref(5);
 const defaultRerankThreshold = ref(0.5);
 const defaultMaxCompletionTokens = ref(2048);
 const defaultTemperature = ref(0.7);
@@ -1920,10 +1972,14 @@ const defaultFormData = {
     multi_turn_enabled: false,
     history_turns: 5,
     // 检索策略设置
-    embedding_top_k: 10,
+    embedding_top_k: 30,
+    vector_recall_top_k: 50,
+    keyword_recall_top_k: 50,
+    rrf_vector_weight: 0.7,
     keyword_threshold: 0.3,
     vector_threshold: 0.5,
     rerank_top_k: 5,
+    rerank_candidate_top_k: 20,
     rerank_threshold: 0.5,
     // 高级设置（普通模式）
     enable_query_expansion: true,
@@ -2220,9 +2276,28 @@ watch(() => props.visible, async (val) => {
       if (!agentData.config) {
         agentData.config = JSON.parse(JSON.stringify(defaultFormData.config));
       }
+
+      const usesPreviousRetrievalDefaults = agentData.config.embedding_top_k === 10
+        && agentData.config.vector_recall_top_k === 50
+        && agentData.config.keyword_recall_top_k === 50
+        && agentData.config.rrf_vector_weight === 0.7
+        && agentData.config.rerank_candidate_top_k === 10
+        && (agentData.config.rerank_top_k === 5 || agentData.config.rerank_top_k === 10);
+      if (usesPreviousRetrievalDefaults) {
+        agentData.config.embedding_top_k = 30;
+        agentData.config.rerank_candidate_top_k = 20;
+        agentData.config.rerank_top_k = 5;
+      }
       
       // 补全可能缺失的字段
       agentData.config = { ...defaultFormData.config, ...agentData.config };
+      // 兼容旧智能体：新增检索字段在旧记录中可能被序列化为 0。
+      // 仅补齐无效零值，保留该智能体已经保存的合法配置。
+      if (agentData.config.vector_recall_top_k <= 0) agentData.config.vector_recall_top_k = 50;
+      if (agentData.config.keyword_recall_top_k <= 0) agentData.config.keyword_recall_top_k = 50;
+      if (agentData.config.rrf_vector_weight <= 0) agentData.config.rrf_vector_weight = 0.7;
+      if (agentData.config.rerank_candidate_top_k <= 0) agentData.config.rerank_candidate_top_k = Math.min(20, agentData.config.embedding_top_k);
+      if (agentData.config.rerank_top_k <= 0) agentData.config.rerank_top_k = Math.min(5, agentData.config.rerank_candidate_top_k);
       agentData.config.complexity_routing = {
         ...defaultFormData.config.complexity_routing,
         ...(agentData.config.complexity_routing || {}),
@@ -2276,10 +2351,8 @@ watch(() => props.visible, async (val) => {
       // 创建新智能体，使用系统默认值
       const newFormData = JSON.parse(JSON.stringify(defaultFormData));
       // 应用系统默认检索参数
-      newFormData.config.embedding_top_k = defaultEmbeddingTopK.value;
       newFormData.config.keyword_threshold = defaultKeywordThreshold.value;
       newFormData.config.vector_threshold = defaultVectorThreshold.value;
-      newFormData.config.rerank_top_k = defaultRerankTopK.value;
       newFormData.config.rerank_threshold = defaultRerankThreshold.value;
       newFormData.config.max_completion_tokens = defaultMaxCompletionTokens.value;
       newFormData.config.temperature = defaultTemperature.value;
@@ -2735,17 +2808,11 @@ const loadDependencies = async () => {
       defaultFallbackResponse.value = conversationConfig.data.fallback_response;
     }
     // 加载默认检索参数
-    if (conversationConfig.data?.embedding_top_k) {
-      defaultEmbeddingTopK.value = conversationConfig.data.embedding_top_k;
-    }
     if (conversationConfig.data?.keyword_threshold !== undefined) {
       defaultKeywordThreshold.value = conversationConfig.data.keyword_threshold;
     }
     if (conversationConfig.data?.vector_threshold !== undefined) {
       defaultVectorThreshold.value = conversationConfig.data.vector_threshold;
-    }
-    if (conversationConfig.data?.rerank_top_k) {
-      defaultRerankTopK.value = conversationConfig.data.rerank_top_k;
     }
     if (conversationConfig.data?.rerank_threshold !== undefined) {
       defaultRerankThreshold.value = conversationConfig.data.rerank_threshold;

@@ -58,7 +58,7 @@ var (
 	ErrImageNotParse = errors.New("image not parse without enable multimodel")
 )
 
-// ListIntegrationFolders returns only selectable root folders for the integration API.
+// ListIntegrationFolders returns selectable ordinary folders for the integration API.
 func (s *knowledgeService) ListIntegrationFolders(ctx context.Context, tenantID uint64, kbID string) ([]*types.KnowledgeTag, error) {
 	tags, err := s.listAllIntegrationTags(ctx, tenantID, kbID)
 	if err != nil {
@@ -66,7 +66,7 @@ func (s *knowledgeService) ListIntegrationFolders(ctx context.Context, tenantID 
 	}
 	result := make([]*types.KnowledgeTag, 0, len(tags))
 	for _, tag := range tags {
-		if tag != nil && !tag.IsPublic && tag.ParentID == nil && tag.Name != types.UntaggedTagName {
+		if tag != nil && !tag.IsPublic && tag.Name != types.UntaggedTagName {
 			result = append(result, tag)
 		}
 	}
@@ -103,7 +103,7 @@ func (s *knowledgeService) ResolveIntegrationFolderIDs(ctx context.Context, tena
 			return nil, errors.New("invalid_folder_ids")
 		}
 		for _, tag := range tags {
-			if tag == nil || tag.Name == types.UntaggedTagName || tag.ParentID != nil {
+			if tag == nil || tag.Name == types.UntaggedTagName {
 				return nil, errors.New("invalid_folder_ids")
 			}
 			if _, ok := allowedKBs[tag.KnowledgeBaseID]; !ok {

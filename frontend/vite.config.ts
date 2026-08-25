@@ -62,6 +62,12 @@ export default defineConfig({
       : undefined,
     // 代理配置，用于开发环境
     proxy: {
+      '/knowledge/api': {
+        target: process.env.VITE_DEV_API_TARGET || 'http://localhost:8080',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/knowledge\/api/, '/api'),
+      },
       '/api': {
         target: process.env.VITE_DEV_API_TARGET || 'http://localhost:8080',
         changeOrigin: true,

@@ -84,10 +84,14 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 
 	// Run KB search and web search concurrently
 	pipelineInfo(ctx, "Search", "plan", map[string]interface{}{
-		"search_targets":    len(chatManage.SearchTargets),
-		"embedding_top_k":   chatManage.EmbeddingTopK,
-		"vector_threshold":  chatManage.VectorThreshold,
-		"keyword_threshold": chatManage.KeywordThreshold,
+		"search_targets":         len(chatManage.SearchTargets),
+		"fusion_top_k":           chatManage.EmbeddingTopK,
+		"vector_recall_top_k":    chatManage.VectorRecallTopK,
+		"keyword_recall_top_k":   chatManage.KeywordRecallTopK,
+		"rrf_vector_weight":      chatManage.RRFVectorWeight,
+		"rerank_candidate_top_k": chatManage.RerankCandidateTopK,
+		"vector_threshold":       chatManage.VectorThreshold,
+		"keyword_threshold":      chatManage.KeywordThreshold,
 	})
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -469,6 +473,9 @@ func (p *PluginSearch) searchByTargets(
 						VectorThreshold:       chatManage.VectorThreshold,
 						KeywordThreshold:      chatManage.KeywordThreshold,
 						MatchCount:            chatManage.EmbeddingTopK,
+						VectorMatchCount:      chatManage.VectorRecallTopK,
+						KeywordMatchCount:     chatManage.KeywordRecallTopK,
+						RRFVectorWeight:       chatManage.RRFVectorWeight,
 						SkipContextEnrichment: true,
 					}
 					res, err := p.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], params)
@@ -556,6 +563,9 @@ func (p *PluginSearch) searchSingleTarget(
 		VectorThreshold:       chatManage.VectorThreshold,
 		KeywordThreshold:      chatManage.KeywordThreshold,
 		MatchCount:            chatManage.EmbeddingTopK,
+		VectorMatchCount:      chatManage.VectorRecallTopK,
+		KeywordMatchCount:     chatManage.KeywordRecallTopK,
+		RRFVectorWeight:       chatManage.RRFVectorWeight,
 		SkipContextEnrichment: true,
 	}
 	params.TagIDs = t.TagIDs

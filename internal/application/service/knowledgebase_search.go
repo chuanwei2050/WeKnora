@@ -125,12 +125,23 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, err
 	}
 
-	// Use 5x over-retrieval to ensure sufficient candidates for RRF fusion and reranking.
-	// Scale proportionally when searching multiple KBs to maintain per-KB recall quality.
-	matchCount := max(params.MatchCount*5, 50) * len(searchKBIDs)
-	if matchCount > 500 {
-		matchCount = 500
+	// Preserve the legacy over-retrieval behavior when callers do not provide
+	// explicit per-channel budgets.
+	defaultRecallCount := max(params.MatchCount*5, 50)
+	vectorMatchCount := params.VectorMatchCount
+	if vectorMatchCount <= 0 {
+		vectorMatchCount = defaultRecallCount
 	}
+	keywordMatchCount := params.KeywordMatchCount
+	if keywordMatchCount <= 0 {
+		keywordMatchCount = defaultRecallCount
+	}
+	vectorMatchCount = min(vectorMatchCount*len(searchKBIDs), 500)
+	keywordMatchCount = min(keywordMatchCount*len(searchKBIDs), 500)
+	logger.Infof(ctx,
+		"Hybrid retrieval budgets: vector=%d, keyword=%d, fusion=%d, rrf_vector_weight=%.2f",
+		vectorMatchCount, keywordMatchCount, params.MatchCount, params.RRFVectorWeight,
+	)
 
 	// Build retrieval parameters for vector and keyword engines
 	var vectorKnowledgeIDs []string
@@ -140,7 +151,10 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 			logger.Warnf(ctx, "Skipping vector retrieval because embedding compatibility could not be resolved: %v", err)
 		}
 	}
-	retrieveParams, err := s.buildRetrievalParams(ctx, retrieveEngine, kb, params, searchKBIDs, vectorKnowledgeIDs, matchCount)
+	retrieveParams, err := s.buildRetrievalParams(
+		ctx, retrieveEngine, kb, params, searchKBIDs, vectorKnowledgeIDs,
+		vectorMatchCount, keywordMatchCount,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -174,12 +188,17 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	}
 	logger.Infof(ctx, "Result count before fusion: vector=%d, keyword=%d", len(vectorResults), len(keywordResults))
 
-	deduplicatedChunks := fuseOrDeduplicate(ctx, vectorResults, keywordResults)
+	deduplicatedChunks := fuseOrDeduplicate(ctx, vectorResults, keywordResults, params.RRFVectorWeight)
+	if len(vectorResults) > 0 && len(keywordResults) > 0 {
+		deduplicatedChunks = preserveRetrieverLeaders(deduplicatedChunks, vectorResults, keywordResults, params.MatchCount)
+	}
 
 	kb.EnsureDefaults()
 
 	// FAQ-specific post-processing: iterative retrieval or negative question filtering
-	deduplicatedChunks = s.applyFAQPostProcessing(ctx, kb, deduplicatedChunks, vectorResults, retrieveEngine, retrieveParams, params, matchCount)
+	deduplicatedChunks = s.applyFAQPostProcessing(
+		ctx, kb, deduplicatedChunks, vectorResults, retrieveEngine, retrieveParams, params, vectorMatchCount,
+	)
 
 	// Limit to MatchCount
 	if len(deduplicatedChunks) > params.MatchCount {
@@ -198,7 +217,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	params types.SearchParams,
 	searchKBIDs []string,
 	vectorKnowledgeIDs []string,
-	matchCount int,
+	vectorMatchCount, keywordMatchCount int,
 ) ([]types.RetrieveParams, error) {
 	currentTenantID := types.MustTenantIDFromContext(ctx)
 	var retrieveParams []types.RetrieveParams
@@ -249,7 +268,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 			Query:            params.QueryText,
 			Embedding:        queryEmbedding,
 			KnowledgeBaseIDs: searchKBIDs,
-			TopK:             matchCount,
+			TopK:             vectorMatchCount,
 			Threshold:        params.VectorThreshold,
 			RetrieverType:    types.VectorRetrieverType,
 			KnowledgeIDs:     vectorKnowledgeIDs,
@@ -272,7 +291,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 		retrieveParams = append(retrieveParams, types.RetrieveParams{
 			Query:            params.QueryText,
 			KnowledgeBaseIDs: searchKBIDs,
-			TopK:             matchCount,
+			TopK:             keywordMatchCount,
 			Threshold:        params.KeywordThreshold,
 			RetrieverType:    types.KeywordsRetrieverType,
 			KnowledgeIDs:     params.KnowledgeIDs,

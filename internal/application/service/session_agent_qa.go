@@ -485,6 +485,13 @@ func (s *sessionService) buildAgentConfig(
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
 		RerankTopK:                  customAgent.Config.RerankTopK,
+		EmbeddingTopK:               customAgent.Config.EmbeddingTopK,
+		VectorRecallTopK:            customAgent.Config.VectorRecallTopK,
+		KeywordRecallTopK:           customAgent.Config.KeywordRecallTopK,
+		RRFVectorWeight:             customAgent.Config.RRFVectorWeight,
+		RerankCandidateTopK:         customAgent.Config.RerankCandidateTopK,
+		VectorThreshold:             customAgent.Config.VectorThreshold,
+		KeywordThreshold:            customAgent.Config.KeywordThreshold,
 		ComplexityRouting:           customAgent.Config.ComplexityRouting,
 	}
 	agentConfig.VerifiedAnswer = customAgent.Config.VerifiedAnswer

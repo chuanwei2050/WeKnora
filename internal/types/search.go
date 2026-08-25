@@ -191,6 +191,9 @@ type SearchParams struct {
 	VectorThreshold      float64   `json:"vector_threshold"`
 	KeywordThreshold     float64   `json:"keyword_threshold"`
 	MatchCount           int       `json:"match_count"`
+	VectorMatchCount     int       `json:"vector_match_count,omitempty"`
+	KeywordMatchCount    int       `json:"keyword_match_count,omitempty"`
+	RRFVectorWeight      float64   `json:"rrf_vector_weight,omitempty"`
 	DisableKeywordsMatch bool      `json:"disable_keywords_match"`
 	DisableVectorMatch   bool      `json:"disable_vector_match"`
 	KnowledgeIDs         []string  `json:"knowledge_ids"`

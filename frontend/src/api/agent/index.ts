@@ -103,10 +103,14 @@ export interface CustomAgentConfig {
   history_turns?: number;           // 保留历史轮数
 
   // ===== 检索策略设置 =====
-  embedding_top_k?: number;         // 向量召回TopK
+  embedding_top_k?: number;         // 融合后保留数量（兼容旧字段名）
+  vector_recall_top_k?: number;     // 向量通道预召回数量
+  keyword_recall_top_k?: number;    // 关键词通道预召回数量
+  rrf_vector_weight?: number;       // RRF 向量权重，关键词权重为 1 减此值
   keyword_threshold?: number;       // 关键词召回阈值
   vector_threshold?: number;        // 向量召回阈值
   rerank_top_k?: number;            // 重排TopK
+  rerank_candidate_top_k?: number;  // 送入重排的候选数量
   rerank_threshold?: number;        // 重排阈值
 
   // ===== 高级设置（主要用于普通模式）=====

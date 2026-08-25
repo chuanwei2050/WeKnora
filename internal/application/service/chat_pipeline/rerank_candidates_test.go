@@ -93,6 +93,14 @@ func TestAdaptiveRerankCandidateLimit(t *testing.T) {
 			}, PipelineState: types.PipelineState{RewriteQuery: "广电计量"}},
 			want: 10,
 		},
+		{
+			name: "explicit rerank candidate limit wins",
+			manage: &types.ChatManage{PipelineRequest: types.PipelineRequest{
+				EmbeddingTopK:       30,
+				RerankCandidateTopK: 12,
+			}, PipelineState: types.PipelineState{RewriteQuery: "广电计量有哪些主要业务板块"}},
+			want: 12,
+		},
 	}
 
 	for _, test := range tests {
