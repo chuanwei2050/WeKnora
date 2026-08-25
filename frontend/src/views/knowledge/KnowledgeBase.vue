@@ -3693,11 +3693,11 @@ async function createNewSession(value: string): Promise<void> {
     align-items: center;
     justify-content: center;
     color: var(--td-text-color-secondary, #5e5e5e);
-    opacity: 0.55;
+    opacity: 0;
     cursor: grab;
 
     .knowledge-tree-row:hover & {
-      opacity: 1;
+      opacity: 0.65;
     }
 
     &:active {
@@ -3707,6 +3707,25 @@ async function createNewSession(value: string): Promise<void> {
     &.disabled {
       cursor: not-allowed;
       opacity: 0.35;
+    }
+  }
+
+  .ordinary-folder-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: 3px;
+    appearance: none;
+    background: transparent;
+    color: var(--td-text-color-secondary, #5e5e5e);
+    line-height: 1;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-text-color-primary, #232323);
     }
   }
 
@@ -3980,20 +3999,6 @@ async function createNewSession(value: string): Promise<void> {
     flex: 1;
   }
 
-  .ordinary-folder-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--td-text-color-secondary, #5e5e5e);
-    cursor: pointer;
-
-    &:hover {
-      color: var(--td-text-color-primary, #232323);
-    }
-  }
 }
 
 .tag-content {
