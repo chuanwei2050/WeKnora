@@ -289,7 +289,11 @@ const fileTypeOptions = computed(() => [
   { content: 'FLAC', value: 'flac' },
   { content: 'OGG', value: 'ogg' },
 ]);
-type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>;
+type TagInputInstance = ComponentPublicInstance & {
+  focus?: () => void;
+  select?: () => void;
+  inputRef?: HTMLInputElement;
+};
 type FolderCreatePlacement =
   | { kind: 'root' }
   | { kind: 'public' }
@@ -361,6 +365,10 @@ const setEditingTagInputRefByTag = (tagId: string) => (el: TagInputInstance | nu
   setEditingTagInputRef(el, tagId);
 };
 const newTagInputRef = ref<TagInputInstance | null>(null);
+const setNewTagInputRef = (el: TagInputInstance | null) => {
+  newTagInputRef.value = el;
+};
+const openTagMoreId = ref('');
 const creatingTag = ref(false);
 const creatingPlacement = ref<FolderCreatePlacement>({ kind: 'root' });
 const creatingTagLoading = ref(false);
@@ -593,6 +601,7 @@ const startCreatePublicTag = () => {
 
 const startCreateChildTag = (parentId: string) => {
   if (!kbId.value || creatingTag.value) return;
+  openTagMoreId.value = '';
   if (collapsedOrdinaryFolderIds.value.has(parentId)) {
     const next = new Set(collapsedOrdinaryFolderIds.value);
     next.delete(parentId);
@@ -603,9 +612,20 @@ const startCreateChildTag = (parentId: string) => {
   creatingTag.value = true;
   creatingPlacement.value = { kind: 'ordinary-child', parentId };
   nextTick(() => {
-    newTagInputRef.value?.focus?.();
-    newTagInputRef.value?.select?.();
+    setTimeout(() => {
+      newTagInputRef.value?.focus?.();
+      const input = newTagInputRef.value?.inputRef;
+      if (input instanceof HTMLInputElement) input.select();
+    }, 0);
   });
+};
+
+const onTagMoreVisibleChange = (tagId: string, visible: boolean) => {
+  if (visible) {
+    openTagMoreId.value = tagId;
+  } else if (openTagMoreId.value === tagId) {
+    openTagMoreId.value = '';
+  }
 };
 
 const cancelCreateTag = () => {
@@ -657,6 +677,7 @@ const submitCreateTag = async () => {
 };
 
 const startEditTag = (tag: any) => {
+  openTagMoreId.value = '';
   creatingTag.value = false;
   newTagName.value = '';
   editingTagId.value = tag.id;
@@ -729,6 +750,7 @@ const tagDeleteDesc = computed(() => {
 });
 
 const confirmDeleteTag = (tag: any) => {
+  openTagMoreId.value = '';
   if (isFolderNotEmpty(tag) || hasFolderChildren(tag.id)) {
     MessagePlugin.warning(t('knowledgeBase.folderDeleteNotEmpty'));
     return;
@@ -2393,19 +2415,25 @@ async function createNewSession(value: string): Promise<void> {
                     </div>
                   </template>
                   <div v-else-if="canEdit" class="tag-more" @click.stop>
-                    <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
+                    <t-popup
+                      :visible="openTagMoreId === tag.id"
+                      trigger="click"
+                      placement="top-right"
+                      overlayClassName="tag-more-popup"
+                      :on-visible-change="(visible: boolean) => onTagMoreVisibleChange(tag.id, visible)"
+                    >
                       <div class="tag-more-btn"><t-icon name="more" size="14px" /></div>
                       <template #content>
                         <div class="tag-menu">
                           <div
                             v-if="!tag.is_public && !tag.parent_id"
                             class="tag-menu-item"
-                            @click="startCreateChildTag(tag.id)"
+                            @click.stop="startCreateChildTag(tag.id)"
                           >
                             <t-icon class="menu-icon" name="add" />
                             <span>{{ $t('knowledgeBase.childFolderCreateAction') }}</span>
                           </div>
-                          <div class="tag-menu-item" @click="startEditTag(tag)">
+                          <div class="tag-menu-item" @click.stop="startEditTag(tag)">
                             <t-icon class="menu-icon" name="edit" />
                             <span>{{ $t('knowledgeBase.folderRenameAction') }}</span>
                           </div>
@@ -2435,7 +2463,7 @@ async function createNewSession(value: string): Promise<void> {
                           </div>
                           <div
                             class="tag-menu-item danger"
-                            @click="confirmDeleteTag(tag)"
+                            @click.stop="confirmDeleteTag(tag)"
                           >
                             <t-icon class="menu-icon" name="delete" />
                             <span>{{ $t('knowledgeBase.folderDeleteAction') }}</span>
@@ -2458,7 +2486,7 @@ async function createNewSession(value: string): Promise<void> {
                 <span class="ordinary-folder-toggle-placeholder" />
                 <span class="folder-icon computer-folder-icon" aria-hidden="true" />
                 <div class="tag-edit-input" @keydown.enter="onCreateTagEnterKey" @keydown.esc.prevent.stop="cancelCreateTag">
-                  <t-input ref="newTagInputRef" v-model="newTagName" size="small" :maxlength="40" :placeholder="$t('knowledgeBase.tagNamePlaceholder')" />
+                  <t-input :ref="setNewTagInputRef" v-model="newTagName" size="small" :maxlength="40" :placeholder="$t('knowledgeBase.tagNamePlaceholder')" />
                 </div>
                 <div class="tag-inline-actions">
                   <t-button variant="text" size="small" class="tag-action-btn confirm" :loading="creatingTagLoading" @click.stop="submitCreateTag"><t-icon name="check" size="16px" /></t-button>
