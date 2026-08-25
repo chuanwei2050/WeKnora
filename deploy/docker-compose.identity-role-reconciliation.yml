@@ -1,0 +1,4 @@
+services:
+  app:
+    image: wechatopenai/weknora-app:identity-role-reconciliation-20260825
+    pull_policy: never

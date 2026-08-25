@@ -166,7 +166,7 @@ func TestWeKnoraSideTenantAdminPromotionIgnoresClientMaxRole(t *testing.T) {
 	require.Equal(t, types.UserRoleTenantAdmin, resolved.EffectiveRole())
 }
 
-func TestHostMappedTenantAdminMustHitBoundAdministrator(t *testing.T) {
+func TestHostMappedTenantAdminReconcilesHistoricalMemberIdentity(t *testing.T) {
 	svc := testService(t)
 	ctx := context.Background()
 	boundAdmin := &types.User{ID: "bound-admin", Username: "bound-admin", Email: "bound@example.test", PasswordHash: "unused", TenantID: 1, IsActive: true, Role: types.UserRoleTenantAdmin}
@@ -179,15 +179,54 @@ func TestHostMappedTenantAdminMustHitBoundAdministrator(t *testing.T) {
 		MaxRole: string(types.UserRoleTenantAdmin), AdministratorUserID: boundAdmin.ID,
 	}
 	require.NoError(t, svc.db.Create(client).Error)
-	require.NoError(t, svc.db.Create(&ExternalIdentity{ClientID: client.ID, IdentityProviderID: "idp", ExternalTenantID: "external", ExternalUserID: "other-admin-host", UserID: otherAdmin.ID, Active: true}).Error)
+	historicalMember := &types.User{ID: "historical-member", Username: "historical-member", Email: "member@example.test", PasswordHash: "unused", TenantID: 1, IsActive: true, Role: types.UserRoleMember}
+	require.NoError(t, svc.db.Create(historicalMember).Error)
+	require.NoError(t, svc.db.Create(&ExternalIdentity{ClientID: client.ID, IdentityProviderID: "idp", ExternalTenantID: "external", ExternalUserID: "other-admin-host", UserID: historicalMember.ID, Active: true}).Error)
 	require.NoError(t, svc.db.Create(&ExternalIdentity{ClientID: client.ID, IdentityProviderID: "idp", ExternalTenantID: "external", ExternalUserID: "bound-admin-host", UserID: boundAdmin.ID, Active: true}).Error)
+	require.NoError(t, svc.db.Create(&Session{ID: "old-member-session", Digest: digest("old-member-token"), Kind: "browser", ClientID: client.ID, TenantID: 1, UserID: historicalMember.ID, ScopesJSON: `[]`, KnowledgeBaseIDsJSON: `[]`, ExpiresAt: time.Now().Add(time.Hour), AbsoluteExpiresAt: time.Now().Add(time.Hour)}).Error)
 
-	_, err := svc.resolveExternalUser(ctx, client, BootstrapRequest{ExternalTenantID: "external", ExternalUserID: "other-admin-host", ExternalRoles: []string{"external_admin"}})
-	require.ErrorIs(t, err, ErrForbidden)
-
-	resolved, err := svc.resolveExternalUser(ctx, client, BootstrapRequest{ExternalTenantID: "external", ExternalUserID: "bound-admin-host", ExternalRoles: []string{"external_admin"}})
+	resolved, err := svc.resolveExternalUser(ctx, client, BootstrapRequest{ExternalTenantID: "external", ExternalUserID: "other-admin-host", ExternalRoles: []string{"external_admin"}})
 	require.NoError(t, err)
 	require.Equal(t, boundAdmin.ID, resolved.ID)
+	var reconciled ExternalIdentity
+	require.NoError(t, svc.db.First(&reconciled, "client_id = ? AND external_user_id = ?", client.ID, "other-admin-host").Error)
+	require.Equal(t, boundAdmin.ID, reconciled.UserID)
+	var oldSession Session
+	require.NoError(t, svc.db.First(&oldSession, "id = ?", "old-member-session").Error)
+	require.NotNil(t, oldSession.RevokedAt)
+
+	resolved, err = svc.resolveExternalUser(ctx, client, BootstrapRequest{ExternalTenantID: "external", ExternalUserID: "bound-admin-host", ExternalRoles: []string{"external_admin"}})
+	require.NoError(t, err)
+	require.Equal(t, boundAdmin.ID, resolved.ID)
+}
+
+func TestHostMemberReconcilesAdministratorIdentityWithoutDowngradingSharedAdministrator(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	boundAdmin := &types.User{ID: "bound-admin", Username: "bound-admin", Email: "bound@example.test", PasswordHash: "unused", TenantID: 1, IsActive: true, Role: types.UserRoleTenantAdmin}
+	require.NoError(t, svc.db.Create(boundAdmin).Error)
+	client := &Client{
+		ID: "project", TenantID: 1, IdentityProviderID: "idp", Enabled: true,
+		KnowledgeBaseAccessMode: KnowledgeBaseAccessAll, KnowledgeBaseIDsJSON: `[]`, RoleMappingsJSON: `{"tenant_admin":"tenant_admin","member":"member"}`,
+		MaxRole: string(types.UserRoleTenantAdmin), AdministratorUserID: boundAdmin.ID,
+	}
+	require.NoError(t, svc.db.Create(client).Error)
+	require.NoError(t, svc.db.Create(&ExternalIdentity{ClientID: client.ID, IdentityProviderID: "idp", ExternalTenantID: "external", ExternalUserID: "host-user", UserID: boundAdmin.ID, Active: true}).Error)
+	require.NoError(t, svc.db.Create(&Session{ID: "old-admin-session", Digest: digest("old-admin-token"), Kind: "browser", ClientID: client.ID, TenantID: 1, UserID: boundAdmin.ID, ScopesJSON: `[]`, KnowledgeBaseIDsJSON: `[]`, ExpiresAt: time.Now().Add(time.Hour), AbsoluteExpiresAt: time.Now().Add(time.Hour)}).Error)
+
+	resolved, err := svc.resolveExternalUser(ctx, client, BootstrapRequest{ExternalTenantID: "external", ExternalUserID: "host-user", ExternalRoles: []string{"member"}})
+	require.NoError(t, err)
+	require.Equal(t, types.UserRoleMember, resolved.EffectiveRole())
+	require.NotEqual(t, boundAdmin.ID, resolved.ID)
+	var administrator types.User
+	require.NoError(t, svc.db.First(&administrator, "id = ?", boundAdmin.ID).Error)
+	require.Equal(t, types.UserRoleTenantAdmin, administrator.EffectiveRole())
+	var identity ExternalIdentity
+	require.NoError(t, svc.db.First(&identity, "client_id = ? AND external_user_id = ?", client.ID, "host-user").Error)
+	require.Equal(t, resolved.ID, identity.UserID)
+	var oldSession Session
+	require.NoError(t, svc.db.First(&oldSession, "id = ?", "old-admin-session").Error)
+	require.NotNil(t, oldSession.RevokedAt)
 }
 
 func TestBrowserTicketExchangeRefreshAndLogoutLifecycle(t *testing.T) {

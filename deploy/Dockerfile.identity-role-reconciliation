@@ -1,0 +1,8 @@
+FROM wechatopenai/weknora-builder:identity-role-reconciliation-20260825 AS patched
+
+FROM wechatopenai/weknora-app:development-2c262e8a7203-jenkins
+
+COPY --from=patched /app/WeKnora /app/WeKnora
+
+LABEL org.opencontainers.image.title="weknora-identity-role-reconciliation"
+LABEL org.opencontainers.image.created="2026-08-25"

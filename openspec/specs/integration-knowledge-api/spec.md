@@ -17,6 +17,21 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 - **WHEN** 具有 `kb:list` scope 的主体请求知识库列表
 - **THEN** 系统只返回 client allowlist 与用户权限交集内的知识库，不包含模型密钥、存储配置或内部治理配置
 
+### Requirement: 外部身份角色必须在 bootstrap 边界对账
+系统 MUST 以 `(client_id, external_tenant_id, external_user_id)` 作为稳定身份，并在每次 bootstrap 时按客户端声明且受 role mapping 约束的当前角色对账历史绑定。角色变化 MUST 在事务内更新身份绑定并撤销旧主体的活动 Integration session，不得要求宿主删除身份或降低声明角色绕过冲突。
+
+#### Scenario: 历史成员晋升租户管理员
+- **WHEN** 已绑定普通成员账号的外部身份随后由授权客户端声明为 `tenant_admin`
+- **THEN** 系统验证 Client 管理员绑定，原子重绑管理员账号、撤销旧成员 session 并继续签发 ticket
+
+#### Scenario: 历史管理员降为普通成员
+- **WHEN** 已绑定 Client 管理员账号的外部身份随后由授权客户端声明为 `member`
+- **THEN** 系统恢复该稳定外部身份的专属成员账号、撤销旧管理员 session，且不得降低共享管理员账号自身角色
+
+#### Scenario: Client 管理员绑定失效
+- **WHEN** 角色对账需要管理员账号但 Client 未绑定有效的同租户管理员
+- **THEN** 系统返回 `403 administrator_binding_invalid`，不得伪装为客户端密钥错误
+
 ### Requirement: 授权客户端必须能够维护租户知识
 系统 MUST 允许具有 `knowledge:write` scope 的主体创建或删除文档知识库并向已授权知识库上传文件。租户和用户身份 MUST 仅来自认证后的 integration principal，请求体 MUST NOT 覆盖租户身份，上传 MUST 受请求体上限约束，所有变更 MUST 写入审计记录。签发带有 `knowledge:write` 的 service token 时 MUST 绑定并重新校验该 client 配置的有效租户管理员，MUST NOT 以空用户身份产生无法发布的治理草稿。
 

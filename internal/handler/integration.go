@@ -265,6 +265,11 @@ func (h *IntegrationHandler) Bootstrap(c *gin.Context) {
 	}
 	ticket, err := h.service.CreateBootstrap(c.Request.Context(), bearerToken(c), integrationauth.BootstrapRequest{ExternalTenantID: req.ExternalTenantID, ExternalUserID: req.ExternalUserID, ExternalRoles: req.ExternalRoles, Active: req.Active, Origin: req.Origin})
 	if err != nil {
+		if errors.Is(err, integrationauth.ErrAdministratorBindingInvalid) {
+			h.service.Audit(c.Request.Context(), nil, "auth.bootstrap", "denied", "administrator_binding_invalid")
+			integrationError(c, http.StatusForbidden, "administrator_binding_invalid", "integration administrator binding is invalid")
+			return
+		}
 		h.service.Audit(c.Request.Context(), nil, "auth.bootstrap", "denied", "bootstrap_denied")
 		integrationError(c, http.StatusForbidden, "bootstrap_denied", "bootstrap request denied")
 		return

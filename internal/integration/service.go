@@ -25,10 +25,11 @@ import (
 )
 
 var (
-	ErrUnauthorized = errors.New("integration authentication failed")
-	ErrForbidden    = errors.New("integration access denied")
-	ErrConflict     = errors.New("integration credential already consumed")
-	ErrInvalid      = errors.New("invalid integration request")
+	ErrUnauthorized                = errors.New("integration authentication failed")
+	ErrForbidden                   = errors.New("integration access denied")
+	ErrConflict                    = errors.New("integration credential already consumed")
+	ErrInvalid                     = errors.New("invalid integration request")
+	ErrAdministratorBindingInvalid = errors.New("integration administrator binding invalid")
 )
 
 const (
@@ -563,12 +564,15 @@ func (s *Service) resolveExternalUser(ctx context.Context, client *Client, req B
 				return nil, updateErr
 			}
 		}
-		if role == types.UserRoleTenantAdmin && identity.UserID != client.AdministratorUserID {
-			return nil, ErrForbidden
-		}
 		user, getErr := s.users.GetUserByID(ctx, identity.UserID)
 		if getErr != nil || user == nil {
 			return user, getErr
+		}
+		if role == types.UserRoleTenantAdmin && identity.UserID != client.AdministratorUserID {
+			return s.reconcileExternalIdentityUser(ctx, client, &identity, user, role)
+		}
+		if role == types.UserRoleMember && identity.UserID == client.AdministratorUserID {
+			return s.reconcileExternalIdentityUser(ctx, client, &identity, user, role)
 		}
 		if !existingExternalUserRoleAllowed(client, user, role) {
 			return nil, ErrForbidden
@@ -592,8 +596,81 @@ func (s *Service) resolveExternalUser(ctx context.Context, client *Client, req B
 		identity = ExternalIdentity{ClientID: client.ID, IdentityProviderID: client.IdentityProviderID, ExternalTenantID: req.ExternalTenantID, ExternalUserID: req.ExternalUserID, UserID: user.ID, Active: true}
 		return user, s.db.WithContext(ctx).Create(&identity).Error
 	}
-	userID := uuid.NewString()
-	nameDigest := digest(client.ID + ":" + req.ExternalTenantID + ":" + req.ExternalUserID)[:20]
+	user, err := s.newExternalMember(client, req.ExternalTenantID, req.ExternalUserID)
+	if err != nil {
+		return nil, err
+	}
+	return user, s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(user).Error; err != nil {
+			return err
+		}
+		return tx.Create(&ExternalIdentity{ClientID: client.ID, IdentityProviderID: client.IdentityProviderID, ExternalTenantID: req.ExternalTenantID, ExternalUserID: req.ExternalUserID, UserID: user.ID, Active: true}).Error
+	})
+}
+
+func (s *Service) reconcileExternalIdentityUser(ctx context.Context, client *Client, identity *ExternalIdentity, currentUser *types.User, role types.UserRole) (*types.User, error) {
+	var target *types.User
+	if role == types.UserRoleTenantAdmin {
+		if client.AdministratorUserID == "" {
+			return nil, ErrAdministratorBindingInvalid
+		}
+		administrator, err := s.users.GetUserByID(ctx, client.AdministratorUserID)
+		if err != nil || administrator == nil || administrator.TenantID != client.TenantID || !administrator.IsActive || administrator.EffectiveRole() != types.UserRoleTenantAdmin {
+			return nil, ErrAdministratorBindingInvalid
+		}
+		target = administrator
+	} else {
+		member, err := s.externalMember(ctx, client, identity.ExternalTenantID, identity.ExternalUserID)
+		if err != nil {
+			return nil, err
+		}
+		target = member
+	}
+	if target.ID == currentUser.ID {
+		return target, nil
+	}
+	now := s.now()
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if target.ID != client.AdministratorUserID {
+			if err := tx.Where("id = ?", target.ID).FirstOrCreate(target).Error; err != nil {
+				return err
+			}
+		}
+		result := tx.Model(&ExternalIdentity{}).
+			Where("id = ? AND user_id = ?", identity.ID, currentUser.ID).
+			Update("user_id", target.ID)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrConflict
+		}
+		return tx.Model(&Session{}).
+			Where("client_id = ? AND user_id = ? AND revoked_at IS NULL", client.ID, currentUser.ID).
+			Update("revoked_at", now).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.Audit(ctx, &Principal{ClientID: client.ID, TenantID: client.TenantID, UserID: target.ID}, "auth.identity_role_reconciled", "allowed", string(role))
+	return target, nil
+}
+
+func (s *Service) externalMember(ctx context.Context, client *Client, externalTenantID, externalUserID string) (*types.User, error) {
+	username := externalMemberUsername(client.ID, externalTenantID, externalUserID)
+	var existing types.User
+	if err := s.db.WithContext(ctx).Where("tenant_id = ? AND username = ?", client.TenantID, username).First(&existing).Error; err == nil {
+		if existing.IsActive && existing.EffectiveRole() == types.UserRoleMember {
+			return &existing, nil
+		}
+		return nil, ErrForbidden
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	return s.newExternalMember(client, externalTenantID, externalUserID)
+}
+
+func (s *Service) newExternalMember(client *Client, externalTenantID, externalUserID string) (*types.User, error) {
 	randomPassword, err := randomToken()
 	if err != nil {
 		return nil, err
@@ -608,13 +685,12 @@ func (s *Service) resolveExternalUser(ctx context.Context, client *Client, req B
 		knowledgeBaseAccessMode = types.KnowledgeBaseAccessAll
 		knowledgeBaseIDs = nil
 	}
-	user := &types.User{ID: userID, Username: "integration-" + nameDigest, Email: "integration-" + nameDigest + "@external.local", PasswordHash: string(passwordHash), TenantID: client.TenantID, IsActive: true, Role: role, KnowledgeBaseAccessMode: knowledgeBaseAccessMode, KnowledgeBaseIDs: knowledgeBaseIDs}
-	return user, s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(user).Error; err != nil {
-			return err
-		}
-		return tx.Create(&ExternalIdentity{ClientID: client.ID, IdentityProviderID: client.IdentityProviderID, ExternalTenantID: req.ExternalTenantID, ExternalUserID: req.ExternalUserID, UserID: user.ID, Active: true}).Error
-	})
+	username := externalMemberUsername(client.ID, externalTenantID, externalUserID)
+	return &types.User{ID: uuid.NewString(), Username: username, Email: username + "@external.local", PasswordHash: string(passwordHash), TenantID: client.TenantID, IsActive: true, Role: types.UserRoleMember, KnowledgeBaseAccessMode: knowledgeBaseAccessMode, KnowledgeBaseIDs: knowledgeBaseIDs}, nil
+}
+
+func externalMemberUsername(clientID, externalTenantID, externalUserID string) string {
+	return "integration-" + digest(clientID + ":" + externalTenantID + ":" + externalUserID)[:20]
 }
 
 func (s *Service) disableExternalIdentity(ctx context.Context, clientID, userID string) error {
