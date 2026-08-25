@@ -26,6 +26,8 @@ type KnowledgeTag struct {
 	SortOrder int `json:"sort_order"        gorm:"default:0"`
 	// Whether this folder is displayed under the virtual public-files container.
 	IsPublic bool `json:"is_public" gorm:"not null;default:false"`
+	// ParentID is set only for ordinary second-level folders.
+	ParentID *string `json:"parent_id,omitempty" gorm:"type:varchar(36);index"`
 	// Whether files in this folder can appear in search and conversation retrieval.
 	SearchEnabled bool `json:"search_enabled" gorm:"not null;default:true"`
 	// Creation time

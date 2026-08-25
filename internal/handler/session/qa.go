@@ -20,45 +20,47 @@ import (
 
 // qaRequestContext holds all the common data needed for QA requests
 type qaRequestContext struct {
-	ctx               context.Context
-	c                 *gin.Context
-	sessionID         string
-	requestID         string
-	query             string
-	session           *types.Session
-	customAgent       *types.CustomAgent
-	assistantMessage  *types.Message
-	knowledgeBaseIDs  []string
-	knowledgeIDs      []string
-	summaryModelID    string
-	webSearchEnabled  bool
-	enableMemory      bool // Whether memory feature is enabled
-	mentionedItems    types.MentionedItems
-	effectiveTenantID uint64                   // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
-	images            []ImageAttachment        // Uploaded images with analysis text
-	userMessageID     string                   // Created user message ID (populated after createUserMessage)
-	channel           string                   // Source channel: "web", "api", "im", etc.
-	attachments       types.MessageAttachments // Processed file attachments
-	voiceMetadata     types.JSON
+	ctx                   context.Context
+	c                     *gin.Context
+	sessionID             string
+	requestID             string
+	query                 string
+	session               *types.Session
+	customAgent           *types.CustomAgent
+	assistantMessage      *types.Message
+	knowledgeBaseIDs      []string
+	knowledgeIDs          []string
+	summaryModelID        string
+	webSearchEnabled      bool
+	filterDisabledFolders bool
+	enableMemory          bool // Whether memory feature is enabled
+	mentionedItems        types.MentionedItems
+	effectiveTenantID     uint64                   // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
+	images                []ImageAttachment        // Uploaded images with analysis text
+	userMessageID         string                   // Created user message ID (populated after createUserMessage)
+	channel               string                   // Source channel: "web", "api", "im", etc.
+	attachments           types.MessageAttachments // Processed file attachments
+	voiceMetadata         types.JSON
 }
 
 // buildQARequest converts the qaRequestContext into a types.QARequest for service invocation.
 func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 	imageURLs, imageDescription := extractImageURLsAndOCRText(rc.images)
 	return &types.QARequest{
-		Session:            rc.session,
-		Query:              rc.query,
-		AssistantMessageID: rc.assistantMessage.ID,
-		SummaryModelID:     rc.summaryModelID,
-		CustomAgent:        rc.customAgent,
-		KnowledgeBaseIDs:   rc.knowledgeBaseIDs,
-		KnowledgeIDs:       rc.knowledgeIDs,
-		ImageURLs:          imageURLs,
-		ImageDescription:   imageDescription,
-		UserMessageID:      rc.userMessageID,
-		WebSearchEnabled:   rc.webSearchEnabled,
-		EnableMemory:       rc.enableMemory,
-		Attachments:        rc.attachments,
+		Session:               rc.session,
+		Query:                 rc.query,
+		AssistantMessageID:    rc.assistantMessage.ID,
+		SummaryModelID:        rc.summaryModelID,
+		CustomAgent:           rc.customAgent,
+		KnowledgeBaseIDs:      rc.knowledgeBaseIDs,
+		KnowledgeIDs:          rc.knowledgeIDs,
+		ImageURLs:             imageURLs,
+		ImageDescription:      imageDescription,
+		UserMessageID:         rc.userMessageID,
+		WebSearchEnabled:      rc.webSearchEnabled,
+		FilterDisabledFolders: rc.filterDisabledFolders,
+		EnableMemory:          rc.enableMemory,
+		Attachments:           rc.attachments,
 	}
 }
 
@@ -232,17 +234,18 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 			IsCompleted: false,
 			Channel:     request.Channel,
 		},
-		knowledgeBaseIDs:  secutils.SanitizeForLogArray(kbIDs),
-		knowledgeIDs:      secutils.SanitizeForLogArray(knowledgeIDs),
-		summaryModelID:    secutils.SanitizeForLog(request.SummaryModelID),
-		webSearchEnabled:  request.WebSearchEnabled,
-		enableMemory:      request.EnableMemory,
-		mentionedItems:    convertMentionedItems(request.MentionedItems),
-		effectiveTenantID: effectiveTenantID,
-		images:            request.Images,
-		channel:           request.Channel,
-		attachments:       processedAttachments,
-		voiceMetadata:     voiceMetadata,
+		knowledgeBaseIDs:      secutils.SanitizeForLogArray(kbIDs),
+		knowledgeIDs:          secutils.SanitizeForLogArray(knowledgeIDs),
+		summaryModelID:        secutils.SanitizeForLog(request.SummaryModelID),
+		webSearchEnabled:      request.WebSearchEnabled,
+		filterDisabledFolders: request.FilterDisabledFolders,
+		enableMemory:          request.EnableMemory,
+		mentionedItems:        convertMentionedItems(request.MentionedItems),
+		effectiveTenantID:     effectiveTenantID,
+		images:                request.Images,
+		channel:               request.Channel,
+		attachments:           processedAttachments,
+		voiceMetadata:         voiceMetadata,
 	}
 
 	return reqCtx, &request, nil
@@ -451,7 +454,7 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	)
 
 	// Directly call knowledge retrieval service without LLM summarization
-	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, request.Query)
+	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, request.FilterDisabledFolders, request.Query)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))

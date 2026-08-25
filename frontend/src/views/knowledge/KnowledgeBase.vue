@@ -56,7 +56,10 @@ import DocumentListView from './components/DocumentListView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import {
   UNTAGGED_TAG_NAME,
+  folderSiblingKey,
   folderMoveTargets,
+  ordinaryFolderBranches,
+  ordinaryFolderChildOrders,
   placeFolder,
   resolveUploadTarget,
 } from './components/document-folder-organization';
@@ -286,6 +289,10 @@ const fileTypeOptions = computed(() => [
   { content: 'OGG', value: 'ogg' },
 ]);
 type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>;
+type FolderCreatePlacement =
+  | { kind: 'root' }
+  | { kind: 'public' }
+  | { kind: 'ordinary-child'; parentId: string };
 const tagDropdownOptions = computed(() =>
   tagList.value.map((tag: any) => ({
     content: tag.name,
@@ -299,26 +306,44 @@ const tagMap = computed<Record<string, any>>(() => {
   });
   return map;
 });
-const filteredTags = computed(() => {
-  const query = tagSearchQuery.value.trim().toLowerCase();
-  if (!query) return tagList.value;
-  return tagList.value.filter((tag) => (tag.name || '').toLowerCase().includes(query));
-});
 const untaggedTag = computed(() => tagList.value.find(tag => tag.name === UNTAGGED_TAG_NAME));
 const ordinaryTags = computed(() => tagList.value.filter(tag => tag.name !== UNTAGGED_TAG_NAME));
-const rootTags = computed(() => ordinaryTags.value.filter(tag => !tag.is_public));
-const publicTags = computed(() => ordinaryTags.value.filter(tag => tag.is_public));
-const filteredRootTags = computed(() => filteredTags.value.filter(tag => tag.name !== UNTAGGED_TAG_NAME && !tag.is_public));
-const filteredPublicTags = computed(() => filteredTags.value.filter(tag => tag.name !== UNTAGGED_TAG_NAME && tag.is_public));
-const filteredDisplayTags = computed(() => [...filteredPublicTags.value, ...filteredRootTags.value]);
+const ordinaryBranches = computed(() => ordinaryFolderBranches(ordinaryTags.value));
+const rootTags = computed(() => ordinaryBranches.value.map(branch => branch.root));
+const ordinaryChildTags = computed(() => ordinaryBranches.value.flatMap(branch => branch.children));
+const publicTags = computed(() => ordinaryTags.value.filter(tag => tag.is_public && !tag.parent_id));
+const collapsedOrdinaryFolderIds = ref<Set<string>>(new Set());
+const filteredDisplayTags = computed(() => {
+  const query = tagSearchQuery.value.trim().toLowerCase();
+  const publicMatches = publicTags.value.filter(tag => !query || (tag.name || '').toLowerCase().includes(query));
+  const ordinaryMatches = ordinaryBranches.value.flatMap((branch) => {
+    if (!query) {
+      return collapsedOrdinaryFolderIds.value.has(branch.root.id) ? [branch.root] : [branch.root, ...branch.children];
+    }
+    const rootMatches = (branch.root.name || '').toLowerCase().includes(query);
+    const childMatches = branch.children.filter(child => (child.name || '').toLowerCase().includes(query));
+    if (!rootMatches && !childMatches.length) return [];
+    return [branch.root, ...(rootMatches ? branch.children : childMatches)];
+  });
+  return [...publicMatches, ...ordinaryMatches];
+});
 const isFolderNotEmpty = (tag: any) => (
   Number(tag.knowledge_count || 0) > 0 || Number(tag.chunk_count || 0) > 0
+);
+const hasFolderChildren = (tagId: string) => ordinaryChildTags.value.some(tag => tag.parent_id === tagId);
+const toggleOrdinaryFolder = (tagId: string) => {
+  const next = new Set(collapsedOrdinaryFolderIds.value);
+  if (next.has(tagId)) next.delete(tagId);
+  else next.add(tagId);
+  collapsedOrdinaryFolderIds.value = next;
+};
+const isTagSearchDisabledByParent = (tag: any) => (
+  Boolean(tag.parent_id) && tagMap.value[tag.parent_id]?.search_enabled === false
 );
 const folderOrderComplete = computed(() => tagList.value.length === tagTotal.value);
 const canReorderFolders = computed(() => canEdit.value && folderOrderComplete.value && !tagSearchQuery.value.trim());
 const draggedTagId = ref('');
 const dragOverTagId = ref('');
-const dragOverPublicFolder = ref(false);
 const folderOrderSaving = ref(false);
 const publicFolderExpanded = ref(true);
 const selectedFolder = computed(() => tagMap.value[selectedTagId.value]);
@@ -338,7 +363,7 @@ const setEditingTagInputRefByTag = (tagId: string) => (el: TagInputInstance | nu
 };
 const newTagInputRef = ref<TagInputInstance | null>(null);
 const creatingTag = ref(false);
-const creatingPublicTag = ref(false);
+const creatingPlacement = ref<FolderCreatePlacement>({ kind: 'root' });
 const creatingTagLoading = ref(false);
 const newTagName = ref('');
 const editingTagId = ref<string | null>(null);
@@ -486,7 +511,6 @@ const selectFolder = (tagId: string) => {
 const resetFolderDrag = () => {
   draggedTagId.value = '';
   dragOverTagId.value = '';
-  dragOverPublicFolder.value = false;
 };
 
 const handleFolderDragStart = (event: DragEvent, tagId: string) => {
@@ -501,26 +525,32 @@ const handleFolderDragStart = (event: DragEvent, tagId: string) => {
 
 const handleFolderDragOver = (event: DragEvent, tagId: string) => {
   if (!draggedTagId.value || draggedTagId.value === tagId) return;
+  if (folderSiblingKey(tagMap.value[draggedTagId.value]) !== folderSiblingKey(tagMap.value[tagId])) return;
   event.preventDefault();
   dragOverTagId.value = tagId;
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
 };
 
-const handleFolderDrop = async (event: DragEvent, targetTagId: string, targetPublic: boolean) => {
+const handleFolderDrop = async (event: DragEvent, targetTagId: string) => {
   event.preventDefault();
   const sourceTagId = draggedTagId.value || event.dataTransfer?.getData('text/plain') || '';
   if (!canReorderFolders.value || !sourceTagId || sourceTagId === targetTagId || folderOrderSaving.value) {
     resetFolderDrag();
     return;
   }
+  if (folderSiblingKey(tagMap.value[sourceTagId]) !== folderSiblingKey(tagMap.value[targetTagId])) {
+    resetFolderDrag();
+    return;
+  }
 
   const previous = [...tagList.value];
-  const { root: nextRoot, public: nextPublic } = placeFolder(ordinaryTags.value, sourceTagId, targetTagId, targetPublic);
-  tagList.value = [...tagList.value.filter(tag => tag.name === UNTAGGED_TAG_NAME), ...nextPublic, ...nextRoot];
+  const { root: nextRoot, public: nextPublic, children } = placeFolder(ordinaryTags.value, sourceTagId, targetTagId);
+  tagList.value = [...tagList.value.filter(tag => tag.name === UNTAGGED_TAG_NAME), ...nextPublic, ...nextRoot, ...children];
   folderOrderSaving.value = true;
   resetFolderDrag();
   try {
-    await reorderKnowledgeBaseTags(kbId.value, nextRoot.map(tag => tag.id), nextPublic.map(tag => tag.id));
+    const completeChildOrders = ordinaryFolderChildOrders([...nextRoot, ...children]);
+    await reorderKnowledgeBaseTags(kbId.value, nextRoot.map(tag => tag.id), nextPublic.map(tag => tag.id), completeChildOrders);
     MessagePlugin.success(t('knowledgeBase.folderReorderSuccess'));
   } catch (error: any) {
     tagList.value = previous;
@@ -542,7 +572,7 @@ const startCreateTag = () => {
   editingTagId.value = null;
   editingTagName.value = '';
   creatingTag.value = true;
-  creatingPublicTag.value = false;
+  creatingPlacement.value = { kind: 'root' };
   nextTick(() => {
     newTagInputRef.value?.focus?.();
     newTagInputRef.value?.select?.();
@@ -554,8 +584,25 @@ const startCreatePublicTag = () => {
   editingTagId.value = null;
   editingTagName.value = '';
   creatingTag.value = true;
-  creatingPublicTag.value = true;
+  creatingPlacement.value = { kind: 'public' };
   publicFolderExpanded.value = true;
+  nextTick(() => {
+    newTagInputRef.value?.focus?.();
+    newTagInputRef.value?.select?.();
+  });
+};
+
+const startCreateChildTag = (parentId: string) => {
+  if (!kbId.value || creatingTag.value) return;
+  if (collapsedOrdinaryFolderIds.value.has(parentId)) {
+    const next = new Set(collapsedOrdinaryFolderIds.value);
+    next.delete(parentId);
+    collapsedOrdinaryFolderIds.value = next;
+  }
+  editingTagId.value = null;
+  editingTagName.value = '';
+  creatingTag.value = true;
+  creatingPlacement.value = { kind: 'ordinary-child', parentId };
   nextTick(() => {
     newTagInputRef.value?.focus?.();
     newTagInputRef.value?.select?.();
@@ -564,7 +611,7 @@ const startCreatePublicTag = () => {
 
 const cancelCreateTag = () => {
   creatingTag.value = false;
-  creatingPublicTag.value = false;
+  creatingPlacement.value = { kind: 'root' };
   newTagName.value = '';
 };
 
@@ -588,8 +635,18 @@ const submitCreateTag = async () => {
   }
   creatingTagLoading.value = true;
   try {
-    const siblings = creatingPublicTag.value ? publicTags.value : rootTags.value;
-    await createKnowledgeBaseTag(kbId.value, { name, sort_order: siblings.length, is_public: creatingPublicTag.value });
+    const placement = creatingPlacement.value;
+    const siblings = placement.kind === 'public'
+      ? publicTags.value
+      : placement.kind === 'ordinary-child'
+        ? ordinaryChildTags.value.filter(tag => tag.parent_id === placement.parentId)
+        : rootTags.value;
+    await createKnowledgeBaseTag(kbId.value, {
+      name,
+      sort_order: siblings.length,
+      is_public: placement.kind === 'public',
+      parent_id: placement.kind === 'ordinary-child' ? placement.parentId : undefined,
+    });
     MessagePlugin.success(t('knowledgeBase.tagCreateSuccess'));
     cancelCreateTag();
     await loadTags(kbId.value);
@@ -651,7 +708,7 @@ const submitEditTag = async () => {
 };
 
 const updateTagSearchEnabled = async (tag: any, enabled: boolean) => {
-  if (!kbId.value || tagSearchUpdatingId.value) return;
+  if (!kbId.value || tagSearchUpdatingId.value || isTagSearchDisabledByParent(tag)) return;
   const previous = tag.search_enabled !== false;
   tag.search_enabled = enabled;
   tagSearchUpdatingId.value = tag.id;
@@ -673,7 +730,7 @@ const tagDeleteDesc = computed(() => {
 });
 
 const confirmDeleteTag = (tag: any) => {
-  if (isFolderNotEmpty(tag)) {
+  if (isFolderNotEmpty(tag) || hasFolderChildren(tag.id)) {
     MessagePlugin.warning(t('knowledgeBase.folderDeleteNotEmpty'));
     return;
   }
@@ -2202,12 +2259,8 @@ async function createNewSession(value: string): Promise<void> {
 
             <div
               class="knowledge-tree-row folder-row fixed-folder-row public-folder-row"
-              :class="{ 'drop-target': dragOverPublicFolder }"
               role="listitem"
               @click="publicFolderExpanded = !publicFolderExpanded"
-              @dragover.prevent="dragOverPublicFolder = Boolean(draggedTagId)"
-              @dragleave="dragOverPublicFolder = false"
-              @drop="handleFolderDrop($event, '', true)"
             >
               <span class="public-folder-toggle" aria-hidden="true">
                 <t-icon :name="publicFolderExpanded ? 'chevron-down' : 'chevron-right'" size="14px" />
@@ -2226,7 +2279,7 @@ async function createNewSession(value: string): Promise<void> {
               </t-button>
             </div>
 
-            <div v-if="creatingTag && creatingPublicTag" class="knowledge-tree-row folder-row public-child-row tree-editing" @click.stop>
+            <div v-if="creatingTag && creatingPlacement.kind === 'public'" class="knowledge-tree-row folder-row public-child-row tree-editing" @click.stop>
               <span class="folder-drag-placeholder" />
               <span class="folder-icon computer-folder-icon" aria-hidden="true" />
               <div
@@ -2252,8 +2305,9 @@ async function createNewSession(value: string): Promise<void> {
               </div>
             </div>
 
-            <div v-if="creatingTag && !creatingPublicTag" class="knowledge-tree-row folder-row tree-editing" @click.stop>
+            <div v-if="creatingTag && creatingPlacement.kind === 'root'" class="knowledge-tree-row folder-row tree-editing" @click.stop>
               <span class="folder-drag-placeholder" />
+              <span class="ordinary-folder-toggle-placeholder" />
               <span class="folder-icon computer-folder-icon" aria-hidden="true" />
               <div class="tag-edit-input" @keydown.enter="onCreateTagEnterKey" @keydown.esc.prevent.stop="cancelCreateTag">
                 <t-input ref="newTagInputRef" v-model="newTagName" size="small" :maxlength="40" :placeholder="$t('knowledgeBase.tagNamePlaceholder')" />
@@ -2271,9 +2325,11 @@ async function createNewSession(value: string): Promise<void> {
               </div>
             </template>
             <template v-else>
-              <div
+              <template
                 v-for="tag in filteredDisplayTags"
                 :key="tag.id"
+              >
+              <div
                 v-show="!tag.is_public || publicFolderExpanded"
                 class="knowledge-tree-row folder-row"
                 :class="{
@@ -2282,20 +2338,31 @@ async function createNewSession(value: string): Promise<void> {
                   dragging: draggedTagId === tag.id,
                   'drop-target': dragOverTagId === tag.id,
                   'public-child-row': tag.is_public,
-                  'root-folder-row': !tag.is_public,
+                  'ordinary-child-row': Boolean(tag.parent_id),
+                  'root-folder-row': !tag.is_public && !tag.parent_id,
                 }"
                 role="listitem"
                 :draggable="canReorderFolders && !folderOrderSaving"
                 @dragstart="handleFolderDragStart($event, tag.id)"
                 @dragover="handleFolderDragOver($event, tag.id)"
                 @dragleave="dragOverTagId === tag.id && (dragOverTagId = '')"
-                @drop="handleFolderDrop($event, tag.id, Boolean(tag.is_public))"
+                @drop="handleFolderDrop($event, tag.id)"
                 @dragend="resetFolderDrag"
               >
                 <span v-if="canEdit" class="folder-drag-handle" :class="{ disabled: !canReorderFolders }" aria-hidden="true">
                   <t-icon name="move" size="14px" />
                 </span>
                 <span v-else class="folder-drag-placeholder" />
+                <button
+                  v-if="!tag.is_public && !tag.parent_id && hasFolderChildren(tag.id)"
+                  type="button"
+                  class="ordinary-folder-toggle"
+                  :aria-label="collapsedOrdinaryFolderIds.has(tag.id) ? $t('knowledgeBase.folderExpandAction') : $t('knowledgeBase.folderCollapseAction')"
+                  @click.stop="toggleOrdinaryFolder(tag.id)"
+                >
+                  <t-icon :name="collapsedOrdinaryFolderIds.has(tag.id) ? 'chevron-right' : 'chevron-down'" size="14px" />
+                </button>
+                <span v-else-if="!tag.is_public" class="ordinary-folder-toggle-placeholder" />
                 <span class="folder-icon computer-folder-icon" aria-hidden="true" />
                 <template v-if="editingTagId === tag.id">
                   <div
@@ -2332,6 +2399,14 @@ async function createNewSession(value: string): Promise<void> {
                       <div class="tag-more-btn"><t-icon name="more" size="14px" /></div>
                       <template #content>
                         <div class="tag-menu">
+                          <div
+                            v-if="!tag.is_public && !tag.parent_id"
+                            class="tag-menu-item"
+                            @click="startCreateChildTag(tag.id)"
+                          >
+                            <t-icon class="menu-icon" name="add" />
+                            <span>{{ $t('knowledgeBase.childFolderCreateAction') }}</span>
+                          </div>
                           <div class="tag-menu-item" @click="startEditTag(tag)">
                             <t-icon class="menu-icon" name="edit" />
                             <span>{{ $t('knowledgeBase.folderRenameAction') }}</span>
@@ -2339,7 +2414,21 @@ async function createNewSession(value: string): Promise<void> {
                           <div class="tag-menu-item tag-menu-search" @click.stop>
                             <t-icon class="menu-icon" name="search" />
                             <span>{{ $t('knowledgeBase.folderSearchLabel') }}</span>
+                            <t-tooltip
+                              v-if="isTagSearchDisabledByParent(tag)"
+                              :content="$t('knowledgeBase.folderSearchDisabledByParent')"
+                              placement="right"
+                            >
+                              <span class="tag-menu-switch">
+                                <t-switch
+                                  :value="tag.search_enabled !== false"
+                                  size="small"
+                                  disabled
+                                />
+                              </span>
+                            </t-tooltip>
                             <t-switch
+                              v-else
                               :value="tag.search_enabled !== false"
                               size="small"
                               :loading="tagSearchUpdatingId === tag.id"
@@ -2359,13 +2448,24 @@ async function createNewSession(value: string): Promise<void> {
                   </div>
                 </div>
               </div>
+              <div
+                v-if="creatingTag && creatingPlacement.kind === 'ordinary-child' && creatingPlacement.parentId === tag.id"
+                class="knowledge-tree-row folder-row ordinary-child-row tree-editing"
+                @click.stop
+              >
+                <span class="folder-drag-placeholder" />
+                <span class="ordinary-folder-toggle-placeholder" />
+                <span class="folder-icon computer-folder-icon" aria-hidden="true" />
+                <div class="tag-edit-input" @keydown.enter="onCreateTagEnterKey" @keydown.esc.prevent.stop="cancelCreateTag">
+                  <t-input ref="newTagInputRef" v-model="newTagName" size="small" :maxlength="40" :placeholder="$t('knowledgeBase.tagNamePlaceholder')" />
+                </div>
+                <div class="tag-inline-actions">
+                  <t-button variant="text" size="small" class="tag-action-btn confirm" :loading="creatingTagLoading" @click.stop="submitCreateTag"><t-icon name="check" size="16px" /></t-button>
+                  <t-button variant="text" size="small" class="tag-action-btn cancel" @click.stop="cancelCreateTag"><t-icon name="close" size="16px" /></t-button>
+                </div>
+              </div>
+              </template>
             </template>
-            <div
-              v-if="draggedTagId && ordinaryTags.find(tag => tag.id === draggedTagId)?.is_public"
-              class="root-folder-drop-zone"
-              @dragover.prevent
-              @drop="handleFolderDrop($event, '', false)"
-            />
             <div v-if="!tagLoading && tagSearchQuery && !filteredDisplayTags.length" class="tag-empty-state">
               {{ $t('knowledgeBase.tagEmptyResult') }}
             </div>
@@ -3580,7 +3680,9 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .folder-drag-handle,
-  .folder-drag-placeholder {
+  .folder-drag-placeholder,
+  .ordinary-folder-toggle,
+  .ordinary-folder-toggle-placeholder {
     width: 18px;
     height: 22px;
     flex: 0 0 18px;
@@ -3591,7 +3693,12 @@ async function createNewSession(value: string): Promise<void> {
     align-items: center;
     justify-content: center;
     color: var(--td-text-color-secondary, #5e5e5e);
+    opacity: 0.55;
     cursor: grab;
+
+    .knowledge-tree-row:hover & {
+      opacity: 1;
+    }
 
     &:active {
       cursor: grabbing;
@@ -3624,6 +3731,7 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .knowledge-tree-row {
+    box-sizing: border-box;
     width: 100%;
     min-width: 0;
     min-height: 32px;
@@ -3642,6 +3750,10 @@ async function createNewSession(value: string): Promise<void> {
     transition: background-color 0.15s ease, color 0.15s ease;
 
     &.public-child-row {
+      padding-left: 20px;
+    }
+
+    &.ordinary-child-row {
       padding-left: 20px;
     }
 
@@ -3866,6 +3978,21 @@ async function createNewSession(value: string): Promise<void> {
 
   > span {
     flex: 1;
+  }
+
+  .ordinary-folder-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--td-text-color-secondary, #5e5e5e);
+    cursor: pointer;
+
+    &:hover {
+      color: var(--td-text-color-primary, #232323);
+    }
   }
 }
 

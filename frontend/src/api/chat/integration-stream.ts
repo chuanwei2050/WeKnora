@@ -6,6 +6,7 @@ export interface StreamRequestParams {
   agent_enabled?: boolean
   agent_id?: string
   web_search_enabled?: boolean
+  filter_disabled_folders?: boolean
   enable_memory?: boolean
   summary_model_id?: string
   mcp_service_ids?: string[]
@@ -22,6 +23,7 @@ export function buildIntegrationMessageBody(params: StreamRequestParams) {
     query: params.query,
     ...(params.agent_id ? { agent_id: params.agent_id } : {}),
     ...(params.knowledge_base_ids?.length ? { selected_knowledge_base_ids: params.knowledge_base_ids } : {}),
+    ...(params.filter_disabled_folders !== undefined ? { filter_disabled_folders: params.filter_disabled_folders } : {}),
     ...(params.images?.length ? { images: params.images } : {}),
     ...(params.attachment_uploads?.length ? { attachment_uploads: params.attachment_uploads } : {}),
     ...(params.voice_metadata && Object.keys(params.voice_metadata).length > 0 ? { voice_metadata: params.voice_metadata } : {}),

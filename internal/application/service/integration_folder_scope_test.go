@@ -84,9 +84,11 @@ func (r integrationFolderKnowledgeRepo) GetKnowledgeBatch(_ context.Context, ten
 }
 
 func integrationFolderServiceFixture() *knowledgeService {
+	ordinaryParentID := "ordinary-1"
 	tags := []*types.KnowledgeTag{
 		{ID: "uncategorized", TenantID: 1, KnowledgeBaseID: "kb-1", Name: types.UntaggedTagName, SortOrder: -1},
 		{ID: "ordinary-1", TenantID: 1, KnowledgeBaseID: "kb-1", Name: "普通一", SortOrder: 1},
+		{ID: "ordinary-child", TenantID: 1, KnowledgeBaseID: "kb-1", Name: "普通子级", ParentID: &ordinaryParentID, SortOrder: 1},
 		{ID: "public-1", TenantID: 1, KnowledgeBaseID: "kb-1", Name: "公共一", IsPublic: true, SortOrder: 2},
 		{ID: "ordinary-2", TenantID: 1, KnowledgeBaseID: "kb-2", Name: "普通二", SortOrder: 1},
 		{ID: "public-2", TenantID: 1, KnowledgeBaseID: "kb-2", Name: "公共二", IsPublic: true, SortOrder: 2},
@@ -134,10 +136,11 @@ func TestResolveIntegrationFolderIDsMergesPublicFoldersFromExplicitFolderKBs(t *
 func TestResolveIntegrationFolderIDsRejectsInvalidScopes(t *testing.T) {
 	service := integrationFolderServiceFixture()
 	for name, ids := range map[string][]string{
-		"uncategorized": {"uncategorized"},
-		"cross kb":      {"foreign"},
-		"unknown":       {"missing"},
-		"duplicate":     {"ordinary-1", "ordinary-1"},
+		"uncategorized":  {"uncategorized"},
+		"cross kb":       {"foreign"},
+		"unknown":        {"missing"},
+		"duplicate":      {"ordinary-1", "ordinary-1"},
+		"ordinary child": {"ordinary-child"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := service.ResolveIntegrationFolderIDs(t.Context(), 1, []string{"kb-1"}, ids, nil)

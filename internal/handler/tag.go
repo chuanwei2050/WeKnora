@@ -163,10 +163,11 @@ func (h *TagHandler) ListTags(c *gin.Context) {
 }
 
 type createTagRequest struct {
-	Name      string `json:"name"       binding:"required"`
-	Color     string `json:"color"`
-	SortOrder int    `json:"sort_order"`
-	IsPublic  bool   `json:"is_public"`
+	Name      string  `json:"name"       binding:"required"`
+	Color     string  `json:"color"`
+	SortOrder int     `json:"sort_order"`
+	IsPublic  bool    `json:"is_public"`
+	ParentID  *string `json:"parent_id"`
 }
 
 // CreateTag godoc
@@ -200,7 +201,7 @@ func (h *TagHandler) CreateTag(c *gin.Context) {
 	}
 
 	tag, err := h.tagService.CreateTag(effCtx, kbID,
-		secutils.SanitizeForLog(req.Name), secutils.SanitizeForLog(req.Color), req.SortOrder, req.IsPublic)
+		secutils.SanitizeForLog(req.Name), secutils.SanitizeForLog(req.Color), req.SortOrder, req.IsPublic, req.ParentID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"kb_id": kbID,
@@ -223,8 +224,9 @@ type updateTagRequest struct {
 }
 
 type reorderTagsRequest struct {
-	RootTagIDs   []string `json:"root_tag_ids"`
-	PublicTagIDs []string `json:"public_tag_ids"`
+	RootTagIDs   []string            `json:"root_tag_ids"`
+	PublicTagIDs []string            `json:"public_tag_ids"`
+	ChildOrders  map[string][]string `json:"child_orders"`
 }
 
 // ReorderTags atomically saves the complete order of ordinary folders.
@@ -252,8 +254,22 @@ func (h *TagHandler) ReorderTags(c *gin.Context) {
 			}
 		}
 	}
+	for parentID, ids := range req.ChildOrders {
+		trimmedParentID := strings.TrimSpace(parentID)
+		if trimmedParentID == "" || trimmedParentID != parentID {
+			c.Error(errors.NewBadRequestError("父文件夹ID不合法"))
+			return
+		}
+		for index := range ids {
+			ids[index] = strings.TrimSpace(ids[index])
+			if ids[index] == "" {
+				c.Error(errors.NewBadRequestError("文件夹ID不能为空"))
+				return
+			}
+		}
+	}
 
-	if err := h.tagService.ReorderTags(effCtx, kbID, req.RootTagIDs, req.PublicTagIDs); err != nil {
+	if err := h.tagService.ReorderTags(effCtx, kbID, req.RootTagIDs, req.PublicTagIDs, req.ChildOrders); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kb_id": kbID})
 		c.Error(err)
 		return

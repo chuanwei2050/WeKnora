@@ -209,16 +209,17 @@ type ImageAttachment struct {
 
 // KnowledgeQARequest knowledge Q&A request
 type KnowledgeQARequest struct {
-	Query            string            `json:"query"`              // Query text for knowledge base search
-	KnowledgeBaseIDs []string          `json:"knowledge_base_ids"` // Selected knowledge base IDs for this request
-	KnowledgeIDs     []string          `json:"knowledge_ids"`      // Selected knowledge IDs for this request
-	AgentEnabled     bool              `json:"agent_enabled"`      // Whether agent mode is enabled for this request
-	AgentID          string            `json:"agent_id"`           // Selected custom agent ID for this request
-	WebSearchEnabled bool              `json:"web_search_enabled"` // Whether web search is enabled for this request
-	SummaryModelID   string            `json:"summary_model_id"`   // Optional summary model ID (overrides session default)
-	DisableTitle     bool              `json:"disable_title"`      // Whether to disable auto title generation
-	Images           []ImageAttachment `json:"images,omitempty"`   // Attached images for multimodal chat
-	Channel          string            `json:"channel,omitempty"`  // Source channel: "web", "api", "im", etc.
+	Query                 string            `json:"query"`                   // Query text for knowledge base search
+	KnowledgeBaseIDs      []string          `json:"knowledge_base_ids"`      // Selected knowledge base IDs for this request
+	KnowledgeIDs          []string          `json:"knowledge_ids"`           // Selected knowledge IDs for this request
+	AgentEnabled          bool              `json:"agent_enabled"`           // Whether agent mode is enabled for this request
+	AgentID               string            `json:"agent_id"`                // Selected custom agent ID for this request
+	WebSearchEnabled      bool              `json:"web_search_enabled"`      // Whether web search is enabled for this request
+	FilterDisabledFolders bool              `json:"filter_disabled_folders"` // Whether to exclude folders disabled for search
+	SummaryModelID        string            `json:"summary_model_id"`        // Optional summary model ID (overrides session default)
+	DisableTitle          bool              `json:"disable_title"`           // Whether to disable auto title generation
+	Images                []ImageAttachment `json:"images,omitempty"`        // Attached images for multimodal chat
+	Channel               string            `json:"channel,omitempty"`       // Source channel: "web", "api", "im", etc.
 }
 
 // LLMToolCall represents a function/tool call from the LLM
@@ -435,10 +436,11 @@ func (c *Client) StopSession(ctx context.Context, sessionID string, messageID st
 
 // SearchKnowledgeRequest knowledge search request
 type SearchKnowledgeRequest struct {
-	Query            string   `json:"query"`                        // Query content
-	KnowledgeBaseID  string   `json:"knowledge_base_id,omitempty"`  // Single knowledge base ID (for backward compatibility)
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"` // Knowledge base IDs (multi-KB support)
-	KnowledgeIDs     []string `json:"knowledge_ids,omitempty"`      // Specific knowledge (file) IDs
+	Query                 string   `json:"query"`                             // Query content
+	KnowledgeBaseID       string   `json:"knowledge_base_id,omitempty"`       // Single knowledge base ID (for backward compatibility)
+	KnowledgeBaseIDs      []string `json:"knowledge_base_ids,omitempty"`      // Knowledge base IDs (multi-KB support)
+	KnowledgeIDs          []string `json:"knowledge_ids,omitempty"`           // Specific knowledge (file) IDs
+	FilterDisabledFolders bool     `json:"filter_disabled_folders,omitempty"` // Whether to exclude folders disabled for search
 }
 
 // SearchKnowledgeResponse search results response

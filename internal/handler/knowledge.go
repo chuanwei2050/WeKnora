@@ -1527,9 +1527,10 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	mentionOnly := c.Query("usage") == "mention"
+	filterDisabledFolders, _ := strconv.ParseBool(c.DefaultQuery("filter_disabled_folders", "false"))
 	type mentionSearcher interface {
-		SearchKnowledgeForMention(context.Context, string, int, int, []string) ([]*types.Knowledge, bool, error)
-		SearchKnowledgeForScopesMention(context.Context, []types.KnowledgeSearchScope, string, int, int, []string) ([]*types.Knowledge, bool, error)
+		SearchKnowledgeForMention(context.Context, string, int, int, []string, bool) ([]*types.Knowledge, bool, error)
+		SearchKnowledgeForScopesMention(context.Context, []types.KnowledgeSearchScope, string, int, int, []string, bool) ([]*types.Knowledge, bool, error)
 	}
 
 	var fileTypes []string
@@ -1615,7 +1616,7 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		var hasMore bool
 		var searchErr error
 		if searcher, ok := h.kgService.(mentionSearcher); mentionOnly && ok {
-			knowledges, hasMore, searchErr = searcher.SearchKnowledgeForScopesMention(ctx, scopes, keyword, offset, limit, fileTypes)
+			knowledges, hasMore, searchErr = searcher.SearchKnowledgeForScopesMention(ctx, scopes, keyword, offset, limit, fileTypes, filterDisabledFolders)
 		} else {
 			knowledges, hasMore, searchErr = h.kgService.SearchKnowledgeForScopes(ctx, scopes, keyword, offset, limit, fileTypes)
 		}
@@ -1637,7 +1638,7 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 	var hasMore bool
 	var err error
 	if searcher, ok := h.kgService.(mentionSearcher); mentionOnly && ok {
-		knowledges, hasMore, err = searcher.SearchKnowledgeForMention(ctx, keyword, offset, limit, fileTypes)
+		knowledges, hasMore, err = searcher.SearchKnowledgeForMention(ctx, keyword, offset, limit, fileTypes, filterDisabledFolders)
 	} else {
 		knowledges, hasMore, err = h.kgService.SearchKnowledge(ctx, keyword, offset, limit, fileTypes)
 	}

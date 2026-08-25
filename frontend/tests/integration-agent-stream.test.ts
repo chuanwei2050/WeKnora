@@ -16,6 +16,21 @@ describe('integration agent stream', () => {
     })).toEqual({ query: 'question', agent_id: 'agent-1' })
   })
 
+  it('sends the disabled-folder filter with widget messages', () => {
+    expect(buildIntegrationMessageBody({
+      session_id: 'session-1',
+      query: 'question',
+      filter_disabled_folders: true,
+      method: 'POST',
+      url: '/api/v1/agent-chat',
+    })).toEqual({ query: 'question', filter_disabled_folders: true })
+
+    const chatView = readSource('../src/views/chat/index.vue')
+    const mentionInput = readSource('../src/components/Input-field.vue')
+    expect(chatView).toContain('filter_disabled_folders: true')
+    expect(mentionInput).toContain('filter_disabled_folders: true')
+  })
+
   it('maps agent events into the existing AG-UI response types', () => {
     expect(mapIntegrationEvent({
       event: 'tool_call',

@@ -1223,7 +1223,11 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       const fileTypesParam = agentSupportedFileTypes.value.length > 0 ? agentSupportedFileTypes.value : undefined;
       const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
       const agentId = selectedAgentId.value;
-      const searchOptions = { ...(sourceTenantId && agentId ? { agent_id: agentId } : {}), usage: 'mention' as const };
+      const searchOptions = {
+        ...(sourceTenantId && agentId ? { agent_id: agentId } : {}),
+        usage: 'mention' as const,
+        filter_disabled_folders: true,
+      };
       const res: any = await searchKnowledge(
         q || '',
         mentionOffset.value,

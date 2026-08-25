@@ -143,6 +143,7 @@ func (s *knowledgeTagService) CreateTag(
 	color string,
 	sortOrder int,
 	isPublic bool,
+	parentID *string,
 ) (*types.KnowledgeTag, error) {
 	name = strings.TrimSpace(name)
 	if kbID == "" || name == "" {
@@ -151,6 +152,24 @@ func (s *knowledgeTagService) CreateTag(
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
 		return nil, err
+	}
+
+	var normalizedParentID *string
+	if parentID != nil {
+		trimmedParentID := strings.TrimSpace(*parentID)
+		if trimmedParentID != "" {
+			if isPublic {
+				return nil, werrors.NewBadRequestError("公共子文件夹不能指定父文件夹")
+			}
+			parent, parentErr := s.repo.GetByID(ctx, kb.TenantID, trimmedParentID)
+			if parentErr != nil || parent == nil || parent.KnowledgeBaseID != kb.ID {
+				return nil, werrors.NewBadRequestError("父文件夹无效")
+			}
+			if parent.Name == types.UntaggedTagName || parent.IsPublic || parent.ParentID != nil {
+				return nil, werrors.NewBadRequestError("只能在普通一级文件夹下创建子文件夹")
+			}
+			normalizedParentID = &trimmedParentID
+		}
 	}
 
 	// Check if tag with same name already exists
@@ -175,6 +194,7 @@ func (s *knowledgeTagService) CreateTag(
 		Color:           strings.TrimSpace(color),
 		SortOrder:       sortOrder,
 		IsPublic:        isPublic,
+		ParentID:        normalizedParentID,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -235,7 +255,7 @@ func (s *knowledgeTagService) UpdateTag(
 }
 
 // ReorderTags validates and atomically persists the complete order of ordinary tags.
-func (s *knowledgeTagService) ReorderTags(ctx context.Context, kbID string, rootIDs, publicIDs []string) error {
+func (s *knowledgeTagService) ReorderTags(ctx context.Context, kbID string, rootIDs, publicIDs []string, childOrders map[string][]string) error {
 	if kbID == "" {
 		return werrors.NewBadRequestError("知识库ID不能为空")
 	}
@@ -253,27 +273,59 @@ func (s *knowledgeTagService) ReorderTags(ctx context.Context, kbID string, root
 		return werrors.NewBadRequestError("文件夹数量超过可排序上限")
 	}
 
-	expected := make(map[string]struct{}, len(tags))
+	expectedRoot := make(map[string]struct{}, len(tags))
+	expectedPublic := make(map[string]struct{}, len(tags))
+	expectedChildren := make(map[string]map[string]struct{})
 	for _, tag := range tags {
-		if tag != nil && tag.Name != types.UntaggedTagName {
-			expected[tag.ID] = struct{}{}
+		if tag == nil || tag.Name == types.UntaggedTagName {
+			continue
+		}
+		if tag.ParentID != nil {
+			if expectedChildren[*tag.ParentID] == nil {
+				expectedChildren[*tag.ParentID] = make(map[string]struct{})
+			}
+			expectedChildren[*tag.ParentID][tag.ID] = struct{}{}
+		} else if tag.IsPublic {
+			expectedPublic[tag.ID] = struct{}{}
+		} else {
+			expectedRoot[tag.ID] = struct{}{}
 		}
 	}
-	orderedIDs := append(append(make([]string, 0, len(rootIDs)+len(publicIDs)), rootIDs...), publicIDs...)
-	if len(orderedIDs) != len(expected) {
-		return werrors.NewBadRequestError("文件夹排序集合不完整")
-	}
-	seen := make(map[string]struct{}, len(orderedIDs))
-	for _, id := range orderedIDs {
-		if _, duplicate := seen[id]; duplicate {
-			return werrors.NewBadRequestError("文件夹排序包含重复项")
+	validateSection := func(ids []string, expected map[string]struct{}) error {
+		if len(ids) != len(expected) {
+			return werrors.NewBadRequestError("文件夹排序集合不完整")
 		}
-		if _, ok := expected[id]; !ok {
-			return werrors.NewBadRequestError("文件夹排序包含无效项")
+		seen := make(map[string]struct{}, len(ids))
+		for _, id := range ids {
+			if _, duplicate := seen[id]; duplicate {
+				return werrors.NewBadRequestError("文件夹排序包含重复项")
+			}
+			if _, ok := expected[id]; !ok {
+				return werrors.NewBadRequestError("文件夹排序包含跨层级或跨父级项")
+			}
+			seen[id] = struct{}{}
 		}
-		seen[id] = struct{}{}
+		return nil
 	}
-	return s.repo.Reorder(ctx, kb.TenantID, kbID, rootIDs, publicIDs)
+	if err := validateSection(rootIDs, expectedRoot); err != nil {
+		return err
+	}
+	if err := validateSection(publicIDs, expectedPublic); err != nil {
+		return err
+	}
+	if len(childOrders) != len(expectedChildren) {
+		return werrors.NewBadRequestError("二级文件夹排序集合不完整")
+	}
+	for parentID, expected := range expectedChildren {
+		ids, ok := childOrders[parentID]
+		if !ok {
+			return werrors.NewBadRequestError("二级文件夹排序缺少父级")
+		}
+		if err := validateSection(ids, expected); err != nil {
+			return err
+		}
+	}
+	return s.repo.Reorder(ctx, kb.TenantID, kbID, rootIDs, publicIDs, childOrders)
 }
 
 // DeleteTag deletes a tag. When force=true, also deletes all chunks under this tag.
@@ -290,6 +342,15 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 	}
 	if tag.Name == types.UntaggedTagName {
 		return werrors.NewBadRequestError("未分类文件夹不能删除")
+	}
+	if !contentOnly {
+		hasChildren, childrenErr := s.repo.HasChildren(ctx, tenantID, tag.KnowledgeBaseID, tag.ID)
+		if childrenErr != nil {
+			return childrenErr
+		}
+		if hasChildren {
+			return werrors.NewBadRequestError("该文件夹仍有子文件夹，请先处理子文件夹")
+		}
 	}
 
 	// Get KB info for embedding model
@@ -505,5 +566,5 @@ func (s *knowledgeTagService) FindOrCreateTagByName(ctx context.Context, kbID st
 	}
 
 	// 创建新标签
-	return s.CreateTag(ctx, kbID, name, "", 0, false)
+	return s.CreateTag(ctx, kbID, name, "", 0, false, nil)
 }

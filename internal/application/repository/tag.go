@@ -141,6 +141,7 @@ func (r *knowledgeTagRepository) Reorder(
 	tenantID uint64,
 	kbID string,
 	rootIDs, publicIDs []string,
+	childOrders map[string][]string,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&types.KnowledgeTag{}).
@@ -148,11 +149,11 @@ func (r *knowledgeTagRepository) Reorder(
 			Update("sort_order", -1).Error; err != nil {
 			return err
 		}
-		updateSection := func(ids []string, isPublic bool) error {
+		updateRootSection := func(ids []string, isPublic bool) error {
 			for index, id := range ids {
 				result := tx.Model(&types.KnowledgeTag{}).
-					Where("tenant_id = ? AND knowledge_base_id = ? AND id = ? AND name <> ?", tenantID, kbID, id, types.UntaggedTagName).
-					Updates(map[string]interface{}{"sort_order": index, "is_public": isPublic})
+					Where("tenant_id = ? AND knowledge_base_id = ? AND id = ? AND name <> ? AND parent_id IS NULL AND is_public = ?", tenantID, kbID, id, types.UntaggedTagName, isPublic).
+					Update("sort_order", index)
 				if result.Error != nil {
 					return result.Error
 				}
@@ -162,11 +163,42 @@ func (r *knowledgeTagRepository) Reorder(
 			}
 			return nil
 		}
-		if err := updateSection(rootIDs, false); err != nil {
+		if err := updateRootSection(rootIDs, false); err != nil {
 			return err
 		}
-		return updateSection(publicIDs, true)
+		if err := updateRootSection(publicIDs, true); err != nil {
+			return err
+		}
+		for parentID, ids := range childOrders {
+			for index, id := range ids {
+				result := tx.Model(&types.KnowledgeTag{}).
+					Where("tenant_id = ? AND knowledge_base_id = ? AND id = ? AND parent_id = ? AND is_public = ?", tenantID, kbID, id, parentID, false).
+					Update("sort_order", index)
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected != 1 {
+					return fmt.Errorf("tag %s is not reorderable under parent %s", id, parentID)
+				}
+			}
+		}
+		return nil
 	})
+}
+
+// HasChildren reports whether an ordinary folder has direct children in the same knowledge base.
+func (r *knowledgeTagRepository) HasChildren(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	parentID string,
+) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&types.KnowledgeTag{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND parent_id = ?", tenantID, kbID, parentID).
+		Limit(1).
+		Count(&count).Error
+	return count > 0, err
 }
 
 // Delete deletes a knowledge tag

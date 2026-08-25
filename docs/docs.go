@@ -14368,6 +14368,10 @@ const docTemplate = `{
                     "description": "Whether memory feature is enabled for this request",
                     "type": "boolean"
                 },
+                "filter_disabled_folders": {
+                    "description": "Whether to exclude folders disabled for search",
+                    "type": "boolean"
+                },
                 "images": {
                     "description": "Attached images for multimodal chat",
                     "type": "array",
@@ -14480,6 +14484,10 @@ const docTemplate = `{
                 "query"
             ],
             "properties": {
+                "filter_disabled_folders": {
+                    "description": "Whether to exclude folders disabled for search",
+                    "type": "boolean"
+                },
                 "knowledge_base_id": {
                     "description": "Single knowledge base ID (for backward compatibility)",
                     "type": "string"

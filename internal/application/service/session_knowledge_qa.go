@@ -80,7 +80,7 @@ func (s *sessionService) KnowledgeQA(
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, true)
+	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.FilterDisabledFolders)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets: %v", err)
 	}
@@ -148,7 +148,7 @@ func (s *sessionService) KnowledgeQA(
 		},
 	}
 	chatManage.VerifiedRetrieve = func(retrieveCtx context.Context, query string) ([]*types.SearchResult, error) {
-		return s.SearchKnowledge(retrieveCtx, chatManage.KnowledgeBaseIDs, chatManage.KnowledgeIDs, query)
+		return s.SearchKnowledge(retrieveCtx, chatManage.KnowledgeBaseIDs, chatManage.KnowledgeIDs, req.FilterDisabledFolders, query)
 	}
 
 	// Apply custom agent overrides (system prompt, temperature, retrieval params,
@@ -489,12 +489,17 @@ func (s *sessionService) buildSearchTargets(
 		IntegrationFolderIDsForKnowledgeBase(context.Context, uint64, string, []string) ([]string, error)
 	}
 	searchableTags := func(scopeTenantID uint64, kbID string) ([]string, error) {
+		var tagIDs []string
 		if len(explicitTagIDs) > 0 {
 			provider, ok := s.knowledgeService.(integrationFolderScopeProvider)
 			if !ok {
 				return nil, errors.New("integration folder scope is unavailable")
 			}
-			return provider.IntegrationFolderIDsForKnowledgeBase(ctx, scopeTenantID, kbID, explicitTagIDs[0])
+			var err error
+			tagIDs, err = provider.IntegrationFolderIDsForKnowledgeBase(ctx, scopeTenantID, kbID, explicitTagIDs[0])
+			if err != nil || !filterDisabledFolders {
+				return tagIDs, err
+			}
 		}
 		if !filterDisabledFolders {
 			return nil, nil
@@ -503,7 +508,21 @@ func (s *sessionService) buildSearchTargets(
 		if !ok {
 			return nil, nil
 		}
-		return provider.SearchableTagIDs(ctx, scopeTenantID, kbID)
+		searchable, err := provider.SearchableTagIDs(ctx, scopeTenantID, kbID)
+		if err != nil || len(explicitTagIDs) == 0 {
+			return searchable, err
+		}
+		allowed := make(map[string]struct{}, len(searchable))
+		for _, id := range searchable {
+			allowed[id] = struct{}{}
+		}
+		filtered := make([]string, 0, len(tagIDs))
+		for _, id := range tagIDs {
+			if _, ok := allowed[id]; ok {
+				filtered = append(filtered, id)
+			}
+		}
+		return filtered, nil
 	}
 
 	// Build a map from KB ID to TenantID for all KBs we need to process
@@ -702,19 +721,19 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 // knowledgeBaseIDs: list of knowledge base IDs to search (supports multi-KB)
 // knowledgeIDs: list of specific knowledge (file) IDs to search
 func (s *sessionService) SearchKnowledge(ctx context.Context,
-	knowledgeBaseIDs []string, knowledgeIDs []string, query string,
+	knowledgeBaseIDs []string, knowledgeIDs []string, filterDisabledFolders bool, query string,
 ) ([]*types.SearchResult, error) {
-	return s.searchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, nil, query)
+	return s.searchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, nil, filterDisabledFolders, query)
 }
 
 func (s *sessionService) SearchKnowledgeWithFolders(ctx context.Context,
-	knowledgeBaseIDs []string, knowledgeIDs []string, folderIDs []string, query string,
+	knowledgeBaseIDs []string, knowledgeIDs []string, folderIDs []string, filterDisabledFolders bool, query string,
 ) ([]*types.SearchResult, error) {
-	return s.searchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, folderIDs, query)
+	return s.searchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, folderIDs, filterDisabledFolders, query)
 }
 
 func (s *sessionService) searchKnowledge(ctx context.Context,
-	knowledgeBaseIDs []string, knowledgeIDs []string, folderIDs []string, query string,
+	knowledgeBaseIDs []string, knowledgeIDs []string, folderIDs []string, filterDisabledFolders bool, query string,
 ) ([]*types.SearchResult, error) {
 	logger.Info(ctx, "Start knowledge base search without LLM summary")
 	logger.Infof(ctx, "Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, query: %s",
@@ -731,9 +750,9 @@ func (s *sessionService) searchKnowledge(ctx context.Context,
 	var searchTargets types.SearchTargets
 	var err error
 	if folderIDs == nil {
-		searchTargets, err = s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, false)
+		searchTargets, err = s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, filterDisabledFolders)
 	} else {
-		searchTargets, err = s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, false, folderIDs)
+		searchTargets, err = s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, filterDisabledFolders, folderIDs)
 	}
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets: %v", err)

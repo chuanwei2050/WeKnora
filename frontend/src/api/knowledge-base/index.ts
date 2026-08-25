@@ -225,7 +225,7 @@ export function listKnowledgeTags(
 
 export function createKnowledgeBaseTag(
   kbId: string,
-  data: { name: string; color?: string; sort_order?: number; is_public?: boolean },
+  data: { name: string; color?: string; sort_order?: number; is_public?: boolean; parent_id?: string },
 ) {
   return post(`/api/v1/knowledge-bases/${kbId}/tags`, data);
 }
@@ -238,10 +238,16 @@ export function updateKnowledgeBaseTag(
   return put(`/api/v1/knowledge-bases/${kbId}/tags/${tagId}`, data);
 }
 
-export function reorderKnowledgeBaseTags(kbId: string, rootTagIds: string[], publicTagIds: string[]) {
+export function reorderKnowledgeBaseTags(
+  kbId: string,
+  rootTagIds: string[],
+  publicTagIds: string[],
+  childOrders: Record<string, string[]>,
+) {
   return put(`/api/v1/knowledge-bases/${kbId}/tags/reorder`, {
     root_tag_ids: rootTagIds,
     public_tag_ids: publicTagIds,
+    child_orders: childOrders,
   });
 }
 
@@ -377,7 +383,7 @@ export function searchKnowledge(
   offset = 0,
   limit = 20,
   fileTypes?: string[],
-  options?: { agent_id?: string; usage?: 'mention' }
+  options?: { agent_id?: string; usage?: 'mention'; filter_disabled_folders?: boolean }
 ) {
   const query = new URLSearchParams();
   query.set('keyword', keyword);
@@ -388,6 +394,9 @@ export function searchKnowledge(
   }
   if (options?.agent_id) query.set('agent_id', options.agent_id);
   if (options?.usage) query.set('usage', options.usage);
+  if (options?.filter_disabled_folders !== undefined) {
+    query.set('filter_disabled_folders', String(options.filter_disabled_folders));
+  }
   return get(`/api/v1/knowledge/search?${query.toString()}`);
 }
 
@@ -395,6 +404,7 @@ export function knowledgeSemanticSearch(data: {
   query: string;
   knowledge_base_ids?: string[];
   knowledge_ids?: string[];
+  filter_disabled_folders?: boolean;
 }) {
   return post('/api/v1/knowledge-search', data);
 }

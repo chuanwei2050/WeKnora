@@ -98,11 +98,12 @@ func loadIntegrationLimits() integrationLimits {
 }
 
 type integrationBatchSearchQuery struct {
-	ID           string    `json:"id" binding:"required"`
-	Query        string    `json:"query" binding:"required"`
-	KnowledgeIDs *[]string `json:"knowledge_ids"`
-	FolderIDs    *[]string `json:"folder_ids"`
-	TopK         int       `json:"top_k"`
+	ID                    string    `json:"id" binding:"required"`
+	Query                 string    `json:"query" binding:"required"`
+	KnowledgeIDs          *[]string `json:"knowledge_ids"`
+	FolderIDs             *[]string `json:"folder_ids"`
+	FilterDisabledFolders bool      `json:"filter_disabled_folders"`
+	TopK                  int       `json:"top_k"`
 }
 
 type integrationBatchSearchRequest struct {
@@ -126,7 +127,7 @@ type integrationFolderProvider interface {
 }
 
 type folderSearchSession interface {
-	SearchKnowledgeWithFolders(context.Context, []string, []string, []string, string) ([]*types.SearchResult, error)
+	SearchKnowledgeWithFolders(context.Context, []string, []string, []string, bool, string) ([]*types.SearchResult, error)
 }
 
 func validIntegrationKnowledgeIDs(ids []string, limit int) bool {
@@ -863,11 +864,12 @@ func (h *IntegrationHandler) Search(c *gin.Context) {
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, int64(h.limits.maxRequestBytes))
 	var req struct {
-		KnowledgeBaseIDs *[]string `json:"knowledge_base_ids" binding:"required"`
-		KnowledgeIDs     *[]string `json:"knowledge_ids"`
-		FolderIDs        *[]string `json:"folder_ids"`
-		Query            string    `json:"query" binding:"required"`
-		TopK             int       `json:"top_k"`
+		KnowledgeBaseIDs      *[]string `json:"knowledge_base_ids" binding:"required"`
+		KnowledgeIDs          *[]string `json:"knowledge_ids"`
+		FolderIDs             *[]string `json:"folder_ids"`
+		FilterDisabledFolders bool      `json:"filter_disabled_folders"`
+		Query                 string    `json:"query" binding:"required"`
+		TopK                  int       `json:"top_k"`
 	}
 	if c.ShouldBindJSON(&req) != nil || req.KnowledgeBaseIDs == nil || len(*req.KnowledgeBaseIDs) == 0 || strings.TrimSpace(req.Query) == "" {
 		h.audit(c, "api.search", "denied", "invalid_request")
@@ -896,7 +898,7 @@ func (h *IntegrationHandler) Search(c *gin.Context) {
 	var results []*types.SearchResult
 	var err error
 	if req.FolderIDs == nil || len(*req.FolderIDs) == 0 {
-		results, err = h.sessions.SearchKnowledge(c.Request.Context(), *req.KnowledgeBaseIDs, knowledgeIDs, req.Query)
+		results, err = h.sessions.SearchKnowledge(c.Request.Context(), *req.KnowledgeBaseIDs, knowledgeIDs, req.FilterDisabledFolders, req.Query)
 	} else {
 		provider, providerOK := h.knowledges.(integrationFolderProvider)
 		searcher, searcherOK := h.sessions.(folderSearchSession)
@@ -913,7 +915,7 @@ func (h *IntegrationHandler) Search(c *gin.Context) {
 			integrationError(c, http.StatusBadRequest, "invalid_folder_ids", "invalid folder ids")
 			return
 		}
-		results, err = searcher.SearchKnowledgeWithFolders(c.Request.Context(), *req.KnowledgeBaseIDs, knowledgeIDs, folderIDs, req.Query)
+		results, err = searcher.SearchKnowledgeWithFolders(c.Request.Context(), *req.KnowledgeBaseIDs, knowledgeIDs, folderIDs, req.FilterDisabledFolders, req.Query)
 	}
 	if err != nil {
 		if appErr, ok := werrors.IsAppError(err); ok && appErr.Code == werrors.ErrForbidden {
@@ -1079,10 +1081,10 @@ func (h *IntegrationHandler) runIntegrationSearchBatch(ctx context.Context, know
 				if !ok {
 					err = errors.New("folder search is unavailable")
 				} else {
-					found, err = searcher.SearchKnowledgeWithFolders(ctx, knowledgeBaseIDs, knowledgeIDs, folderIDsByQuery[0][index], query.Query)
+					found, err = searcher.SearchKnowledgeWithFolders(ctx, knowledgeBaseIDs, knowledgeIDs, folderIDsByQuery[0][index], query.FilterDisabledFolders, query.Query)
 				}
 			} else {
-				found, err = h.sessions.SearchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, query.Query)
+				found, err = h.sessions.SearchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, query.FilterDisabledFolders, query.Query)
 			}
 			if err != nil {
 				if appErr, ok := werrors.IsAppError(err); ok && appErr.Code == werrors.ErrForbidden {
@@ -1418,6 +1420,7 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 		Query                    string    `json:"query" binding:"required"`
 		AgentID                  string    `json:"agent_id"`
 		SelectedKnowledgeBaseIDs *[]string `json:"selected_knowledge_base_ids"`
+		FilterDisabledFolders    bool      `json:"filter_disabled_folders"`
 		Images                   []struct {
 			Data string `json:"data"`
 		} `json:"images"`
@@ -1631,7 +1634,7 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	}()
 	session, err := h.sessions.GetSession(generationCtx, binding.SessionID)
 	if err == nil {
-		qaRequest := &types.QARequest{Session: session, Query: req.Query, AssistantMessageID: assistantMessage.ID, KnowledgeBaseIDs: selected, UserMessageID: userMessage.ID, ImageURLs: imageURLs, Attachments: processedAttachments, CustomAgent: customAgent}
+		qaRequest := &types.QARequest{Session: session, Query: req.Query, AssistantMessageID: assistantMessage.ID, KnowledgeBaseIDs: selected, UserMessageID: userMessage.ID, ImageURLs: imageURLs, Attachments: processedAttachments, CustomAgent: customAgent, FilterDisabledFolders: req.FilterDisabledFolders}
 		if agentMode {
 			err = h.sessions.AgentQA(generationCtx, qaRequest, eventBus)
 		} else {

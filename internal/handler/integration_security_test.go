@@ -32,20 +32,22 @@ type batchSearchSessionService struct {
 	active    int
 	maxActive int
 	folderIDs []string
+	filters   []bool
 	calls     int
 }
 
-func (s *batchSearchSessionService) SearchKnowledgeWithFolders(_ context.Context, knowledgeBaseIDs []string, knowledgeIDs []string, folderIDs []string, query string) ([]*types.SearchResult, error) {
+func (s *batchSearchSessionService) SearchKnowledgeWithFolders(_ context.Context, knowledgeBaseIDs []string, knowledgeIDs []string, folderIDs []string, filterDisabledFolders bool, query string) ([]*types.SearchResult, error) {
 	s.mu.Lock()
 	s.folderIDs = append([]string(nil), folderIDs...)
 	s.mu.Unlock()
-	return s.SearchKnowledge(context.Background(), knowledgeBaseIDs, knowledgeIDs, query)
+	return s.SearchKnowledge(context.Background(), knowledgeBaseIDs, knowledgeIDs, filterDisabledFolders, query)
 }
 
-func (s *batchSearchSessionService) SearchKnowledge(_ context.Context, knowledgeBaseIDs []string, knowledgeIDs []string, query string) ([]*types.SearchResult, error) {
+func (s *batchSearchSessionService) SearchKnowledge(_ context.Context, knowledgeBaseIDs []string, knowledgeIDs []string, filterDisabledFolders bool, query string) ([]*types.SearchResult, error) {
 	s.mu.Lock()
 	s.active++
 	s.calls++
+	s.filters = append(s.filters, filterDisabledFolders)
 	if s.active > s.maxActive {
 		s.maxActive = s.active
 	}
@@ -326,13 +328,31 @@ func TestIntegrationBatchSearchUsesResolvedFolders(t *testing.T) {
 		kbs:      batchSearchKnowledgeBaseService{},
 		limits:   integrationLimits{defaultTopK: 2, batchConcurrency: 1},
 	}
-	queries := []integrationBatchSearchQuery{{ID: "q-1", Query: "first"}}
+	queries := []integrationBatchSearchQuery{{ID: "q-1", Query: "first", FilterDisabledFolders: true}}
 	resolved := [][]string{{"folder-1", "public-1"}}
 	results, forbidden := handler.runIntegrationSearchBatch(context.Background(), []string{"kb-1"}, queries, resolved)
 
 	require.False(t, forbidden)
 	require.Equal(t, "completed", results[0].Status)
 	require.Equal(t, resolved[0], sessions.folderIDs)
+	require.Equal(t, []bool{true}, sessions.filters)
+}
+
+func TestIntegrationBatchSearchUsesPerQueryFolderFilter(t *testing.T) {
+	sessions := &batchSearchSessionService{}
+	handler := &IntegrationHandler{
+		sessions: sessions,
+		kbs:      batchSearchKnowledgeBaseService{},
+		limits:   integrationLimits{defaultTopK: 2, batchConcurrency: 1},
+	}
+	queries := []integrationBatchSearchQuery{
+		{ID: "q-1", Query: "first", FilterDisabledFolders: true},
+		{ID: "q-2", Query: "second"},
+	}
+	_, forbidden := handler.runIntegrationSearchBatch(context.Background(), []string{"kb-1"}, queries)
+
+	require.False(t, forbidden)
+	require.ElementsMatch(t, []bool{true, false}, sessions.filters)
 }
 
 func TestIntegrationBatchSearchRejectsFolderScopeBeforeExecutingAnyQuery(t *testing.T) {

@@ -74,6 +74,22 @@ func TestBuildSearchTargetsAppliesExplicitIntegrationFolders(t *testing.T) {
 	require.Equal(t, []string{"ordinary-1", "public-1"}, targets[0].TagIDs)
 }
 
+func TestBuildSearchTargetsIntersectsExplicitAndSearchableFolders(t *testing.T) {
+	service := &sessionService{
+		knowledgeService: scopedSearchTargetKnowledgeService{
+			searchTargetKnowledgeService: searchTargetKnowledgeService{searchableTagIDs: []string{"ordinary-1"}},
+			foldersByKB:                  map[string][]string{"kb-1": {"ordinary-1", "disabled-1"}},
+		},
+		knowledgeBaseService: searchTargetKnowledgeBaseService{items: []*types.KnowledgeBase{{ID: "kb-1", TenantID: 7}}},
+	}
+
+	targets, err := service.buildSearchTargets(context.Background(), 7, []string{"kb-1"}, nil, true, []string{"ordinary-1", "disabled-1"})
+
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	require.Equal(t, []string{"ordinary-1"}, targets[0].TagIDs)
+}
+
 func TestBuildSearchTargetsKeepsExplicitFoldersOnOwningKnowledgeBase(t *testing.T) {
 	service := &sessionService{
 		knowledgeBaseService: searchTargetKnowledgeBaseService{items: []*types.KnowledgeBase{

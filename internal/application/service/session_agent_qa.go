@@ -370,7 +370,7 @@ func (s *sessionService) publishVerifiedAgentAnswer(
 		PipelineContext: types.PipelineContext{EventBus: eventBus.AsEventBusInterface()},
 	}
 	manage.VerifiedRetrieve = func(retrieveCtx context.Context, retrieveQuery string) ([]*types.SearchResult, error) {
-		return s.SearchKnowledge(context.WithValue(retrieveCtx, types.TenantIDContextKey, manage.TenantID), manage.KnowledgeBaseIDs, manage.KnowledgeIDs, retrieveQuery)
+		return s.SearchKnowledge(context.WithValue(retrieveCtx, types.TenantIDContextKey, manage.TenantID), manage.KnowledgeBaseIDs, manage.KnowledgeIDs, req.FilterDisabledFolders, retrieveQuery)
 	}
 	answer, err := chatpipeline.VerifyAnswer(retrievalCtx, s.modelService, manage)
 	if err != nil {
@@ -543,7 +543,7 @@ func (s *sessionService) buildAgentConfig(
 	}
 
 	// Build search targets using agent's tenant (handler has validated access for shared agent)
-	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, true)
+	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.FilterDisabledFolders)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets for agent: %v", err)
 	}

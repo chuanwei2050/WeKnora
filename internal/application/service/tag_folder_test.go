@@ -21,13 +21,15 @@ func (s folderKBServiceStub) GetKnowledgeBaseByID(context.Context, string) (*typ
 
 type folderTagRepositoryStub struct {
 	interfaces.KnowledgeTagRepository
-	tags       []*types.KnowledgeTag
-	byID       map[string]*types.KnowledgeTag
-	rootIDs    []string
-	publicIDs  []string
-	updateCall bool
-	deleteCall bool
-	created    *types.KnowledgeTag
+	tags        []*types.KnowledgeTag
+	byID        map[string]*types.KnowledgeTag
+	rootIDs     []string
+	publicIDs   []string
+	childOrders map[string][]string
+	updateCall  bool
+	deleteCall  bool
+	created     *types.KnowledgeTag
+	hasChildren bool
 }
 
 func (s *folderTagRepositoryStub) GetByName(context.Context, uint64, string, string) (*types.KnowledgeTag, error) {
@@ -49,9 +51,10 @@ func (s *folderTagRepositoryStub) ListByKB(
 	return s.tags, int64(len(s.tags)), nil
 }
 
-func (s *folderTagRepositoryStub) Reorder(_ context.Context, _ uint64, _ string, rootIDs, publicIDs []string) error {
+func (s *folderTagRepositoryStub) Reorder(_ context.Context, _ uint64, _ string, rootIDs, publicIDs []string, childOrders map[string][]string) error {
 	s.rootIDs = append([]string(nil), rootIDs...)
 	s.publicIDs = append([]string(nil), publicIDs...)
+	s.childOrders = childOrders
 	return nil
 }
 
@@ -69,6 +72,10 @@ func (s *folderTagRepositoryStub) Delete(context.Context, uint64, string) error 
 	return nil
 }
 
+func (s *folderTagRepositoryStub) HasChildren(context.Context, uint64, string, string) (bool, error) {
+	return s.hasChildren, nil
+}
+
 type documentTagServiceStub struct {
 	interfaces.KnowledgeTagService
 	untagged *types.KnowledgeTag
@@ -81,7 +88,7 @@ func (s documentTagServiceStub) FindOrCreateTagByName(context.Context, string, s
 func TestKnowledgeTagServiceReorderTags(t *testing.T) {
 	repo := &folderTagRepositoryStub{tags: []*types.KnowledgeTag{
 		{ID: "untagged", Name: types.UntaggedTagName},
-		{ID: "a", Name: "A"},
+		{ID: "a", Name: "A", IsPublic: true},
 		{ID: "b", Name: "B"},
 	}}
 	svc := &knowledgeTagService{
@@ -89,7 +96,7 @@ func TestKnowledgeTagServiceReorderTags(t *testing.T) {
 		repo:      repo,
 	}
 
-	require.NoError(t, svc.ReorderTags(context.Background(), "kb", []string{"b"}, []string{"a"}))
+	require.NoError(t, svc.ReorderTags(context.Background(), "kb", []string{"b"}, []string{"a"}, nil))
 	require.Equal(t, []string{"b"}, repo.rootIDs)
 	require.Equal(t, []string{"a"}, repo.publicIDs)
 }
@@ -101,10 +108,56 @@ func TestKnowledgeTagServiceCreatesPublicFolder(t *testing.T) {
 		repo:      repo,
 	}
 
-	tag, err := svc.CreateTag(context.Background(), "kb", "共享资料", "", 0, true)
+	tag, err := svc.CreateTag(context.Background(), "kb", "共享资料", "", 0, true, nil)
 	require.NoError(t, err)
 	require.True(t, tag.IsPublic)
 	require.Same(t, tag, repo.created)
+}
+
+func TestKnowledgeTagServiceCreatesOrdinaryChildFolder(t *testing.T) {
+	parentID := "parent"
+	repo := &folderTagRepositoryStub{byID: map[string]*types.KnowledgeTag{
+		parentID: {ID: parentID, TenantID: 1, KnowledgeBaseID: "kb", Name: "一级"},
+	}}
+	svc := &knowledgeTagService{
+		kbService: folderKBServiceStub{kb: &types.KnowledgeBase{ID: "kb", TenantID: 1}},
+		repo:      repo,
+	}
+
+	tag, err := svc.CreateTag(context.Background(), "kb", "二级", "", 0, false, &parentID)
+	require.NoError(t, err)
+	require.NotNil(t, tag.ParentID)
+	require.Equal(t, parentID, *tag.ParentID)
+	require.False(t, tag.IsPublic)
+}
+
+func TestKnowledgeTagServiceRejectsInvalidChildParents(t *testing.T) {
+	nestedParentID := "nested"
+	tests := []struct {
+		name     string
+		parentID string
+		parent   *types.KnowledgeTag
+		isPublic bool
+	}{
+		{name: "foreign knowledge base", parentID: "foreign", parent: &types.KnowledgeTag{ID: "foreign", TenantID: 1, KnowledgeBaseID: "other", Name: "其他库"}},
+		{name: "public folder", parentID: "public", parent: &types.KnowledgeTag{ID: "public", TenantID: 1, KnowledgeBaseID: "kb", Name: "公共", IsPublic: true}},
+		{name: "second level", parentID: "nested", parent: &types.KnowledgeTag{ID: "nested", TenantID: 1, KnowledgeBaseID: "kb", Name: "二级", ParentID: &nestedParentID}},
+		{name: "untagged", parentID: "untagged", parent: &types.KnowledgeTag{ID: "untagged", TenantID: 1, KnowledgeBaseID: "kb", Name: types.UntaggedTagName}},
+		{name: "public child payload", parentID: "root", parent: &types.KnowledgeTag{ID: "root", TenantID: 1, KnowledgeBaseID: "kb", Name: "一级"}, isPublic: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &folderTagRepositoryStub{byID: map[string]*types.KnowledgeTag{tt.parentID: tt.parent}}
+			svc := &knowledgeTagService{
+				kbService: folderKBServiceStub{kb: &types.KnowledgeBase{ID: "kb", TenantID: 1}},
+				repo:      repo,
+			}
+
+			_, err := svc.CreateTag(context.Background(), "kb", "子级", "", 0, tt.isPublic, &tt.parentID)
+			require.Error(t, err)
+			require.Nil(t, repo.created)
+		})
+	}
 }
 
 func TestKnowledgeTagServiceRejectsInvalidReorderSets(t *testing.T) {
@@ -128,10 +181,54 @@ func TestKnowledgeTagServiceRejectsInvalidReorderSets(t *testing.T) {
 				repo:      repo,
 			}
 
-			require.Error(t, svc.ReorderTags(context.Background(), "kb", tt.ids, nil))
+			require.Error(t, svc.ReorderTags(context.Background(), "kb", tt.ids, nil, nil))
 			require.Empty(t, repo.rootIDs)
 		})
 	}
+}
+
+func TestKnowledgeTagServiceReordersOrdinaryChildrenWithinParent(t *testing.T) {
+	parentID := "a"
+	repo := &folderTagRepositoryStub{tags: []*types.KnowledgeTag{
+		{ID: "untagged", Name: types.UntaggedTagName},
+		{ID: "a", Name: "A"},
+		{ID: "child-a", Name: "Child A", ParentID: &parentID},
+		{ID: "child-b", Name: "Child B", ParentID: &parentID},
+		{ID: "public", Name: "Public", IsPublic: true},
+	}}
+	svc := &knowledgeTagService{
+		kbService: folderKBServiceStub{kb: &types.KnowledgeBase{ID: "kb", TenantID: 1}},
+		repo:      repo,
+	}
+
+	childOrders := map[string][]string{"a": {"child-b", "child-a"}}
+	require.NoError(t, svc.ReorderTags(context.Background(), "kb", []string{"a"}, []string{"public"}, childOrders))
+	require.Equal(t, []string{"a"}, repo.rootIDs)
+	require.Equal(t, []string{"public"}, repo.publicIDs)
+	require.Equal(t, childOrders, repo.childOrders)
+}
+
+func TestKnowledgeTagServiceRejectsCrossParentChildOrder(t *testing.T) {
+	parentA := "a"
+	parentB := "b"
+	repo := &folderTagRepositoryStub{tags: []*types.KnowledgeTag{
+		{ID: "untagged", Name: types.UntaggedTagName},
+		{ID: parentA, Name: "A"},
+		{ID: parentB, Name: "B"},
+		{ID: "child-a", Name: "Child A", ParentID: &parentA},
+		{ID: "child-b", Name: "Child B", ParentID: &parentB},
+	}}
+	svc := &knowledgeTagService{
+		kbService: folderKBServiceStub{kb: &types.KnowledgeBase{ID: "kb", TenantID: 1}},
+		repo:      repo,
+	}
+
+	err := svc.ReorderTags(context.Background(), "kb", []string{"a", "b"}, nil, map[string][]string{
+		"a": {"child-b"},
+		"b": {"child-a"},
+	})
+	require.Error(t, err)
+	require.Empty(t, repo.childOrders)
 }
 
 func TestKnowledgeTagServiceProtectsUntaggedFolder(t *testing.T) {
@@ -150,6 +247,20 @@ func TestKnowledgeTagServiceProtectsUntaggedFolder(t *testing.T) {
 	require.False(t, repo.deleteCall)
 }
 
+func TestKnowledgeTagServiceRejectsDeletingFolderWithChildren(t *testing.T) {
+	tag := &types.KnowledgeTag{ID: "parent", TenantID: 1, KnowledgeBaseID: "kb", Name: "一级"}
+	repo := &folderTagRepositoryStub{
+		byID:        map[string]*types.KnowledgeTag{"parent": tag},
+		hasChildren: true,
+	}
+	svc := &knowledgeTagService{repo: repo}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+
+	err := svc.DeleteTag(ctx, "parent", true, false, nil)
+	require.Error(t, err)
+	require.False(t, repo.deleteCall)
+}
+
 func TestKnowledgeTagServiceUpdatesFolderSearchSwitch(t *testing.T) {
 	tag := &types.KnowledgeTag{ID: "folder", Name: "Folder", SearchEnabled: true}
 	repo := &folderTagRepositoryStub{byID: map[string]*types.KnowledgeTag{"folder": tag}}
@@ -162,6 +273,23 @@ func TestKnowledgeTagServiceUpdatesFolderSearchSwitch(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, updated.SearchEnabled)
 	require.True(t, repo.updateCall)
+}
+
+func TestSearchableTagIDsRequiresEnabledAncestors(t *testing.T) {
+	disabledParentID := "disabled-parent"
+	enabledParentID := "enabled-parent"
+	missingParentID := "missing-parent"
+	ids := searchableTagIDs([]*types.KnowledgeTag{
+		{ID: disabledParentID, SearchEnabled: false},
+		{ID: "hidden-child", ParentID: &disabledParentID, SearchEnabled: true},
+		{ID: enabledParentID, SearchEnabled: true},
+		{ID: "visible-child", ParentID: &enabledParentID, SearchEnabled: true},
+		{ID: "disabled-child", ParentID: &enabledParentID, SearchEnabled: false},
+		{ID: "orphan", ParentID: &missingParentID, SearchEnabled: true},
+		{ID: "public", IsPublic: true, SearchEnabled: true},
+	})
+
+	require.Equal(t, []string{"enabled-parent", "public", "visible-child"}, ids)
 }
 
 func TestResolveDocumentTagID(t *testing.T) {

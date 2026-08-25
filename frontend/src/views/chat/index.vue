@@ -647,6 +647,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         agent_enabled: agentEnabled,
         agent_id: selectedAgentId,
         web_search_enabled: webSearchEnabled,
+        filter_disabled_folders: true,
         enable_memory: enableMemory,
         summary_model_id: modelId,
         mcp_service_ids: mcpServiceIds,

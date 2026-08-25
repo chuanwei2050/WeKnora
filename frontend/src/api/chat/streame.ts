@@ -99,6 +99,7 @@ export function useStream() {
         if (params.knowledge_ids !== undefined && params.knowledge_ids.length > 0) postBody.knowledge_ids = params.knowledge_ids;
         if (params.agent_id) postBody.agent_id = params.agent_id;
         if (params.web_search_enabled !== undefined) postBody.web_search_enabled = params.web_search_enabled;
+        if (params.filter_disabled_folders !== undefined) postBody.filter_disabled_folders = params.filter_disabled_folders;
         if (params.enable_memory !== undefined) postBody.enable_memory = params.enable_memory;
         if (params.summary_model_id) postBody.summary_model_id = params.summary_model_id;
         if (params.mcp_service_ids?.length) postBody.mcp_service_ids = params.mcp_service_ids;
