@@ -5,7 +5,7 @@
 #
 # 量化策略: 对比「量化 vs 非量化」——能明显省盘/显存/加速且当前栈可加载时，优先量化。
 #   Embedding  AWQ-INT4  ≈2.7GB（官方 bf16 ≈7.5GB）→ 优先 AWQ
-#   Rerank     ONNX INT8 ≈0.5GB（官方 fp ≈2GB）    → 优先 ONNX
+#   Rerank     W4A16 INT4 ≈2.5GB（官方 bf16 ≈7.5GB）→ 优先量化
 #   ASR        ONNX INT8 ≈0.23GB（官方 ≈0.9GB）    → 优先 ONNX
 #   TTS        无可用 CosyVoice2 INT8 制品可被本容器加载 → 保持 fp16
 #   Verifier   AWQ；Chat/VLM 预置 FP8（默认 enabled:false 不下载，启用即下 FP8）
@@ -49,11 +49,9 @@ docker:
   gpu_count: 1
   shm_size: 16gb
   service_images:
-    rerank: weknora-rerank:airgap
     asr: weknora-asr:airgap
     tts: weknora-tts:airgap
   service_image_tars:
-    rerank: images/weknora-rerank.tar
     asr: images/weknora-asr.tar
     tts: images/weknora-tts.tar
 
@@ -83,20 +81,29 @@ models:
   rerank:
     enabled: true
     role: rerank
-    model_id: BAAI/bge-reranker-v2-m3
+    model_id: Qwen/Qwen3-Reranker-4B
     revision: null
-    quant: onnx-int8
-    download_id: jiangnanboy/bge-reranker-v2-m3-ONNX-int8
-    download_id_hf: jiangnanboy/bge-reranker-v2-m3-ONNX-int8
-    engine: container
-    needs_gpu: false
+    quant: w4a16-int4
+    download_id: boboliu/Qwen3-Reranker-4B-W4A16-G128
+    download_id_hf: boboliu/Qwen3-Reranker-4B-W4A16-G128
+    engine: vllm
     port: 8002
-    served_model_name: bge-reranker-v2-m3
+    served_model_name: Qwen3-Reranker-4B-W4A16-G128
+    max_model_len: 8192
+    gpu_memory_utilization: 0.30
+    dtype: auto
+    extra_vllm_args:
+      - "--quantization"
+      - "compressed-tensors"
+      - "--runner"
+      - "pooling"
+      - "--hf_overrides"
+      - '{"architectures":["Qwen3ForSequenceClassification"],"classifier_from_token":["no","yes"],"is_original_qwen3_reranker":true}'
     allowed_uses: [rerank, model]
     forbidden_uses: [object-storage, data-connector]
 
   verifier:
-    enabled: true
+    enabled: false
     role: verifier
     roles: [evaluation_judge]
     model_id: Qwen/Qwen3.5-9B

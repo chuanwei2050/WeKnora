@@ -24,20 +24,7 @@
       "allowed_uses": ["rerank", "model"],
       "allowed_model_roles": ["rerank"],
       "endpoint_url": "http://192.168.10.232:8002/v1",
-      "notes": "禁止用途: object-storage, data-connector; quant=onnx-int8"
-    },
-    {
-      "id": "model-verifier",
-      "scheme": "http",
-      "host": "192.168.10.232",
-      "port": 8003,
-      "protocol": "openai-compatible",
-      "tls_required": false,
-      "category": "model",
-      "allowed_uses": ["verifier", "evaluation_judge", "chat", "model"],
-      "allowed_model_roles": ["verifier", "evaluation_judge"],
-      "endpoint_url": "http://192.168.10.232:8003/v1",
-      "notes": "对应 OFFLINE_VERIFIER_MODEL_2 / EVALUATION_JUDGE；quant=awq (tclf90/Qwen3.5-9B-AWQ)"
+      "notes": "禁止用途: object-storage, data-connector; quant=w4a16-int4"
     },
     {
       "id": "model-chat",
@@ -90,29 +77,11 @@
     },
     {
       "role": "rerank",
-      "model_name": "bge-reranker-v2-m3",
+      "model_name": "Qwen3-Reranker-4B-W4A16-G128",
       "endpoint_url": "http://192.168.10.232:8002/v1",
       "approved_endpoint_id": "model-rerank",
-      "engine": "container",
-      "quant": "onnx-int8"
-    },
-    {
-      "role": "verifier",
-      "model_name": "qwen3.5-9b",
-      "endpoint_url": "http://192.168.10.232:8003/v1",
-      "approved_endpoint_id": "model-verifier",
       "engine": "vllm",
-      "quant": "awq",
-      "shared_service": "verifier"
-    },
-    {
-      "role": "evaluation_judge",
-      "model_name": "qwen3.5-9b",
-      "endpoint_url": "http://192.168.10.232:8003/v1",
-      "approved_endpoint_id": "model-verifier",
-      "engine": "vllm",
-      "quant": "awq",
-      "shared_service": "verifier"
+      "quant": "w4a16-int4"
     },
     {
       "role": "chat",
@@ -156,6 +125,6 @@
   "meta": {
     "generated_by": "model-scripts/templates",
     "air_gapped_mode": true,
-    "note": "VLM 复用 Chat；Verifier 与 Evaluation Judge 共用 8003；启用 models.chat 后由 deploy/gen-config 重新生成"
+    "note": "VLM 复用 Chat；Verifier 默认未启用；启用 models.chat 后由 deploy/gen-config 重新生成"
   }
 }

@@ -2062,7 +2062,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_prep.add_argument(
         "--skip-docker-build",
         action="store_true",
-        help="仍拉取 vLLM，但跳过 rerank/asr/tts 镜像构建",
+        help="仍拉取 vLLM，但跳过 asr/tts 镜像构建",
     )
     p_prep.add_argument("--skip-pip", action="store_true", help="跳过工具 pip download")
     p_prep.add_argument("--force-download", action="store_true", help="即使校验通过也重新下载模型")

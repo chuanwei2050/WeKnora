@@ -1,5 +1,5 @@
 # 静态审阅模板。运行时以 `deploy.py gen-config|deploy` 生成文件为准。
-# 全容器：Embedding/Verifier(vLLM) + Rerank/ASR/TTS(自建镜像) + 可选 Chat(vLLM，含 VLM)
+# 全容器：Embedding/Rerank(vLLM) + ASR/TTS(自建镜像) + 可选 Chat/Verifier(vLLM，Chat 含 VLM)
 
 services:
   embedding:
@@ -12,22 +12,11 @@ services:
       - MODEL_API_KEY=${MODEL_API_KEY:?MODEL_API_KEY must be set}
 
   rerank:
-    image: weknora-rerank:airgap
+    image: vllm/vllm-openai:latest
     pull_policy: never
     ports: ["8002:8000"]
     volumes:
       - "${MODEL_DATA_DIR:-/mnt/models}/models/rerank:/models:ro"
-    environment:
-      - MODEL_API_KEY=${MODEL_API_KEY:?MODEL_API_KEY must be set}
-      - MODEL_DIR=/models
-      - PORT=8000
-
-  verifier:
-    image: vllm/vllm-openai:latest
-    pull_policy: never
-    ports: ["8003:8000"]
-    volumes:
-      - "${MODEL_DATA_DIR:-/mnt/models}/models/verifier:/models:ro"
     environment:
       - MODEL_API_KEY=${MODEL_API_KEY:?MODEL_API_KEY must be set}
 

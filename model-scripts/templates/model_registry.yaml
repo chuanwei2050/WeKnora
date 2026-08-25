@@ -1,6 +1,5 @@
 # WeKnora 模型管理 UI 登记数据结构示例
 # VLM 与 Chat 共用主模型端点（无独立 VLM 服务）
-# Verifier 与 Evaluation Judge 共用 8003
 
 models:
   - role: embedding
@@ -12,30 +11,12 @@ models:
     quant: awq-int4
 
   - role: rerank
-    model_name: bge-reranker-v2-m3
+    model_name: Qwen3-Reranker-4B-W4A16-G128
     endpoint_url: http://192.168.10.232:8002/v1
     approved_endpoint_id: model-rerank
     protocol: openai-compatible
-    engine: container
-    quant: onnx-int8
-
-  - role: verifier
-    model_name: qwen3.5-9b
-    endpoint_url: http://192.168.10.232:8003/v1
-    approved_endpoint_id: model-verifier
-    protocol: openai-compatible
     engine: vllm
-    quant: awq
-    shared_service: verifier
-
-  - role: evaluation_judge
-    model_name: qwen3.5-9b
-    endpoint_url: http://192.168.10.232:8003/v1
-    approved_endpoint_id: model-verifier
-    protocol: openai-compatible
-    engine: vllm
-    quant: awq
-    shared_service: verifier
+    quant: w4a16-int4
 
   # 主模型默认未部署；量化已预置 FP8。启用后 Chat / VLM 指向同一 endpoint
   - role: chat

@@ -71,10 +71,10 @@ class TestConfigAndCompose(unittest.TestCase):
         yaml.safe_load(text)
         self.assertIn("--runner", text)
         self.assertIn("pooling", text)
-        self.assertIn("weknora-rerank:airgap", text)
+        self.assertIn("Qwen3-Reranker-4B-W4A16-G128", text)
         self.assertIn("weknora-asr:airgap", text)
         self.assertIn("weknora-tts:airgap", text)
-        self.assertIn('device_ids: ["0"]', text)
+        self.assertIn("device_ids:", text)
         self.assertIn("--api-key", text)
         self.assertIn("MODEL_API_KEY must be set", text)
         self.assertIn("http://127.0.0.1:8000/health", text)
@@ -92,12 +92,12 @@ class TestConfigAndCompose(unittest.TestCase):
         self.assertEqual(set(chat_ep["allowed_model_roles"]), {"chat", "vlm"})
         self.assertEqual(chat_ep["port"], 8000)
 
-    def test_verifier_awq_and_shared_judge(self) -> None:
+    def test_local_verifier_is_disabled(self) -> None:
         cfg = deploy.load_config(ROOT / "config.yaml.example", prefer_as_base=True)
         self.assertIn("verifier", cfg["models"])
         specs = deploy.parse_models(cfg)
         verifier = next(s for s in specs if s.key == "verifier")
-        self.assertTrue(verifier.enabled)
+        self.assertFalse(verifier.enabled)
         self.assertEqual(verifier.quant, "awq")
         self.assertEqual(verifier.download_id, "tclf90/Qwen3.5-9B-AWQ")
         self.assertEqual(verifier.hub_id_hf, "QuantTrio/Qwen3.5-9B-AWQ")
@@ -106,29 +106,30 @@ class TestConfigAndCompose(unittest.TestCase):
         deploy.validate_specs_for_prepare([s for s in specs if s.enabled])
         reg = deploy.render_approved_endpoints(cfg, specs)
         roles = {m["role"] for m in reg["model_registry"]}
-        self.assertIn("verifier", roles)
-        self.assertIn("evaluation_judge", roles)
-        ep = next(e for e in reg["approved_endpoints"] if e["id"] == "model-verifier")
-        self.assertEqual(ep["port"], 8003)
+        self.assertNotIn("verifier", roles)
+        self.assertNotIn("evaluation_judge", roles)
         text = deploy.render_compose(cfg, Path("/mnt/models"), specs)
-        self.assertIn("verifier:", text)
-        self.assertIn("8003:8000", text)
-        self.assertIn("reasoning-parser", text)
+        self.assertNotIn("verifier:", text)
+        self.assertNotIn("8003:8000", text)
 
     def test_prefer_quantized_variants(self) -> None:
         cfg = deploy.load_config(ROOT / "config.yaml.example", prefer_as_base=True)
         specs = {s.key: s for s in deploy.parse_models(cfg)}
         self.assertTrue(specs["embedding"].quant.startswith("awq"))
         self.assertIn("AWQ", specs["embedding"].hub_id.upper())
-        self.assertTrue(specs["rerank"].quant.startswith("onnx"))
-        self.assertIn("ONNX", specs["rerank"].hub_id.upper())
+        self.assertEqual(specs["rerank"].quant, "w4a16-int4")
+        self.assertIn("W4A16", specs["rerank"].hub_id.upper())
+        self.assertEqual(
+            specs["rerank"].download_id,
+            "boboliu/Qwen3-Reranker-4B-W4A16-G128",
+        )
         self.assertTrue(specs["asr"].quant.startswith("onnx"))
         self.assertIn("onnx", specs["asr"].hub_id.lower())
         self.assertEqual(specs["tts"].quant, "fp16")
         text = deploy.render_compose(cfg, Path("/mnt/models"), list(specs.values()))
         self.assertIn("--quantization", text)
-        self.assertIn("awq", text)
-        self.assertIn("QUANT=onnx-int8", text)
+        self.assertIn("compressed-tensors", text)
+        self.assertIn("Qwen3ForSequenceClassification", text)
         self.assertIn("QUANT=fp16", text)
 
     def test_asr_runtime_sidecar_is_configured(self) -> None:
@@ -211,7 +212,6 @@ class TestConfigAndCompose(unittest.TestCase):
         for key, port in {
             "embedding": 8001,
             "rerank": 8002,
-            "verifier": 8003,
             "asr": 8004,
             "tts": 8005,
         }.items():
@@ -298,7 +298,7 @@ class TestCli(unittest.TestCase):
             self.assertIn("pooling", text)
             gateway = out / "gateway" / "weknora-model-gateway.conf"
             self.assertTrue(gateway.exists())
-            self.assertIn("/verifier/", gateway.read_text(encoding="utf-8"))
+            self.assertNotIn("/verifier/", gateway.read_text(encoding="utf-8"))
             self.assertIn("10.0.0.8", (out / "approved_endpoints.json").read_text(encoding="utf-8"))
 
 
