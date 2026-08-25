@@ -70,9 +70,7 @@ type KnowledgeBase struct {
 	// Unique identifier of the knowledge base
 	ID string `yaml:"id"                      json:"id"                      gorm:"type:varchar(36);primaryKey"`
 	// Name of the knowledge base
-	Name    string  `yaml:"name"                    json:"name"`
-	Code    string  `yaml:"code" json:"code,omitempty" gorm:"column:code;type:varchar(64)"`
-	CodeKey *string `yaml:"-" json:"-" gorm:"column:code_key;type:varchar(64);uniqueIndex:idx_knowledge_bases_tenant_code_key"`
+	Name string `yaml:"name"                    json:"name"`
 	// Type of the knowledge base (document, faq, etc.)
 	Type string `yaml:"type"                    json:"type"                    gorm:"type:varchar(32);default:'document'"`
 	// Whether this knowledge base is temporary (ephemeral) and should be hidden from UI
@@ -80,7 +78,7 @@ type KnowledgeBase struct {
 	// Description of the knowledge base
 	Description string `yaml:"description"             json:"description"`
 	// Tenant ID
-	TenantID uint64 `yaml:"tenant_id"               json:"tenant_id" gorm:"uniqueIndex:idx_knowledge_bases_tenant_code_key"`
+	TenantID uint64 `yaml:"tenant_id"               json:"tenant_id"`
 	// User ID that created this knowledge base. Empty historical values are admin-managed only.
 	CreatedBy string `yaml:"created_by"              json:"created_by,omitempty"       gorm:"type:varchar(36);index"`
 	// Chunking configuration

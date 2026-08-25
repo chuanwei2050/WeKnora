@@ -119,7 +119,6 @@ type integrationBatchSearchResult struct {
 }
 
 var integrationKnowledgeIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
-var integrationKnowledgeBaseCodePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 type integrationFolderProvider interface {
 	ListIntegrationFolders(context.Context, uint64, string) ([]*types.KnowledgeTag, error)
@@ -535,39 +534,56 @@ func (h *IntegrationHandler) ListKnowledgeBases(c *gin.Context) {
 	integrationData(c, http.StatusOK, result)
 }
 
-func (h *IntegrationHandler) ListKnowledgeBaseFoldersByCode(c *gin.Context) {
+func (h *IntegrationHandler) ListKnowledgeBaseFolders(c *gin.Context) {
 	if !h.requireScope(c, "kb:list") || !h.requireScope(c, "knowledge:read") {
 		return
 	}
-	code := strings.TrimSpace(c.Param("code"))
-	if !integrationKnowledgeBaseCodePattern.MatchString(code) {
-		h.audit(c, "api.knowledge_base.folders", "denied", "invalid_code")
-		integrationError(c, http.StatusBadRequest, "invalid_knowledge_base_code", "invalid knowledge base code")
+	rawIDs := strings.TrimSpace(c.Query("knowledge_base_ids"))
+	if rawIDs == "" {
+		h.audit(c, "api.knowledge_base.folders", "denied", "invalid_knowledge_base_ids")
+		integrationError(c, http.StatusBadRequest, "invalid_knowledge_base_ids", "knowledge base IDs are required")
+		return
+	}
+	knowledgeBaseIDs := strings.Split(rawIDs, ",")
+	for i := range knowledgeBaseIDs {
+		knowledgeBaseIDs[i] = strings.TrimSpace(knowledgeBaseIDs[i])
+	}
+	if len(knowledgeBaseIDs) > h.limits.maxKnowledgeBases || !validIntegrationKnowledgeIDs(knowledgeBaseIDs, h.limits.maxKnowledgeBases) {
+		h.audit(c, "api.knowledge_base.folders", "denied", "invalid_knowledge_base_ids")
+		integrationError(c, http.StatusBadRequest, "invalid_knowledge_base_ids", "invalid knowledge base IDs")
 		return
 	}
 	principal := integrationPrincipal(c)
-	key := strings.ToUpper(code)
-	matched, err := h.kbs.GetRepository().GetKnowledgeBaseByCodeKey(c.Request.Context(), principal.TenantID, key)
-	if err != nil || matched == nil || h.service.AuthorizeKnowledgeBases(principal, []string{matched.ID}) != nil {
+	if h.service.AuthorizeKnowledgeBases(principal, knowledgeBaseIDs) != nil {
 		h.audit(c, "api.knowledge_base.folders", "denied", "not_found_or_denied")
 		integrationError(c, http.StatusNotFound, "knowledge_base_not_found", "knowledge base not found")
 		return
+	}
+	for _, knowledgeBaseID := range knowledgeBaseIDs {
+		matched, err := h.kbs.GetRepository().GetKnowledgeBaseByIDAndTenant(c.Request.Context(), knowledgeBaseID, principal.TenantID)
+		if err != nil || matched == nil {
+			h.audit(c, "api.knowledge_base.folders", "denied", "not_found_or_denied")
+			integrationError(c, http.StatusNotFound, "knowledge_base_not_found", "knowledge base not found")
+			return
+		}
 	}
 	provider, ok := h.knowledges.(integrationFolderProvider)
 	if !ok {
 		integrationError(c, http.StatusInternalServerError, "folder_list_failed", "failed to list folders")
 		return
 	}
-	folders, err := provider.ListIntegrationFolders(c.Request.Context(), principal.TenantID, matched.ID)
-	if err != nil {
-		integrationError(c, http.StatusInternalServerError, "folder_list_failed", "failed to list folders")
-		return
+	data := make([]gin.H, 0)
+	for _, knowledgeBaseID := range knowledgeBaseIDs {
+		folders, err := provider.ListIntegrationFolders(c.Request.Context(), principal.TenantID, knowledgeBaseID)
+		if err != nil {
+			integrationError(c, http.StatusInternalServerError, "folder_list_failed", "failed to list folders")
+			return
+		}
+		for _, folder := range folders {
+			data = append(data, gin.H{"knowledge_base_id": knowledgeBaseID, "id": folder.ID, "name": folder.Name, "sort_order": folder.SortOrder})
+		}
 	}
-	data := make([]gin.H, 0, len(folders))
-	for _, folder := range folders {
-		data = append(data, gin.H{"id": folder.ID, "name": folder.Name, "sort_order": folder.SortOrder})
-	}
-	h.service.AuditResources(c.Request.Context(), principal, "api.knowledge_base.folders", "allowed", "", []string{matched.ID})
+	h.service.AuditResources(c.Request.Context(), principal, "api.knowledge_base.folders", "allowed", "", knowledgeBaseIDs)
 	integrationData(c, http.StatusOK, data)
 }
 

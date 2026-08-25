@@ -28,29 +28,29 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 - **WHEN** 客户端向不在授权范围内的知识库上传文件
 - **THEN** 系统在摄取文件前整次拒绝请求
 
-### Requirement: Integration API 必须支持按知识库编码列出文件夹
-系统 MUST 在 `GET /api/integration/v1/knowledge-bases/by-code/{code}/folders` 为同时具有 `kb:list` 和 `knowledge:read` scope 的主体返回编码对应知识库内可用于筛选的真实文件夹，并继续执行租户、client allowlist 和用户权限校验。
+### Requirement: Integration API 必须支持按知识库 ID 列表列出文件夹
+系统 MUST 在 `GET /api/integration/v1/knowledge-bases/folders?knowledge_base_ids={id1},{id2}` 为同时具有 `kb:list` 和 `knowledge:read` scope 的主体返回 ID 列表对应知识库内可用于筛选的真实文件夹，并继续执行租户、client allowlist 和用户权限校验。每个返回项 MUST 包含所属的 `knowledge_base_id`。
 
-#### Scenario: 按编码查询授权知识库文件夹
-- **WHEN** 授权主体提交其租户内可访问知识库的有效编码
+#### Scenario: 按多个 ID 查询授权知识库文件夹
+- **WHEN** 授权主体提交其租户内多个可访问知识库的有效 ID
 - **THEN** 系统只返回外层普通文件夹
-- **AND** 每项只包含稳定字段 `id`、`name` 和 `sort_order`
+- **AND** 每项只包含稳定字段 `knowledge_base_id`、`id`、`name` 和 `sort_order`
 - **AND** 结果保持持久化顺序
 
 #### Scenario: 文件夹列表排除固定入口
-- **WHEN** 编码对应知识库包含“未分类”、普通文件夹和公共子文件夹
+- **WHEN** ID 对应知识库包含“未分类”、普通文件夹和公共子文件夹
 - **THEN** 响应不包含“未分类”
 - **AND** 响应不包含无真实标签 ID 的“公共文件”容器
 - **AND** 响应不包含“公共文件”下的公共子文件夹
 
-#### Scenario: 编码不存在或知识库不可访问
-- **WHEN** 编码不存在或主体无权访问对应知识库
+#### Scenario: 任一知识库 ID 不存在或不可访问
+- **WHEN** 任一知识库 ID 不存在或主体无权访问对应知识库
 - **THEN** 系统统一返回 `404` 且不泄露知识库是否存在
 - **AND** 系统在审计中记录实际拒绝原因
 
-#### Scenario: 编码格式非法
-- **WHEN** 路径中的编码不符合允许字符或长度限制
-- **THEN** 系统返回稳定的 `400 invalid_knowledge_base_code`
+#### Scenario: 知识库 ID 列表缺失或格式非法
+- **WHEN** `knowledge_base_ids` 缺失、为空、超过数量限制或包含格式非法的 ID
+- **THEN** 系统返回稳定的 `400 invalid_knowledge_base_ids`
 
 #### Scenario: 客户端只有知识库列表权限
 - **WHEN** 主体具有 `kb:list` 但不具有 `knowledge:read` scope

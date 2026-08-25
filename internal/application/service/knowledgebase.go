@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -22,39 +20,7 @@ import (
 var (
 	ErrInvalidTenantID           = errors.New("invalid tenant ID")
 	ErrKnowledgeBaseAccessDenied = errors.New("knowledge base access denied")
-	ErrInvalidKnowledgeBaseCode  = errors.New("invalid knowledge base code")
-	ErrKnowledgeBaseCodeConflict = errors.New("knowledge base code already exists")
 )
-
-var knowledgeBaseCodePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-
-func normalizeKnowledgeBaseCode(code string) (string, *string, error) {
-	code = strings.TrimSpace(code)
-	if code == "" {
-		return "", nil, nil
-	}
-	if !knowledgeBaseCodePattern.MatchString(code) {
-		return "", nil, fmt.Errorf("%w: must contain only letters, numbers, hyphens, and underscores, with a maximum length of 64", ErrInvalidKnowledgeBaseCode)
-	}
-	key := strings.ToUpper(code)
-	return code, &key, nil
-}
-
-func (s *knowledgeBaseService) validateKnowledgeBaseCodeUnique(ctx context.Context, tenantID uint64, codeKey *string, exceptID string) error {
-	if codeKey == nil {
-		return nil
-	}
-	kbs, err := s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
-	if err != nil {
-		return err
-	}
-	for _, candidate := range kbs {
-		if candidate.ID != exceptID && candidate.CodeKey != nil && *candidate.CodeKey == *codeKey {
-			return ErrKnowledgeBaseCodeConflict
-		}
-	}
-	return nil
-}
 
 // knowledgeBaseService implements the knowledge base service interface
 type knowledgeBaseService struct {
@@ -135,14 +101,6 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	}
 	kb.CreatedAt = time.Now()
 	kb.TenantID = types.MustTenantIDFromContext(ctx)
-	var codeErr error
-	kb.Code, kb.CodeKey, codeErr = normalizeKnowledgeBaseCode(kb.Code)
-	if codeErr != nil {
-		return nil, codeErr
-	}
-	if codeErr = s.validateKnowledgeBaseCodeUnique(ctx, kb.TenantID, kb.CodeKey, ""); codeErr != nil {
-		return nil, codeErr
-	}
 	kb.UpdatedAt = time.Now()
 	if userID, ok := types.UserIDFromContext(ctx); ok {
 		kb.CreatedBy = userID
@@ -155,9 +113,6 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 			"knowledge_base_id": kb.ID,
 			"tenant_id":         kb.TenantID,
 		})
-		if errors.Is(err, repository.ErrKnowledgeBaseCodeConflict) {
-			return nil, ErrKnowledgeBaseCodeConflict
-		}
 		return nil, err
 	}
 
@@ -407,7 +362,6 @@ func (s *knowledgeBaseService) FillKnowledgeBaseCounts(ctx context.Context, kb *
 func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	id string,
 	name string,
-	code *string,
 	description string,
 	config *types.KnowledgeBaseConfig,
 ) (*types.KnowledgeBase, error) {
@@ -429,17 +383,6 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 
 	// Update the knowledge base properties
 	kb.Name = name
-	if code != nil {
-		normalizedCode, codeKey, normalizeErr := normalizeKnowledgeBaseCode(*code)
-		if normalizeErr != nil {
-			return nil, normalizeErr
-		}
-		if uniqueErr := s.validateKnowledgeBaseCodeUnique(ctx, kb.TenantID, codeKey, kb.ID); uniqueErr != nil {
-			return nil, uniqueErr
-		}
-		kb.Code = normalizedCode
-		kb.CodeKey = codeKey
-	}
 	kb.Description = description
 	if config != nil {
 		if config.ChunkingConfig.ChunkSize > 0 || config.ChunkingConfig.ChunkOverlap > 0 || len(config.ChunkingConfig.Separators) > 0 {
@@ -499,9 +442,6 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"knowledge_base_id": id,
 		})
-		if errors.Is(err, repository.ErrKnowledgeBaseCodeConflict) {
-			return nil, ErrKnowledgeBaseCodeConflict
-		}
 		return nil, err
 	}
 

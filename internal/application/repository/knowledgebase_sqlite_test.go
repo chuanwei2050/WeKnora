@@ -19,8 +19,6 @@ const knowledgeBasesTestDDL = `
 CREATE TABLE IF NOT EXISTS knowledge_bases (
     id VARCHAR(36) PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    code VARCHAR(64),
-    code_key VARCHAR(64),
     description TEXT,
     tenant_id INTEGER NOT NULL,
     created_by VARCHAR(36),
@@ -50,7 +48,6 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
 );
-CREATE UNIQUE INDEX idx_knowledge_bases_tenant_code_key ON knowledge_bases (tenant_id, code_key);
 `
 
 // setupKBTestDB creates an in-memory SQLite database containing the
@@ -80,29 +77,6 @@ func makeKB(vectorStoreID *string) *types.KnowledgeBase {
 }
 
 func kbStrPtr(s string) *string { return &s }
-
-func TestKnowledgeBaseCodeUniquePerTenantAndLookup(t *testing.T) {
-	db := setupKBTestDB(t)
-	repo := NewKnowledgeBaseRepository(db)
-	key := "BIDDER-01"
-	first := makeKB(nil)
-	first.Code, first.CodeKey = "Bidder-01", &key
-	require.NoError(t, repo.CreateKnowledgeBase(t.Context(), first))
-
-	duplicate := makeKB(nil)
-	duplicate.Code, duplicate.CodeKey = "bidder-01", &key
-	require.ErrorIs(t, repo.CreateKnowledgeBase(t.Context(), duplicate), ErrKnowledgeBaseCodeConflict)
-
-	otherTenant := makeKB(nil)
-	otherTenant.TenantID = 2
-	otherTenant.Code, otherTenant.CodeKey = "bidder-01", &key
-	require.NoError(t, repo.CreateKnowledgeBase(t.Context(), otherTenant))
-
-	found, err := repo.GetKnowledgeBaseByCodeKey(t.Context(), 1, key)
-	require.NoError(t, err)
-	require.Equal(t, first.ID, found.ID)
-	require.Equal(t, "Bidder-01", found.Code)
-}
 
 // reloadKB fetches the KnowledgeBase back from the database using its ID.
 func reloadKB(t *testing.T, db *gorm.DB, id string) types.KnowledgeBase {

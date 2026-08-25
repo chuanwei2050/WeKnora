@@ -65,12 +65,12 @@ type batchSearchKnowledgeBaseService struct {
 
 type folderEndpointKnowledgeBaseRepo struct {
 	interfaces.KnowledgeBaseRepository
-	byTenant map[uint64]*types.KnowledgeBase
+	byID map[string]*types.KnowledgeBase
 }
 
-func (r folderEndpointKnowledgeBaseRepo) GetKnowledgeBaseByCodeKey(_ context.Context, tenantID uint64, codeKey string) (*types.KnowledgeBase, error) {
-	kb := r.byTenant[tenantID]
-	if kb == nil || kb.CodeKey == nil || *kb.CodeKey != codeKey {
+func (r folderEndpointKnowledgeBaseRepo) GetKnowledgeBaseByIDAndTenant(_ context.Context, id string, tenantID uint64) (*types.KnowledgeBase, error) {
+	kb := r.byID[id]
+	if kb == nil || kb.TenantID != tenantID {
 		return nil, gorm.ErrRecordNotFound
 	}
 	return kb, nil
@@ -100,24 +100,29 @@ func (s folderEndpointKnowledgeService) ResolveIntegrationFolderIDs(context.Cont
 	return s.resolved, s.resolveErr
 }
 
-func newFolderEndpointHandler(t *testing.T, kbs map[uint64]*types.KnowledgeBase, folders []*types.KnowledgeTag) (*IntegrationHandler, *gorm.DB) {
+func newFolderEndpointHandler(t *testing.T, kbs map[string]*types.KnowledgeBase, folders []*types.KnowledgeTag) (*IntegrationHandler, *gorm.DB) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&integrationauth.Audit{}))
-	repo := folderEndpointKnowledgeBaseRepo{byTenant: kbs}
+	repo := folderEndpointKnowledgeBaseRepo{byID: kbs}
 	return &IntegrationHandler{
 		service:    integrationauth.NewService(db, nil, nil),
 		kbs:        folderEndpointKnowledgeBaseService{repo: repo},
 		knowledges: folderEndpointKnowledgeService{folders: folders},
+		limits:     integrationLimits{maxKnowledgeBases: 20},
 	}, db
 }
 
-func folderEndpointContext(method, path, code string, principal *integrationauth.Principal) (*gin.Context, *httptest.ResponseRecorder) {
+func folderEndpointContext(method, path, knowledgeBaseIDs string, principal *integrationauth.Principal) (*gin.Context, *httptest.ResponseRecorder) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(method, path, nil)
-	ctx.Params = gin.Params{{Key: "code", Value: code}}
+	if knowledgeBaseIDs != "" {
+		query := ctx.Request.URL.Query()
+		query.Set("knowledge_base_ids", knowledgeBaseIDs)
+		ctx.Request.URL.RawQuery = query.Encode()
+	}
 	ctx.Set("integrationPrincipal", principal)
 	return ctx, recorder
 }
@@ -198,28 +203,26 @@ func TestIntegrationKnowledgeIDsAreBoundedAndValidated(t *testing.T) {
 	require.False(t, validIntegrationKnowledgeIDs([]string{strings.Repeat("x", 129)}, 2))
 }
 
-func TestIntegrationFoldersByCodeRequiresBothScopes(t *testing.T) {
-	key := "KB-CODE"
-	handler, _ := newFolderEndpointHandler(t, map[uint64]*types.KnowledgeBase{1: {ID: "kb-1", TenantID: 1, CodeKey: &key}}, nil)
+func TestIntegrationFoldersByIDsRequiresBothScopes(t *testing.T) {
+	handler, _ := newFolderEndpointHandler(t, map[string]*types.KnowledgeBase{"kb-1": {ID: "kb-1", TenantID: 1}}, nil)
 	principal := &integrationauth.Principal{TenantID: 1, KnowledgeBaseIDs: []string{"kb-1"}, Scopes: []string{"kb:list"}}
-	ctx, recorder := folderEndpointContext(http.MethodGet, "/api/integration/v1/knowledge-bases/by-code/kb-code/folders", "kb-code", principal)
+	ctx, recorder := folderEndpointContext(http.MethodGet, "/api/integration/v1/knowledge-bases/folders", "kb-1", principal)
 
-	handler.ListKnowledgeBaseFoldersByCode(ctx)
+	handler.ListKnowledgeBaseFolders(ctx)
 
 	require.Equal(t, http.StatusForbidden, recorder.Code)
 	require.NotContains(t, recorder.Body.String(), "普通文件夹")
 }
 
-func TestIntegrationFoldersByCodeReturnsStableOrdinaryFolderDTOAndAudits(t *testing.T) {
-	key := "KB-CODE"
-	handler, db := newFolderEndpointHandler(t, map[uint64]*types.KnowledgeBase{
-		1: {ID: "kb-1", TenantID: 1, Code: "Kb-Code", CodeKey: &key},
-		2: {ID: "kb-2", TenantID: 2, Code: "Kb-Code", CodeKey: &key},
+func TestIntegrationFoldersByIDsReturnsStableOrdinaryFolderDTOAndAudits(t *testing.T) {
+	handler, db := newFolderEndpointHandler(t, map[string]*types.KnowledgeBase{
+		"kb-1": {ID: "kb-1", TenantID: 1},
+		"kb-2": {ID: "kb-2", TenantID: 1},
 	}, []*types.KnowledgeTag{{ID: "folder-1", Name: "普通文件夹", SortOrder: 3}})
-	principal := &integrationauth.Principal{ClientID: "client-1", TenantID: 1, KnowledgeBaseIDs: []string{"kb-1"}, Scopes: []string{"kb:list", "knowledge:read"}}
-	ctx, recorder := folderEndpointContext(http.MethodGet, "/api/integration/v1/knowledge-bases/by-code/kb-code/folders", "kb-code", principal)
+	principal := &integrationauth.Principal{ClientID: "client-1", TenantID: 1, KnowledgeBaseIDs: []string{"kb-1", "kb-2"}, Scopes: []string{"kb:list", "knowledge:read"}}
+	ctx, recorder := folderEndpointContext(http.MethodGet, "/api/integration/v1/knowledge-bases/folders", "kb-1,kb-2", principal)
 
-	handler.ListKnowledgeBaseFoldersByCode(ctx)
+	handler.ListKnowledgeBaseFolders(ctx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	var response struct {
@@ -228,32 +231,35 @@ func TestIntegrationFoldersByCodeReturnsStableOrdinaryFolderDTOAndAudits(t *test
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	require.True(t, response.Success)
-	require.Equal(t, []map[string]any{{"id": "folder-1", "name": "普通文件夹", "sort_order": float64(3)}}, response.Data)
+	require.Equal(t, []map[string]any{
+		{"knowledge_base_id": "kb-1", "id": "folder-1", "name": "普通文件夹", "sort_order": float64(3)},
+		{"knowledge_base_id": "kb-2", "id": "folder-1", "name": "普通文件夹", "sort_order": float64(3)},
+	}, response.Data)
 	require.NotContains(t, recorder.Body.String(), "is_public")
 
 	var audit integrationauth.Audit
 	require.NoError(t, db.Where("action = ?", "api.knowledge_base.folders").First(&audit).Error)
 	require.Equal(t, "allowed", audit.Outcome)
 	require.Contains(t, audit.ResourceIDsJSON, "kb-1")
+	require.Contains(t, audit.ResourceIDsJSON, "kb-2")
 }
 
-func TestIntegrationFoldersByCodeRejectsInvalidNotFoundAndUnauthorizedWithoutLeaking(t *testing.T) {
-	key := "KB-CODE"
-	handler, db := newFolderEndpointHandler(t, map[uint64]*types.KnowledgeBase{1: {ID: "kb-1", TenantID: 1, CodeKey: &key}}, nil)
+func TestIntegrationFoldersByIDsRejectsInvalidNotFoundAndUnauthorizedWithoutLeaking(t *testing.T) {
+	handler, db := newFolderEndpointHandler(t, map[string]*types.KnowledgeBase{"kb-1": {ID: "kb-1", TenantID: 1}}, nil)
 	basePrincipal := &integrationauth.Principal{ClientID: "client-1", TenantID: 1, KnowledgeBaseIDs: []string{"kb-1"}, Scopes: []string{"kb:list", "knowledge:read"}}
 
 	invalidCtx, invalidRecorder := folderEndpointContext(http.MethodGet, "/folders", "bad/code", basePrincipal)
-	handler.ListKnowledgeBaseFoldersByCode(invalidCtx)
+	handler.ListKnowledgeBaseFolders(invalidCtx)
 	require.Equal(t, http.StatusBadRequest, invalidRecorder.Code)
-	require.Contains(t, invalidRecorder.Body.String(), "invalid_knowledge_base_code")
+	require.Contains(t, invalidRecorder.Body.String(), "invalid_knowledge_base_ids")
 
 	for name, principal := range map[string]*integrationauth.Principal{
 		"not found in tenant": {ClientID: "client-1", TenantID: 2, KnowledgeBaseIDs: []string{"kb-2"}, Scopes: []string{"kb:list", "knowledge:read"}},
 		"not allowlisted":     {ClientID: "client-1", TenantID: 1, KnowledgeBaseIDs: []string{"other"}, Scopes: []string{"kb:list", "knowledge:read"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			ctx, recorder := folderEndpointContext(http.MethodGet, "/folders", "kb-code", principal)
-			handler.ListKnowledgeBaseFoldersByCode(ctx)
+			ctx, recorder := folderEndpointContext(http.MethodGet, "/folders", "kb-1", principal)
+			handler.ListKnowledgeBaseFolders(ctx)
 			require.Equal(t, http.StatusNotFound, recorder.Code)
 			var response struct {
 				Success bool `json:"success"`

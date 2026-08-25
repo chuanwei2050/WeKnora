@@ -11,8 +11,7 @@ import (
 )
 
 var (
-	ErrKnowledgeBaseNotFound     = errors.New("knowledge base not found")
-	ErrKnowledgeBaseCodeConflict = errors.New("knowledge base code already exists")
+	ErrKnowledgeBaseNotFound = errors.New("knowledge base not found")
 )
 
 // knowledgeBaseRepository implements the KnowledgeBaseRepository interface
@@ -27,11 +26,7 @@ func NewKnowledgeBaseRepository(db *gorm.DB) interfaces.KnowledgeBaseRepository 
 
 // CreateKnowledgeBase creates a new knowledge base
 func (r *knowledgeBaseRepository) CreateKnowledgeBase(ctx context.Context, kb *types.KnowledgeBase) error {
-	err := r.db.WithContext(ctx).Create(kb).Error
-	if kb.CodeKey != nil && errors.Is(err, gorm.ErrDuplicatedKey) {
-		return ErrKnowledgeBaseCodeConflict
-	}
-	return err
+	return r.db.WithContext(ctx).Create(kb).Error
 }
 
 // GetKnowledgeBaseByID gets a knowledge base by id (no tenant scope; caller must enforce isolation where needed)
@@ -50,17 +45,6 @@ func (r *knowledgeBaseRepository) GetKnowledgeBaseByID(ctx context.Context, id s
 func (r *knowledgeBaseRepository) GetKnowledgeBaseByIDAndTenant(ctx context.Context, id string, tenantID uint64) (*types.KnowledgeBase, error) {
 	var kb types.KnowledgeBase
 	if err := r.db.WithContext(ctx).Where("id = ? AND tenant_id = ?", id, tenantID).First(&kb).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrKnowledgeBaseNotFound
-		}
-		return nil, err
-	}
-	return &kb, nil
-}
-
-func (r *knowledgeBaseRepository) GetKnowledgeBaseByCodeKey(ctx context.Context, tenantID uint64, codeKey string) (*types.KnowledgeBase, error) {
-	var kb types.KnowledgeBase
-	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND code_key = ?", tenantID, codeKey).First(&kb).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrKnowledgeBaseNotFound
 		}
@@ -145,11 +129,7 @@ func (r *knowledgeBaseRepository) TogglePinKnowledgeBase(ctx context.Context, id
 
 // UpdateKnowledgeBase updates a knowledge base
 func (r *knowledgeBaseRepository) UpdateKnowledgeBase(ctx context.Context, kb *types.KnowledgeBase) error {
-	err := r.db.WithContext(ctx).Save(kb).Error
-	if kb.CodeKey != nil && errors.Is(err, gorm.ErrDuplicatedKey) {
-		return ErrKnowledgeBaseCodeConflict
-	}
-	return err
+	return r.db.WithContext(ctx).Save(kb).Error
 }
 
 // DeleteKnowledgeBase deletes a knowledge base
