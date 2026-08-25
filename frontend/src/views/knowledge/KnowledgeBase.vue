@@ -2362,7 +2362,7 @@ async function createNewSession(value: string): Promise<void> {
                 >
                   <t-icon :name="collapsedOrdinaryFolderIds.has(tag.id) ? 'chevron-right' : 'chevron-down'" size="14px" />
                 </button>
-                <span v-else-if="!tag.is_public" class="ordinary-folder-toggle-placeholder" />
+                <span v-else class="ordinary-folder-toggle-placeholder" />
                 <span class="folder-icon computer-folder-icon" aria-hidden="true" />
                 <template v-if="editingTagId === tag.id">
                   <div
@@ -3680,7 +3680,6 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .folder-drag-handle,
-  .folder-drag-placeholder,
   .ordinary-folder-toggle,
   .ordinary-folder-toggle-placeholder {
     width: 18px;
@@ -3689,15 +3688,19 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .folder-drag-handle {
+    position: absolute;
+    right: 54px;
+    z-index: 1;
+    flex: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     color: var(--td-text-color-secondary, #5e5e5e);
-    opacity: 0;
+    opacity: 0.5;
     cursor: grab;
 
     .knowledge-tree-row:hover & {
-      opacity: 0.65;
+      opacity: 0.85;
     }
 
     &:active {
@@ -3708,6 +3711,10 @@ async function createNewSession(value: string): Promise<void> {
       cursor: not-allowed;
       opacity: 0.35;
     }
+  }
+
+  .folder-drag-placeholder {
+    display: none;
   }
 
   .ordinary-folder-toggle {
@@ -3750,6 +3757,7 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .knowledge-tree-row {
+    position: relative;
     box-sizing: border-box;
     width: 100%;
     min-width: 0;
