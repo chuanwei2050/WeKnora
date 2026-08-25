@@ -2328,19 +2328,6 @@ async function createNewSession(value: string): Promise<void> {
               </div>
             </div>
 
-            <div v-if="creatingTag && creatingPlacement.kind === 'root'" class="knowledge-tree-row folder-row tree-editing" @click.stop>
-              <span class="folder-drag-placeholder" />
-              <span class="ordinary-folder-toggle-placeholder" />
-              <span class="folder-icon computer-folder-icon" aria-hidden="true" />
-              <div class="tag-edit-input" @keydown.enter="onCreateTagEnterKey" @keydown.esc.prevent.stop="cancelCreateTag">
-                <t-input ref="newTagInputRef" v-model="newTagName" size="small" :maxlength="40" :placeholder="$t('knowledgeBase.tagNamePlaceholder')" />
-              </div>
-              <div class="tag-inline-actions">
-                <t-button variant="text" size="small" class="tag-action-btn confirm" :loading="creatingTagLoading" @click.stop="submitCreateTag"><t-icon name="check" size="16px" /></t-button>
-                <t-button variant="text" size="small" class="tag-action-btn cancel" @click.stop="cancelCreateTag"><t-icon name="close" size="16px" /></t-button>
-              </div>
-            </div>
-
             <template v-if="tagLoading && !ordinaryTags.length">
               <div v-for="n in 6" :key="'folder-skel-'+n" class="knowledge-tree-row folder-row tree-skeleton-row">
                 <span class="folder-drag-placeholder" />
@@ -2495,6 +2482,18 @@ async function createNewSession(value: string): Promise<void> {
               </div>
               </template>
             </template>
+            <div v-if="creatingTag && creatingPlacement.kind === 'root'" class="knowledge-tree-row folder-row tree-editing" @click.stop>
+              <span class="folder-drag-placeholder" />
+              <span class="ordinary-folder-toggle-placeholder" />
+              <span class="folder-icon computer-folder-icon" aria-hidden="true" />
+              <div class="tag-edit-input" @keydown.enter="onCreateTagEnterKey" @keydown.esc.prevent.stop="cancelCreateTag">
+                <t-input ref="newTagInputRef" v-model="newTagName" size="small" :maxlength="40" :placeholder="$t('knowledgeBase.tagNamePlaceholder')" />
+              </div>
+              <div class="tag-inline-actions">
+                <t-button variant="text" size="small" class="tag-action-btn confirm" :loading="creatingTagLoading" @click.stop="submitCreateTag"><t-icon name="check" size="16px" /></t-button>
+                <t-button variant="text" size="small" class="tag-action-btn cancel" @click.stop="cancelCreateTag"><t-icon name="close" size="16px" /></t-button>
+              </div>
+            </div>
             <div v-if="!tagLoading && tagSearchQuery && !filteredDisplayTags.length" class="tag-empty-state">
               {{ $t('knowledgeBase.tagEmptyResult') }}
             </div>
