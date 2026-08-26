@@ -62,12 +62,16 @@ func TestApplyRoutingDecisionDoesNotBroadenScope(t *testing.T) {
 func TestApplyRoutingDecisionConstrainsExistingOptionalStages(t *testing.T) {
 	manage := &ChatManage{PipelineRequest: PipelineRequest{
 		EnableQueryExpansion: true,
+		EmbeddingTopK:        30,
 		VerifiedAnswer:       VerifiedAnswerConfig{Enabled: true},
 	}}
 	manage.RoutingDecision = &RoutingDecision{Budget: RoutingBudget{RetrievalTopK: 5}}
 	manage.ApplyRoutingDecision()
 	if manage.EnableQueryExpansion || manage.VerifiedAnswer.Enabled {
 		t.Fatalf("routing budget must disable stages absent from the selected route: %+v", manage)
+	}
+	if manage.EmbeddingTopK != 30 {
+		t.Fatalf("routing must not override the platform retrieval budget: got %d", manage.EmbeddingTopK)
 	}
 
 	agent := &AgentConfig{VerifiedAnswer: VerifiedAnswerConfig{Enabled: true}}

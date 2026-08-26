@@ -167,16 +167,13 @@ func (c *ChatManage) NeedsRetrieval() bool {
 	return c.Intent.NeedsKBRetrieval()
 }
 
-// ApplyRoutingDecision narrows or selects existing pipeline budgets. It does
-// not grant a new knowledge/tool scope and therefore cannot widen permissions.
+// ApplyRoutingDecision selects optional pipeline stages without overriding the
+// platform-managed retrieval budget.
 func (c *ChatManage) ApplyRoutingDecision() {
 	if c == nil || c.RoutingDecision == nil {
 		return
 	}
 	budget := c.RoutingDecision.Budget
-	if budget.RetrievalTopK > 0 && (c.EmbeddingTopK == 0 || budget.RetrievalTopK < c.EmbeddingTopK) {
-		c.EmbeddingTopK = budget.RetrievalTopK
-	}
 	c.EnableQueryExpansion = c.EnableQueryExpansion && budget.QueryExpansion
 	c.VerifiedAnswer.Enabled = budget.VerificationEnabled
 	if budget.VerificationEnabled && budget.MaxAgentIterations > 0 && (c.VerifiedAnswer.Budget.MaxModelCalls == 0 || budget.MaxAgentIterations < c.VerifiedAnswer.Budget.MaxModelCalls) {
