@@ -113,7 +113,7 @@ import usermsg from './components/usermsg.vue';
 import { getMessageList, generateSessionsTitle, getSession } from "@/api/chat/index";
 import { getAgentById, getSuggestedQuestions } from "@/api/agent/index";
 import { useStream } from '../../api/chat/streame'
-import { mergeStreamContent, shouldUseIntegrationAGUI } from '../../api/chat/integration-stream'
+import { buildAgentCompleteEvent, isAGUITerminalEvent, mergeStreamContent, shouldUseIntegrationAGUI } from '../../api/chat/integration-stream'
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -664,9 +664,24 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
 // Watch for stream errors and show message
 watch(error, (newError) => {
     if (newError) {
+        const activeAgentMessage = messagesList.findLast((item) => item.isAgentMode && !item.is_completed);
+        if (activeAgentMessage) {
+            activeAgentMessage.is_completed = true;
+            activeAgentMessage.agentEventStream = activeAgentMessage.agentEventStream || [];
+            if (!activeAgentMessage.agentEventStream.some(isAGUITerminalEvent)) {
+                activeAgentMessage.agentEventStream.push({ type: 'error', content: newError, done: true });
+            }
+            activeAgentMessage._pendingToolCalls?.forEach((event) => {
+                event.pending = false;
+                event.success = false;
+            });
+            activeAgentMessage._pendingToolCalls?.clear();
+        }
         MessagePlugin.error(newError);
         isReplying.value = false;
         loading.value = false;
+        fullContent.value = '';
+        aguiMessageIds.delete(currentAssistantMessageId.value);
         // 清空当前 assistant message ID
         currentAssistantMessageId.value = '';
     }
@@ -1192,14 +1207,13 @@ const handleAgentChunk = (data) => {
             console.log('[Agent] Complete event received');
             loading.value = false;
             isReplying.value = false;
+            message.is_completed = true;
             // 将 total_duration_ms 存入事件流供 AgentStreamDisplay 使用
-            if (data.data?.total_duration_ms && message.agentEventStream) {
-                message.agentEventStream.push({
-                    type: 'agent_complete',
-                    total_duration_ms: data.data.total_duration_ms,
-                    total_steps: data.data.total_steps,
-                });
+            if (message.agentEventStream && !message.agentEventStream.some((event) => event.type === 'agent_complete')) {
+                message.agentEventStream.push(buildAgentCompleteEvent(data.data));
             }
+            currentAssistantMessageId.value = '';
+            aguiMessageIds.delete(data.id);
             break;
             
         case 'stop':

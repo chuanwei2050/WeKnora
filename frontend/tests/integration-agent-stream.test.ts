@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { buildIntegrationMessageBody, isAGUITerminalEvent, mapIntegrationEvent, mergeStreamContent, shouldUseIntegrationAGUI } from '../src/api/chat/integration-stream'
+import { buildAgentCompleteEvent, buildIntegrationMessageBody, isAGUITerminalEvent, isTerminalStreamResponse, mapIntegrationEvent, mergeStreamContent, shouldReportUnexpectedStreamClose, shouldUseIntegrationAGUI } from '../src/api/chat/integration-stream'
 
 const readSource = (relativePath: string) => readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), 'utf8')
 
@@ -88,8 +88,36 @@ describe('integration agent stream', () => {
     expect(isAGUITerminalEvent({ type: 'answer', done: true })).toBe(true)
     expect(isAGUITerminalEvent({ type: 'error', done: true })).toBe(true)
     expect(isAGUITerminalEvent({ type: 'stop' })).toBe(true)
+    expect(isAGUITerminalEvent({ type: 'agent_complete' })).toBe(true)
     expect(isAGUITerminalEvent({ type: 'answer', done: false })).toBe(false)
     expect(isAGUITerminalEvent({ type: 'tool_call' })).toBe(false)
+  })
+
+  it('records completion even when the server omits duration metadata', () => {
+    expect(buildAgentCompleteEvent()).toEqual({
+      type: 'agent_complete',
+      total_duration_ms: undefined,
+      total_steps: undefined,
+    })
+    expect(buildAgentCompleteEvent({ total_duration_ms: 1200, total_steps: 5 })).toEqual({
+      type: 'agent_complete',
+      total_duration_ms: 1200,
+      total_steps: 5,
+    })
+  })
+
+  it('distinguishes terminal responses from intermediate chunks', () => {
+    expect(isTerminalStreamResponse({ response_type: 'complete', done: true })).toBe(true)
+    expect(isTerminalStreamResponse({ response_type: 'answer', done: true })).toBe(true)
+    expect(isTerminalStreamResponse({ response_type: 'error', done: true })).toBe(true)
+    expect(isTerminalStreamResponse({ response_type: 'stop' })).toBe(true)
+    expect(isTerminalStreamResponse({ response_type: 'answer', done: false })).toBe(false)
+  })
+
+  it('reports only unexpected stream closures', () => {
+    expect(shouldReportUnexpectedStreamClose(false, false)).toBe(true)
+    expect(shouldReportUnexpectedStreamClose(true, false)).toBe(false)
+    expect(shouldReportUnexpectedStreamClose(false, true)).toBe(false)
   })
 
   it('respects the client display switch before sharing AG-UI', () => {

@@ -40,8 +40,34 @@ interface AGUITerminalEvent {
   done?: boolean
 }
 
+interface StreamResponse {
+  response_type?: string
+  done?: boolean
+}
+
+interface AgentCompleteMetadata {
+  total_duration_ms?: number
+  total_steps?: number
+}
+
 export function isAGUITerminalEvent(event: AGUITerminalEvent): boolean {
-  return event.type === 'stop' || (event.type === 'error' && event.done === true) || (event.type === 'answer' && event.done === true)
+  return event.type === 'agent_complete' || event.type === 'stop' || (event.type === 'error' && event.done === true) || (event.type === 'answer' && event.done === true)
+}
+
+export function isTerminalStreamResponse(response: StreamResponse): boolean {
+  return response.response_type === 'complete' || response.response_type === 'stop' || (response.response_type === 'error' && response.done === true) || (response.response_type === 'answer' && response.done === true)
+}
+
+export function shouldReportUnexpectedStreamClose(receivedTerminalEvent: boolean, aborted: boolean): boolean {
+  return !receivedTerminalEvent && !aborted
+}
+
+export function buildAgentCompleteEvent(data?: AgentCompleteMetadata) {
+  return {
+    type: 'agent_complete',
+    total_duration_ms: data?.total_duration_ms,
+    total_steps: data?.total_steps,
+  }
 }
 
 export function shouldUseIntegrationAGUI(serverEnabled: boolean, displayEnabled: boolean): boolean {

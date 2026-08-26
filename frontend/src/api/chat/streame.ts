@@ -5,7 +5,7 @@ import { createIdempotencyKey } from '@/utils/idempotency-key';
 import i18n from '@/i18n';
 import { getApiBaseUrl } from '@/utils/api-base';
 import { getEmbeddedCSRFToken, getEmbeddedSessionToken, getRuntimeMode } from '@/utils/embedded-runtime';
-import { buildIntegrationMessageBody, mapIntegrationEvent, type StreamRequestParams } from './integration-stream';
+import { buildIntegrationMessageBody, isTerminalStreamResponse, mapIntegrationEvent, shouldReportUnexpectedStreamClose, type StreamRequestParams } from './integration-stream';
 
 
 
@@ -46,6 +46,8 @@ export function useStream() {
     // 获取JWT Token
     const isIntegrationWidget = getRuntimeMode() === 'embedded-widget';
     const idempotencyKey = createIdempotencyKey();
+    const activeController = controller;
+    let receivedTerminalEvent = false;
     let lastEventId = '';
     const seenEventIds = new Set<string>();
     const token = isIntegrationWidget ? getEmbeddedSessionToken() : localStorage.getItem('weknora_token');
@@ -162,6 +164,7 @@ export function useStream() {
           }
           const parsed = isIntegrationWidget ? mapIntegrationEvent(raw) : raw;
           if (!parsed) return;
+          if (isTerminalStreamResponse(parsed)) receivedTerminalEvent = true;
           buffer.push(parsed); // 数据存入缓冲
           // 执行自定义处理
           if (chunkHandler) {
@@ -179,6 +182,9 @@ export function useStream() {
         },
 
         onclose: () => {
+          if (shouldReportUnexpectedStreamClose(receivedTerminalEvent, activeController.signal.aborted)) {
+            error.value = i18n.global.t('error.streamFailed');
+          }
           stopStream();
         },
       });

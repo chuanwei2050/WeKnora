@@ -23,6 +23,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	integrationauth "github.com/Tencent/WeKnora/internal/integration"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -758,12 +759,13 @@ func (h *IntegrationHandler) SearchKnowledgeList(c *gin.Context) {
 func (h *IntegrationHandler) listKnowledge(c *gin.Context, folderIDs []string, filterDisabledFolders bool) {
 	kbID := strings.TrimSpace(c.Param("knowledge_base_id"))
 	principal := integrationPrincipal(c)
+	hasFolderFilter := len(folderIDs) > 0
 	if kbID == "" || h.service.AuthorizeKnowledgeBases(principal, []string{kbID}) != nil {
 		h.audit(c, "api.knowledge.list", "denied", "knowledge_base_denied")
 		integrationError(c, http.StatusForbidden, "knowledge_base_denied", "knowledge base access denied")
 		return
 	}
-	if len(folderIDs) > 0 {
+	if hasFolderFilter {
 		provider, ok := h.knowledges.(integrationFolderProvider)
 		if !ok {
 			integrationError(c, http.StatusInternalServerError, "list_failed", "failed to list knowledge")
@@ -787,7 +789,7 @@ func (h *IntegrationHandler) listKnowledge(c *gin.Context, folderIDs []string, f
 		return
 	}
 	allowedTagIDs := make(map[string]struct{})
-	if len(folderIDs) > 0 {
+	if hasFolderFilter {
 		for _, folderID := range folderIDs {
 			allowedTagIDs[folderID] = struct{}{}
 		}
@@ -822,7 +824,7 @@ func (h *IntegrationHandler) listKnowledge(c *gin.Context, folderIDs []string, f
 		if row == nil {
 			continue
 		}
-		if len(folderIDs) > 0 || filterDisabledFolders {
+		if hasFolderFilter || filterDisabledFolders {
 			if _, ok := allowedTagIDs[row.TagID]; !ok {
 				continue
 			}
@@ -1654,14 +1656,14 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-Accel-Buffering", "no")
 	var streamMu sync.Mutex
-	appendAndWrite := func(ctx context.Context, eventName string, data any) {
+	appendAndWrite := func(ctx context.Context, eventName string, data any) error {
 		streamMu.Lock()
 		defer streamMu.Unlock()
 		stored, appendErr := h.service.AppendStreamEvent(ctx, binding.SessionID, assistantMessage.ID, eventName, data)
 		if appendErr != nil {
-			return
+			return appendErr
 		}
-		writeIntegrationSSEEvent(c, stored)
+		return writeIntegrationSSEEvent(c, stored)
 	}
 	executionMode := "quick-answer"
 	if agentMode {
@@ -1787,7 +1789,11 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 		appendAndWrite(generationCtx, "error", gin.H{"code": "message_persist_failed", "retryable": true, "status": "failed"})
 		return
 	}
-	appendAndWrite(generationCtx, "answer.completed", gin.H{"status": "completed", "answer": assistantMessage.Content, "selected_knowledge_base_ids": selected, "references": references})
+	if appendErr := appendAndWrite(generationCtx, "answer.completed", gin.H{"status": "completed", "answer": assistantMessage.Content, "selected_knowledge_base_ids": selected, "references": references}); appendErr != nil {
+		logger.Errorf(generationCtx, "Failed to append integration completion event: %v", appendErr)
+		writeIntegrationSSEError(c, binding.SessionID, assistantMessage.ID, "stream_event_persist_failed")
+		return
+	}
 	h.service.AuditResources(generationCtx, principal, "api.chat.message.create", "allowed", "", selected)
 }
 
@@ -1844,10 +1850,30 @@ func (h *IntegrationHandler) writeStoredEvents(c *gin.Context, binding *integrat
 	}
 }
 
-func writeIntegrationSSEEvent(c *gin.Context, stored *integrationauth.StreamEvent) {
+func writeIntegrationSSEEvent(c *gin.Context, stored *integrationauth.StreamEvent) error {
 	envelope := gin.H{"event_id": stored.EventID, "event": stored.Event, "session_id": stored.SessionID, "message_id": stored.MessageID, "sequence": stored.Sequence, "occurred_at": stored.OccurredAt, "data": json.RawMessage(stored.DataJSON)}
 	data, _ := json.Marshal(envelope)
-	_, _ = c.Writer.Write([]byte("id: " + stored.EventID + "\nevent: " + stored.Event + "\ndata: " + string(data) + "\n\n"))
+	_, err := c.Writer.Write([]byte("id: " + stored.EventID + "\nevent: " + stored.Event + "\ndata: " + string(data) + "\n\n"))
+	c.Writer.Flush()
+	return err
+}
+
+func writeIntegrationSSEError(c *gin.Context, sessionID, messageID, code string) {
+	eventID := uuid.NewString()
+	envelope := gin.H{
+		"event_id":    eventID,
+		"event":       "error",
+		"session_id":  sessionID,
+		"message_id":  messageID,
+		"occurred_at": time.Now(),
+		"data": gin.H{
+			"code":      code,
+			"retryable": true,
+			"status":    "failed",
+		},
+	}
+	data, _ := json.Marshal(envelope)
+	_, _ = c.Writer.Write([]byte("id: " + eventID + "\nevent: error\ndata: " + string(data) + "\n\n"))
 	c.Writer.Flush()
 }
 
