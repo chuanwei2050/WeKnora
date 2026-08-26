@@ -25,7 +25,7 @@ func TestPreserveRetrieverLeadersKeepsKeywordOnlyExactMatch(t *testing.T) {
 	}
 	fused[30] = target
 
-	got := preserveRetrieverLeaders(fused, vectorResults, keywordResults, 30)
+	got := preserveRetrieverLeaders(fused, vectorResults, keywordResults, 20, 30)
 	if len(got) != 30 {
 		t.Fatalf("expected 30 candidates, got %d", len(got))
 	}
@@ -36,6 +36,33 @@ func TestPreserveRetrieverLeadersKeepsKeywordOnlyExactMatch(t *testing.T) {
 		t.Logf("candidate %d: %s", i, candidate.ChunkID)
 	}
 	t.Fatalf("keyword rank-3 candidate %q was excluded from the rerank pool", target.ChunkID)
+}
+
+func TestPreserveRetrieverLeadersUsesRerankCandidateBudget(t *testing.T) {
+	vectorResults := make([]*types.IndexWithScore, 30)
+	keywordResults := make([]*types.IndexWithScore, 30)
+	for i := range 30 {
+		vectorResults[i] = &types.IndexWithScore{ChunkID: fmt.Sprintf("vector-%02d", i)}
+		keywordResults[i] = &types.IndexWithScore{ChunkID: fmt.Sprintf("keyword-%02d", i)}
+	}
+
+	got := preserveRetrieverLeaders(
+		append(append([]*types.IndexWithScore{}, vectorResults...), keywordResults...),
+		vectorResults,
+		keywordResults,
+		20,
+		30,
+	)
+
+	seen := make(map[string]struct{}, 20)
+	for _, candidate := range got[:20] {
+		seen[candidate.ChunkID] = struct{}{}
+	}
+	for _, expected := range []string{"vector-09", "keyword-09"} {
+		if _, ok := seen[expected]; !ok {
+			t.Fatalf("retriever leader %q was excluded from the downstream rerank budget", expected)
+		}
+	}
 }
 
 func TestPreserveRetrieverLeadersDeduplicatesSharedLeaders(t *testing.T) {
@@ -50,7 +77,7 @@ func TestPreserveRetrieverLeadersDeduplicatesSharedLeaders(t *testing.T) {
 		{ChunkID: "tail-2"},
 	}
 
-	got := preserveRetrieverLeaders(fused, vectorResults, keywordResults, 4)
+	got := preserveRetrieverLeaders(fused, vectorResults, keywordResults, 4, 4)
 	seen := make(map[string]struct{}, len(got))
 	for _, candidate := range got {
 		if _, exists := seen[candidate.ChunkID]; exists {

@@ -159,17 +159,17 @@ func fuseWithRRF(
 // weaker chunks that happen to occur in both channels.
 func preserveRetrieverLeaders(
 	fused, vectorResults, keywordResults []*types.IndexWithScore,
-	limit int,
+	candidateLimit, resultLimit int,
 ) []*types.IndexWithScore {
-	if limit <= 0 || len(fused) <= limit {
+	if candidateLimit <= 0 || resultLimit <= 0 || len(fused) <= candidateLimit {
 		return fused
 	}
 
-	leadersPerChannel := min(5, max(1, limit/3))
-	result := make([]*types.IndexWithScore, 0, limit)
-	seen := make(map[string]struct{}, limit)
+	leadersPerChannel := max(1, candidateLimit/2)
+	result := make([]*types.IndexWithScore, 0, resultLimit)
+	seen := make(map[string]struct{}, resultLimit)
 	appendUnique := func(candidate *types.IndexWithScore) {
-		if candidate == nil || len(result) >= limit {
+		if candidate == nil || len(result) >= resultLimit {
 			return
 		}
 		if _, exists := seen[candidate.ChunkID]; exists {

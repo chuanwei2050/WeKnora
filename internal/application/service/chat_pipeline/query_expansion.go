@@ -59,6 +59,7 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 					MatchCount:            expTopK,
 					VectorMatchCount:      chatManage.VectorRecallTopK,
 					KeywordMatchCount:     chatManage.KeywordRecallTopK,
+					RerankCandidateCount:  chatManage.RerankCandidateTopK,
 					RRFVectorWeight:       chatManage.RRFVectorWeight,
 					DisableVectorMatch:    false,
 					DisableKeywordsMatch:  false,

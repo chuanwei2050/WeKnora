@@ -37,3 +37,21 @@ func TestPreserveStrongKeywordResultsDoesNotRestoreWeakMatch(t *testing.T) {
 		t.Fatalf("weak keyword result should remain filtered, got %d results", len(got))
 	}
 }
+
+func TestPreserveStrongKeywordResultsReservesCapacityForEveryStrongMatch(t *testing.T) {
+	reranked := []*types.SearchResult{
+		{ID: "semantic-1", MatchType: types.MatchTypeEmbedding, Score: 0.9},
+		{ID: "semantic-2", MatchType: types.MatchTypeEmbedding, Score: 0.8},
+		{ID: "semantic-3", MatchType: types.MatchTypeEmbedding, Score: 0.7},
+	}
+	first := &types.SearchResult{ID: "keyword-1", MatchType: types.MatchTypeKeywords, Score: 20}
+	second := &types.SearchResult{ID: "keyword-2", MatchType: types.MatchTypeKeywords, Score: 19}
+
+	got := preserveStrongKeywordResults(reranked, []*types.SearchResult{first, second}, 3)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(got))
+	}
+	if got[1].ID != first.ID || got[2].ID != second.ID {
+		t.Fatalf("expected both strong keyword matches to be retained, got %#v", got)
+	}
+}

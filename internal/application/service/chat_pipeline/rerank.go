@@ -257,6 +257,7 @@ func preserveStrongKeywordResults(
 		seen[result.ID] = struct{}{}
 	}
 	strongCutoff := maxKeywordScore * 0.9
+	missing := make([]*types.SearchResult, 0)
 	for _, candidate := range candidates {
 		if candidate.MatchType != types.MatchTypeKeywords || candidate.Score < strongCutoff {
 			continue
@@ -264,17 +265,22 @@ func preserveStrongKeywordResults(
 		if _, exists := seen[candidate.ID]; exists {
 			continue
 		}
+		missing = append(missing, candidate)
+		seen[candidate.ID] = struct{}{}
+	}
+	if len(missing) > limit {
+		missing = missing[:limit]
+	}
+	keepReranked := min(len(reranked), limit-len(missing))
+	result := append([]*types.SearchResult(nil), reranked[:keepReranked]...)
+	for _, candidate := range missing {
 		candidate.Metadata = ensureMetadata(candidate.Metadata)
 		candidate.Metadata["base_score"] = fmt.Sprintf("%.4f", candidate.Score)
 		candidate.Metadata["keyword_preserved"] = "true"
 		candidate.Score = 1.0
-		if len(reranked) >= limit {
-			reranked = reranked[:limit-1]
-		}
-		reranked = append(reranked, candidate)
-		seen[candidate.ID] = struct{}{}
+		result = append(result, candidate)
 	}
-	return reranked
+	return result
 }
 
 // prepareRerankCandidates removes duplicate chunks/content before model inference

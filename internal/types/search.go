@@ -193,6 +193,7 @@ type SearchParams struct {
 	MatchCount           int       `json:"match_count"`
 	VectorMatchCount     int       `json:"vector_match_count,omitempty"`
 	KeywordMatchCount    int       `json:"keyword_match_count,omitempty"`
+	RerankCandidateCount int       `json:"-"`
 	RRFVectorWeight      float64   `json:"rrf_vector_weight,omitempty"`
 	DisableKeywordsMatch bool      `json:"disable_keywords_match"`
 	DisableVectorMatch   bool      `json:"disable_vector_match"`

@@ -68,18 +68,21 @@ func (p *PluginDataAnalysis) OnEvent(
 	if !chatManage.NeedsRetrieval() {
 		return next()
 	}
-	// 1. Check if there are any CSV/Excel files in MergeResult
-	var dataFiles []*types.SearchResult
-	for _, result := range chatManage.MergeResult {
-		if isDataFile(result.KnowledgeFilename) {
-			dataFiles = append(dataFiles, result)
+	// Keep the complete retrieved evidence for the selected table before table
+	// metadata chunks are removed from the final answer context.
+	retrievedResults := chatManage.MergeResult
+	var targetFile *types.SearchResult
+	for _, result := range retrievedResults {
+		if result != nil && isDataFile(result.KnowledgeFilename) {
+			targetFile = result
+			break
 		}
 	}
 
 	// Filter out table column and table summary chunks from MergeResult
 	chatManage.MergeResult = filterOutTableChunks(chatManage.MergeResult)
 
-	if len(dataFiles) == 0 {
+	if targetFile == nil {
 		return next()
 	}
 	stageID, stageStarted := emitPipelineStageStart(ctx, chatManage, "data_analysis", "分析表格")
@@ -94,11 +97,8 @@ func (p *PluginDataAnalysis) OnEvent(
 		emitPipelineStageResult(ctx, chatManage, stageID, "data_analysis", output, stageStarted, stageSuccess, map[string]interface{}{"status": status})
 	}
 
-	// 2. Ask LLM if data analysis is needed
-	// We only process the first data file for now to avoid complexity
-	targetFile := dataFiles[0]
-
-	// Get Knowledge details to get file path
+	// Analyze only the highest-ranked retrieved table to keep the synchronous
+	// routing cost bounded to one model call.
 	knowledge, err := p.knowledgeService.GetKnowledgeByID(ctx, targetFile.KnowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get knowledge %s: %v", targetFile.KnowledgeID, err)
@@ -106,11 +106,8 @@ func (p *PluginDataAnalysis) OnEvent(
 		return next()
 	}
 
-	// Initialize DataAnalysisTool
 	tool := tools.NewDataAnalysisTool(p.knowledgeBaseService, p.knowledgeService, p.tenantService, p.fileService, p.db, chatManage.SessionID)
 	defer tool.Cleanup(ctx)
-
-	// Load data into DuckDB
 	schema, err := tool.LoadFromKnowledge(ctx, knowledge)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get data schema: %v", err)
@@ -128,13 +125,10 @@ func (p *PluginDataAnalysis) OnEvent(
 	// Use utils.GenerateSchema to generate format schema for DataAnalysisInput
 	formatSchema := utils.GenerateSchema[tools.DataAnalysisInput]()
 
-	evidence := dataAnalysisEvidence(dataFiles, knowledge.ID, 6000)
+	evidence := dataAnalysisEvidence(retrievedResults, knowledge.ID, 6000)
 	analysisPrompt := dataAnalysisPrompt(chatManage.Query, knowledge.ID, schema.Description(), evidence)
-
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
-		{Role: "user", Content: analysisPrompt},
-	}, &chat.ChatOptions{
+	response, err := chatModel.Chat(ctx, []chat.Message{{Role: "user", Content: analysisPrompt}}, &chat.ChatOptions{
 		Temperature: 0,
 		Thinking:    &thinking,
 		Format:      formatSchema,
@@ -144,10 +138,7 @@ func (p *PluginDataAnalysis) OnEvent(
 		finishStage()
 		return next()
 	}
-	// logger.Debugf(ctx, "Data analysis LLM response: %s", response.Content)
 
-	// Execute SQL using the tool
-	// Initialize DataAnalysisTool
 	toolInput, err := bindDataAnalysisInput(response.Content, knowledge.ID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to parse analysis response: %v", err)
@@ -164,6 +155,7 @@ func (p *PluginDataAnalysis) OnEvent(
 		emitPipelineStageResult(ctx, chatManage, stageID, "data_analysis", "无需表格分析", stageStarted, true, map[string]interface{}{"status": "skipped"})
 		return next()
 	}
+
 	executionCtx, cancel := context.WithTimeout(ctx, dataAnalysisTimeout)
 	toolResult, err := tool.Execute(executionCtx, toolInput)
 	cancel()
@@ -172,9 +164,6 @@ func (p *PluginDataAnalysis) OnEvent(
 		finishStage()
 		return next()
 	}
-
-	// 5. Store result
-	// Create a new SearchResult for the analysis output
 	analysisResult := &types.SearchResult{
 		ID:                   "analysis_" + knowledge.ID,
 		Content:              dataAnalysisEvidenceInstruction + "\n\n" + toolResult.Output,
@@ -185,9 +174,7 @@ func (p *PluginDataAnalysis) OnEvent(
 		KnowledgeFilename:    knowledge.FileName,
 		KnowledgeDescription: knowledge.Description,
 	}
-
 	chatManage.MergeResult = mergeDataAnalysisResult(chatManage.MergeResult, analysisResult, toolResult.Data)
-
 	stageSuccess = true
 	finishStage()
 	return next()

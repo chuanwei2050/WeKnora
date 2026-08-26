@@ -474,6 +474,7 @@ func (p *PluginSearch) searchByTargets(
 						KeywordThreshold:      chatManage.KeywordThreshold,
 						MatchCount:            chatManage.EmbeddingTopK,
 						VectorMatchCount:      chatManage.VectorRecallTopK,
+						RerankCandidateCount:  chatManage.RerankCandidateTopK,
 						KeywordMatchCount:     chatManage.KeywordRecallTopK,
 						RRFVectorWeight:       chatManage.RRFVectorWeight,
 						SkipContextEnrichment: true,
@@ -565,6 +566,7 @@ func (p *PluginSearch) searchSingleTarget(
 		MatchCount:            chatManage.EmbeddingTopK,
 		VectorMatchCount:      chatManage.VectorRecallTopK,
 		KeywordMatchCount:     chatManage.KeywordRecallTopK,
+		RerankCandidateCount:  chatManage.RerankCandidateTopK,
 		RRFVectorWeight:       chatManage.RRFVectorWeight,
 		SkipContextEnrichment: true,
 	}

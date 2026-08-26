@@ -179,8 +179,14 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	logger.Infof(ctx, "Result count before fusion: vector=%d, keyword=%d", len(vectorResults), len(keywordResults))
 
 	deduplicatedChunks := fuseOrDeduplicate(ctx, vectorResults, keywordResults, params.RRFVectorWeight)
-	if len(vectorResults) > 0 && len(keywordResults) > 0 {
-		deduplicatedChunks = preserveRetrieverLeaders(deduplicatedChunks, vectorResults, keywordResults, params.MatchCount)
+	if len(vectorResults) > 0 && len(keywordResults) > 0 && params.RerankCandidateCount > 0 {
+		deduplicatedChunks = preserveRetrieverLeaders(
+			deduplicatedChunks,
+			vectorResults,
+			keywordResults,
+			params.RerankCandidateCount,
+			params.MatchCount,
+		)
 	}
 
 	kb.EnsureDefaults()
