@@ -15,6 +15,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const titleDeliveryWindow = 3 * time.Second
+
+func remainingTitleDeliveryWait(startedAt, now time.Time) time.Duration {
+	remaining := titleDeliveryWindow - now.Sub(startedAt)
+	if remaining <= 0 {
+		return 0
+	}
+	return remaining
+}
+
 // ContinueStream godoc
 // @Summary      继续流式响应
 // @Description  继续获取正在进行的流式响应
@@ -304,10 +314,12 @@ func (h *Handler) handleAgentEventsForSSE(
 	eventBus *event.EventBus,
 	waitForTitle bool,
 ) {
+	streamStartedAt := time.Now()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	lastOffset := 0
+	titleReceived := false
 	log := logger.GetLogger(ctx)
 
 	log.Infof("Starting pull-based SSE streaming for session=%s, message=%s", sessionID, assistantMessageID)
@@ -333,7 +345,6 @@ func (h *Handler) handleAgentEventsForSSE(
 
 			// Send any new events
 			streamCompleted := false
-			titleReceived := false
 			for _, evt := range events {
 				// Check for stop event
 				if evt.Type == types.ResponseType(event.EventStop) {
@@ -392,7 +403,13 @@ func (h *Handler) handleAgentEventsForSSE(
 			if streamCompleted {
 				log.Infof("Stream completed for session=%s, message=%s", sessionID, assistantMessageID)
 				if waitForTitle && !titleReceived {
-					titleTimeout := time.NewTimer(3 * time.Second)
+					remainingWait := remainingTitleDeliveryWait(streamStartedAt, time.Now())
+					if remainingWait == 0 {
+						log.Infof("Title delivery window elapsed for session=%s", sessionID)
+						return
+					}
+
+					titleTimeout := time.NewTimer(remainingWait)
 					titleTicker := time.NewTicker(100 * time.Millisecond)
 					defer titleTimeout.Stop()
 					defer titleTicker.Stop()
