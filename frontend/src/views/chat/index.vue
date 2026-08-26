@@ -346,10 +346,12 @@ const debounce = (fn, delay) => {
     }
 }
 const onChatScrollTop = () => {
-    if (scrollLock.value) return;
-    const { scrollTop, scrollHeight } = scrollContainer.value;
+    if (scrollLock.value || historyLoading.value || isReplying.value || !scrollContainer.value) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainer.value;
+    if (scrollHeight <= clientHeight) return;
     isFirstEnter.value = false
     if (scrollTop == 0) {
+        historyLoading.value = true;
         let data = {
             session_id: session_id.value,
             created_at: created_at.value,
@@ -459,8 +461,27 @@ const reconstructEventStreamFromSteps = (agentSteps, messageContent, isCompleted
 };
 const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
     let chatlist = data.reverse()
+    const existingMessageIds = new Set(messagesList.map(item => item.id).filter(Boolean));
     for (let i = 0, len = chatlist.length; i < len; i++) {
         let item = chatlist[i];
+        if (item.id && existingMessageIds.has(item.id)) continue;
+        if (item.role === 'user' && item.content && item.created_at) {
+            const serverCreatedAt = Date.parse(item.created_at);
+            const optimisticMessage = messagesList.find(existing =>
+                existing._optimistic === true &&
+                existing.role === 'user' &&
+                existing.content === item.content &&
+                Number.isFinite(serverCreatedAt) &&
+                Math.abs(serverCreatedAt - existing._optimisticCreatedAt) < 120_000
+            );
+            if (optimisticMessage) {
+                Object.assign(optimisticMessage, item);
+                delete optimisticMessage._optimistic;
+                delete optimisticMessage._optimisticCreatedAt;
+                if (item.id) existingMessageIds.add(item.id);
+                continue;
+            }
+        }
         item.isAgentMode = false; // Agent 模式标记
         item.agentEventStream = item.agentEventStream || [];
         item._eventMap = new Map();
@@ -505,6 +526,7 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
             item.content = t('chat.cannotAnswer');
         }
         messagesList.unshift(item);
+        if (item.id) existingMessageIds.add(item.id);
         if (isFirstEnter.value) {
             scrollToBottom(true);
         } else if (isScrollType) {
@@ -601,7 +623,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     }
 
     // 将@提及的知识库和文件信息存入用户消息
-     messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), voice_metadata: voiceMetadata, channel: 'web' });
+     messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), voice_metadata: voiceMetadata, channel: 'web', _optimistic: true, _optimisticCreatedAt: Date.now() });
     userHasScrolledUp.value = false;
     scrollToBottom(true);
     
