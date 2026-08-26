@@ -11,7 +11,7 @@ const (
 	DefaultVectorRecallTopK    = 50
 	DefaultKeywordRecallTopK   = 50
 	DefaultRRFVectorWeight     = 0.7
-	DefaultVectorThreshold     = 0.5
+	DefaultVectorThreshold     = 0.3
 	DefaultKeywordThreshold    = 0.3
 	DefaultRerankCandidateTopK = 20
 	DefaultRerankTopK          = 10
@@ -33,7 +33,7 @@ type RetrievalConfig struct {
 	KeywordRecallTopK int `json:"keyword_recall_top_k"`
 	// RRFVectorWeight controls vector contribution during reciprocal rank fusion.
 	RRFVectorWeight float64 `json:"rrf_vector_weight"`
-	// VectorThreshold is the minimum vector similarity score (0-1, default: 0.5)
+	// VectorThreshold is the minimum vector similarity score (0-1, default: 0.3)
 	VectorThreshold float64 `json:"vector_threshold"`
 	// KeywordThreshold is the minimum keyword match score (0-1, default: 0.3)
 	KeywordThreshold float64 `json:"keyword_threshold"`

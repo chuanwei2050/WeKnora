@@ -26,8 +26,7 @@ type PluginQueryUnderstand struct {
 }
 
 var (
-	rewriteImageSepPattern  = regexp.MustCompile(`(?s)^(.*?)\s*\n?---\n(.*)$`)
-	simpleArithmeticPattern = regexp.MustCompile(`^[零〇一二三四五六七八九十百千万亿两\d０-９.+\-*/×÷加减乘除()（）]+$`)
+	rewriteImageSepPattern = regexp.MustCompile(`(?s)^(.*?)\s*\n?---\n(.*)$`)
 )
 
 type queryUnderstandOutput struct {
@@ -215,19 +214,6 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	} else {
 		historyList = p.loadHistory(ctx, chatManage)
 	}
-	if isSimpleExplicitFactQuery(chatManage, historyList) {
-		chatManage.Intent = types.IntentKBSearch
-		if needRouting {
-			decision := types.PlanRouting(types.QuestionComplexity{Level: types.ComplexityL1, Subtype: types.SubtypeExplicitFact, Confidence: 1, RationaleSummary: "单轮明确事实查询"}, chatManage.ComplexityRouting)
-			chatManage.RoutingDecision = &decision
-			chatManage.ApplyRoutingDecision()
-		}
-		pipelineInfo(ctx, "QueryUnderstand", "fast_path", map[string]interface{}{"session_id": chatManage.SessionID, "query": chatManage.Query})
-		stageSuccess = true
-		finishStage()
-		return next()
-	}
-
 	// --- Select the appropriate model ---
 	rewriteModel, useImages := p.selectModel(ctx, chatManage, hasImages)
 	if rewriteModel == nil {
@@ -377,50 +363,6 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	stageSuccess = true
 	finishStage()
 	return next()
-}
-
-func isSimpleExplicitFactQuery(chatManage *types.ChatManage, history []*types.History) bool {
-	if chatManage == nil || len(history) > 0 || len(chatManage.Images) > 0 || chatManage.WebSearchEnabled {
-		return false
-	}
-	if len(chatManage.SearchTargets) == 0 && len(chatManage.KnowledgeBaseIDs) == 0 && len(chatManage.KnowledgeIDs) == 0 {
-		return false
-	}
-	query := strings.TrimSpace(chatManage.Query)
-	length := len([]rune(query))
-	if length < 2 || length > 40 {
-		return false
-	}
-	if isUtilityQuery(query) {
-		return false
-	}
-	for _, marker := range []string{"为什么", "如何", "怎么", "比较", "对比", "区别", "关系", "影响", "原因", "方案", "分析", "总结", "它", "他是", "她是", "这个", "那个", "上述", "上面", "前面", "刚才"} {
-		if strings.Contains(query, marker) {
-			return false
-		}
-	}
-	for _, marker := range []string{"谁有", "谁具备", "谁持有", "有哪些", "是否有", "有无"} {
-		if strings.Contains(query, marker) {
-			return true
-		}
-	}
-	return false
-}
-
-func isUtilityQuery(query string) bool {
-	for _, marker := range []string{"天气", "气温", "下雨", "降雨", "几级风"} {
-		if strings.Contains(query, marker) {
-			return true
-		}
-	}
-	if strings.Contains(query, "多少度") {
-		return true
-	}
-
-	expression := strings.NewReplacer(
-		"多少", "", "等于", "", "是", "", "几", "", "？", "", "?", "", " ", "",
-	).Replace(query)
-	return expression != "" && simpleArithmeticPattern.MatchString(expression)
 }
 
 // updateUserMessageImageCaption writes the generated ImageDescription back to

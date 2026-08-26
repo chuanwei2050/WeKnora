@@ -18,6 +18,11 @@ func TestNormalizeRetrievalConfigFillsLegacyFields(t *testing.T) {
 	require.NoError(t, ValidateRetrievalConfig(got))
 }
 
+func TestDefaultRetrievalConfigUsesRecallSafeVectorThreshold(t *testing.T) {
+	require.Equal(t, 0.3, DefaultRetrievalConfig().VectorThreshold)
+	require.Equal(t, 0.3, NormalizeRetrievalConfig(nil).VectorThreshold)
+}
+
 func TestApplyRetrievalConfigUpdatePreservesExplicitZeroThresholds(t *testing.T) {
 	zero := 0.0
 	disabled := false

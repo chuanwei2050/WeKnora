@@ -112,49 +112,38 @@ func TestRoutingPromptUsesPreviousConversationForFollowUp(t *testing.T) {
 	}
 }
 
-func TestSimpleExplicitFactQueryFastPath(t *testing.T) {
-	manage := &types.ChatManage{PipelineRequest: types.PipelineRequest{
-		Query:            "谁有系统集成项目管理工程师证书？",
-		KnowledgeBaseIDs: []string{"kb"},
-	}}
-	if !isSimpleExplicitFactQuery(manage, nil) {
-		t.Fatal("明确的单轮事实问题应走快速路径")
+func TestExplicitFactQueryUsesModelRouting(t *testing.T) {
+	model := &validationChatStub{content: `{"rewrite_query":"系统集成项目管理工程师证书","intent":"kb_search","image_description":"","complexity_level":"L1","reasoning_subtype":"explicit_fact","needs_entity_relation":false,"confidence":0.95,"rationale_summary":"单条件事实检索"}`}
+	plugin := &PluginQueryUnderstand{
+		modelService: &validationModelServiceStub{chat: model},
+		config: &appconfig.Config{Conversation: &appconfig.ConversationConfig{
+			RewritePromptSystem: "system",
+			RewritePromptUser:   "query={{query}}",
+		}},
 	}
-	for _, query := range []string{
-		"什么是向量数据库？",
-		"哪个方案更好？",
-		"哪里可以办理？",
-		"有多少人通过？",
-		"何时发布？",
-		"哪些人员符合复杂条件？",
-		"它还有哪些证书？",
-		"比较两个方案的区别",
-		"为什么需要这个证书？",
-		"今天多少度？",
-		"上海明天多少度？",
-		"北京天气如何？",
-		"1+1是多少？",
-		"一加一是多少？",
-		"12×8等于多少？",
-	} {
-		manage.Query = query
-		if isSimpleExplicitFactQuery(manage, nil) {
-			t.Fatalf("复杂或依赖上下文的问题不应走快速路径: %s", query)
-		}
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			Query:             "谁有系统集成项目管理工程师证书？",
+			ChatModelID:       "chat-model",
+			EnableRewrite:     true,
+			ComplexityRouting: types.DefaultComplexityRoutingConfig(),
+		},
+		PipelineState: types.PipelineState{
+			History: []*types.History{{Query: "", Answer: ""}},
+		},
 	}
-	manage.Query = "谁有这个证书？"
-	if isSimpleExplicitFactQuery(manage, []*types.History{{Query: "证书清单", Answer: "..."}}) {
-		t.Fatal("有历史上下文的问题不应走快速路径")
+	nextCalled := false
+	if err := plugin.OnEvent(context.Background(), types.QUERY_UNDERSTAND, manage, func() *PluginError {
+		nextCalled = true
+		return nil
+	}); err != nil {
+		t.Fatalf("query understand failed: %v", err)
 	}
-	manage.Query = "谁是现任美国总统？"
-	manage.WebSearchEnabled = true
-	if isSimpleExplicitFactQuery(manage, nil) {
-		t.Fatal("启用联网搜索时不应绕过意图和复杂度判断")
+	if model.calls != 1 || !nextCalled {
+		t.Fatalf("explicit fact query bypassed model routing: calls=%d next=%v", model.calls, nextCalled)
 	}
-	manage.WebSearchEnabled = false
-	manage.KnowledgeBaseIDs = nil
-	if isSimpleExplicitFactQuery(manage, nil) {
-		t.Fatal("没有明确知识库范围时不应强制走知识库快速路径")
+	if manage.RewriteQuery != "系统集成项目管理工程师证书" || manage.RoutingDecision == nil {
+		t.Fatalf("model routing result was not applied: rewrite=%q routing=%#v", manage.RewriteQuery, manage.RoutingDecision)
 	}
 }
 

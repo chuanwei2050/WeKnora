@@ -40,7 +40,7 @@ vector_recall_top_k + keyword_recall_top_k
 
 后端提供一个从 `PlatformSettings.RetrievalConfig` 生成完整、有默认值且已校验配置的解析边界。所有 ChatManage 初始化和无摘要搜索都使用该结果；智能体覆盖函数停止写入检索字段，只继续处理提示词、对话、工具和其他非检索配置。不得在各调用链复制默认值。
 
-平台默认值为：查询扩展开启、`EmbeddingTopK=30`、两路 recall 各 `50`、`RRFVectorWeight=0.7`、向量阈值 `0.5`、关键词阈值 `0.3`、`RerankCandidateTopK=20`、`RerankTopK=10`、Rerank 阈值 `0.3`。校验必须保证：
+平台默认值为：查询扩展开启、`EmbeddingTopK=30`、两路 recall 各 `50`、`RRFVectorWeight=0.7`、向量阈值 `0.3`、关键词阈值 `0.3`、`RerankCandidateTopK=20`、`RerankTopK=10`、Rerank 阈值 `0.3`。校验必须保证：
 
 - recall 值为 `1..500`；
 - `1 <= RerankTopK <= RerankCandidateTopK <= EmbeddingTopK`；
