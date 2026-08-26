@@ -34,6 +34,8 @@ export function useStream() {
 
   // 启动流式请求
   const startStream = async (params: StreamRequestParams) => {
+    if (isStreaming.value) return;
+
     // 重置状态
     output.value = '';
     error.value = null;

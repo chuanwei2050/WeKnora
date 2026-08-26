@@ -66,4 +66,28 @@ describe('stream lifecycle', () => {
     expect(stream.isLoading.value).toBe(false)
     wrapper.unmount()
   })
+
+  it('does not start a second request while a stream is active', async () => {
+    let finishRequest!: () => void
+    let activeOptions!: {
+      onmessage: (event: { data: string }) => void
+      onclose: () => void
+    }
+    fetchEventSource.mockImplementation((_url, options) => {
+      activeOptions = options
+      return new Promise<void>((resolve) => { finishRequest = resolve })
+    })
+    const { stream, wrapper } = mountStream()
+
+    const activeRequest = stream.startStream(request)
+    await Promise.resolve()
+    await stream.startStream({ ...request, method: 'GET', url: '/api/v1/sessions/continue-stream' })
+
+    expect(fetchEventSource).toHaveBeenCalledTimes(1)
+    activeOptions.onmessage({ data: JSON.stringify({ response_type: 'complete', done: true }) })
+    activeOptions.onclose()
+    finishRequest()
+    await activeRequest
+    wrapper.unmount()
+  })
 })
