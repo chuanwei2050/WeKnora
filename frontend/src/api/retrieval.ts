@@ -13,6 +13,8 @@ export interface RetrievalConfig {
   rerank_candidate_top_k: number
   rerank_top_k: number
   rerank_threshold: number
+  batch_max_results: number
+  batch_max_content_chars: number
 }
 
 // Get tenant retrieval config via KV API

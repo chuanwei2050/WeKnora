@@ -443,6 +443,46 @@ func TestEffectiveIntegrationResponseLimitOnlyNarrowsPlatformLimit(t *testing.T)
 	require.Equal(t, 5, effectiveIntegrationResponseLimit(8, 5))
 }
 
+func TestApplyIntegrationBatchBudgetDeduplicatesAndDistributesFairly(t *testing.T) {
+	result := func(chunkID, content string) gin.H {
+		return gin.H{
+			"knowledge_id":         "doc-1",
+			"knowledge_version_id": "version-1",
+			"chunk_id":             chunkID,
+			"content":              content,
+		}
+	}
+	input := []integrationBatchSearchResult{
+		{ID: "q-1", Status: "completed", Results: []gin.H{result("shared", "共享"), result("q1-extra", "甲")}},
+		{ID: "q-2", Status: "completed", Results: []gin.H{result("shared", "共享"), result("q2-extra", "乙")}},
+		{ID: "q-3", Status: "completed", Results: []gin.H{result("q3", "丙")}},
+	}
+
+	got, stats := applyIntegrationBatchBudget(input, 3, 10)
+	require.Equal(t, []string{"shared", "q2-extra", "q3"}, []string{
+		got[0].Results[0]["chunk_id"].(string),
+		got[1].Results[0]["chunk_id"].(string),
+		got[2].Results[0]["chunk_id"].(string),
+	})
+	require.Equal(t, 5, stats.BeforeResults)
+	require.Equal(t, 3, stats.AfterResults)
+	require.Equal(t, 4, stats.ContentChars)
+}
+
+func TestApplyIntegrationBatchBudgetEnforcesContentCharactersWithoutTruncation(t *testing.T) {
+	input := []integrationBatchSearchResult{
+		{ID: "q-1", Status: "completed", Results: []gin.H{{"chunk_id": "too-long", "content": "一二三四"}, {"chunk_id": "fits", "content": "一二"}}},
+		{ID: "q-2", Status: "completed", Results: []gin.H{{"chunk_id": "also-fits", "content": "三"}}},
+	}
+
+	got, stats := applyIntegrationBatchBudget(input, 10, 3)
+	require.Len(t, got[0].Results, 1)
+	require.Equal(t, "fits", got[0].Results[0]["chunk_id"])
+	require.Len(t, got[1].Results, 1)
+	require.Equal(t, "also-fits", got[1].Results[0]["chunk_id"])
+	require.Equal(t, 3, stats.ContentChars)
+}
+
 func TestIntegrationBatchSearchUsesResolvedFolders(t *testing.T) {
 	sessions := &batchSearchSessionService{}
 	handler := &IntegrationHandler{

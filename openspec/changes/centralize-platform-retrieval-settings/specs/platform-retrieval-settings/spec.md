@@ -13,7 +13,7 @@
 - **AND** 智能体的提示词、工具、对话和其他非检索配置继续生效
 
 ### Requirement: 平台策略必须描述完整且有界的检索阶段
-平台策略 MUST 包含 `enable_query_expansion`、`embedding_top_k`、`vector_recall_top_k`、`keyword_recall_top_k`、`rrf_vector_weight`、`rerank_candidate_top_k`、`rerank_top_k` 和向量/关键词/rerank 阈值。`enable_query_expansion=false` 时任何路由和智能体 MUST NOT 重新启用查询扩展；为 true 时请求级路由 MAY 按复杂度决定是否实际扩展。rerank 模型 MUST 继续使用平台默认模型配置，检索策略不得创建第二个模型覆盖入口。所有数量 MUST 表示一次查询跨全部知识库的总预算，MUST NOT 乘知识库数量。
+平台策略 MUST 包含 `enable_query_expansion`、`embedding_top_k`、`vector_recall_top_k`、`keyword_recall_top_k`、`rrf_vector_weight`、`rerank_candidate_top_k`、`rerank_top_k`、`batch_max_results`、`batch_max_content_chars` 和向量/关键词/rerank 阈值。`enable_query_expansion=false` 时任何路由和智能体 MUST NOT 重新启用查询扩展；为 true 时请求级路由 MAY 按复杂度决定是否实际扩展。rerank 模型 MUST 继续使用平台默认模型配置，检索策略不得创建第二个模型覆盖入口。召回和 rerank 数量 MUST 表示一次查询跨全部知识库的总预算，MUST NOT 乘知识库数量；batch 字段 MUST 仅限制 Integration 批量响应的整批总量。
 
 #### Scenario: 多知识库搜索
 - **WHEN** 请求选择多个知识库且平台两路 recall 均配置为 50
@@ -22,6 +22,14 @@
 
 #### Scenario: 非法阶段顺序
 - **WHEN** 平台管理员提交 `rerank_top_k > rerank_candidate_top_k` 或 `rerank_candidate_top_k > embedding_top_k`
+- **THEN** 系统拒绝保存并返回可定位字段的参数错误
+
+#### Scenario: 旧平台配置缺少批量预算
+- **WHEN** 系统读取尚无批量预算字段的平台设置
+- **THEN** 有效配置使用 `batch_max_results=200` 和 `batch_max_content_chars=200000`
+
+#### Scenario: 平台管理员保存非法批量预算
+- **WHEN** platform_admin 提交非正数或超过服务端允许范围的批量总结果数或正文字符数
 - **THEN** 系统拒绝保存并返回可定位字段的参数错误
 
 ### Requirement: 只有平台管理员可以修改检索策略

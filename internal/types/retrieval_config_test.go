@@ -15,7 +15,27 @@ func TestNormalizeRetrievalConfigFillsLegacyFields(t *testing.T) {
 	require.Equal(t, DefaultKeywordRecallTopK, got.KeywordRecallTopK)
 	require.Equal(t, 10, got.RerankCandidateTopK)
 	require.Equal(t, 5, got.RerankTopK)
+	require.Equal(t, DefaultBatchMaxResults, got.BatchMaxResults)
+	require.Equal(t, DefaultBatchMaxContentChars, got.BatchMaxContentChars)
 	require.NoError(t, ValidateRetrievalConfig(got))
+}
+
+func TestValidateRetrievalConfigRejectsInvalidBatchBudgets(t *testing.T) {
+	config := DefaultRetrievalConfig()
+	config.BatchMaxResults = 0
+	require.EqualError(t, ValidateRetrievalConfig(config), "batch_max_results must be between 1 and 5000")
+
+	config = DefaultRetrievalConfig()
+	config.BatchMaxContentChars = 0
+	require.EqualError(t, ValidateRetrievalConfig(config), "batch_max_content_chars must be between 1 and 10000000")
+
+	config = DefaultRetrievalConfig()
+	config.BatchMaxResults = MaxBatchMaxResults + 1
+	require.EqualError(t, ValidateRetrievalConfig(config), "batch_max_results must be between 1 and 5000")
+
+	config = DefaultRetrievalConfig()
+	config.BatchMaxContentChars = MaxBatchMaxContentChars + 1
+	require.EqualError(t, ValidateRetrievalConfig(config), "batch_max_content_chars must be between 1 and 10000000")
 }
 
 func TestDefaultRetrievalConfigUsesRecallSafeVectorThreshold(t *testing.T) {

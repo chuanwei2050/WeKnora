@@ -50,7 +50,7 @@
 - **AND** 直接 Chunk 加载不得绕过最终文件夹范围
 
 ### Requirement: RAG 搜索必须支持有界批量查询
-系统 MUST 在 `POST /api/integration/v1/rag/search-batch` 接受共享的非空 `knowledge_base_ids` 和有界 `queries` 数组。每个查询 MUST 携带批内唯一稳定 ID、非空 query，并 MAY 携带该查询的 `knowledge_ids`、`folder_ids` 与 `top_k`。系统 MUST 在执行任何查询前校验整批参数、知识库授权和文件夹范围，以受控并发使用平台检索策略执行检索，按请求顺序返回逐查询状态和结果；每个查询的 `top_k` 只能缩小平台最终响应上限，批量请求 MUST 作为一次独立限流操作计费。
+系统 MUST 在 `POST /api/integration/v1/rag/search-batch` 接受共享的非空 `knowledge_base_ids` 和有界 `queries` 数组。每个查询 MUST 携带批内唯一稳定 ID、非空 query，并 MAY 携带该查询的 `knowledge_ids`、`folder_ids` 与 `top_k`。系统 MUST 在执行任何查询前校验整批参数、知识库授权和文件夹范围，以受控并发使用平台检索策略执行检索，按请求顺序返回逐查询状态和结果；每个查询的 `top_k` 只能缩小平台最终响应上限，批量请求 MUST 作为一次独立限流操作计费。系统 MUST 在逐查询截断后应用平台 `batch_max_results` 和 `batch_max_content_chars`，并在不改变逐 query 响应结构的前提下公平分配整批预算。
 
 #### Scenario: 批量搜索多个业务目标
 - **WHEN** 具有 `rag:search` scope 的主体提交多个唯一查询和已授权知识库
@@ -85,3 +85,24 @@
 #### Scenario: 批量子查询的文档超出文件夹范围
 - **WHEN** 任一子查询同时提交 `knowledge_ids` 和 `folder_ids` 且存在范围外文档
 - **THEN** 系统整批返回 `400 invalid_knowledge_folder_scope`，不执行任何查询
+
+#### Scenario: 批量结果超过平台总结果预算
+- **WHEN** 多个查询的逐查询结果合计超过平台 `batch_max_results`
+- **THEN** 系统以轮询方式按请求顺序分配名额并保持各查询内部顺序
+- **AND** 整批结果数不得超过平台硬上限
+- **AND** 返回结构仍按原查询 ID 和请求顺序组织
+
+#### Scenario: 批量结果包含跨查询重复证据
+- **WHEN** 多个查询的结果具有相同 `knowledge_version_id + chunk_id`
+- **THEN** 系统在整批结果中仅保留首次选中的证据
+- **AND** 其他查询保持原状态但其结果 MAY 因全局去重而为空
+
+#### Scenario: 批量正文达到字符预算
+- **WHEN** 候选正文无法放入平台 `batch_max_content_chars` 的剩余预算
+- **THEN** 系统跳过该完整候选并继续检查其他候选，且不得截断证据正文
+- **AND** 整批返回正文字符数不得超过平台硬上限
+
+#### Scenario: 调用方为批量子查询指定 top_k
+- **WHEN** query 提交 `top_k` 或省略该字段
+- **THEN** 单条有效上限继续为 `min(top_k, 平台 rerank_top_k)` 或平台 `rerank_top_k`
+- **AND** 系统不读取或提供独立的批量单条 rerank 配置

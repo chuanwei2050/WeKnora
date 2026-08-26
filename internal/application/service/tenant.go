@@ -500,7 +500,13 @@ func (s *tenantService) GetWeKnoraCloudCredentials(ctx context.Context) *types.W
 }
 
 func (s *tenantService) GetPlatformSettings(ctx context.Context) (*types.PlatformSettings, error) {
-	return s.repo.GetPlatformSettings(ctx)
+	settings, err := s.repo.GetPlatformSettings(ctx)
+	if err != nil || settings == nil {
+		return settings, err
+	}
+	normalizedRetrieval := types.NormalizeRetrievalConfig(settings.RetrievalConfig)
+	settings.RetrievalConfig = &normalizedRetrieval
+	return settings, nil
 }
 
 func (s *tenantService) UpdatePlatformSettings(ctx context.Context, settings *types.PlatformSettings) (*types.PlatformSettings, error) {
@@ -511,19 +517,21 @@ func (s *tenantService) UpdatePlatformSettings(ctx context.Context, settings *ty
 	if settings == nil {
 		return nil, werrors.NewBadRequestError("platform settings are required")
 	}
-	normalizedRetrieval := types.NormalizeRetrievalConfig(settings.RetrievalConfig)
-	if err := types.ValidateRetrievalConfig(normalizedRetrieval); err != nil {
+	if settings.RetrievalConfig == nil {
+		normalizedRetrieval := types.DefaultRetrievalConfig()
+		settings.RetrievalConfig = &normalizedRetrieval
+	}
+	if err := types.ValidateRetrievalConfig(*settings.RetrievalConfig); err != nil {
 		return nil, werrors.NewBadRequestError(err.Error())
 	}
-	settings.RetrievalConfig = &normalizedRetrieval
 	if err := s.repo.UpdatePlatformSettings(ctx, settings); err != nil {
 		return nil, err
 	}
-	return s.repo.GetPlatformSettings(ctx)
+	return s.GetPlatformSettings(ctx)
 }
 
 func (s *tenantService) applyPlatformSettings(ctx context.Context, tenant *types.Tenant) error {
-	settings, err := s.repo.GetPlatformSettings(ctx)
+	settings, err := s.GetPlatformSettings(ctx)
 	if err != nil {
 		return err
 	}

@@ -7,15 +7,19 @@ import (
 )
 
 const (
-	DefaultEmbeddingTopK       = 30
-	DefaultVectorRecallTopK    = 50
-	DefaultKeywordRecallTopK   = 50
-	DefaultRRFVectorWeight     = 0.7
-	DefaultVectorThreshold     = 0.3
-	DefaultKeywordThreshold    = 0.3
-	DefaultRerankCandidateTopK = 20
-	DefaultRerankTopK          = 10
-	DefaultRerankThreshold     = 0.3
+	DefaultEmbeddingTopK        = 30
+	DefaultVectorRecallTopK     = 50
+	DefaultKeywordRecallTopK    = 50
+	DefaultRRFVectorWeight      = 0.7
+	DefaultVectorThreshold      = 0.3
+	DefaultKeywordThreshold     = 0.3
+	DefaultRerankCandidateTopK  = 20
+	DefaultRerankTopK           = 10
+	DefaultRerankThreshold      = 0.3
+	DefaultBatchMaxResults      = 200
+	DefaultBatchMaxContentChars = 200000
+	MaxBatchMaxResults          = 5000
+	MaxBatchMaxContentChars     = 10000000
 )
 
 // RetrievalConfig holds the global retrieval/search configuration for a tenant.
@@ -47,6 +51,10 @@ type RetrievalConfig struct {
 	RerankModelID string `json:"rerank_model_id"`
 	// EnableQueryExpansion is the platform-wide ceiling for model-driven query expansion.
 	EnableQueryExpansion bool `json:"enable_query_expansion"`
+	// BatchMaxResults limits the total number of results returned by one Integration batch search.
+	BatchMaxResults int `json:"batch_max_results"`
+	// BatchMaxContentChars limits total Unicode characters in batch result content.
+	BatchMaxContentChars int `json:"batch_max_content_chars"`
 
 	rrfVectorWeightSet  bool
 	vectorThresholdSet  bool
@@ -68,6 +76,8 @@ type RetrievalConfigUpdate struct {
 	RerankTopK           *int     `json:"rerank_top_k"`
 	RerankThreshold      *float64 `json:"rerank_threshold"`
 	EnableQueryExpansion *bool    `json:"enable_query_expansion"`
+	BatchMaxResults      *int     `json:"batch_max_results"`
+	BatchMaxContentChars *int     `json:"batch_max_content_chars"`
 }
 
 // ApplyRetrievalConfigUpdate merges an API update onto the normalized platform value.
@@ -108,6 +118,12 @@ func ApplyRetrievalConfigUpdate(current *RetrievalConfig, update RetrievalConfig
 		result.EnableQueryExpansion = *update.EnableQueryExpansion
 		result.queryExpansionSet = true
 	}
+	if update.BatchMaxResults != nil {
+		result.BatchMaxResults = *update.BatchMaxResults
+	}
+	if update.BatchMaxContentChars != nil {
+		result.BatchMaxContentChars = *update.BatchMaxContentChars
+	}
 	result.RerankModelID = ""
 	return result
 }
@@ -125,6 +141,8 @@ func DefaultRetrievalConfig() RetrievalConfig {
 		RerankTopK:           DefaultRerankTopK,
 		RerankThreshold:      DefaultRerankThreshold,
 		EnableQueryExpansion: true,
+		BatchMaxResults:      DefaultBatchMaxResults,
+		BatchMaxContentChars: DefaultBatchMaxContentChars,
 	}
 }
 
@@ -166,6 +184,12 @@ func NormalizeRetrievalConfig(config *RetrievalConfig) RetrievalConfig {
 	if !result.queryExpansionSet {
 		result.EnableQueryExpansion = true
 	}
+	if result.BatchMaxResults <= 0 {
+		result.BatchMaxResults = DefaultBatchMaxResults
+	}
+	if result.BatchMaxContentChars <= 0 {
+		result.BatchMaxContentChars = DefaultBatchMaxContentChars
+	}
 	result.RerankModelID = ""
 	return result
 }
@@ -198,6 +222,12 @@ func ValidateRetrievalConfig(config RetrievalConfig) error {
 	}
 	if config.RerankThreshold < -10 || config.RerankThreshold > 10 {
 		return fmt.Errorf("rerank_threshold must be between -10 and 10")
+	}
+	if config.BatchMaxResults < 1 || config.BatchMaxResults > MaxBatchMaxResults {
+		return fmt.Errorf("batch_max_results must be between 1 and %d", MaxBatchMaxResults)
+	}
+	if config.BatchMaxContentChars < 1 || config.BatchMaxContentChars > MaxBatchMaxContentChars {
+		return fmt.Errorf("batch_max_content_chars must be between 1 and %d", MaxBatchMaxContentChars)
 	}
 	return nil
 }
@@ -241,6 +271,14 @@ func (c *RetrievalConfig) GetEffectiveRerankCandidateTopK() int {
 // GetEffectiveRerankThreshold returns RerankThreshold with a fallback default.
 func (c *RetrievalConfig) GetEffectiveRerankThreshold() float64 {
 	return NormalizeRetrievalConfig(c).RerankThreshold
+}
+
+func (c *RetrievalConfig) GetEffectiveBatchMaxResults() int {
+	return NormalizeRetrievalConfig(c).BatchMaxResults
+}
+
+func (c *RetrievalConfig) GetEffectiveBatchMaxContentChars() int {
+	return NormalizeRetrievalConfig(c).BatchMaxContentChars
 }
 
 // Value implements the driver.Valuer interface for database serialization

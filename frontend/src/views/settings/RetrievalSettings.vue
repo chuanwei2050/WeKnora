@@ -120,6 +120,33 @@
     </div>
 
     <div class="subsection-header">
+      <h3>{{ t('retrievalSettings.batchProtectionTitle') }}</h3>
+      <p>{{ t('retrievalSettings.batchProtectionDescription') }}</p>
+    </div>
+
+    <div class="settings-group">
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ t('retrievalSettings.batchMaxResultsLabel') }}</label>
+          <p class="desc">{{ t('retrievalSettings.batchMaxResultsDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-input-number v-model="localConfig.batch_max_results" :min="1" :max="5000" theme="column" />
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ t('retrievalSettings.batchMaxContentCharsLabel') }}</label>
+          <p class="desc">{{ t('retrievalSettings.batchMaxContentCharsDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-input-number v-model="localConfig.batch_max_content_chars" :min="1" :max="10000000" theme="column" />
+        </div>
+      </div>
+    </div>
+
+    <div class="subsection-header">
       <h3>{{ t('retrievalSettings.fallbackTitle') }}</h3>
       <p>{{ t('retrievalSettings.fallbackDescription') }}</p>
     </div>
@@ -213,6 +240,8 @@ const defaultConfig: RetrievalConfig = {
   rerank_candidate_top_k: 20,
   rerank_top_k: 10,
   rerank_threshold: 0.3,
+    batch_max_results: 200,
+    batch_max_content_chars: 200000,
 }
 
 const localConfig = reactive<RetrievalConfig>({ ...defaultConfig })
@@ -242,6 +271,8 @@ const loadConfig = async () => {
         rerank_candidate_top_k: cfg.rerank_candidate_top_k ?? defaultConfig.rerank_candidate_top_k,
         rerank_top_k: cfg.rerank_top_k ?? defaultConfig.rerank_top_k,
         rerank_threshold: cfg.rerank_threshold ?? defaultConfig.rerank_threshold,
+        batch_max_results: cfg.batch_max_results ?? defaultConfig.batch_max_results,
+        batch_max_content_chars: cfg.batch_max_content_chars ?? defaultConfig.batch_max_content_chars,
       })
       initialConfig = { ...localConfig }
     }

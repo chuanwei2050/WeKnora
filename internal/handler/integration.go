@@ -1133,12 +1133,26 @@ func (h *IntegrationHandler) SearchBatch(c *gin.Context) {
 		}
 		folderIDsByQuery[i] = resolved
 	}
+	batchConfig := types.DefaultRetrievalConfig()
+	if h.tenant != nil {
+		if tenant, err := h.tenant.GetTenantByID(c.Request.Context(), principal.TenantID); err == nil && tenant != nil {
+			batchConfig = types.NormalizeRetrievalConfig(tenant.RetrievalConfig)
+		}
+	}
 	results, forbidden := h.runIntegrationSearchBatch(c.Request.Context(), knowledgeBaseIDs, req.Queries, folderIDsByQuery)
 	if forbidden {
 		h.service.AuditResources(c.Request.Context(), principal, "api.search.batch", "denied", "knowledge_denied", knowledgeBaseIDs)
 		integrationError(c, http.StatusForbidden, "knowledge_denied", "knowledge access denied")
 		return
 	}
+	var budgetStats integrationBatchBudgetStats
+	results, budgetStats = applyIntegrationBatchBudget(
+		results,
+		batchConfig.BatchMaxResults,
+		batchConfig.BatchMaxContentChars,
+	)
+	logger.Infof(c.Request.Context(), "Integration batch response budget applied: before=%d after=%d content_chars=%d affected_queries=%d",
+		budgetStats.BeforeResults, budgetStats.AfterResults, budgetStats.ContentChars, budgetStats.AffectedQueries)
 	h.service.AuditResources(c.Request.Context(), principal, "api.search.batch", "allowed", "", knowledgeBaseIDs)
 	integrationData(c, http.StatusOK, gin.H{"results": results})
 }
@@ -1243,6 +1257,89 @@ func integrationPublicSearchResults(results []*types.SearchResult, knowledgeBase
 		})
 	}
 	return publicResults
+}
+
+type integrationBatchBudgetStats struct {
+	BeforeResults   int
+	AfterResults    int
+	ContentChars    int
+	AffectedQueries int
+}
+
+func applyIntegrationBatchBudget(results []integrationBatchSearchResult, maxResults, maxContentChars int) ([]integrationBatchSearchResult, integrationBatchBudgetStats) {
+	if maxResults <= 0 {
+		maxResults = types.DefaultBatchMaxResults
+	}
+	if maxContentChars <= 0 {
+		maxContentChars = types.DefaultBatchMaxContentChars
+	}
+
+	trimmed := make([]integrationBatchSearchResult, len(results))
+	positions := make([]int, len(results))
+	stats := integrationBatchBudgetStats{}
+	for i, result := range results {
+		stats.BeforeResults += len(result.Results)
+		trimmed[i] = result
+		trimmed[i].Results = make([]gin.H, 0, len(result.Results))
+	}
+
+	seen := make(map[string]struct{})
+	for stats.AfterResults < maxResults {
+		selectedInRound := false
+		remainingCandidates := false
+		for i := range results {
+			for positions[i] < len(results[i].Results) {
+				remainingCandidates = true
+				candidate := results[i].Results[positions[i]]
+				positions[i]++
+				identity := integrationBatchResultIdentity(candidate)
+				if identity != "" {
+					if _, duplicate := seen[identity]; duplicate {
+						continue
+					}
+				}
+				content, _ := candidate["content"].(string)
+				contentChars := utf8.RuneCountInString(content)
+				if stats.ContentChars+contentChars > maxContentChars {
+					continue
+				}
+				trimmed[i].Results = append(trimmed[i].Results, candidate)
+				stats.AfterResults++
+				stats.ContentChars += contentChars
+				if identity != "" {
+					seen[identity] = struct{}{}
+				}
+				selectedInRound = true
+				break
+			}
+			if stats.AfterResults >= maxResults {
+				break
+			}
+		}
+		if !selectedInRound || !remainingCandidates {
+			break
+		}
+	}
+
+	for i := range results {
+		if len(trimmed[i].Results) != len(results[i].Results) {
+			stats.AffectedQueries++
+		}
+	}
+	return trimmed, stats
+}
+
+func integrationBatchResultIdentity(result gin.H) string {
+	chunkID := strings.TrimSpace(fmt.Sprint(result["chunk_id"]))
+	if chunkID == "" || chunkID == "<nil>" {
+		return ""
+	}
+	versionID := strings.TrimSpace(fmt.Sprint(result["knowledge_version_id"]))
+	if versionID != "" && versionID != "<nil>" {
+		return versionID + "\x00" + chunkID
+	}
+	knowledgeID := strings.TrimSpace(fmt.Sprint(result["knowledge_id"]))
+	return knowledgeID + "\x00" + chunkID
 }
 
 func (h *IntegrationHandler) CreateChatSession(c *gin.Context) {
