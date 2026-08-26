@@ -45,7 +45,13 @@ func TestPipelineStageUsesExistingAGUIEventContract(t *testing.T) {
 	if id == "" || call.ToolCallID != id || call.ToolName != "rerank" || call.Hint != "筛选相关内容" {
 		t.Fatalf("unexpected tool call: %#v", call)
 	}
+	if call.Arguments["pipeline_stage"] != true {
+		t.Fatalf("tool call missing pipeline stage marker: %#v", call.Arguments)
+	}
 	if result.ToolCallID != id || result.ToolName != "rerank" || !result.Success || result.Output != "筛选完成" {
 		t.Fatalf("unexpected tool result: %#v", result)
+	}
+	if result.Data["pipeline_stage"] != true {
+		t.Fatalf("tool result missing pipeline stage marker: %#v", result.Data)
 	}
 }

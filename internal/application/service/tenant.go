@@ -508,6 +508,14 @@ func (s *tenantService) UpdatePlatformSettings(ctx context.Context, settings *ty
 	if !ok || !user.IsPlatformAdmin() {
 		return nil, werrors.NewForbiddenError("Only platform administrators can update platform settings")
 	}
+	if settings == nil {
+		return nil, werrors.NewBadRequestError("platform settings are required")
+	}
+	normalizedRetrieval := types.NormalizeRetrievalConfig(settings.RetrievalConfig)
+	if err := types.ValidateRetrievalConfig(normalizedRetrieval); err != nil {
+		return nil, werrors.NewBadRequestError(err.Error())
+	}
+	settings.RetrievalConfig = &normalizedRetrieval
 	if err := s.repo.UpdatePlatformSettings(ctx, settings); err != nil {
 		return nil, err
 	}

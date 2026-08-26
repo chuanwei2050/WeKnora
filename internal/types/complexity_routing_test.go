@@ -49,8 +49,8 @@ func TestApplyRoutingDecisionDoesNotBroadenScope(t *testing.T) {
 	if manage.EmbeddingTopK != 20 {
 		t.Fatalf("routing increased retrieval budget: %d", manage.EmbeddingTopK)
 	}
-	if !manage.EnableQueryExpansion {
-		t.Fatal("routing should be allowed to select the existing query expansion capability")
+	if manage.EnableQueryExpansion {
+		t.Fatal("routing must not enable query expansion when the platform capability is disabled")
 	}
 	manage.RoutingDecision.Budget = RoutingBudget{GraphEnabled: true, MaxAgentIterations: 6, VerificationEnabled: true}
 	manage.ApplyRoutingDecision()

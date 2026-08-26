@@ -67,7 +67,6 @@ type integrationLimits struct {
 	maxKnowledgeIDs   int
 	maxBatchQueries   int
 	batchConcurrency  int
-	defaultTopK       int
 	maxTopK           int
 	maxQueryBytes     int
 	maxRequestBytes   int
@@ -86,15 +85,35 @@ func loadIntegrationLimits() integrationLimits {
 		maxKnowledgeIDs:   positiveEnv("INTEGRATION_MAX_KNOWLEDGE_IDS", 100),
 		maxBatchQueries:   positiveEnv("INTEGRATION_MAX_BATCH_QUERIES", 100),
 		batchConcurrency:  positiveEnv("INTEGRATION_BATCH_SEARCH_CONCURRENCY", 8),
-		defaultTopK:       positiveEnv("INTEGRATION_DEFAULT_TOP_K", 10),
 		maxTopK:           positiveEnv("INTEGRATION_MAX_TOP_K", 50),
 		maxQueryBytes:     positiveEnv("INTEGRATION_MAX_QUERY_BYTES", 8192),
 		maxRequestBytes:   positiveEnv("INTEGRATION_MAX_REQUEST_BYTES", 25*1024*1024),
 	}
-	if limits.defaultTopK > limits.maxTopK {
-		limits.defaultTopK = limits.maxTopK
-	}
 	return limits
+}
+
+func (h *IntegrationHandler) retrievalResponseLimit(ctx context.Context, tenantID uint64, requested int) int {
+	platformLimit := types.DefaultRerankTopK
+	if h.tenant != nil {
+		if tenant, err := h.tenant.GetTenantByID(ctx, tenantID); err == nil && tenant != nil {
+			platformLimit = tenant.RetrievalConfig.GetEffectiveRerankTopK()
+		}
+	}
+	limit := effectiveIntegrationResponseLimit(requested, platformLimit)
+	if h.limits.maxTopK > 0 && limit > h.limits.maxTopK {
+		return h.limits.maxTopK
+	}
+	return limit
+}
+
+func effectiveIntegrationResponseLimit(requested, platformLimit int) int {
+	if platformLimit <= 0 {
+		platformLimit = types.DefaultRerankTopK
+	}
+	if requested > 0 && requested < platformLimit {
+		return requested
+	}
+	return platformLimit
 }
 
 type integrationBatchSearchQuery struct {
@@ -953,10 +972,7 @@ func (h *IntegrationHandler) Search(c *gin.Context) {
 		integrationError(c, http.StatusInternalServerError, "search_failed", "knowledge search failed")
 		return
 	}
-	limit := req.TopK
-	if limit == 0 {
-		limit = h.limits.defaultTopK
-	}
+	limit := h.retrievalResponseLimit(c.Request.Context(), integrationPrincipal(c).TenantID, req.TopK)
 	if len(results) > limit {
 		results = results[:limit]
 	}
@@ -1076,6 +1092,7 @@ func validateIntegrationBatchSearchRequest(req integrationBatchSearchRequest, li
 }
 
 func (h *IntegrationHandler) runIntegrationSearchBatch(ctx context.Context, knowledgeBaseIDs []string, queries []integrationBatchSearchQuery, folderIDsByQuery ...[][]string) ([]integrationBatchSearchResult, bool) {
+	tenantID, _ := types.TenantIDFromContext(ctx)
 	results := make([]integrationBatchSearchResult, len(queries))
 	knowledgeBaseNames := make(map[string]string)
 	if listed, err := h.kbs.ListKnowledgeBases(ctx); err == nil {
@@ -1122,10 +1139,7 @@ func (h *IntegrationHandler) runIntegrationSearchBatch(ctx context.Context, know
 				results[index] = integrationBatchSearchResult{ID: query.ID, Status: "failed", Results: []gin.H{}, Error: "search_failed"}
 				return
 			}
-			limit := query.TopK
-			if limit == 0 {
-				limit = h.limits.defaultTopK
-			}
+			limit := h.retrievalResponseLimit(ctx, tenantID, query.TopK)
 			results[index] = integrationBatchSearchResult{ID: query.ID, Status: "completed", Results: integrationPublicSearchResults(found, knowledgeBaseNames, limit)}
 		}()
 	}
@@ -1580,6 +1594,8 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	eventBus := event.NewEventBus()
 	var answer strings.Builder
 	var answerStream integrationUTF8Stream
+	var thinkingStream integrationUTF8Stream
+	var reflectionStream integrationUTF8Stream
 	var references types.References = types.References{}
 	retrievalCallID := "knowledge-retrieval-" + assistantMessage.ID
 	retrievalStartedAt := time.Now()
@@ -1621,7 +1637,8 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 			return nil
 		}
 		if data, ok := evt.Data.(event.AgentThoughtData); ok {
-			appendAndWrite(ctx, "thinking", gin.H{"content": data.Content, "iteration": data.Iteration, "done": data.Done, "event_id": evt.ID})
+			content := thinkingStream.Push(data.Content)
+			appendAndWrite(ctx, "thinking", gin.H{"content": content, "iteration": data.Iteration, "done": data.Done, "event_id": evt.ID})
 		}
 		return nil
 	})
@@ -1648,6 +1665,7 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 			return nil
 		}
 		if data, ok := evt.Data.(event.AgentReflectionData); ok {
+			data.Content = reflectionStream.Push(data.Content)
 			appendAndWrite(ctx, "reflection", data)
 		}
 		return nil

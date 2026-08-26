@@ -80,7 +80,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		pipelineInfo(ctx, "Rerank", "skip", map[string]interface{}{
 			"reason": "empty_search_result",
 		})
-		emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "没有需要筛选的内容", stageStarted, true)
+		emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "没有需要筛选的内容", stageStarted, true, map[string]interface{}{"status": "skipped", "input_count": 0, "output_count": 0})
 		return next()
 	}
 	// Get rerank model from service
@@ -221,14 +221,14 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		pipelineWarn(ctx, "Rerank", "output", map[string]interface{}{
 			"filtered_cnt": 0,
 		})
-		emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "未筛选出相关内容", stageStarted, false)
+		emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "未筛选出相关内容", stageStarted, true, map[string]interface{}{"status": "empty", "input_count": len(chatManage.SearchResult), "output_count": 0})
 		return ErrSearchNothing
 	}
 
 	pipelineInfo(ctx, "Rerank", "output", map[string]interface{}{
 		"filtered_cnt": len(chatManage.RerankResult),
 	})
-	emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "相关内容筛选完成", stageStarted, true)
+	emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "相关内容筛选完成", stageStarted, true, map[string]interface{}{"status": "completed", "input_count": len(chatManage.SearchResult), "output_count": len(chatManage.RerankResult)})
 	return next()
 }
 

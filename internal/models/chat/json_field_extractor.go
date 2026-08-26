@@ -140,10 +140,10 @@ func findSafeEnd(value string, from int) (int, bool) {
 			return i, true
 		} else {
 			// Regular character - handle multi-byte UTF-8
-			_, size := utf8.DecodeRuneInString(value[i:])
-			if size == 0 {
-				size = 1
+			if !utf8.FullRuneInString(value[i:]) {
+				return i, false
 			}
+			_, size := utf8.DecodeRuneInString(value[i:])
 			i += size
 		}
 	}

@@ -174,7 +174,13 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	stageID, stageStarted := emitPipelineStageStart(ctx, chatManage, "query_understand", "理解问题")
 	stageSuccess := false
 	finishStage := func() {
-		emitPipelineStageResult(ctx, chatManage, stageID, "query_understand", "已理解问题", stageStarted, stageSuccess)
+		status := "failed"
+		output := "问题理解未完成"
+		if stageSuccess {
+			status = "completed"
+			output = "已理解问题"
+		}
+		emitPipelineStageResult(ctx, chatManage, stageID, "query_understand", output, stageStarted, stageSuccess, map[string]interface{}{"status": status})
 	}
 
 	hasImages := len(chatManage.Images) > 0

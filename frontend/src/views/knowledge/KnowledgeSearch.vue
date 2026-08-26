@@ -6,24 +6,7 @@
           <h2 style="--wails-draggable: drag">{{ $t('knowledgeSearch.title') }}</h2>
           <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('knowledgeSearch.subtitle') }}</p>
         </div>
-        <div class="header-actions" style="--wails-draggable: no-drag">
-          <t-button variant="text" shape="square" :class="{ active: showSettings }" style="--wails-draggable: no-drag" @click="showSettings = !showSettings">
-            <template #icon><t-icon name="setting" /></template>
-          </t-button>
-        </div>
       </div>
-
-      <!-- Retrieval settings drawer -->
-      <t-drawer
-        v-model:visible="showSettings"
-        :header="$t('retrievalSettings.title')"
-        size="420px"
-        :footer="false"
-        :close-on-overlay-click="true"
-        class="retrieval-drawer"
-      >
-        <RetrievalSettings />
-      </t-drawer>
 
       <!-- Tab 切换 -->
       <div class="search-tabs">
@@ -266,7 +249,6 @@ import { useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { listKnowledgeBases, knowledgeSemanticSearch } from '@/api/knowledge-base'
 import { searchMessages, type MessageSearchGroupItem } from '@/api/chat-history'
-import RetrievalSettings from '@/views/settings/RetrievalSettings.vue'
 import { useMenuStore } from '@/stores/menu'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -278,7 +260,6 @@ const settingsStore = useSettingsStore()
 // ─── Shared state ───
 const query = ref('')
 const activeTab = ref<'knowledge' | 'messages'>('knowledge')
-const showSettings = ref(false)
 
 // ─── Knowledge search state ───
 const loading = ref(false)

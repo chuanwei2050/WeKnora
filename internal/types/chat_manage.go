@@ -3,7 +3,21 @@ package types
 import (
 	"context"
 	"maps"
+	"strings"
 )
+
+const legacyDefaultFallbackPromptPrefix = "You are WeKnora, a professional and friendly AI assistant developed by Tencent."
+const currentDefaultFallbackPromptPrefix = "You are a professional and friendly AI assistant ."
+
+// UpgradeLegacyDefaultFallbackPrompt replaces only the exact former built-in
+// prompt. Tenant-authored prompts are left untouched.
+func UpgradeLegacyDefaultFallbackPrompt(prompt, currentDefault string) string {
+	legacyDefault := strings.Replace(currentDefault, currentDefaultFallbackPromptPrefix, legacyDefaultFallbackPromptPrefix, 1)
+	if strings.TrimSpace(prompt) == strings.TrimSpace(legacyDefault) {
+		return currentDefault
+	}
+	return prompt
+}
 
 // PipelineRequest holds immutable configuration set once at the request entry point.
 type PipelineRequest struct {
@@ -163,7 +177,7 @@ func (c *ChatManage) ApplyRoutingDecision() {
 	if budget.RetrievalTopK > 0 && (c.EmbeddingTopK == 0 || budget.RetrievalTopK < c.EmbeddingTopK) {
 		c.EmbeddingTopK = budget.RetrievalTopK
 	}
-	c.EnableQueryExpansion = budget.QueryExpansion
+	c.EnableQueryExpansion = c.EnableQueryExpansion && budget.QueryExpansion
 	c.VerifiedAnswer.Enabled = budget.VerificationEnabled
 	if budget.VerificationEnabled && budget.MaxAgentIterations > 0 && (c.VerifiedAnswer.Budget.MaxModelCalls == 0 || budget.MaxAgentIterations < c.VerifiedAnswer.Budget.MaxModelCalls) {
 		c.VerifiedAnswer.Budget.MaxModelCalls = budget.MaxAgentIterations

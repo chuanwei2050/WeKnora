@@ -2,13 +2,52 @@ package session
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+func TestHandleFinalAnswerBuffersSplitUTF8RunesBeforeStreaming(t *testing.T) {
+	streamManager := &recordingStreamManager{}
+	handler := &AgentStreamHandler{
+		ctx:                context.Background(),
+		sessionID:          "session-1",
+		assistantMessageID: "message-1",
+		assistantMessage:   &types.Message{},
+		streamManager:      streamManager,
+		eventStartTimes:    map[string]time.Time{},
+	}
+	want := "根据检索到的信息，许乃汉持有系统集成项目管理工程师证书。"
+	for _, value := range []byte(want) {
+		if err := handler.handleFinalAnswer(context.Background(), event.Event{
+			ID:   "answer-1",
+			Data: event.AgentFinalAnswerData{Content: string([]byte{value})},
+		}); err != nil {
+			t.Fatalf("handleFinalAnswer() error = %v", err)
+		}
+	}
+	if err := handler.handleFinalAnswer(context.Background(), event.Event{
+		ID: "answer-1", Data: event.AgentFinalAnswerData{Done: true},
+	}); err != nil {
+		t.Fatalf("handleFinalAnswer(done) error = %v", err)
+	}
+
+	var got strings.Builder
+	for _, streamEvent := range streamManager.events {
+		if !utf8.ValidString(streamEvent.Content) {
+			t.Fatalf("streamed invalid UTF-8 chunk: %q", streamEvent.Content)
+		}
+		got.WriteString(streamEvent.Content)
+	}
+	if got.String() != want {
+		t.Fatalf("streamed answer = %q, want %q", got.String(), want)
+	}
+}
 
 type recordingStreamManager struct {
 	events []interfaces.StreamEvent

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -30,6 +31,9 @@ type AgentStreamHandler struct {
 	// State tracking
 	knowledgeRefs   []*types.SearchResult
 	finalAnswer     string
+	answerUTF8      streamUTF8Buffer
+	thoughtUTF8     streamUTF8Buffer
+	reflectionUTF8  streamUTF8Buffer
 	eventStartTimes map[string]time.Time // Track start time for duration calculation
 	acceptedAt      time.Time
 	firstVisibleAt  *time.Time
@@ -37,6 +41,22 @@ type AgentStreamHandler struct {
 	timingError     string
 	timedOut        bool
 	mu              sync.Mutex
+}
+
+type streamUTF8Buffer struct {
+	pending []byte
+}
+
+func (s *streamUTF8Buffer) Push(chunk string) string {
+	data := append(s.pending, []byte(chunk)...)
+	validEnd := 0
+	for validEnd < len(data) && utf8.FullRune(data[validEnd:]) {
+		_, size := utf8.DecodeRune(data[validEnd:])
+		validEnd += size
+	}
+	content := string(data[:validEnd])
+	s.pending = append(s.pending[:0], data[validEnd:]...)
+	return content
 }
 
 // NewAgentStreamHandler creates a new handler for agent SSE streaming
@@ -99,6 +119,7 @@ func (h *AgentStreamHandler) handleThought(ctx context.Context, evt event.Event)
 	}
 
 	h.mu.Lock()
+	content := h.thoughtUTF8.Push(data.Content)
 
 	// Track start time on first chunk
 	if _, exists := h.eventStartTimes[evt.ID]; !exists {
@@ -128,7 +149,7 @@ func (h *AgentStreamHandler) handleThought(ctx context.Context, evt event.Event)
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeThinking,
-		Content:   data.Content, // Just this chunk
+		Content:   content,
 		Done:      data.Done,
 		Timestamp: time.Now(),
 		Data:      metadata,
@@ -316,6 +337,7 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 
 	// Accumulate final answer locally for assistant message (database)
 	h.finalAnswer += data.Content
+	content := h.answerUTF8.Push(data.Content)
 	if h.firstVisibleAt == nil && strings.TrimSpace(data.Content) != "" {
 		now := time.Now().UTC()
 		h.firstVisibleAt = &now
@@ -349,7 +371,7 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeAnswer,
-		Content:   data.Content, // Just this chunk
+		Content:   content,
 		Done:      data.Done,
 		Timestamp: time.Now(),
 		Data:      metadata,
@@ -387,11 +409,15 @@ func (h *AgentStreamHandler) handleReflection(ctx context.Context, evt event.Eve
 		return nil
 	}
 
+	h.mu.Lock()
+	content := h.reflectionUTF8.Push(data.Content)
+	h.mu.Unlock()
+
 	// Append this chunk to stream (frontend will accumulate by event ID)
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeReflection,
-		Content:   data.Content, // Just this chunk
+		Content:   content,
 		Done:      data.Done,
 		Timestamp: time.Now(),
 	}); err != nil {

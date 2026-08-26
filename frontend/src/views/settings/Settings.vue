@@ -114,6 +114,10 @@
                   <StorageEngineSettings />
                 </div>
 
+                <div v-if="currentSection === 'retrieval'" class="section">
+                  <RetrievalSettings />
+                </div>
+
                 <!-- 系统信息 -->
                 <div v-if="currentSection === 'system'" class="section">
                   <SystemInfo />
@@ -175,6 +179,7 @@ import ChatHistorySettings from './ChatHistorySettings.vue'
 import VectorStoreSettings from './VectorStoreSettings.vue'
 import ParserEngineSettings from './ParserEngineSettings.vue'
 import StorageEngineSettings from './StorageEngineSettings.vue'
+import RetrievalSettings from './RetrievalSettings.vue'
 import { isBidReviewEmbeddedMode } from '@/utils/bidreview-sso'
 import FeedbackReview from './FeedbackReview.vue'
 import GraphTripleReview from './GraphTripleReview.vue'
@@ -207,6 +212,7 @@ const navItems = computed<SettingsNavItem[]>(() => {
     { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
     { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
     { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
+    { key: 'retrieval', icon: 'search', label: t('retrievalSettings.navLabel') },
     { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
     { key: 'system', icon: 'info-circle', label: t('settings.systemSettings') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
@@ -219,7 +225,7 @@ const navItems = computed<SettingsNavItem[]>(() => {
     ? 'tenant_admin'
     : authStore.user?.role || 'member'
   if (role === 'platform_admin') {
-    const platformSections = new Set(['general', 'ollama', 'models', 'websearch', 'vectorstore', 'parser', 'storage', 'mcp', 'system'])
+    const platformSections = new Set(['general', 'ollama', 'models', 'websearch', 'vectorstore', 'parser', 'storage', 'retrieval', 'mcp', 'system'])
     return items.filter(item => platformSections.has(item.key))
   }
   if (role === 'tenant_admin') {

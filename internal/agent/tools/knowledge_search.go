@@ -389,8 +389,8 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	return result, nil
 }
 
-// resolveSearchParams keeps per-agent retrieval settings authoritative while
-// retaining tenant/global fallbacks for legacy runtime configurations.
+// resolveSearchParams uses the request-scoped platform retrieval snapshot and
+// retains built-in defaults only when no tenant snapshot is available.
 func (t *KnowledgeSearchTool) resolveSearchParams(ctx context.Context) knowledgeSearchParams {
 	params := knowledgeSearchParams{minScore: 0.3, rrfVectorWeight: 0.7}
 	if t.config != nil {
@@ -398,17 +398,14 @@ func (t *KnowledgeSearchTool) resolveSearchParams(ctx context.Context) knowledge
 		params.vectorThreshold = t.config.Conversation.VectorThreshold
 		params.keywordThreshold = t.config.Conversation.KeywordThreshold
 	}
-	if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil && tenant.ConversationConfig != nil {
-		cc := tenant.ConversationConfig
-		if cc.EmbeddingTopK > 0 {
-			params.topK = cc.EmbeddingTopK
-		}
-		if cc.VectorThreshold > 0 {
-			params.vectorThreshold = cc.VectorThreshold
-		}
-		if cc.KeywordThreshold > 0 {
-			params.keywordThreshold = cc.KeywordThreshold
-		}
+	if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil {
+		rc := types.NormalizeRetrievalConfig(tenant.RetrievalConfig)
+		params.topK = rc.EmbeddingTopK
+		params.vectorRecallTopK = rc.VectorRecallTopK
+		params.keywordRecallTopK = rc.KeywordRecallTopK
+		params.rrfVectorWeight = rc.RRFVectorWeight
+		params.vectorThreshold = rc.VectorThreshold
+		params.keywordThreshold = rc.KeywordThreshold
 	}
 	if rc := t.retrievalConfig; rc != nil {
 		if rc.EmbeddingTopK > 0 {

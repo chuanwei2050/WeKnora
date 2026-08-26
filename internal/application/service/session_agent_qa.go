@@ -347,6 +347,7 @@ func (s *sessionService) publishVerifiedAgentAnswer(
 		return errors.New("verified agent produced an empty answer")
 	}
 	tenantID := s.resolveRetrievalTenantID(ctx, req)
+	retrievalConfig := s.effectiveRetrievalConfig(ctx, tenantID)
 	retrievalCtx := context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 	manage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
@@ -359,7 +360,7 @@ func (s *sessionService) publishVerifiedAgentAnswer(
 			ChatModelID:          chatModelID,
 			ComplexityRouting:    agentConfig.ComplexityRouting,
 			VerifiedAnswer:       agentConfig.VerifiedAnswer,
-			EnableQueryExpansion: routingDecision != nil && routingDecision.Budget.QueryExpansion,
+			EnableQueryExpansion: retrievalConfig.EnableQueryExpansion && routingDecision != nil && routingDecision.Budget.QueryExpansion,
 		},
 		PipelineState: types.PipelineState{
 			RewriteQuery:    query,
@@ -471,6 +472,7 @@ func (s *sessionService) buildAgentConfig(
 	agentTenantID uint64,
 ) (*types.AgentConfig, error) {
 	customAgent := req.CustomAgent
+	retrievalConfig := types.NormalizeRetrievalConfig(tenantInfo.RetrievalConfig)
 	agentConfig := &types.AgentConfig{
 		MaxIterations:               customAgent.Config.MaxIterations,
 		Temperature:                 customAgent.Config.Temperature,
@@ -484,14 +486,14 @@ func (s *sessionService) buildAgentConfig(
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
-		RerankTopK:                  customAgent.Config.RerankTopK,
-		EmbeddingTopK:               customAgent.Config.EmbeddingTopK,
-		VectorRecallTopK:            customAgent.Config.VectorRecallTopK,
-		KeywordRecallTopK:           customAgent.Config.KeywordRecallTopK,
-		RRFVectorWeight:             customAgent.Config.RRFVectorWeight,
-		RerankCandidateTopK:         customAgent.Config.RerankCandidateTopK,
-		VectorThreshold:             customAgent.Config.VectorThreshold,
-		KeywordThreshold:            customAgent.Config.KeywordThreshold,
+		RerankTopK:                  retrievalConfig.RerankTopK,
+		EmbeddingTopK:               retrievalConfig.EmbeddingTopK,
+		VectorRecallTopK:            retrievalConfig.VectorRecallTopK,
+		KeywordRecallTopK:           retrievalConfig.KeywordRecallTopK,
+		RRFVectorWeight:             retrievalConfig.RRFVectorWeight,
+		RerankCandidateTopK:         retrievalConfig.RerankCandidateTopK,
+		VectorThreshold:             retrievalConfig.VectorThreshold,
+		KeywordThreshold:            retrievalConfig.KeywordThreshold,
 		ComplexityRouting:           customAgent.Config.ComplexityRouting,
 	}
 	agentConfig.VerifiedAnswer = customAgent.Config.VerifiedAnswer

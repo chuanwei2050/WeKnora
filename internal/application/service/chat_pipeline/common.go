@@ -41,15 +41,21 @@ func emitPipelineStageStart(ctx context.Context, chatManage *types.ChatManage, n
 		return "", started
 	}
 	id := uuid.NewString()
-	chatManage.EventBus.Emit(ctx, types.Event{Type: types.EventType(event.EventAgentToolCall), SessionID: chatManage.SessionID, Data: event.AgentToolCallData{ToolCallID: id, ToolName: name, Hint: hint}})
+	chatManage.EventBus.Emit(ctx, types.Event{Type: types.EventType(event.EventAgentToolCall), SessionID: chatManage.SessionID, Data: event.AgentToolCallData{ToolCallID: id, ToolName: name, Hint: hint, Arguments: map[string]any{"pipeline_stage": true}}})
 	return id, started
 }
 
-func emitPipelineStageResult(ctx context.Context, chatManage *types.ChatManage, id, name, output string, started time.Time, success bool) {
+func emitPipelineStageResult(ctx context.Context, chatManage *types.ChatManage, id, name, output string, started time.Time, success bool, stageData ...map[string]interface{}) {
 	if chatManage.EventBus == nil || id == "" {
 		return
 	}
-	chatManage.EventBus.Emit(ctx, types.Event{Type: types.EventType(event.EventAgentToolResult), SessionID: chatManage.SessionID, Data: event.AgentToolResultData{ToolCallID: id, ToolName: name, Output: output, Success: success, Duration: time.Since(started).Milliseconds()}})
+	data := map[string]interface{}{"pipeline_stage": true}
+	if len(stageData) > 0 {
+		for key, value := range stageData[0] {
+			data[key] = value
+		}
+	}
+	chatManage.EventBus.Emit(ctx, types.Event{Type: types.EventType(event.EventAgentToolResult), SessionID: chatManage.SessionID, Data: event.AgentToolResultData{ToolCallID: id, ToolName: name, Output: output, Success: success, Duration: time.Since(started).Milliseconds(), Data: data}})
 }
 
 // prepareChatModel shared logic to prepare chat model and options

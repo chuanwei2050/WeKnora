@@ -65,6 +65,23 @@ func TestJSONFieldExtractor_SmallChunks(t *testing.T) {
 	}
 }
 
+func TestJSONFieldExtractor_BuffersSplitUTF8Runes(t *testing.T) {
+	e := newJSONFieldExtractor("answer")
+	input := []byte(`{"answer":"你好，流式回答"}`)
+	got := ""
+
+	for _, b := range input {
+		got += e.Feed(string([]byte{b}))
+	}
+
+	if got != "你好，流式回答" {
+		t.Errorf("expected complete UTF-8 content, got %q", got)
+	}
+	if !e.IsDone() {
+		t.Error("expected extractor to be done")
+	}
+}
+
 func TestJSONFieldExtractor_Markdown(t *testing.T) {
 	e := newJSONFieldExtractor("answer")
 

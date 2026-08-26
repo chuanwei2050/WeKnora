@@ -85,7 +85,13 @@ func (p *PluginDataAnalysis) OnEvent(
 	stageID, stageStarted := emitPipelineStageStart(ctx, chatManage, "data_analysis", "分析表格")
 	stageSuccess := false
 	finishStage := func() {
-		emitPipelineStageResult(ctx, chatManage, stageID, "data_analysis", "表格分析完成", stageStarted, stageSuccess)
+		status := "failed"
+		output := "表格分析未完成"
+		if stageSuccess {
+			status = "completed"
+			output = "表格分析完成"
+		}
+		emitPipelineStageResult(ctx, chatManage, stageID, "data_analysis", output, stageStarted, stageSuccess, map[string]interface{}{"status": status})
 	}
 
 	// 2. Ask LLM if data analysis is needed
@@ -146,6 +152,16 @@ func (p *PluginDataAnalysis) OnEvent(
 	if err != nil {
 		logger.Errorf(ctx, "Failed to parse analysis response: %v", err)
 		finishStage()
+		return next()
+	}
+	var analysisInput tools.DataAnalysisInput
+	if err := json.Unmarshal(toolInput, &analysisInput); err != nil {
+		logger.Errorf(ctx, "Failed to decode bound analysis input: %v", err)
+		finishStage()
+		return next()
+	}
+	if strings.TrimSpace(analysisInput.Sql) == "" {
+		emitPipelineStageResult(ctx, chatManage, stageID, "data_analysis", "无需表格分析", stageStarted, true, map[string]interface{}{"status": "skipped"})
 		return next()
 	}
 	executionCtx, cancel := context.WithTimeout(ctx, dataAnalysisTimeout)

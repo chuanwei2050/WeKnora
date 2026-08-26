@@ -7,6 +7,36 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+func (s *sessionService) effectiveRetrievalConfig(ctx context.Context, tenantID uint64) types.RetrievalConfig {
+	if s.tenantService != nil {
+		if tenant, err := s.tenantService.GetTenantByID(ctx, tenantID); err == nil && tenant != nil {
+			return types.NormalizeRetrievalConfig(tenant.RetrievalConfig)
+		}
+	}
+	return types.DefaultRetrievalConfig()
+}
+
+func (s *sessionService) effectiveConversationConfig(ctx context.Context, tenantID uint64) *types.ConversationConfig {
+	if s.tenantService != nil {
+		if tenant, err := s.tenantService.GetTenantByID(ctx, tenantID); err == nil && tenant != nil && tenant.ConversationConfig != nil {
+			result := *tenant.ConversationConfig
+			if result.FallbackStrategy == "" {
+				result.FallbackStrategy = s.cfg.Conversation.FallbackStrategy
+			}
+			if result.FallbackResponse == "" {
+				result.FallbackResponse = s.cfg.Conversation.FallbackResponse
+			}
+			if result.FallbackPrompt == "" {
+				result.FallbackPrompt = s.cfg.Conversation.FallbackPrompt
+			} else {
+				result.FallbackPrompt = types.UpgradeLegacyDefaultFallbackPrompt(result.FallbackPrompt, s.cfg.Conversation.FallbackPrompt)
+			}
+			return &result
+		}
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Shared QA helpers: KB resolution, model resolution, retrieval tenant
 // ---------------------------------------------------------------------------
@@ -87,7 +117,8 @@ func (s *sessionService) resolveRetrievalTenantID(
 // applyAgentOverridesToChatManage applies custom agent configuration overrides
 // to a ChatManage object that was initialized with system defaults.
 // This covers: system prompt, context template, temperature, max tokens,
-// retrieval thresholds, rewrite settings, fallback settings, FAQ strategy, and history turns.
+// rewrite settings, FAQ strategy, and history turns. Platform retrieval and
+// fallback settings are intentionally not overridden here.
 func (s *sessionService) applyAgentOverridesToChatManage(
 	ctx context.Context,
 	customAgent *types.CustomAgent,
@@ -121,48 +152,13 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 		cm.SummaryConfig.MaxCompletionTokens = customAgent.Config.MaxCompletionTokens
 		logger.Infof(ctx, "Using custom agent's max_completion_tokens: %d", customAgent.Config.MaxCompletionTokens)
 	}
-	// Override retrieval strategy settings
-	if customAgent.Config.EmbeddingTopK > 0 {
-		cm.EmbeddingTopK = customAgent.Config.EmbeddingTopK
-	}
-	if customAgent.Config.VectorRecallTopK > 0 {
-		cm.VectorRecallTopK = customAgent.Config.VectorRecallTopK
-	}
-	if customAgent.Config.KeywordRecallTopK > 0 {
-		cm.KeywordRecallTopK = customAgent.Config.KeywordRecallTopK
-	}
-	if customAgent.Config.RRFVectorWeight > 0 && customAgent.Config.RRFVectorWeight < 1 {
-		cm.RRFVectorWeight = customAgent.Config.RRFVectorWeight
-	}
-	cm.KeywordThreshold = customAgent.Config.KeywordThreshold
-	cm.VectorThreshold = customAgent.Config.VectorThreshold
-	if customAgent.Config.RerankTopK > 0 {
-		cm.RerankTopK = customAgent.Config.RerankTopK
-	}
-	if customAgent.Config.RerankCandidateTopK > 0 {
-		cm.RerankCandidateTopK = customAgent.Config.RerankCandidateTopK
-	}
-	cm.RerankThreshold = customAgent.Config.RerankThreshold
-
 	// Override rewrite settings
 	cm.EnableRewrite = customAgent.Config.EnableRewrite
-	cm.EnableQueryExpansion = customAgent.Config.EnableQueryExpansion
 	if customAgent.Config.RewritePromptSystem != "" {
 		cm.RewritePromptSystem = customAgent.Config.RewritePromptSystem
 	}
 	if customAgent.Config.RewritePromptUser != "" {
 		cm.RewritePromptUser = customAgent.Config.RewritePromptUser
-	}
-
-	// Override fallback settings
-	if customAgent.Config.FallbackStrategy != "" {
-		cm.FallbackStrategy = types.FallbackStrategy(customAgent.Config.FallbackStrategy)
-	}
-	if customAgent.Config.FallbackResponse != "" {
-		cm.FallbackResponse = customAgent.Config.FallbackResponse
-	}
-	if customAgent.Config.FallbackPrompt != "" {
-		cm.FallbackPrompt = customAgent.Config.FallbackPrompt
 	}
 
 	// Override web search settings

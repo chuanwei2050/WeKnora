@@ -105,7 +105,11 @@
                     </div>
                   </div>
 
-                  <div v-if="!event.pending && (event.tool_name === 'search_knowledge' || event.tool_name === 'knowledge_search') && event.tool_data" class="search-results-summary-fixed">
+                  <div v-if="!event.pending && isPipelineStageEvent(event) && event.output" class="search-results-summary-fixed pipeline-stage-summary-fixed">
+                    <div class="results-summary-text">{{ event.output }}</div>
+                  </div>
+
+                  <div v-if="!event.pending && !isPipelineStageEvent(event) && (event.tool_name === 'search_knowledge' || event.tool_name === 'knowledge_search') && event.tool_data" class="search-results-summary-fixed">
                     <div class="results-summary-text" v-html="getSearchResultsSummary(event)"></div>
                   </div>
 
@@ -265,7 +269,11 @@
             </div>
           </div>
 
-          <div v-if="!event.pending && (event.tool_name === 'search_knowledge' || event.tool_name === 'knowledge_search') && event.tool_data" class="search-results-summary-fixed">
+          <div v-if="!event.pending && isPipelineStageEvent(event) && event.output" class="search-results-summary-fixed pipeline-stage-summary-fixed">
+            <div class="results-summary-text">{{ event.output }}</div>
+          </div>
+
+          <div v-if="!event.pending && !isPipelineStageEvent(event) && (event.tool_name === 'search_knowledge' || event.tool_name === 'knowledge_search') && event.tool_data" class="search-results-summary-fixed">
             <div class="results-summary-text" v-html="getSearchResultsSummary(event)"></div>
           </div>
 
@@ -488,6 +496,10 @@ const getLocalizedToolName = (toolName?: string | null): string => {
   }
 
   return toolName;
+};
+
+const isPipelineStageEvent = (event: any): boolean => {
+  return event?.arguments?.pipeline_stage === true || event?.tool_data?.pipeline_stage === true;
 };
 
 /**
@@ -1126,6 +1138,7 @@ const isEventExpanded = (eventId: string): boolean => {
 // Check if search/grep tools have results
 const hasResults = (event: any): boolean => {
   if (!event || !event.tool_data) return true; // Default to true for other tools
+  if (isPipelineStageEvent(event)) return false;
   
   const toolName = event.tool_name;
   
@@ -1952,6 +1965,9 @@ const getQueryText = (args: any): string => {
 
 // Get tool title - prefer summary over description, add query for search tools
 const getToolTitle = (event: any): string => {
+  if (isPipelineStageEvent(event)) {
+    return getLocalizedToolName(event.tool_name);
+  }
   if (event.pending) {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');

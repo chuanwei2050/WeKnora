@@ -43,7 +43,8 @@ func (s *sessionService) KnowledgeQA(
 		return err
 	}
 
-	// Initialize ChatManage defaults from config.yaml
+	// Initialize ChatManage defaults from config.yaml. Platform conversation
+	// settings override these values below for each new request.
 	summaryConfig := types.SummaryConfig{
 		Prompt:              s.cfg.Conversation.Summary.Prompt,
 		ContextTemplate:     s.cfg.Conversation.Summary.ContextTemplate,
@@ -52,12 +53,6 @@ func (s *sessionService) KnowledgeQA(
 		MaxCompletionTokens: s.cfg.Conversation.Summary.MaxCompletionTokens,
 		Thinking:            nil,
 	}
-	fallbackStrategy := types.FallbackStrategy(s.cfg.Conversation.FallbackStrategy)
-	if fallbackStrategy == "" {
-		fallbackStrategy = types.FallbackStrategyFixed
-		logger.Infof(ctx, "Fallback strategy not set, using default: %v", fallbackStrategy)
-	}
-
 	// Resolve chat model vision capability and VLM model ID for image routing
 	var chatModelSupportsVision bool
 	var vlmModelID string
@@ -78,6 +73,20 @@ func (s *sessionService) KnowledgeQA(
 
 	// Resolve retrieval tenant scope using shared helper
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
+	retrievalConfig := s.effectiveRetrievalConfig(ctx, retrievalTenantID)
+	conversationConfig := s.effectiveConversationConfig(ctx, retrievalTenantID)
+	fallbackStrategy := types.FallbackStrategy(s.cfg.Conversation.FallbackStrategy)
+	fallbackResponse := s.cfg.Conversation.FallbackResponse
+	fallbackPrompt := s.cfg.Conversation.FallbackPrompt
+	if conversationConfig != nil {
+		fallbackStrategy = types.FallbackStrategy(conversationConfig.FallbackStrategy)
+		fallbackResponse = conversationConfig.FallbackResponse
+		fallbackPrompt = conversationConfig.FallbackPrompt
+	}
+	if fallbackStrategy == "" {
+		fallbackStrategy = types.FallbackStrategyFixed
+		logger.Infof(ctx, "Fallback strategy not set, using default: %v", fallbackStrategy)
+	}
 
 	// Build unified search targets (computed once, used throughout pipeline)
 	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.FilterDisabledFolders)
@@ -108,19 +117,23 @@ func (s *sessionService) KnowledgeQA(
 			KnowledgeBaseIDs:        knowledgeBaseIDs,
 			KnowledgeIDs:            knowledgeIDs,
 			SearchTargets:           searchTargets,
-			VectorThreshold:         s.cfg.Conversation.VectorThreshold,
-			KeywordThreshold:        s.cfg.Conversation.KeywordThreshold,
-			EmbeddingTopK:           s.cfg.Conversation.EmbeddingTopK,
-			RerankTopK:              s.cfg.Conversation.RerankTopK,
-			RerankThreshold:         s.cfg.Conversation.RerankThreshold,
+			VectorThreshold:         retrievalConfig.VectorThreshold,
+			KeywordThreshold:        retrievalConfig.KeywordThreshold,
+			EmbeddingTopK:           retrievalConfig.EmbeddingTopK,
+			VectorRecallTopK:        retrievalConfig.VectorRecallTopK,
+			KeywordRecallTopK:       retrievalConfig.KeywordRecallTopK,
+			RRFVectorWeight:         retrievalConfig.RRFVectorWeight,
+			RerankCandidateTopK:     retrievalConfig.RerankCandidateTopK,
+			RerankTopK:              retrievalConfig.RerankTopK,
+			RerankThreshold:         retrievalConfig.RerankThreshold,
 			ChatModelID:             chatModelID,
 			RerankModelID:           rerankModelID,
 			SummaryConfig:           summaryConfig,
 			FallbackStrategy:        fallbackStrategy,
-			FallbackResponse:        s.cfg.Conversation.FallbackResponse,
-			FallbackPrompt:          s.cfg.Conversation.FallbackPrompt,
+			FallbackResponse:        fallbackResponse,
+			FallbackPrompt:          fallbackPrompt,
 			EnableRewrite:           s.cfg.Conversation.EnableRewrite,
-			EnableQueryExpansion:    s.cfg.Conversation.EnableQueryExpansion,
+			EnableQueryExpansion:    retrievalConfig.EnableQueryExpansion,
 			RewritePromptSystem:     s.cfg.Conversation.RewritePromptSystem,
 			RewritePromptUser:       s.cfg.Conversation.RewritePromptUser,
 			WebSearchEnabled:        req.WebSearchEnabled,
@@ -767,25 +780,25 @@ func (s *sessionService) searchKnowledge(ctx context.Context,
 	// Create default retrieval parameters — prefer tenant RetrievalConfig, fallback to built-in defaults
 	userID, _ := types.UserIDFromContext(ctx)
 
-	// Load tenant-level retrieval config (nil is safe — GetEffective* methods handle nil receiver)
-	var rc *types.RetrievalConfig
-	if tenant, err2 := s.tenantService.GetTenantByID(ctx, tenantID); err2 == nil {
-		rc = tenant.RetrievalConfig
-	}
+	rc := s.effectiveRetrievalConfig(ctx, tenantID)
 
 	chatManage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
-			Query:            query,
-			UserID:           userID,
-			KnowledgeBaseIDs: knowledgeBaseIDs,
-			KnowledgeIDs:     knowledgeIDs,
-			SearchTargets:    searchTargets,
-			MaxRounds:        s.cfg.Conversation.MaxRounds,
-			EmbeddingTopK:    rc.GetEffectiveEmbeddingTopK(),
-			VectorThreshold:  rc.GetEffectiveVectorThreshold(),
-			KeywordThreshold: rc.GetEffectiveKeywordThreshold(),
-			RerankTopK:       rc.GetEffectiveRerankTopK(),
-			RerankThreshold:  rc.GetEffectiveRerankThreshold(),
+			Query:               query,
+			UserID:              userID,
+			KnowledgeBaseIDs:    knowledgeBaseIDs,
+			KnowledgeIDs:        knowledgeIDs,
+			SearchTargets:       searchTargets,
+			MaxRounds:           s.cfg.Conversation.MaxRounds,
+			EmbeddingTopK:       rc.EmbeddingTopK,
+			VectorRecallTopK:    rc.VectorRecallTopK,
+			KeywordRecallTopK:   rc.KeywordRecallTopK,
+			RRFVectorWeight:     rc.RRFVectorWeight,
+			VectorThreshold:     rc.VectorThreshold,
+			KeywordThreshold:    rc.KeywordThreshold,
+			RerankCandidateTopK: rc.RerankCandidateTopK,
+			RerankTopK:          rc.RerankTopK,
+			RerankThreshold:     rc.RerankThreshold,
 		},
 		PipelineState: types.PipelineState{
 			RewriteQuery: query,

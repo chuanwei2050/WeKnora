@@ -56,6 +56,13 @@ func NewEvaluationService(
 	}
 }
 
+func evaluationRetrievalConfig(ctx context.Context) types.RetrievalConfig {
+	if tenant, ok := types.TenantInfoFromContext(ctx); ok && tenant != nil {
+		return types.NormalizeRetrievalConfig(tenant.RetrievalConfig)
+	}
+	return types.DefaultRetrievalConfig()
+}
+
 // evaluationMemoryStorage stores evaluation tasks in memory with thread-safe access
 type evaluationMemoryStorage struct {
 	store map[string]*types.EvaluationDetail // Map of taskID to evaluation details
@@ -139,6 +146,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 
 	// Get tenant ID from context for multi-tenancy support
 	tenantID := types.MustTenantIDFromContext(ctx)
+	retrievalConfig := evaluationRetrievalConfig(ctx)
 	logger.Infof(ctx, "Tenant ID: %d", tenantID)
 
 	// Handle knowledge base creation if not provided
@@ -267,14 +275,19 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 		},
 		Params: &types.ChatManage{
 			PipelineRequest: types.PipelineRequest{
-				VectorThreshold:  e.config.Conversation.VectorThreshold,
-				KeywordThreshold: e.config.Conversation.KeywordThreshold,
-				EmbeddingTopK:    e.config.Conversation.EmbeddingTopK,
-				MaxRounds:        e.config.Conversation.MaxRounds,
-				RerankModelID:    rerankModelID,
-				RerankTopK:       e.config.Conversation.RerankTopK,
-				RerankThreshold:  e.config.Conversation.RerankThreshold,
-				ChatModelID:      chatModelID,
+				VectorThreshold:      retrievalConfig.VectorThreshold,
+				KeywordThreshold:     retrievalConfig.KeywordThreshold,
+				EmbeddingTopK:        retrievalConfig.EmbeddingTopK,
+				VectorRecallTopK:     retrievalConfig.VectorRecallTopK,
+				KeywordRecallTopK:    retrievalConfig.KeywordRecallTopK,
+				RRFVectorWeight:      retrievalConfig.RRFVectorWeight,
+				RerankCandidateTopK:  retrievalConfig.RerankCandidateTopK,
+				MaxRounds:            e.config.Conversation.MaxRounds,
+				RerankModelID:        rerankModelID,
+				RerankTopK:           retrievalConfig.RerankTopK,
+				RerankThreshold:      retrievalConfig.RerankThreshold,
+				EnableQueryExpansion: retrievalConfig.EnableQueryExpansion,
+				ChatModelID:          chatModelID,
 				SummaryConfig: types.SummaryConfig{
 					MaxTokens:           e.config.Conversation.Summary.MaxTokens,
 					RepeatPenalty:       e.config.Conversation.Summary.RepeatPenalty,

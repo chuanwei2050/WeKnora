@@ -994,6 +994,26 @@ func (h *TenantHandler) buildDefaultConversationConfig() *types.ConversationConf
 	}
 }
 
+func (h *TenantHandler) applyConversationFallbackDefaults(config *types.ConversationConfig) *types.ConversationConfig {
+	if config == nil {
+		return h.buildDefaultConversationConfig()
+	}
+	result := *config
+	defaults := h.buildDefaultConversationConfig()
+	if result.FallbackStrategy == "" {
+		result.FallbackStrategy = defaults.FallbackStrategy
+	}
+	if result.FallbackResponse == "" {
+		result.FallbackResponse = defaults.FallbackResponse
+	}
+	if result.FallbackPrompt == "" {
+		result.FallbackPrompt = defaults.FallbackPrompt
+	} else {
+		result.FallbackPrompt = types.UpgradeLegacyDefaultFallbackPrompt(result.FallbackPrompt, defaults.FallbackPrompt)
+	}
+	return &result
+}
+
 func validateConversationConfig(req *types.ConversationConfig) error {
 	if req.MaxRounds <= 0 {
 		return errors.NewBadRequestError("max_rounds must be greater than 0")
@@ -1045,11 +1065,10 @@ func (h *TenantHandler) GetTenantConversationConfig(c *gin.Context) {
 		c.Error(errors.NewInternalServerError("Failed to load platform settings").WithDetails(err.Error()))
 		return
 	}
-	response := settings.ConversationConfig
-	if response == nil {
+	if settings.ConversationConfig == nil {
 		logger.Info(ctx, "Platform has no conversation config, returning defaults")
-		response = h.buildDefaultConversationConfig()
 	}
+	response := h.applyConversationFallbackDefaults(settings.ConversationConfig)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    response,
@@ -1239,12 +1258,10 @@ func (h *TenantHandler) GetTenantRetrievalConfig(c *gin.Context) {
 		return
 	}
 	data := settings.RetrievalConfig
-	if data == nil {
-		data = &types.RetrievalConfig{}
-	}
+	normalized := types.NormalizeRetrievalConfig(data)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    data,
+		"data":    normalized,
 	})
 }
 
@@ -1252,39 +1269,21 @@ func (h *TenantHandler) GetTenantRetrievalConfig(c *gin.Context) {
 func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	var cfg types.RetrievalConfig
-	if err := c.ShouldBindJSON(&cfg); err != nil {
+	var update types.RetrievalConfigUpdate
+	if err := c.ShouldBindJSON(&update); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
 
-	// Validate thresholds
-	if cfg.VectorThreshold < 0 || cfg.VectorThreshold > 1 {
-		c.Error(errors.NewBadRequestError("vector_threshold must be between 0 and 1"))
-		return
-	}
-	if cfg.KeywordThreshold < 0 || cfg.KeywordThreshold > 1 {
-		c.Error(errors.NewBadRequestError("keyword_threshold must be between 0 and 1"))
-		return
-	}
-	if cfg.RerankThreshold < -10 || cfg.RerankThreshold > 10 {
-		c.Error(errors.NewBadRequestError("rerank_threshold must be between -10 and 10"))
-		return
-	}
-	if cfg.EmbeddingTopK < 0 || cfg.EmbeddingTopK > 200 {
-		c.Error(errors.NewBadRequestError("embedding_top_k must be between 0 and 200"))
-		return
-	}
-	if cfg.RerankTopK < 0 || cfg.RerankTopK > 200 {
-		c.Error(errors.NewBadRequestError("rerank_top_k must be between 0 and 200"))
-		return
-	}
-	cfg.RerankModelID = ""
-
 	settings, err := h.getPlatformSettings(ctx)
 	if err != nil {
 		c.Error(errors.NewInternalServerError("Failed to load platform settings").WithDetails(err.Error()))
+		return
+	}
+	cfg := types.ApplyRetrievalConfigUpdate(settings.RetrievalConfig, update)
+	if err := types.ValidateRetrievalConfig(cfg); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	settings.RetrievalConfig = &cfg

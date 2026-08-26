@@ -38,7 +38,7 @@ func TestKnowledgeSearchParamsPreferCurrentAgentConfig(t *testing.T) {
 		RerankTopK:          5,
 	}
 	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, agentConfig, 5)
-	tenant := &types.Tenant{ConversationConfig: &types.ConversationConfig{
+	tenant := &types.Tenant{RetrievalConfig: &types.RetrievalConfig{
 		EmbeddingTopK:    3,
 		VectorThreshold:  0.8,
 		KeywordThreshold: 0.7,
@@ -55,6 +55,27 @@ func TestKnowledgeSearchParamsPreferCurrentAgentConfig(t *testing.T) {
 	}
 	if params.vectorThreshold != 0.42 || params.keywordThreshold != 0.24 {
 		t.Fatalf("thresholds = vector:%v keyword:%v, want 0.42/0.24", params.vectorThreshold, params.keywordThreshold)
+	}
+}
+
+func TestKnowledgeSearchParamsUsePlatformSnapshotWithoutAgentConfig(t *testing.T) {
+	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, nil, 10)
+	platform := types.DefaultRetrievalConfig()
+	platform.EmbeddingTopK = 24
+	platform.VectorRecallTopK = 31
+	platform.KeywordRecallTopK = 32
+	platform.RRFVectorWeight = 0.6
+	platform.VectorThreshold = 0.51
+	platform.KeywordThreshold = 0.29
+	ctx := context.WithValue(t.Context(), types.TenantInfoContextKey, &types.Tenant{RetrievalConfig: &platform})
+
+	params := tool.resolveSearchParams(ctx)
+
+	if params.topK != 24 || params.vectorRecallTopK != 31 || params.keywordRecallTopK != 32 {
+		t.Fatalf("platform retrieval counts = fusion:%d vector:%d keyword:%d, want 24/31/32", params.topK, params.vectorRecallTopK, params.keywordRecallTopK)
+	}
+	if params.rrfVectorWeight != 0.6 || params.vectorThreshold != 0.51 || params.keywordThreshold != 0.29 {
+		t.Fatalf("platform retrieval scores = rrf:%v vector:%v keyword:%v", params.rrfVectorWeight, params.vectorThreshold, params.keywordThreshold)
 	}
 }
 

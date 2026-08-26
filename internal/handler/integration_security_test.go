@@ -143,6 +143,13 @@ func TestIntegrationGenerationContextSurvivesRequestCancellation(t *testing.T) {
 	require.ErrorIs(t, generationContext.Err(), context.Canceled)
 }
 
+func TestIntegrationResponseLimitHonorsOperationalMaximum(t *testing.T) {
+	handler := &IntegrationHandler{limits: integrationLimits{maxTopK: 5}}
+
+	require.Equal(t, 5, handler.retrievalResponseLimit(context.Background(), 1, 0))
+	require.Equal(t, 3, handler.retrievalResponseLimit(context.Background(), 1, 3))
+}
+
 func TestIntegrationReferencesAcceptsEventPayloadShapes(t *testing.T) {
 	reference := &types.SearchResult{ID: "chunk-1", KnowledgeTitle: "测试文档"}
 
@@ -315,7 +322,7 @@ func TestIntegrationBatchSearchPreservesQueryOrderAndBoundsConcurrency(t *testin
 	handler := &IntegrationHandler{
 		sessions: sessions,
 		kbs:      batchSearchKnowledgeBaseService{},
-		limits:   integrationLimits{defaultTopK: 2, batchConcurrency: 2},
+		limits:   integrationLimits{batchConcurrency: 2},
 	}
 	knowledgeIDs := []string{"doc-1"}
 	queries := []integrationBatchSearchQuery{
@@ -333,12 +340,18 @@ func TestIntegrationBatchSearchPreservesQueryOrderAndBoundsConcurrency(t *testin
 	require.Equal(t, 2, sessions.maxActive)
 }
 
+func TestEffectiveIntegrationResponseLimitOnlyNarrowsPlatformLimit(t *testing.T) {
+	require.Equal(t, 5, effectiveIntegrationResponseLimit(0, 5))
+	require.Equal(t, 3, effectiveIntegrationResponseLimit(3, 5))
+	require.Equal(t, 5, effectiveIntegrationResponseLimit(8, 5))
+}
+
 func TestIntegrationBatchSearchUsesResolvedFolders(t *testing.T) {
 	sessions := &batchSearchSessionService{}
 	handler := &IntegrationHandler{
 		sessions: sessions,
 		kbs:      batchSearchKnowledgeBaseService{},
-		limits:   integrationLimits{defaultTopK: 2, batchConcurrency: 1},
+		limits:   integrationLimits{batchConcurrency: 1},
 	}
 	queries := []integrationBatchSearchQuery{{ID: "q-1", Query: "first", FilterDisabledFolders: true}}
 	resolved := [][]string{{"folder-1", "public-1"}}
@@ -355,7 +368,7 @@ func TestIntegrationBatchSearchUsesPerQueryFolderFilter(t *testing.T) {
 	handler := &IntegrationHandler{
 		sessions: sessions,
 		kbs:      batchSearchKnowledgeBaseService{},
-		limits:   integrationLimits{defaultTopK: 2, batchConcurrency: 1},
+		limits:   integrationLimits{batchConcurrency: 1},
 	}
 	queries := []integrationBatchSearchQuery{
 		{ID: "q-1", Query: "first", FilterDisabledFolders: true},

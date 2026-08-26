@@ -359,90 +359,6 @@
           </div>
         </div>
 
-        <div class="setting-row">
-          <div class="setting-info">
-            <label>{{ $t('conversationSettings.embeddingTopK.label') }}</label>
-            <p class="desc">{{ $t('conversationSettings.embeddingTopK.desc') }}</p>
-          </div>
-          <div class="setting-control">
-            <t-input-number
-              v-model="localEmbeddingTopK"
-              :min="1"
-              :max="50"
-              @change="handleEmbeddingTopKChange"
-            />
-          </div>
-        </div>
-
-        <div class="setting-row">
-          <div class="setting-info">
-            <label>{{ $t('conversationSettings.keywordThreshold.label') }}</label>
-            <p class="desc">{{ $t('conversationSettings.keywordThreshold.desc') }}</p>
-          </div>
-          <div class="setting-control slider-with-value">
-            <t-slider
-              v-model="localKeywordThreshold"
-              :min="0"
-              :max="1"
-              :step="0.05"
-              style="width: 240px;"
-              @change="handleKeywordThresholdChange"
-            />
-            <span class="value-display">{{ localKeywordThreshold.toFixed(2) }}</span>
-          </div>
-        </div>
-
-        <div class="setting-row">
-          <div class="setting-info">
-            <label>{{ $t('conversationSettings.vectorThreshold.label') }}</label>
-            <p class="desc">{{ $t('conversationSettings.vectorThreshold.desc') }}</p>
-          </div>
-          <div class="setting-control slider-with-value">
-            <t-slider
-              v-model="localVectorThreshold"
-              :min="0"
-              :max="1"
-              :step="0.05"
-              style="width: 240px;"
-              @change="handleVectorThresholdChange"
-            />
-            <span class="value-display">{{ localVectorThreshold.toFixed(2) }}</span>
-          </div>
-        </div>
-
-        <div class="setting-row">
-          <div class="setting-info">
-            <label>{{ $t('conversationSettings.rerankTopK.label') }}</label>
-            <p class="desc">{{ $t('conversationSettings.rerankTopK.desc') }}</p>
-          </div>
-          <div class="setting-control">
-            <t-input-number
-              v-model="localRerankTopK"
-              :min="1"
-              :max="20"
-              @change="handleRerankTopKChange"
-            />
-          </div>
-        </div>
-
-        <div class="setting-row">
-          <div class="setting-info">
-            <label>{{ $t('conversationSettings.rerankThreshold.label') }}</label>
-            <p class="desc">{{ $t('conversationSettings.rerankThreshold.desc') }}</p>
-          </div>
-          <div class="setting-control slider-with-value">
-            <t-slider
-              v-model="localRerankThreshold"
-              :min="-10"
-              :max="10"
-              :step="0.01"
-              style="width: 240px;"
-              @change="handleRerankThresholdChange"
-            />
-            <span class="value-display">{{ localRerankThreshold.toFixed(1) }}</span>
-          </div>
-        </div>
-
       </div>
     </div>
 
@@ -453,19 +369,6 @@
       </div>
 
       <div class="settings-group">
-        <div class="setting-row">
-          <div class="setting-info">
-            <label>{{ $t('conversationSettings.enableQueryExpansion.label') }}</label>
-            <p class="desc">{{ $t('conversationSettings.enableQueryExpansion.desc') }}</p>
-          </div>
-          <div class="setting-control">
-            <t-switch
-              v-model="localEnableQueryExpansion"
-              :label="[$t('common.off'), $t('common.on')]"
-              @change="handleEnableQueryExpansionChange"
-            />
-          </div>
-        </div>
         <!-- 开启问题改写 -->
         <div class="setting-row">
           <div class="setting-info">
@@ -710,13 +613,7 @@ let savedTemperatureNormal = 0.3
 let savedMaxCompletionTokens = 2048
 
 const localMaxRounds = ref(5)
-const localEmbeddingTopK = ref(10)
-const localKeywordThreshold = ref(0.3)
-const localVectorThreshold = ref(0.5)
-const localRerankTopK = ref(5)
-const localRerankThreshold = ref(0.5)
 const localEnableRewrite = ref(true)
-const localEnableQueryExpansion = ref(true)
 const localFallbackStrategy = ref<'fixed' | 'model'>('fixed')
 const localFallbackResponse = ref('')
 const localFallbackPrompt = ref('')
@@ -737,13 +634,7 @@ const syncConversationLocals = () => {
   savedMaxCompletionTokens = localMaxCompletionTokens.value
 
   localMaxRounds.value = cfg.max_rounds ?? 5
-  localEmbeddingTopK.value = cfg.embedding_top_k ?? 10
-  localKeywordThreshold.value = cfg.keyword_threshold ?? 0.3
-  localVectorThreshold.value = cfg.vector_threshold ?? 0.5
-  localRerankTopK.value = cfg.rerank_top_k ?? 5
-  localRerankThreshold.value = cfg.rerank_threshold ?? 0.5
   localEnableRewrite.value = cfg.enable_rewrite ?? true
-  localEnableQueryExpansion.value = cfg.enable_query_expansion ?? true
   localFallbackStrategy.value = (cfg.fallback_strategy as 'fixed' | 'model') || 'fixed'
   localFallbackResponse.value = cfg.fallback_response ?? ''
   localFallbackPrompt.value = cfg.fallback_prompt ?? ''
@@ -1551,69 +1442,12 @@ const handleMaxRoundsChange = async (value: number) => {
   }
 }
 
-const handleEmbeddingTopKChange = async (value: number) => {
-  try {
-    await saveConversationConfig({ embedding_top_k: value }, t('conversationSettings.toasts.embeddingSaved'))
-  } catch (error) {
-    console.error('保存 embedding_top_k 失败:', error)
-    localEmbeddingTopK.value = conversationConfig.value.embedding_top_k
-  }
-}
-
-const handleKeywordThresholdChange = async (value: number) => {
-  try {
-    await saveConversationConfig({ keyword_threshold: value }, t('conversationSettings.toasts.keywordThresholdSaved'))
-  } catch (error) {
-    console.error('保存 keyword_threshold 失败:', error)
-    localKeywordThreshold.value = conversationConfig.value.keyword_threshold
-  }
-}
-
-const handleVectorThresholdChange = async (value: number) => {
-  try {
-    await saveConversationConfig({ vector_threshold: value }, t('conversationSettings.toasts.vectorThresholdSaved'))
-  } catch (error) {
-    console.error('保存 vector_threshold 失败:', error)
-    localVectorThreshold.value = conversationConfig.value.vector_threshold
-  }
-}
-
-const handleRerankTopKChange = async (value: number) => {
-  try {
-    await saveConversationConfig({ rerank_top_k: value }, t('conversationSettings.toasts.rerankTopKSaved'))
-  } catch (error) {
-    console.error('保存 rerank_top_k 失败:', error)
-    localRerankTopK.value = conversationConfig.value.rerank_top_k
-  }
-}
-
-const handleRerankThresholdChange = async (value: number) => {
-  try {
-    await saveConversationConfig({ rerank_threshold: value }, t('conversationSettings.toasts.rerankThresholdSaved'))
-  } catch (error) {
-    console.error('保存 rerank_threshold 失败:', error)
-    localRerankThreshold.value = conversationConfig.value.rerank_threshold
-  }
-}
-
 const handleEnableRewriteChange = async (value: boolean) => {
   try {
     await saveConversationConfig({ enable_rewrite: value }, t('conversationSettings.toasts.enableRewriteSaved'))
   } catch (error) {
     console.error('保存 enable_rewrite 失败:', error)
     localEnableRewrite.value = conversationConfig.value.enable_rewrite
-  }
-}
-
-const handleEnableQueryExpansionChange = async (value: boolean) => {
-  try {
-    await saveConversationConfig(
-      { enable_query_expansion: value },
-      t('conversationSettings.toasts.enableQueryExpansionSaved')
-    )
-  } catch (error) {
-    console.error('保存 enable_query_expansion 失败:', error)
-    localEnableQueryExpansion.value = conversationConfig.value.enable_query_expansion ?? true
   }
 }
 
