@@ -144,6 +144,10 @@ type integrationFolderProvider interface {
 	ResolveIntegrationFolderIDs(context.Context, uint64, []string, []string, []string) ([]string, error)
 }
 
+type integrationSearchableFolderProvider interface {
+	SearchableTagIDs(context.Context, uint64, string) ([]string, error)
+}
+
 type folderSearchSession interface {
 	SearchKnowledgeWithFolders(context.Context, []string, []string, []string, bool, string) ([]*types.SearchResult, error)
 }
@@ -729,26 +733,99 @@ func (h *IntegrationHandler) ListKnowledge(c *gin.Context) {
 	if !h.requireScope(c, "knowledge:read") {
 		return
 	}
+	h.listKnowledge(c, nil, false)
+}
+
+func (h *IntegrationHandler) SearchKnowledgeList(c *gin.Context) {
+	if !h.enforceRate(c, "api.knowledge.list", 120) {
+		return
+	}
+	if !h.requireScope(c, "knowledge:read") {
+		return
+	}
+	h.limitRequestBody(c)
+	var req struct {
+		FolderIDs             []string `json:"folder_ids"`
+		FilterDisabledFolders bool     `json:"filter_disabled_folders"`
+	}
+	if c.ShouldBindJSON(&req) != nil || !validIntegrationKnowledgeIDs(req.FolderIDs, h.limits.maxKnowledgeIDs) {
+		integrationError(c, http.StatusBadRequest, "invalid_knowledge_filter", "folder_ids and filter_disabled_folders are invalid")
+		return
+	}
+	h.listKnowledge(c, req.FolderIDs, req.FilterDisabledFolders)
+}
+
+func (h *IntegrationHandler) listKnowledge(c *gin.Context, folderIDs []string, filterDisabledFolders bool) {
 	kbID := strings.TrimSpace(c.Param("knowledge_base_id"))
-	if kbID == "" || h.service.AuthorizeKnowledgeBases(integrationPrincipal(c), []string{kbID}) != nil {
+	principal := integrationPrincipal(c)
+	if kbID == "" || h.service.AuthorizeKnowledgeBases(principal, []string{kbID}) != nil {
 		h.audit(c, "api.knowledge.list", "denied", "knowledge_base_denied")
 		integrationError(c, http.StatusForbidden, "knowledge_base_denied", "knowledge base access denied")
 		return
+	}
+	if len(folderIDs) > 0 {
+		provider, ok := h.knowledges.(integrationFolderProvider)
+		if !ok {
+			integrationError(c, http.StatusInternalServerError, "list_failed", "failed to list knowledge")
+			return
+		}
+		resolved, resolveErr := provider.ResolveIntegrationFolderIDs(c.Request.Context(), principal.TenantID, []string{kbID}, folderIDs, nil)
+		if resolveErr != nil {
+			integrationError(c, http.StatusBadRequest, "invalid_folder_ids", "invalid folder ids")
+			return
+		}
+		folderIDs = resolved
 	}
 	rows, err := h.knowledges.ListKnowledgeByKnowledgeBaseID(c.Request.Context(), kbID)
 	if err != nil {
 		integrationError(c, http.StatusInternalServerError, "list_failed", "failed to list knowledge")
 		return
 	}
-	tagNames, err := h.service.KnowledgeTagNames(c.Request.Context(), integrationPrincipal(c), kbID)
+	tagNames, err := h.service.KnowledgeTagNames(c.Request.Context(), principal, kbID)
 	if err != nil {
 		integrationError(c, http.StatusInternalServerError, "list_failed", "failed to list knowledge metadata")
 		return
+	}
+	allowedTagIDs := make(map[string]struct{})
+	if len(folderIDs) > 0 {
+		for _, folderID := range folderIDs {
+			allowedTagIDs[folderID] = struct{}{}
+		}
+	}
+	if filterDisabledFolders {
+		provider, ok := h.knowledges.(integrationSearchableFolderProvider)
+		if !ok {
+			integrationError(c, http.StatusInternalServerError, "list_failed", "failed to list knowledge")
+			return
+		}
+		searchableTagIDs, searchableErr := provider.SearchableTagIDs(c.Request.Context(), principal.TenantID, kbID)
+		if searchableErr != nil {
+			integrationError(c, http.StatusInternalServerError, "list_failed", "failed to list knowledge")
+			return
+		}
+		searchable := make(map[string]struct{}, len(searchableTagIDs))
+		for _, tagID := range searchableTagIDs {
+			searchable[tagID] = struct{}{}
+		}
+		if len(allowedTagIDs) == 0 {
+			allowedTagIDs = searchable
+		} else {
+			for tagID := range allowedTagIDs {
+				if _, ok := searchable[tagID]; !ok {
+					delete(allowedTagIDs, tagID)
+				}
+			}
+		}
 	}
 	result := make([]gin.H, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
 			continue
+		}
+		if len(folderIDs) > 0 || filterDisabledFolders {
+			if _, ok := allowedTagIDs[row.TagID]; !ok {
+				continue
+			}
 		}
 		result = append(result, gin.H{
 			"id": row.ID, "knowledge_base_id": row.KnowledgeBaseID,
@@ -758,7 +835,7 @@ func (h *IntegrationHandler) ListKnowledge(c *gin.Context) {
 			"enable_status": row.EnableStatus, "updated_at": row.UpdatedAt,
 		})
 	}
-	h.service.AuditResources(c.Request.Context(), integrationPrincipal(c), "api.knowledge.list", "allowed", "", []string{kbID})
+	h.service.AuditResources(c.Request.Context(), principal, "api.knowledge.list", "allowed", "", []string{kbID})
 	integrationData(c, http.StatusOK, result)
 }
 

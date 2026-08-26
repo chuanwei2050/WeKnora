@@ -87,9 +87,11 @@ func (s folderEndpointKnowledgeBaseService) GetRepository() interfaces.Knowledge
 
 type folderEndpointKnowledgeService struct {
 	interfaces.KnowledgeService
-	folders    []*types.KnowledgeTag
-	resolved   []string
-	resolveErr error
+	folders       []*types.KnowledgeTag
+	knowledges    []*types.Knowledge
+	resolved      []string
+	searchableIDs []string
+	resolveErr    error
 }
 
 func (s folderEndpointKnowledgeService) ListIntegrationFolders(context.Context, uint64, string) ([]*types.KnowledgeTag, error) {
@@ -100,17 +102,26 @@ func (s folderEndpointKnowledgeService) ResolveIntegrationFolderIDs(context.Cont
 	return s.resolved, s.resolveErr
 }
 
+func (s folderEndpointKnowledgeService) SearchableTagIDs(context.Context, uint64, string) ([]string, error) {
+	return s.searchableIDs, nil
+}
+
+func (s folderEndpointKnowledgeService) ListKnowledgeByKnowledgeBaseID(context.Context, string) ([]*types.Knowledge, error) {
+	return s.knowledges, nil
+}
+
 func newFolderEndpointHandler(t *testing.T, kbs map[string]*types.KnowledgeBase, folders []*types.KnowledgeTag) (*IntegrationHandler, *gorm.DB) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&integrationauth.Audit{}))
+	require.NoError(t, db.AutoMigrate(&integrationauth.Audit{}, &types.KnowledgeTag{}))
 	repo := folderEndpointKnowledgeBaseRepo{byID: kbs}
 	return &IntegrationHandler{
 		service:    integrationauth.NewService(db, nil, nil),
 		kbs:        folderEndpointKnowledgeBaseService{repo: repo},
 		knowledges: folderEndpointKnowledgeService{folders: folders},
-		limits:     integrationLimits{maxKnowledgeBases: 20},
+		limiter:    newIntegrationRateLimiter(),
+		limits:     integrationLimits{maxKnowledgeBases: 20, maxKnowledgeIDs: 100, maxRequestBytes: 4096},
 	}, db
 }
 
@@ -291,6 +302,67 @@ func TestIntegrationFoldersByIDsRejectsInvalidNotFoundAndUnauthorizedWithoutLeak
 	var denied int64
 	require.NoError(t, db.Model(&integrationauth.Audit{}).Where("action = ? AND outcome = ?", "api.knowledge_base.folders", "denied").Count(&denied).Error)
 	require.EqualValues(t, 3, denied)
+}
+
+func TestIntegrationKnowledgeListSearchFiltersByFoldersAndSearchEnabled(t *testing.T) {
+	handler, db := newFolderEndpointHandler(t, map[string]*types.KnowledgeBase{"kb-1": {ID: "kb-1", TenantID: 1}}, nil)
+	require.NoError(t, db.Create([]*types.KnowledgeTag{
+		{ID: "folder-1", SeqID: 1, TenantID: 1, KnowledgeBaseID: "kb-1", Name: "可搜索"},
+		{ID: "folder-2", SeqID: 2, TenantID: 1, KnowledgeBaseID: "kb-1", Name: "已关闭"},
+		{ID: "folder-3", SeqID: 3, TenantID: 1, KnowledgeBaseID: "kb-1", Name: "其他"},
+	}).Error)
+	handler.knowledges = folderEndpointKnowledgeService{
+		knowledges: []*types.Knowledge{
+			{ID: "doc-1", KnowledgeBaseID: "kb-1", TagID: "folder-1", Title: "保留"},
+			{ID: "doc-2", KnowledgeBaseID: "kb-1", TagID: "folder-2", Title: "关闭"},
+			{ID: "doc-3", KnowledgeBaseID: "kb-1", TagID: "folder-3", Title: "范围外"},
+		},
+		resolved:      []string{"folder-1", "folder-2"},
+		searchableIDs: []string{"folder-1", "folder-3"},
+	}
+	principal := &integrationauth.Principal{ClientID: "client-1", TenantID: 1, KnowledgeBaseIDs: []string{"kb-1"}, Scopes: []string{"knowledge:read"}}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/integration/v1/knowledge-bases/kb-1/knowledge/search", strings.NewReader(`{"folder_ids":["folder-1","folder-2"],"filter_disabled_folders":true}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Params = gin.Params{{Key: "knowledge_base_id", Value: "kb-1"}}
+	ctx.Set("integrationPrincipal", principal)
+
+	handler.SearchKnowledgeList(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool             `json:"success"`
+		Data    []map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	require.Len(t, response.Data, 1)
+	require.Equal(t, "doc-1", response.Data[0]["id"])
+	require.Equal(t, "可搜索", response.Data[0]["tag_name"])
+}
+
+func TestIntegrationKnowledgeListSearchRejectsInvalidFilterParameters(t *testing.T) {
+	handler, _ := newFolderEndpointHandler(t, map[string]*types.KnowledgeBase{"kb-1": {ID: "kb-1", TenantID: 1}}, nil)
+	principal := &integrationauth.Principal{ClientID: "client-1", TenantID: 1, KnowledgeBaseIDs: []string{"kb-1"}, Scopes: []string{"knowledge:read"}}
+	for name, body := range map[string]string{
+		"invalid folder":  `{"folder_ids":["bad/folder"]}`,
+		"invalid boolean": `{"filter_disabled_folders":"maybe"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/knowledge/search", strings.NewReader(body))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			ctx.Params = gin.Params{{Key: "knowledge_base_id", Value: "kb-1"}}
+			ctx.Set("integrationPrincipal", principal)
+
+			handler.SearchKnowledgeList(ctx)
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.Contains(t, recorder.Body.String(), "invalid_knowledge_filter")
+		})
+	}
 }
 
 func TestIntegrationBatchSearchValidationRejectsDuplicateAndOversizedPlans(t *testing.T) {
