@@ -233,8 +233,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 }
 
 // preserveStrongKeywordResults prevents the semantic reranker from completely
-// vetoing high-confidence lexical matches. Keyword scores are only compared
-// with other keyword scores from the same retrieval request.
+// vetoing the top lexical match from an individual retrieval request.
 func preserveStrongKeywordResults(
 	reranked, candidates []*types.SearchResult,
 	limit int,
@@ -242,24 +241,13 @@ func preserveStrongKeywordResults(
 	if limit <= 0 || len(candidates) == 0 {
 		return reranked
 	}
-	maxKeywordScore := 0.0
-	for _, candidate := range candidates {
-		if candidate.MatchType == types.MatchTypeKeywords && candidate.Score > maxKeywordScore {
-			maxKeywordScore = candidate.Score
-		}
-	}
-	if maxKeywordScore <= 0 {
-		return reranked
-	}
-
 	seen := make(map[string]struct{}, len(reranked))
 	for _, result := range reranked {
 		seen[result.ID] = struct{}{}
 	}
-	strongCutoff := maxKeywordScore * 0.9
 	missing := make([]*types.SearchResult, 0)
 	for _, candidate := range candidates {
-		if candidate.MatchType != types.MatchTypeKeywords || candidate.Score < strongCutoff {
+		if candidate.MatchType != types.MatchTypeKeywords || candidate.Metadata["keyword_leader"] != "true" {
 			continue
 		}
 		if _, exists := seen[candidate.ID]; exists {

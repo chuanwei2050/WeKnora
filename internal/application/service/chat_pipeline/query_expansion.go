@@ -7,6 +7,7 @@ import (
 	"sync"
 	"unicode"
 
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -45,24 +46,33 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 		"jobs": jobs,
 		"cap":  capSem,
 	})
+	taskIndex := 0
 	for _, q := range expansions {
 		for _, target := range chatManage.SearchTargets {
+			index := taskIndex
+			taskIndex++
 			wgExp.Add(1)
-			go func(q string, t *types.SearchTarget) {
+			go func(q string, t *types.SearchTarget, index int) {
 				defer wgExp.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
+				fusionBudget := searchutil.SplitBudget(expTopK, jobs, index)
+				vectorBudget := searchutil.SplitBudget(chatManage.VectorRecallTopK, jobs, index)
+				keywordBudget := searchutil.SplitBudget(chatManage.KeywordRecallTopK, jobs, index)
+				if fusionBudget == 0 || (vectorBudget == 0 && keywordBudget == 0) {
+					return
+				}
 				paramsExp := types.SearchParams{
 					QueryText:             q,
 					VectorThreshold:       chatManage.VectorThreshold,
 					KeywordThreshold:      expKwTh,
-					MatchCount:            expTopK,
-					VectorMatchCount:      chatManage.VectorRecallTopK,
-					KeywordMatchCount:     chatManage.KeywordRecallTopK,
+					MatchCount:            fusionBudget,
+					VectorMatchCount:      vectorBudget,
+					KeywordMatchCount:     keywordBudget,
 					RerankCandidateCount:  chatManage.RerankCandidateTopK,
 					RRFVectorWeight:       chatManage.RRFVectorWeight,
-					DisableVectorMatch:    false,
-					DisableKeywordsMatch:  false,
+					DisableVectorMatch:    vectorBudget == 0,
+					DisableKeywordsMatch:  keywordBudget == 0,
 					SkipContextEnrichment: true, // Pipeline handles context assembly in merge stage
 				}
 				// Apply knowledge ID filter if this is a partial KB search
@@ -90,7 +100,7 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 					expResults = append(expResults, res...)
 					muExp.Unlock()
 				}
-			}(q, target)
+			}(q, target, index)
 		}
 	}
 	wgExp.Wait()

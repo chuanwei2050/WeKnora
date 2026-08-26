@@ -165,7 +165,7 @@ func preserveRetrieverLeaders(
 		return fused
 	}
 
-	leadersPerChannel := max(1, candidateLimit/2)
+	leadersPerChannel := max(1, min(candidateLimit, resultLimit)/2)
 	result := make([]*types.IndexWithScore, 0, resultLimit)
 	seen := make(map[string]struct{}, resultLimit)
 	appendUnique := func(candidate *types.IndexWithScore) {

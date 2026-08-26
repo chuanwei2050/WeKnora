@@ -65,6 +65,44 @@ func TestPreserveRetrieverLeadersUsesRerankCandidateBudget(t *testing.T) {
 	}
 }
 
+func TestMarkKeywordLeaderUsesPerSearchRankInsteadOfRawScore(t *testing.T) {
+	results := []*types.SearchResult{{ID: "local-first"}, {ID: "local-second"}}
+	keyword := []*types.IndexWithScore{
+		{ChunkID: "local-first", Score: 2},
+		{ChunkID: "local-second", Score: 100},
+	}
+
+	markKeywordLeader(results, keyword)
+	if results[0].Metadata["keyword_leader"] != "true" {
+		t.Fatal("expected the retrieval-ranked leader to be marked")
+	}
+	if results[1].Metadata["keyword_leader"] == "true" {
+		t.Fatal("raw scores must not redefine the per-search leader")
+	}
+}
+
+func TestPreserveRetrieverLeadersProtectsCandidateWindowBeforeResultLimit(t *testing.T) {
+	vectorResults := make([]*types.IndexWithScore, 25)
+	keywordResults := make([]*types.IndexWithScore, 25)
+	for i := range 25 {
+		vectorResults[i] = &types.IndexWithScore{ChunkID: fmt.Sprintf("vector-%02d", i)}
+		keywordResults[i] = &types.IndexWithScore{ChunkID: fmt.Sprintf("keyword-%02d", i)}
+	}
+	fused := append([]*types.IndexWithScore(nil), vectorResults...)
+
+	got := preserveRetrieverLeaders(fused, vectorResults, keywordResults, 20, 30)
+	if len(got) != 30 {
+		t.Fatalf("expected result limit 30, got %d", len(got))
+	}
+	firstTwenty := make(map[string]bool, 20)
+	for _, result := range got[:20] {
+		firstTwenty[result.ChunkID] = true
+	}
+	if !firstTwenty["keyword-00"] {
+		t.Fatal("keyword leader must be inside the rerank candidate window")
+	}
+}
+
 func TestPreserveRetrieverLeadersDeduplicatesSharedLeaders(t *testing.T) {
 	shared := &types.IndexWithScore{ChunkID: "shared"}
 	vectorResults := []*types.IndexWithScore{shared, {ChunkID: "vector"}}

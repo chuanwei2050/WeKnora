@@ -201,9 +201,6 @@ func (s *sessionService) AgentQA(
 	graphAllowed := types.NeedsEntityRelation(agentQuery)
 	if routingDecision != nil {
 		graphAllowed = routingDecision.Classification.NeedsEntityRelation && routingDecision.Budget.GraphEnabled
-		if routingDecision.Budget.RetrievalTopK > 0 {
-			ctx = context.WithValue(ctx, types.RetrievalTopKContextKey, routingDecision.Budget.RetrievalTopK)
-		}
 	}
 	ctx = context.WithValue(ctx, types.GraphQueryAllowedContextKey, graphAllowed)
 	if graphAllowed {

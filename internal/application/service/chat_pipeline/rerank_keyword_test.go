@@ -9,7 +9,7 @@ import (
 func TestPreserveStrongKeywordResultsRestoresOmittedExactMatch(t *testing.T) {
 	semantic := &types.SearchResult{ID: "semantic", MatchType: types.MatchTypeEmbedding, Score: 0.8}
 	keywordTop := &types.SearchResult{ID: "keyword-top", MatchType: types.MatchTypeKeywords, Score: 21.1}
-	exact := &types.SearchResult{ID: "exact", MatchType: types.MatchTypeKeywords, Score: 19.36}
+	exact := &types.SearchResult{ID: "exact", MatchType: types.MatchTypeKeywords, Score: 19.36, Metadata: map[string]string{"keyword_leader": "true"}}
 	weak := &types.SearchResult{ID: "weak", MatchType: types.MatchTypeKeywords, Score: 10}
 
 	got := preserveStrongKeywordResults(
@@ -29,7 +29,7 @@ func TestPreserveStrongKeywordResultsRestoresOmittedExactMatch(t *testing.T) {
 }
 
 func TestPreserveStrongKeywordResultsDoesNotRestoreWeakMatch(t *testing.T) {
-	top := &types.SearchResult{ID: "top", MatchType: types.MatchTypeKeywords, Score: 20}
+	top := &types.SearchResult{ID: "top", MatchType: types.MatchTypeKeywords, Score: 20, Metadata: map[string]string{"keyword_leader": "true"}}
 	weak := &types.SearchResult{ID: "weak", MatchType: types.MatchTypeKeywords, Score: 10}
 
 	got := preserveStrongKeywordResults([]*types.SearchResult{top}, []*types.SearchResult{top, weak}, 3)
@@ -44,8 +44,8 @@ func TestPreserveStrongKeywordResultsReservesCapacityForEveryStrongMatch(t *test
 		{ID: "semantic-2", MatchType: types.MatchTypeEmbedding, Score: 0.8},
 		{ID: "semantic-3", MatchType: types.MatchTypeEmbedding, Score: 0.7},
 	}
-	first := &types.SearchResult{ID: "keyword-1", MatchType: types.MatchTypeKeywords, Score: 20}
-	second := &types.SearchResult{ID: "keyword-2", MatchType: types.MatchTypeKeywords, Score: 19}
+	first := &types.SearchResult{ID: "keyword-1", MatchType: types.MatchTypeKeywords, Score: 20, Metadata: map[string]string{"keyword_leader": "true"}}
+	second := &types.SearchResult{ID: "keyword-2", MatchType: types.MatchTypeKeywords, Score: 19, Metadata: map[string]string{"keyword_leader": "true"}}
 
 	got := preserveStrongKeywordResults(reranked, []*types.SearchResult{first, second}, 3)
 	if len(got) != 3 {

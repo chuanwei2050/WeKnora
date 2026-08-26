@@ -201,7 +201,29 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
 	}
 
-	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
+	results, err := s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
+	if err != nil {
+		return nil, err
+	}
+	markKeywordLeader(results, keywordResults)
+	return results, nil
+}
+
+func markKeywordLeader(results []*types.SearchResult, keywordResults []*types.IndexWithScore) {
+	if len(keywordResults) == 0 {
+		return
+	}
+	leaderID := keywordResults[0].ChunkID
+	for _, result := range results {
+		if result.ID != leaderID {
+			continue
+		}
+		if result.Metadata == nil {
+			result.Metadata = make(map[string]string)
+		}
+		result.Metadata["keyword_leader"] = "true"
+		return
+	}
 }
 
 func resolveRetrievalMatchCounts(params types.SearchParams) (int, int) {

@@ -29,8 +29,6 @@ const (
 	LanguageContextKey ContextKey = "Language"
 	// GraphQueryAllowedContextKey controls whether the current request needs graph traversal.
 	GraphQueryAllowedContextKey ContextKey = "GraphQueryAllowed"
-	// RetrievalTopKContextKey carries a request-scoped retrieval budget into Agent tools.
-	RetrievalTopKContextKey ContextKey = "RetrievalTopK"
 	// GraphRelationTypesContextKey carries the allowlisted relation types into Agent tools.
 	GraphRelationTypesContextKey ContextKey = "GraphRelationTypes"
 	// LangfuseTraceContextKey carries the active Langfuse *Trace across the

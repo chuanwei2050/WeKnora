@@ -242,10 +242,10 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Queries: %v", queries)
 
 	params := t.resolveSearchParams(ctx)
-	if routedTopK, ok := ctx.Value(types.RetrievalTopKContextKey).(int); ok && routedTopK > 0 && routedTopK < params.topK {
-		params.topK = routedTopK
+	rerankCandidateTopK := 0
+	if t.retrievalConfig != nil {
+		rerankCandidateTopK = t.retrievalConfig.RerankCandidateTopK
 	}
-
 	logger.Infof(
 		ctx,
 		"[Tool][KnowledgeSearch] Search params: fusion_top_k=%d, vector_recall_top_k=%d, keyword_recall_top_k=%d, rrf_vector_weight=%.2f, vector_threshold=%.2f, keyword_threshold=%.2f, min_score=%.2f",
@@ -265,7 +265,7 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 
 	allResults := t.concurrentSearchByTargets(ctx, queries, searchTargets,
 		params.topK, params.vectorRecallTopK, params.keywordRecallTopK, params.rrfVectorWeight,
-		params.vectorThreshold, params.keywordThreshold, kbTypeMap)
+		params.vectorThreshold, params.keywordThreshold, rerankCandidateTopK, kbTypeMap)
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Concurrent search completed: %d raw results", len(allResults))
 
 	// Note: HybridSearch now uses RRF (Reciprocal Rank Fusion) which produces normalized scores
@@ -475,6 +475,7 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 	searchTargets types.SearchTargets,
 	topK, vectorRecallTopK, keywordRecallTopK int,
 	rrfVectorWeight, vectorThreshold, keywordThreshold float64,
+	rerankCandidateTopK int,
 	kbTypeMap map[string]string,
 ) []*searchResultWithMeta {
 	// Batch-fetch KB records for embedding model grouping
@@ -534,12 +535,48 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	allResults := make([]*searchResultWithMeta, 0)
+	groupKeys := make([]string, 0, len(groups))
+	for key := range groups {
+		groupKeys = append(groupKeys, key)
+	}
+	sort.Strings(groupKeys)
+	tasksPerQuery := 0
+	for _, key := range groupKeys {
+		hasFullKB := false
+		for _, target := range groups[key] {
+			if target.Type == types.SearchTargetTypeKnowledgeBase {
+				hasFullKB = true
+			} else {
+				tasksPerQuery++
+			}
+		}
+		if hasFullKB {
+			tasksPerQuery++
+		}
+	}
+	taskCount := len(queries) * tasksPerQuery
+	taskIndex := 0
 
 	for _, query := range queries {
 		q := query
-		for modelKey, targets := range groups {
+		for _, modelKey := range groupKeys {
+			targets := groups[modelKey]
+			groupStart := taskIndex
+			groupTasks := 0
+			hasFullKB := false
+			for _, target := range targets {
+				if target.Type == types.SearchTargetTypeKnowledgeBase {
+					hasFullKB = true
+				} else {
+					groupTasks++
+				}
+			}
+			if hasFullKB {
+				groupTasks++
+			}
+			taskIndex += groupTasks
 			wg.Add(1)
-			go func(q string, modelKey string, targets []*types.SearchTarget) {
+			go func(q string, modelKey string, targets []*types.SearchTarget, groupStart int) {
 				defer wg.Done()
 
 				// Compute embedding once for this (model, query) pair
@@ -567,23 +604,35 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 				}
 
 				var innerWg sync.WaitGroup
+				currentTask := groupStart
 
 				// Combined retrieval for all full-KB targets in this group
 				if len(fullKBIDs) > 0 {
+					budgetIndex := currentTask
+					currentTask++
 					innerWg.Add(1)
-					go func() {
+					go func(index int) {
 						defer innerWg.Done()
+						fusionBudget := searchutil.SplitBudget(topK, taskCount, index)
+						vectorBudget := searchutil.SplitBudget(vectorRecallTopK, taskCount, index)
+						keywordBudget := searchutil.SplitBudget(keywordRecallTopK, taskCount, index)
+						if fusionBudget == 0 || (vectorBudget == 0 && keywordBudget == 0) {
+							return
+						}
 						searchParams := types.SearchParams{
-							QueryText:         q,
-							QueryEmbedding:    queryEmbedding,
-							KnowledgeBaseIDs:  fullKBIDs,
-							TagIDs:            fullTagIDs,
-							MatchCount:        topK,
-							VectorMatchCount:  vectorRecallTopK,
-							KeywordMatchCount: keywordRecallTopK,
-							RRFVectorWeight:   rrfVectorWeight,
-							VectorThreshold:   vectorThreshold,
-							KeywordThreshold:  keywordThreshold,
+							QueryText:            q,
+							QueryEmbedding:       queryEmbedding,
+							KnowledgeBaseIDs:     fullKBIDs,
+							TagIDs:               fullTagIDs,
+							MatchCount:           fusionBudget,
+							VectorMatchCount:     vectorBudget,
+							KeywordMatchCount:    keywordBudget,
+							RerankCandidateCount: rerankCandidateTopK,
+							DisableVectorMatch:   vectorBudget == 0,
+							DisableKeywordsMatch: keywordBudget == 0,
+							RRFVectorWeight:      rrfVectorWeight,
+							VectorThreshold:      vectorThreshold,
+							KeywordThreshold:     keywordThreshold,
 						}
 						kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], searchParams)
 						if err != nil {
@@ -601,26 +650,37 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 							})
 						}
 						mu.Unlock()
-					}()
+					}(budgetIndex)
 				}
 
 				// Individual retrieval for specific-knowledge targets
 				for _, target := range knowledgeTargets {
 					st := target
+					budgetIndex := currentTask
+					currentTask++
 					innerWg.Add(1)
-					go func() {
+					go func(index int) {
 						defer innerWg.Done()
+						fusionBudget := searchutil.SplitBudget(topK, taskCount, index)
+						vectorBudget := searchutil.SplitBudget(vectorRecallTopK, taskCount, index)
+						keywordBudget := searchutil.SplitBudget(keywordRecallTopK, taskCount, index)
+						if fusionBudget == 0 || (vectorBudget == 0 && keywordBudget == 0) {
+							return
+						}
 						searchParams := types.SearchParams{
-							QueryText:         q,
-							QueryEmbedding:    queryEmbedding,
-							MatchCount:        topK,
-							VectorMatchCount:  vectorRecallTopK,
-							KeywordMatchCount: keywordRecallTopK,
-							RRFVectorWeight:   rrfVectorWeight,
-							VectorThreshold:   vectorThreshold,
-							KeywordThreshold:  keywordThreshold,
-							KnowledgeIDs:      st.KnowledgeIDs,
-							TagIDs:            st.TagIDs,
+							QueryText:            q,
+							QueryEmbedding:       queryEmbedding,
+							MatchCount:           fusionBudget,
+							VectorMatchCount:     vectorBudget,
+							KeywordMatchCount:    keywordBudget,
+							RerankCandidateCount: rerankCandidateTopK,
+							DisableVectorMatch:   vectorBudget == 0,
+							DisableKeywordsMatch: keywordBudget == 0,
+							RRFVectorWeight:      rrfVectorWeight,
+							VectorThreshold:      vectorThreshold,
+							KeywordThreshold:     keywordThreshold,
+							KnowledgeIDs:         st.KnowledgeIDs,
+							TagIDs:               st.TagIDs,
 						}
 						kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, st.KnowledgeBaseID, searchParams)
 						if err != nil {
@@ -638,11 +698,11 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 							})
 						}
 						mu.Unlock()
-					}()
+					}(budgetIndex)
 				}
 
 				innerWg.Wait()
-			}(q, modelKey, targets)
+			}(q, modelKey, targets, groupStart)
 		}
 	}
 	wg.Wait()

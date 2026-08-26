@@ -3,6 +3,7 @@ package chatpipeline
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -415,10 +416,46 @@ func (p *PluginSearch) searchByTargets(
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var results []*types.SearchResult
+	groupKeys := make([]string, 0, len(groups))
+	for key := range groups {
+		groupKeys = append(groupKeys, key)
+	}
+	sort.Strings(groupKeys)
+	taskCount := 0
+	for _, key := range groupKeys {
+		targets := groups[key]
+		hasFullKB := false
+		for _, target := range targets {
+			if target.Type == types.SearchTargetTypeKnowledgeBase {
+				hasFullKB = true
+			} else {
+				taskCount++
+			}
+		}
+		if hasFullKB {
+			taskCount++
+		}
+	}
+	taskIndex := 0
 
-	for modelKey, targets := range groups {
+	for _, modelKey := range groupKeys {
+		targets := groups[modelKey]
+		groupStart := taskIndex
+		groupTasks := 0
+		hasFullKB := false
+		for _, target := range targets {
+			if target.Type == types.SearchTargetTypeKnowledgeBase {
+				hasFullKB = true
+			} else {
+				groupTasks++
+			}
+		}
+		if hasFullKB {
+			groupTasks++
+		}
+		taskIndex += groupTasks
 		wg.Add(1)
-		go func(modelKey string, targets []*types.SearchTarget) {
+		go func(modelKey string, targets []*types.SearchTarget, groupStart int) {
 			defer wg.Done()
 
 			// Compute embedding once for this model group.
@@ -458,12 +495,21 @@ func (p *PluginSearch) searchByTargets(
 			})
 
 			var innerWg sync.WaitGroup
+			currentTask := groupStart
 
 			// Combined search: one HybridSearch call spanning all full-KB targets
 			if len(fullKBIDs) > 0 {
+				budgetIndex := currentTask
+				currentTask++
 				innerWg.Add(1)
-				go func() {
+				go func(index int) {
 					defer innerWg.Done()
+					fusionBudget := searchutil.SplitBudget(chatManage.EmbeddingTopK, taskCount, index)
+					vectorBudget := searchutil.SplitBudget(chatManage.VectorRecallTopK, taskCount, index)
+					keywordBudget := searchutil.SplitBudget(chatManage.KeywordRecallTopK, taskCount, index)
+					if fusionBudget == 0 || (vectorBudget == 0 && keywordBudget == 0) {
+						return
+					}
 
 					params := types.SearchParams{
 						QueryText:             queryText,
@@ -472,10 +518,12 @@ func (p *PluginSearch) searchByTargets(
 						TagIDs:                fullTagIDs,
 						VectorThreshold:       chatManage.VectorThreshold,
 						KeywordThreshold:      chatManage.KeywordThreshold,
-						MatchCount:            chatManage.EmbeddingTopK,
-						VectorMatchCount:      chatManage.VectorRecallTopK,
+						MatchCount:            fusionBudget,
+						VectorMatchCount:      vectorBudget,
 						RerankCandidateCount:  chatManage.RerankCandidateTopK,
-						KeywordMatchCount:     chatManage.KeywordRecallTopK,
+						KeywordMatchCount:     keywordBudget,
+						DisableVectorMatch:    vectorBudget == 0,
+						DisableKeywordsMatch:  keywordBudget == 0,
 						RRFVectorWeight:       chatManage.RRFVectorWeight,
 						SkipContextEnrichment: true,
 					}
@@ -494,20 +542,22 @@ func (p *PluginSearch) searchByTargets(
 					mu.Lock()
 					results = append(results, res...)
 					mu.Unlock()
-				}()
+				}(budgetIndex)
 			}
 
 			// Individual search: per-target handling for specific-knowledge targets
 			for _, target := range knowledgeTargets {
+				budgetIndex := currentTask
+				currentTask++
 				innerWg.Add(1)
-				go func(t *types.SearchTarget) {
+				go func(t *types.SearchTarget, index int) {
 					defer innerWg.Done()
-					p.searchSingleTarget(ctx, chatManage, t, queryText, queryEmbedding, &mu, &results)
-				}(target)
+					p.searchSingleTarget(ctx, chatManage, t, queryText, queryEmbedding, taskCount, index, &mu, &results)
+				}(target, budgetIndex)
 			}
 
 			innerWg.Wait()
-		}(modelKey, targets)
+		}(modelKey, targets, groupStart)
 	}
 
 	wg.Wait()
@@ -526,6 +576,7 @@ func (p *PluginSearch) searchSingleTarget(
 	t *types.SearchTarget,
 	queryText string,
 	queryEmbedding []float32,
+	taskCount, taskIndex int,
 	mu *sync.Mutex,
 	results *[]*types.SearchResult,
 ) {
@@ -558,16 +609,24 @@ func (p *PluginSearch) searchSingleTarget(
 		return
 	}
 
+	fusionBudget := searchutil.SplitBudget(chatManage.EmbeddingTopK, taskCount, taskIndex)
+	vectorBudget := searchutil.SplitBudget(chatManage.VectorRecallTopK, taskCount, taskIndex)
+	keywordBudget := searchutil.SplitBudget(chatManage.KeywordRecallTopK, taskCount, taskIndex)
+	if fusionBudget == 0 || (vectorBudget == 0 && keywordBudget == 0) {
+		return
+	}
 	params := types.SearchParams{
 		QueryText:             queryText,
 		QueryEmbedding:        queryEmbedding,
 		VectorThreshold:       chatManage.VectorThreshold,
 		KeywordThreshold:      chatManage.KeywordThreshold,
-		MatchCount:            chatManage.EmbeddingTopK,
-		VectorMatchCount:      chatManage.VectorRecallTopK,
-		KeywordMatchCount:     chatManage.KeywordRecallTopK,
+		MatchCount:            fusionBudget,
+		VectorMatchCount:      vectorBudget,
+		KeywordMatchCount:     keywordBudget,
 		RerankCandidateCount:  chatManage.RerankCandidateTopK,
 		RRFVectorWeight:       chatManage.RRFVectorWeight,
+		DisableVectorMatch:    vectorBudget == 0,
+		DisableKeywordsMatch:  keywordBudget == 0,
 		SkipContextEnrichment: true,
 	}
 	params.TagIDs = t.TagIDs
