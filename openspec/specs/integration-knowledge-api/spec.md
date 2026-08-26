@@ -48,7 +48,7 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 
 #### Scenario: 按多个 ID 查询授权知识库文件夹
 - **WHEN** 授权主体提交其租户内多个可访问知识库的有效 ID
-- **THEN** 系统只返回外层普通文件夹
+- **THEN** 系统返回普通文件夹和公共子文件夹
 - **AND** 每项只包含稳定字段 `knowledge_base_id`、`id`、`name` 和 `sort_order`
 - **AND** 结果保持持久化顺序
 
@@ -56,7 +56,7 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 - **WHEN** ID 对应知识库包含“未分类”、普通文件夹和公共子文件夹
 - **THEN** 响应不包含“未分类”
 - **AND** 响应不包含无真实标签 ID 的“公共文件”容器
-- **AND** 响应不包含“公共文件”下的公共子文件夹
+- **AND** 响应包含“公共文件”下具有真实标签 ID 的公共子文件夹
 
 #### Scenario: 任一知识库 ID 不存在或不可访问
 - **WHEN** 任一知识库 ID 不存在或主体无权访问对应知识库

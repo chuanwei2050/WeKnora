@@ -112,18 +112,26 @@ func TestIntegrationFolderScopeReadsAllPages(t *testing.T) {
 
 	folders, err := service.ListIntegrationFolders(t.Context(), 1, "kb-1")
 	require.NoError(t, err)
-	require.Equal(t, []string{"ordinary-1", "ordinary-child"}, []string{folders[0].ID, folders[1].ID})
+	require.Equal(t, []string{"ordinary-1", "ordinary-child", "public-1"}, folderIDs(folders))
 
 	ids, err := service.ResolveIntegrationFolderIDs(t.Context(), 1, []string{"kb-1", "kb-2"}, []string{"ordinary-1"}, nil)
 	require.NoError(t, err)
 	require.Equal(t, []string{"ordinary-1", "ordinary-child", "public-1"}, ids)
 }
 
-func TestListIntegrationFoldersReturnsOnlyOrdinaryFolders(t *testing.T) {
+func TestListIntegrationFoldersReturnsOrdinaryAndPublicFolders(t *testing.T) {
 	service := integrationFolderServiceFixture()
 	folders, err := service.ListIntegrationFolders(t.Context(), 1, "kb-1")
 	require.NoError(t, err)
-	require.Equal(t, []string{"ordinary-1", "ordinary-child"}, []string{folders[0].ID, folders[1].ID})
+	require.Equal(t, []string{"ordinary-1", "ordinary-child", "public-1"}, folderIDs(folders))
+}
+
+func folderIDs(folders []*types.KnowledgeTag) []string {
+	ids := make([]string, 0, len(folders))
+	for _, folder := range folders {
+		ids = append(ids, folder.ID)
+	}
+	return ids
 }
 
 func TestResolveIntegrationFolderIDsExpandsDescendantsAndMergesPublicFoldersFromExplicitFolderKBs(t *testing.T) {

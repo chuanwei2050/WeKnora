@@ -58,7 +58,7 @@ var (
 	ErrImageNotParse = errors.New("image not parse without enable multimodel")
 )
 
-// ListIntegrationFolders returns selectable ordinary folders for the integration API.
+// ListIntegrationFolders returns selectable real folders for the integration API.
 func (s *knowledgeService) ListIntegrationFolders(ctx context.Context, tenantID uint64, kbID string) ([]*types.KnowledgeTag, error) {
 	tags, err := s.listAllIntegrationTags(ctx, tenantID, kbID)
 	if err != nil {
@@ -66,7 +66,7 @@ func (s *knowledgeService) ListIntegrationFolders(ctx context.Context, tenantID 
 	}
 	result := make([]*types.KnowledgeTag, 0, len(tags))
 	for _, tag := range tags {
-		if tag != nil && !tag.IsPublic && tag.Name != types.UntaggedTagName {
+		if tag != nil && tag.Name != types.UntaggedTagName {
 			result = append(result, tag)
 		}
 	}
