@@ -135,7 +135,7 @@ func (p *PluginDataAnalysis) OnEvent(
 	response, err := chatModel.Chat(ctx, []chat.Message{
 		{Role: "user", Content: analysisPrompt},
 	}, &chat.ChatOptions{
-		Temperature: 0.1,
+		Temperature: 0,
 		Thinking:    &thinking,
 		Format:      formatSchema,
 	})
@@ -212,8 +212,9 @@ If NO, leave the sql field empty.
 When translating natural-language filters into SQL:
 - Separate the distinctive subject terms from incidental wording that is not necessarily stored verbatim.
 - Use the schema to choose every column that can directly answer the question; do not assume the answer is confined to one text column.
+- When the same fact may appear in multiple semantically relevant text columns, combine those predicates with OR so matching rows are not omitted.
 - Use the evidence samples only to recognize how relevant values are actually represented in the table, including equivalent wording.
-- Select the fields needed to identify each result and verify why it matched.
+- Select the fields needed to identify each result and include the matching source values as evidence of why it matched.
 
 Return your response in the specified JSON format.`, query, knowledgeID, schemaDescription, quotedEvidence)
 }
