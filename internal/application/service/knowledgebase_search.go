@@ -127,17 +127,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 
 	// Preserve the legacy over-retrieval behavior when callers do not provide
 	// explicit per-channel budgets.
-	defaultRecallCount := max(params.MatchCount*5, 50)
-	vectorMatchCount := params.VectorMatchCount
-	if vectorMatchCount <= 0 {
-		vectorMatchCount = defaultRecallCount
-	}
-	keywordMatchCount := params.KeywordMatchCount
-	if keywordMatchCount <= 0 {
-		keywordMatchCount = defaultRecallCount
-	}
-	vectorMatchCount = min(vectorMatchCount*len(searchKBIDs), 500)
-	keywordMatchCount = min(keywordMatchCount*len(searchKBIDs), 500)
+	vectorMatchCount, keywordMatchCount := resolveRetrievalMatchCounts(params)
 	logger.Infof(ctx,
 		"Hybrid retrieval budgets: vector=%d, keyword=%d, fusion=%d, rrf_vector_weight=%.2f",
 		vectorMatchCount, keywordMatchCount, params.MatchCount, params.RRFVectorWeight,
@@ -206,6 +196,19 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	}
 
 	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
+}
+
+func resolveRetrievalMatchCounts(params types.SearchParams) (int, int) {
+	defaultRecallCount := max(params.MatchCount*5, 50)
+	vectorMatchCount := params.VectorMatchCount
+	if vectorMatchCount <= 0 {
+		vectorMatchCount = defaultRecallCount
+	}
+	keywordMatchCount := params.KeywordMatchCount
+	if keywordMatchCount <= 0 {
+		keywordMatchCount = defaultRecallCount
+	}
+	return min(vectorMatchCount, 500), min(keywordMatchCount, 500)
 }
 
 // buildRetrievalParams constructs the vector and keyword retrieval parameters

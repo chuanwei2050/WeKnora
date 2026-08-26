@@ -3536,7 +3536,9 @@ export default {
   },
   agentStream: {
     tools: {
+      queryUnderstand: '질문 이해',
       searchKnowledge: '지식베이스 검색',
+      rerank: '관련 콘텐츠 선별',
       grepChunks: '텍스트 패턴 검색',
       webSearch: '웹 검색',
       webFetch: '웹 페이지 가져오기',

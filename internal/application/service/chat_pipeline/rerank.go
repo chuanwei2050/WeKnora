@@ -58,6 +58,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	if !chatManage.NeedsRetrieval() {
 		return next()
 	}
+	stageID, stageStarted := emitPipelineStageStart(ctx, chatManage, "rerank", "筛选相关内容")
 	beforePrepare := len(chatManage.SearchResult)
 	candidateLimit := adaptiveRerankCandidateLimit(chatManage)
 	chatManage.SearchResult = prepareRerankCandidates(chatManage.SearchResult, candidateLimit)
@@ -79,6 +80,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		pipelineInfo(ctx, "Rerank", "skip", map[string]interface{}{
 			"reason": "empty_search_result",
 		})
+		emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "没有需要筛选的内容", stageStarted, true)
 		return next()
 	}
 	// Get rerank model from service
@@ -88,6 +90,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 			"model_id": chatManage.RerankModelID,
 			"error":    err.Error(),
 		})
+		emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "相关内容筛选失败", stageStarted, false)
 		return ErrGetRerankModel.WithError(err)
 	}
 
@@ -218,12 +221,14 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		pipelineWarn(ctx, "Rerank", "output", map[string]interface{}{
 			"filtered_cnt": 0,
 		})
+		emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "未筛选出相关内容", stageStarted, false)
 		return ErrSearchNothing
 	}
 
 	pipelineInfo(ctx, "Rerank", "output", map[string]interface{}{
 		"filtered_cnt": len(chatManage.RerankResult),
 	})
+	emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "相关内容筛选完成", stageStarted, true)
 	return next()
 }
 

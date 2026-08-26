@@ -3148,7 +3148,9 @@ export default {
   },
   agentStream: {
     tools: {
+      queryUnderstand: 'Анализ вопроса',
       searchKnowledge: 'Поиск по базе знаний',
+      rerank: 'Отбор релевантных материалов',
       grepChunks: 'Поиск по текстовому шаблону',
       webSearch: 'Веб-поиск',
       webFetch: 'Загрузка веб-страницы',

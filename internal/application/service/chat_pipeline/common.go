@@ -7,12 +7,15 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/common"
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
 )
 
 var regThinkTags = regexp.MustCompile(`(?s)<think>.*?</think>`)
@@ -30,6 +33,23 @@ func pipelineWarn(ctx context.Context, stage, action string, fields map[string]i
 // pipelineError logs pipeline error level entries.
 func pipelineError(ctx context.Context, stage, action string, fields map[string]interface{}) {
 	common.PipelineError(ctx, stage, action, fields)
+}
+
+func emitPipelineStageStart(ctx context.Context, chatManage *types.ChatManage, name, hint string) (string, time.Time) {
+	started := time.Now()
+	if chatManage.EventBus == nil {
+		return "", started
+	}
+	id := uuid.NewString()
+	chatManage.EventBus.Emit(ctx, types.Event{Type: types.EventType(event.EventAgentToolCall), SessionID: chatManage.SessionID, Data: event.AgentToolCallData{ToolCallID: id, ToolName: name, Hint: hint}})
+	return id, started
+}
+
+func emitPipelineStageResult(ctx context.Context, chatManage *types.ChatManage, id, name, output string, started time.Time, success bool) {
+	if chatManage.EventBus == nil || id == "" {
+		return
+	}
+	chatManage.EventBus.Emit(ctx, types.Event{Type: types.EventType(event.EventAgentToolResult), SessionID: chatManage.SessionID, Data: event.AgentToolResultData{ToolCallID: id, ToolName: name, Output: output, Success: success, Duration: time.Since(started).Milliseconds()}})
 }
 
 // prepareChatModel shared logic to prepare chat model and options

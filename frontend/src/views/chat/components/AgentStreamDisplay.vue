@@ -453,8 +453,10 @@ const DOMPurifyConfig = {
 };
 
 const TOOL_NAME_KEYS: Record<string, string> = {
+  query_understand: 'agentStream.tools.queryUnderstand',
   search_knowledge: 'agentStream.tools.searchKnowledge',
   knowledge_search: 'agentStream.tools.searchKnowledge',
+  rerank: 'agentStream.tools.rerank',
   grep_chunks: 'agentStream.tools.grepChunks',
   web_search: 'agentStream.tools.webSearch',
   web_fetch: 'agentStream.tools.webFetch',

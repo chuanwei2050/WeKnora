@@ -3560,7 +3560,9 @@ export default {
   },
   agentStream: {
     tools: {
+      queryUnderstand: "理解问题",
       searchKnowledge: "知识库检索",
+      rerank: "筛选相关内容",
       grepChunks: "文本模式搜索",
       webSearch: "网络搜索",
       webFetch: "网页抓取",

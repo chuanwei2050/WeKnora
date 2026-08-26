@@ -101,6 +101,7 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 		})
 		return next()
 	}
+	stageID, stageStarted := emitPipelineStageStart(ctx, chatManage, "knowledge_search", "检索知识库")
 
 	pipelineInfo(ctx, "SearchParallel", "start", map[string]interface{}{
 		"session_id":    chatManage.SessionID,
@@ -190,11 +191,13 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	})
 
 	if len(chatManage.SearchResult) == 0 {
+		emitPipelineStageResult(ctx, chatManage, stageID, "knowledge_search", "未找到相关内容", stageStarted, false)
 		if err, ok := errs["chunk_search"]; ok {
 			return err
 		}
 		return ErrSearchNothing
 	}
 
+	emitPipelineStageResult(ctx, chatManage, stageID, "knowledge_search", "知识检索完成", stageStarted, true)
 	return next()
 }

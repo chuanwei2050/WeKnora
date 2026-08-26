@@ -219,7 +219,18 @@ func deepseekRequestCustomizer(
 		logger.Infof(context.Background(), "deepseek model, skip tool_choice")
 		req.ToolChoice = nil
 	}
-	return nil, false
+	if opts == nil || opts.Thinking == nil {
+		return nil, false
+	}
+
+	thinkingType := "disabled"
+	if *opts.Thinking {
+		thinkingType = "enabled"
+	}
+	return ThinkingChatCompletionRequest{
+		ChatCompletionRequest: *req,
+		Thinking:              &ThinkingConfig{Type: thinkingType},
+	}, true
 }
 
 // genericRequestCustomizer 自定义 Generic 请求

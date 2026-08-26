@@ -3554,7 +3554,9 @@ export default {
   },
   agentStream: {
     tools: {
+      queryUnderstand: 'Understand Question',
       searchKnowledge: 'Knowledge Search',
+      rerank: 'Filter Relevant Content',
       grepChunks: 'Text Pattern Search',
       webSearch: 'Web Search',
       webFetch: 'Web Fetch',

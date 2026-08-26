@@ -39,6 +39,8 @@ const (
 var (
 	allFields = []string{fieldID, fieldContent, fieldSourceID, fieldSourceType, fieldChunkID,
 		fieldKnowledgeID, fieldKnowledgeBaseID, fieldTagID, fieldIsEnabled, fieldEmbedding}
+	retrievalOutputFields = []string{fieldID, fieldContent, fieldSourceID, fieldSourceType, fieldChunkID,
+		fieldKnowledgeID, fieldKnowledgeBaseID, fieldTagID, fieldIsEnabled}
 )
 
 // NewMilvusRetrieveEngineRepository creates and initializes a new Milvus repository.
@@ -698,7 +700,7 @@ func (m *milvusRepository) VectorRetrieve(ctx context.Context,
 			searchOption.WithTemplateParam(k, v)
 		}
 	}
-	searchOption.WithOutputFields("*")
+	searchOption.WithOutputFields(retrievalOutputFields...)
 	resultSet, err := m.client.Search(ctx, searchOption)
 	if err != nil {
 		log.Errorf("[Milvus] Vector search failed: %v", err)
@@ -760,7 +762,7 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 				searchOpt.WithTemplateParam(k, v)
 			}
 		}
-		searchOpt.WithOutputFields("*")
+		searchOpt.WithOutputFields(retrievalOutputFields...)
 		resultSet, err := m.client.Search(ctx, searchOpt)
 		if err != nil {
 			log.Errorf("[Milvus] Keywords search failed: %v", err)

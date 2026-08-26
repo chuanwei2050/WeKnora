@@ -27,3 +27,19 @@ func TestNonQwenSiliconFlowDoesNotUseQwenThinkingCustomizer(t *testing.T) {
 	spec := findProviderSpec(provider.ProviderSiliconFlow, "deepseek-ai/DeepSeek-V3.1-Terminus")
 	require.Nil(t, spec)
 }
+
+func TestDeepSeekRequestDisablesThinking(t *testing.T) {
+	spec := findProviderSpec(provider.ProviderDeepSeek, "deepseek-v4-flash-vision-exp")
+	require.NotNil(t, spec)
+
+	thinking := false
+	req := newTestRemoteChat(t).BuildChatCompletionRequest(nil, &ChatOptions{Thinking: &thinking}, false)
+	custom, useRawHTTP := spec.RequestCustomizer(&req, &ChatOptions{Thinking: &thinking}, false)
+	require.True(t, useRawHTTP)
+
+	payload, err := json.Marshal(custom)
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(payload, &decoded))
+	require.Equal(t, map[string]any{"type": "disabled"}, decoded["thinking"])
+}

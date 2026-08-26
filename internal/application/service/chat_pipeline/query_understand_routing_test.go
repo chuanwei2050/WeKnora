@@ -112,6 +112,52 @@ func TestRoutingPromptUsesPreviousConversationForFollowUp(t *testing.T) {
 	}
 }
 
+func TestSimpleExplicitFactQueryFastPath(t *testing.T) {
+	manage := &types.ChatManage{PipelineRequest: types.PipelineRequest{
+		Query:            "谁有系统集成项目管理工程师证书？",
+		KnowledgeBaseIDs: []string{"kb"},
+	}}
+	if !isSimpleExplicitFactQuery(manage, nil) {
+		t.Fatal("明确的单轮事实问题应走快速路径")
+	}
+	for _, query := range []string{
+		"什么是向量数据库？",
+		"哪个方案更好？",
+		"哪里可以办理？",
+		"有多少人通过？",
+		"何时发布？",
+		"哪些人员符合复杂条件？",
+		"它还有哪些证书？",
+		"比较两个方案的区别",
+		"为什么需要这个证书？",
+		"今天多少度？",
+		"上海明天多少度？",
+		"北京天气如何？",
+		"1+1是多少？",
+		"一加一是多少？",
+		"12×8等于多少？",
+	} {
+		manage.Query = query
+		if isSimpleExplicitFactQuery(manage, nil) {
+			t.Fatalf("复杂或依赖上下文的问题不应走快速路径: %s", query)
+		}
+	}
+	manage.Query = "谁有这个证书？"
+	if isSimpleExplicitFactQuery(manage, []*types.History{{Query: "证书清单", Answer: "..."}}) {
+		t.Fatal("有历史上下文的问题不应走快速路径")
+	}
+	manage.Query = "谁是现任美国总统？"
+	manage.WebSearchEnabled = true
+	if isSimpleExplicitFactQuery(manage, nil) {
+		t.Fatal("启用联网搜索时不应绕过意图和复杂度判断")
+	}
+	manage.WebSearchEnabled = false
+	manage.KnowledgeBaseIDs = nil
+	if isSimpleExplicitFactQuery(manage, nil) {
+		t.Fatal("没有明确知识库范围时不应强制走知识库快速路径")
+	}
+}
+
 func TestShouldUseGraphRequiresRelationSignal(t *testing.T) {
 	if ShouldUseGraph(&types.ChatManage{PipelineRequest: types.PipelineRequest{Query: "什么是向量数据库？"}}) {
 		t.Fatal("ordinary fact question should not trigger graph")
