@@ -1,10 +1,21 @@
 package types
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"time"
 
 	"gorm.io/gorm"
 )
+
+const IntegrationPublicFolderName = "公共知识"
+
+// IntegrationPublicFolderID returns the stable virtual folder ID used by the
+// integration API for a knowledge base's public knowledge container.
+func IntegrationPublicFolderID(knowledgeBaseID string) string {
+	sum := sha256.Sum256([]byte(knowledgeBaseID))
+	return "public-knowledge-" + hex.EncodeToString(sum[:])
+}
 
 // KnowledgeTag represents a tag (category) under a specific knowledge base.
 // Tags are scoped by knowledge base (and tenant) and are used to categorize

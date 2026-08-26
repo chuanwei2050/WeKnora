@@ -58,18 +58,25 @@ var (
 	ErrImageNotParse = errors.New("image not parse without enable multimodel")
 )
 
-// ListIntegrationFolders returns selectable real folders for the integration API.
+// ListIntegrationFolders returns ordinary folders and one virtual public folder.
 func (s *knowledgeService) ListIntegrationFolders(ctx context.Context, tenantID uint64, kbID string) ([]*types.KnowledgeTag, error) {
 	tags, err := s.listAllIntegrationTags(ctx, tenantID, kbID)
 	if err != nil {
 		return nil, err
 	}
-	result := make([]*types.KnowledgeTag, 0, len(tags))
+	result := make([]*types.KnowledgeTag, 0, len(tags)+1)
 	for _, tag := range tags {
-		if tag != nil && tag.Name != types.UntaggedTagName {
+		if tag != nil && !tag.IsPublic && tag.Name != types.UntaggedTagName {
 			result = append(result, tag)
 		}
 	}
+	result = append(result, &types.KnowledgeTag{
+		ID:              types.IntegrationPublicFolderID(kbID),
+		TenantID:        tenantID,
+		KnowledgeBaseID: kbID,
+		Name:            types.IntegrationPublicFolderName,
+		IsPublic:        true,
+	})
 	return result, nil
 }
 
@@ -88,40 +95,68 @@ func (s *knowledgeService) listAllIntegrationTags(ctx context.Context, tenantID 
 	}
 }
 
-// ResolveIntegrationFolderIDs validates explicit folders, expands their descendants,
-// and adds public folders from the knowledge bases that own the explicit folders.
+// ResolveIntegrationFolderIDs validates explicit folders and expands ordinary
+// descendants or a selected virtual public folder into real tag IDs.
 func (s *knowledgeService) ResolveIntegrationFolderIDs(ctx context.Context, tenantID uint64, kbIDs, explicitIDs, knowledgeIDs []string) ([]string, error) {
 	allowedKBs := make(map[string]struct{}, len(kbIDs))
+	publicFolderKBs := make(map[string]string, len(kbIDs))
 	for _, kbID := range kbIDs {
 		allowedKBs[kbID] = struct{}{}
+		publicFolderKBs[types.IntegrationPublicFolderID(kbID)] = kbID
 	}
 	resolved := make(map[string]struct{}, len(explicitIDs))
-	selectedKBs := make(map[string]struct{})
+	selectedOrdinaryKBs := make(map[string]struct{})
+	selectedPublicKBs := make(map[string]struct{})
 	if len(explicitIDs) > 0 {
-		tags, err := s.tagRepo.GetByIDs(ctx, tenantID, explicitIDs)
-		if err != nil || len(tags) != len(explicitIDs) {
+		seen := make(map[string]struct{}, len(explicitIDs))
+		realIDs := make([]string, 0, len(explicitIDs))
+		for _, id := range explicitIDs {
+			if _, duplicate := seen[id]; duplicate {
+				return nil, errors.New("invalid_folder_ids")
+			}
+			seen[id] = struct{}{}
+			if kbID, virtual := publicFolderKBs[id]; virtual {
+				selectedPublicKBs[kbID] = struct{}{}
+				continue
+			}
+			realIDs = append(realIDs, id)
+		}
+		tags, err := s.tagRepo.GetByIDs(ctx, tenantID, realIDs)
+		if err != nil || len(tags) != len(realIDs) {
 			return nil, errors.New("invalid_folder_ids")
 		}
 		for _, tag := range tags {
-			if tag == nil || tag.Name == types.UntaggedTagName {
+			if tag == nil || tag.IsPublic || tag.Name == types.UntaggedTagName {
 				return nil, errors.New("invalid_folder_ids")
 			}
 			if _, ok := allowedKBs[tag.KnowledgeBaseID]; !ok {
 				return nil, errors.New("invalid_folder_ids")
 			}
 			resolved[tag.ID] = struct{}{}
-			selectedKBs[tag.KnowledgeBaseID] = struct{}{}
+			selectedOrdinaryKBs[tag.KnowledgeBaseID] = struct{}{}
 		}
+	}
+	selectedKBs := make(map[string]struct{}, len(selectedOrdinaryKBs)+len(selectedPublicKBs))
+	for kbID := range selectedOrdinaryKBs {
+		selectedKBs[kbID] = struct{}{}
+	}
+	for kbID := range selectedPublicKBs {
+		selectedKBs[kbID] = struct{}{}
 	}
 	for kbID := range selectedKBs {
 		tags, err := s.listAllIntegrationTags(ctx, tenantID, kbID)
 		if err != nil {
 			return nil, err
 		}
-		for _, tag := range tags {
-			if tag != nil && tag.IsPublic {
-				resolved[tag.ID] = struct{}{}
+		if _, publicSelected := selectedPublicKBs[kbID]; publicSelected {
+			for _, tag := range tags {
+				if tag != nil && tag.IsPublic {
+					resolved[tag.ID] = struct{}{}
+				}
 			}
+		}
+		if _, ordinarySelected := selectedOrdinaryKBs[kbID]; !ordinarySelected {
+			continue
 		}
 		for changed := true; changed; {
 			changed = false

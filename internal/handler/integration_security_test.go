@@ -342,6 +342,31 @@ func TestIntegrationKnowledgeListSearchFiltersByFoldersAndSearchEnabled(t *testi
 	require.Equal(t, "可搜索", response.Data[0]["tag_name"])
 }
 
+func TestIntegrationKnowledgeListSearchKeepsExplicitEmptyFolderScope(t *testing.T) {
+	handler, _ := newFolderEndpointHandler(t, map[string]*types.KnowledgeBase{"kb-1": {ID: "kb-1", TenantID: 1}}, nil)
+	handler.knowledges = folderEndpointKnowledgeService{
+		knowledges: []*types.Knowledge{{ID: "doc-1", KnowledgeBaseID: "kb-1", TagID: "folder-1"}},
+		resolved:   []string{},
+	}
+	principal := &integrationauth.Principal{TenantID: 1, KnowledgeBaseIDs: []string{"kb-1"}, Scopes: []string{"knowledge:read"}}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	body := `{"folder_ids":["` + types.IntegrationPublicFolderID("kb-1") + `"]}`
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/integration/v1/knowledge-bases/kb-1/knowledge/search", strings.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Params = gin.Params{{Key: "knowledge_base_id", Value: "kb-1"}}
+	ctx.Set("integrationPrincipal", principal)
+
+	handler.SearchKnowledgeList(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Data []map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Empty(t, response.Data)
+}
+
 func TestIntegrationKnowledgeListSearchRejectsInvalidFilterParameters(t *testing.T) {
 	handler, _ := newFolderEndpointHandler(t, map[string]*types.KnowledgeBase{"kb-1": {ID: "kb-1", TenantID: 1}}, nil)
 	principal := &integrationauth.Principal{ClientID: "client-1", TenantID: 1, KnowledgeBaseIDs: []string{"kb-1"}, Scopes: []string{"knowledge:read"}}

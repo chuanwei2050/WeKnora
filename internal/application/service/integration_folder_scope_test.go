@@ -112,18 +112,19 @@ func TestIntegrationFolderScopeReadsAllPages(t *testing.T) {
 
 	folders, err := service.ListIntegrationFolders(t.Context(), 1, "kb-1")
 	require.NoError(t, err)
-	require.Equal(t, []string{"ordinary-1", "ordinary-child", "public-1"}, folderIDs(folders))
+	require.Equal(t, []string{"ordinary-1", "ordinary-child", types.IntegrationPublicFolderID("kb-1")}, folderIDs(folders))
 
 	ids, err := service.ResolveIntegrationFolderIDs(t.Context(), 1, []string{"kb-1", "kb-2"}, []string{"ordinary-1"}, nil)
 	require.NoError(t, err)
-	require.Equal(t, []string{"ordinary-1", "ordinary-child", "public-1"}, ids)
+	require.Equal(t, []string{"ordinary-1", "ordinary-child"}, ids)
 }
 
-func TestListIntegrationFoldersReturnsOrdinaryAndPublicFolders(t *testing.T) {
+func TestListIntegrationFoldersCollapsesPublicFolders(t *testing.T) {
 	service := integrationFolderServiceFixture()
 	folders, err := service.ListIntegrationFolders(t.Context(), 1, "kb-1")
 	require.NoError(t, err)
-	require.Equal(t, []string{"ordinary-1", "ordinary-child", "public-1"}, folderIDs(folders))
+	require.Equal(t, []string{"ordinary-1", "ordinary-child", types.IntegrationPublicFolderID("kb-1")}, folderIDs(folders))
+	require.Equal(t, types.IntegrationPublicFolderName, folders[2].Name)
 }
 
 func folderIDs(folders []*types.KnowledgeTag) []string {
@@ -134,11 +135,15 @@ func folderIDs(folders []*types.KnowledgeTag) []string {
 	return ids
 }
 
-func TestResolveIntegrationFolderIDsExpandsDescendantsAndMergesPublicFoldersFromExplicitFolderKBs(t *testing.T) {
+func TestResolveIntegrationFolderIDsIncludesPublicFoldersOnlyWhenSelected(t *testing.T) {
 	service := integrationFolderServiceFixture()
-	ids, err := service.ResolveIntegrationFolderIDs(t.Context(), 1, []string{"kb-1", "kb-2"}, []string{"ordinary-1", "ordinary-2", "public-1"}, []string{"doc-in", "doc-public"})
+	ids, err := service.ResolveIntegrationFolderIDs(t.Context(), 1, []string{"kb-1", "kb-2"}, []string{"ordinary-1", types.IntegrationPublicFolderID("kb-1")}, []string{"doc-in", "doc-public"})
 	require.NoError(t, err)
-	require.Equal(t, []string{"ordinary-1", "ordinary-2", "ordinary-child", "public-1", "public-2"}, ids)
+	require.Equal(t, []string{"ordinary-1", "ordinary-child", "public-1"}, ids)
+
+	ids, err = service.ResolveIntegrationFolderIDs(t.Context(), 1, []string{"kb-1", "kb-2"}, []string{types.IntegrationPublicFolderID("kb-2")}, nil)
+	require.NoError(t, err)
+	require.Equal(t, []string{"public-2"}, ids)
 }
 
 func TestResolveIntegrationFolderIDsRejectsInvalidScopes(t *testing.T) {
@@ -146,6 +151,7 @@ func TestResolveIntegrationFolderIDsRejectsInvalidScopes(t *testing.T) {
 	for name, ids := range map[string][]string{
 		"uncategorized": {"uncategorized"},
 		"cross kb":      {"foreign"},
+		"real public":   {"public-1"},
 		"unknown":       {"missing"},
 		"duplicate":     {"ordinary-1", "ordinary-1"},
 	} {
@@ -160,7 +166,7 @@ func TestResolveIntegrationFolderIDsAcceptsOrdinaryChild(t *testing.T) {
 	service := integrationFolderServiceFixture()
 	ids, err := service.ResolveIntegrationFolderIDs(t.Context(), 1, []string{"kb-1"}, []string{"ordinary-child"}, nil)
 	require.NoError(t, err)
-	require.Equal(t, []string{"ordinary-child", "public-1"}, ids)
+	require.Equal(t, []string{"ordinary-child"}, ids)
 }
 
 func TestResolveIntegrationFolderIDsRejectsDocumentOutsideFinalScope(t *testing.T) {
