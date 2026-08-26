@@ -3862,12 +3862,6 @@ export default {
       vlmModelDesc: "用于图片分析的视觉语言模型",
       vlmModelPlaceholder: "请选择 VLM 模型",
       vlmModelRequired: "启用图片上传时必须选择 VLM 模型",
-      storageProvider: "图片存储",
-      storageProviderDesc: "选择图片文件的存储引擎，留空则使用系统默认",
-      storageProviderPlaceholder: "选择存储引擎",
-      storageDefault: "系统默认",
-      notConfigured: "未配置",
-      goStorageSettings: "去存储设置中配置",
     },
     audioUpload: {
       label: "语音上传",

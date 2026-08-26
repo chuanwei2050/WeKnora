@@ -3856,12 +3856,6 @@ export default {
       vlmModelDesc: 'Vision language model for image analysis',
       vlmModelPlaceholder: 'Select VLM model',
       vlmModelRequired: 'VLM model is required when image upload is enabled',
-      storageProvider: 'Image Storage',
-      storageProviderDesc: 'Storage engine for uploaded images. Leave empty to use system default',
-      storageProviderPlaceholder: 'Select storage engine',
-      storageDefault: 'System Default',
-      notConfigured: 'Not Configured',
-      goStorageSettings: 'Go to Storage Settings',
     },
     audioUpload: {
       label: 'Audio Upload',

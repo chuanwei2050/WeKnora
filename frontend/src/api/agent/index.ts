@@ -77,7 +77,7 @@ export interface CustomAgentConfig {
   // ===== 图片上传/多模态设置 =====
   image_upload_enabled?: boolean;    // 是否启用图片上传（默认: false）
   vlm_model_id?: string;            // VLM模型ID（图片分析用）
-  image_storage_provider?: string;   // 图片存储提供商
+  image_storage_provider?: string;   // 已废弃：图片存储统一使用平台管理员配置
   attachment_upload_enabled?: boolean; // 是否启用附件上传（默认: false）
   audio_upload_enabled?: boolean;    // 是否启用音频上传/ASR转录（默认: false）
   asr_model_id?: string;            // ASR模型ID（音频转录用）

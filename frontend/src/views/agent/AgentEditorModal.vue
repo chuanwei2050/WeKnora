@@ -398,39 +398,6 @@
                       </div>
                     </div>
 
-                    <!-- 图片存储 Provider（图片上传启用时） -->
-                    <div v-if="formData.config.image_upload_enabled" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.imageUpload.storageProvider') }}</label>
-                        <p class="desc">{{ $t('agentEditor.imageUpload.storageProviderDesc') }}</p>
-                      </div>
-                      <div class="setting-control" style="flex-direction: column; align-items: flex-end;">
-                        <t-select
-                          v-model="formData.config.image_storage_provider"
-                          style="width: 280px;"
-                          :placeholder="$t('agentEditor.imageUpload.storageProviderPlaceholder')"
-                          clearable
-                        >
-                          <t-option value="" :label="$t('agentEditor.imageUpload.storageDefault')" />
-                          <t-option
-                            v-for="opt in imageStorageOptions"
-                            :key="opt.value"
-                            :value="opt.value"
-                            :label="opt.label"
-                            :disabled="opt.disabled"
-                          >
-                            <span class="select-option-with-tag">
-                              <span>{{ opt.label }}</span>
-                              <t-tag v-if="opt.disabled" theme="warning" variant="light" size="small">{{ $t('agentEditor.imageUpload.notConfigured') }}</t-tag>
-                            </span>
-                          </t-option>
-                        </t-select>
-                        <a href="javascript:void(0)" class="go-settings-link" @click.prevent="uiStore.openSettings('storage')">
-                          {{ $t('agentEditor.imageUpload.goStorageSettings') }}
-                        </a>
-                      </div>
-                    </div>
-
                     <!-- 附件上传 -->
                     <div class="setting-row">
                       <div class="setting-info">
@@ -1458,7 +1425,7 @@ import { listKnowledgeBases } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { listSkills, type SkillInfo } from '@/api/skill';
 import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider';
-import { getAgentConfig, getConversationConfig, getStorageEngineStatus, getPromptTemplates, type StorageEngineStatusItem, type PromptTemplate } from '@/api/system';
+import { getAgentConfig, getConversationConfig, getPromptTemplates, type PromptTemplate } from '@/api/system';
 import { useUIStore } from '@/stores/ui';
 import { useAuthStore } from '@/stores/auth';
 import { useOrganizationStore } from '@/stores/organization';
@@ -1531,23 +1498,6 @@ const webSearchProviderList = ref<WebSearchProviderEntity[]>([]);
 const skillOptions = ref<{ name: string; description: string }[]>([]);
 // 是否允许启用 Skills（取决于后端沙箱是否启用，disabled 时为 false；未请求前为 false 避免闪显）
 const skillsAvailable = ref(false);
-// 存储引擎可用状态（用于图片存储 provider 选择）
-const storageEngineStatus = ref<StorageEngineStatusItem[]>([]);
-const imageStorageOptions = computed(() => {
-  const statusMap: Record<string, boolean> = {};
-  for (const e of storageEngineStatus.value) {
-    statusMap[e.name] = e.available;
-  }
-  return [
-    { value: 'local', label: t('settings.storage.engineLocal'), disabled: false },
-    { value: 'minio', label: 'MinIO', disabled: statusMap.minio === false },
-    { value: 'cos', label: t('settings.storage.engineCos'), disabled: statusMap.cos === false },
-    { value: 'tos', label: t('settings.storage.engineTos'), disabled: statusMap.tos === false },
-    { value: 's3', label: 'Amazon S3', disabled: statusMap.s3 === false },
-    { value: 'oss', label: t('settings.storage.engineOss'), disabled: statusMap.oss === false },
-  ];
-});
-
 // 系统默认配置（用于内置智能体显示默认提示词）
 const defaultAgentSystemPrompt = ref('');  // Agent 模式的默认系统提示词（来自 agent-config）
 const defaultNormalSystemPrompt = ref('');  // 普通模式的默认系统提示词（来自 conversation-config）
@@ -2632,15 +2582,9 @@ watch(() => uiStore.showSettingsModal, async (visible, prevVisible) => {
   // 从设置页面返回时（弹窗关闭），刷新模型列表
   if (prevVisible && !visible && props.visible) {
     try {
-      const [models, statusRes] = await Promise.all([
-        listModels(),
-        getStorageEngineStatus(),
-      ]);
+      const models = await listModels();
       if (models && models.length > 0) {
         allModels.value = models;
-      }
-      if (statusRes?.data?.engines) {
-        storageEngineStatus.value = statusRes.data.engines;
       }
     } catch (e) {
       console.warn('Failed to refresh data after settings closed', e);
@@ -2749,16 +2693,6 @@ const loadDependencies = async () => {
       }
     } catch (e) {
       console.warn('Failed to load prompt templates for agent type presets', e);
-    }
-
-    // 加载存储引擎可用状态（用于图片存储 provider 选择）
-    try {
-      const statusRes = await getStorageEngineStatus();
-      if (statusRes?.data?.engines) {
-        storageEngineStatus.value = statusRes.data.engines;
-      }
-    } catch (e) {
-      console.warn('Failed to load storage engine status', e);
     }
 
     // 加载网络搜索引擎配置列表
@@ -4044,24 +3978,6 @@ const handleSave = async () => {
   gap: 8px;
   align-items: center;
   width: 100%;
-}
-
-.select-option-with-tag {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  gap: 8px;
-}
-
-.go-settings-link {
-  font-size: 12px;
-  color: var(--td-brand-color);
-  margin-top: 4px;
-  text-decoration: none;
-  &:hover {
-    text-decoration: underline;
-  }
 }
 
 // 名称输入框带头像预览

@@ -23,7 +23,7 @@ const (
 // This is always called when images are present. VLM analysis is handled
 // separately (either in the pipeline rewrite step for RAG paths, or via
 // analyzeImageAttachments for pure chat paths with non-vision models).
-func (h *Handler) saveImageAttachments(ctx context.Context, images []ImageAttachment, tenantID uint64, storageProvider string) error {
+func (h *Handler) saveImageAttachments(ctx context.Context, images []ImageAttachment, tenantID uint64) error {
 	if len(images) == 0 {
 		return nil
 	}
@@ -31,7 +31,7 @@ func (h *Handler) saveImageAttachments(ctx context.Context, images []ImageAttach
 		return fmt.Errorf("too many images, max %d", maxImagesCount)
 	}
 
-	fileSvc := h.resolveImageFileService(ctx, storageProvider)
+	fileSvc := h.resolveImageFileService(ctx)
 
 	for i := range images {
 		img := &images[i]
@@ -140,21 +140,17 @@ func mimeToExt(mime string) string {
 	}
 }
 
-func (h *Handler) resolveImageFileService(ctx context.Context, storageProvider string) interfaces.FileService {
-	if strings.TrimSpace(storageProvider) == "" {
-		return h.fileService
-	}
-
+func (h *Handler) resolveImageFileService(ctx context.Context) interfaces.FileService {
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if tenant == nil || tenant.StorageEngineConfig == nil {
 		return h.fileService
 	}
 
-	svc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(storageProvider, tenant.StorageEngineConfig, "")
+	svc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig("", tenant.StorageEngineConfig, "")
 	if err != nil {
-		logger.Warnf(ctx, "[image-storage] failed to create %s file service: %v, fallback to default", storageProvider, err)
+		logger.Warnf(ctx, "[image-storage] failed to create platform default file service: %v, fallback to startup default", err)
 		return h.fileService
 	}
-	logger.Infof(ctx, "[image-storage] using provider=%s for image uploads", resolvedProvider)
+	logger.Infof(ctx, "[image-storage] using platform default provider=%s for image uploads", resolvedProvider)
 	return svc
 }
