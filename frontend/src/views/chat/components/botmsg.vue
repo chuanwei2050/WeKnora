@@ -738,21 +738,23 @@ onBeforeUnmount(() => {
         }
         
         &:nth-child(2) {
-            animation-delay: 0.2s;
+            animation-delay: -0.2s;
         }
         
         &:nth-child(3) {
-            animation-delay: 0.4s;
+            animation-delay: -0.4s;
         }
     }
 }
 
 @keyframes typingBounce {
-    0%, 60%, 100% {
+    0%, 100% {
         transform: translateY(0);
+        opacity: 0.45;
     }
-    30% {
-        transform: translateY(-8px);
+    50% {
+        transform: translateY(-6px);
+        opacity: 1;
     }
 }
 

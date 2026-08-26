@@ -326,12 +326,22 @@ watch([() => route.params], (newvalue) => {
         getmsgList(data);
     }
 });
+let scrollPending = false;
+let forceScrollPending = false;
 const scrollToBottom = (force = false) => {
     if (!force && userHasScrolledUp.value) return;
+    forceScrollPending = forceScrollPending || force;
+    if (scrollPending) return;
+    scrollPending = true;
     nextTick(() => {
-        if (scrollContainer.value) {
-            scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight;
-        }
+        requestAnimationFrame(() => {
+            const shouldScroll = forceScrollPending || !userHasScrolledUp.value;
+            forceScrollPending = false;
+            scrollPending = false;
+            if (shouldScroll && scrollContainer.value) {
+                scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight;
+            }
+        });
     })
 }
 const onClickScrollToBottom = () => {
@@ -711,18 +721,6 @@ watch(error, (newError) => {
 
 // 处理流式数据
 onChunk((data) => {
-    // 日志：打印接收到的事件
-    console.log('[Agent Event Received]', {
-        response_type: data.response_type,
-        id: data.id,
-        done: data.done,
-        content_length: data.content?.length || 0,
-        content_preview: data.content ? data.content.substring(0, 50) : '',
-        data: data.data,
-        session_id: data.session_id,
-        assistant_message_id: data.assistant_message_id
-    });
-    
     // 处理 agent query 事件 - 保存 assistant message ID 并保持 loading 状态
     if (data.response_type === 'agent_query') {
         if (data.assistant_message_id) {
@@ -1158,18 +1156,10 @@ const handleAgentChunk = (data) => {
             // 最终答案
             message.thinking = false;
             
-            console.log('[Answer Event] Received:', {
-                has_content: !!data.content,
-                content_length: data.content?.length || 0,
-                done: data.done,
-                current_message_content_length: message.content?.length || 0
-            });
-            
             // 只有当有实际内容时才追加，避免空内容覆盖
             if (data.content || data.data?.replace_content) {
                 message.content = mergeStreamContent(message.content || '', data);
                 fullContent.value = mergeStreamContent(fullContent.value, data);
-                console.log('[Answer] Content appended, new length:', message.content.length);
             }
             
             // Add or update answer event in agentEventStream
@@ -1189,7 +1179,6 @@ const handleAgentChunk = (data) => {
             // 只有当有实际内容时才更新 answerEvent.content
             if (data.content) {
                 answerEvent.content = message.content;
-                console.log('[Answer] answerEvent.content updated, length:', answerEvent.content.length);
             }
 
             // 检查是否为 fallback 回答
@@ -1633,22 +1622,24 @@ onBeforeRouteUpdate((to, from, next) => {
             }
             
             &:nth-child(2) {
-                animation-delay: 0.2s;
+                animation-delay: -0.2s;
             }
             
             &:nth-child(3) {
-                animation-delay: 0.4s;
+                animation-delay: -0.4s;
             }
         }
     }
 }
 
 @keyframes typingBounce {
-    0%, 60%, 100% {
+    0%, 100% {
         transform: translateY(0);
+        opacity: 0.45;
     }
-    30% {
-        transform: translateY(-8px);
+    50% {
+        transform: translateY(-6px);
+        opacity: 1;
     }
 }
 
