@@ -436,6 +436,10 @@ onMounted(async () => {
   align-items: flex-start;
   justify-content: flex-end;
   min-width: 360px;
+
+  :deep(.t-input-number) {
+    width: 160px;
+  }
 }
 
 .setting-control-full {
