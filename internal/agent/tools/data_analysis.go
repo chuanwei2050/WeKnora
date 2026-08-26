@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -32,6 +33,11 @@ var dataAnalysisTool = BaseTool{
 // excelSheetNameColumn is the name of the synthetic column that identifies
 // which Excel sheet a row came from when multiple sheets are unioned together.
 const excelSheetNameColumn = "__sheet_name"
+
+const (
+	dataAnalysisQueryTimeout    = 10 * time.Second
+	maxDeterministicTextColumns = 32
+)
 
 // sqlSingleQuoteEscape escapes single quotes in a string so it can be safely
 // embedded inside a single-quoted SQL literal.
@@ -78,6 +84,7 @@ func reconcileSQLColumnsWithSchema(sqlText string, schema *TableSchema) (string,
 }
 
 var sqlTableReferencePattern = regexp.MustCompile(`(?i)\b(FROM|JOIN)\s+(?:"[^"]+"|[a-zA-Z_][a-zA-Z0-9_-]*)`)
+var simpleContainsFilterPattern = regexp.MustCompile(`(?is)^\s*(?:"(?:""|[^"])+"|[\p{L}_][\p{L}\p{N}_$]*)\s+(?:LIKE|ILIKE)\s+'%((?:''|[^'])+)%'\s*;?\s*$`)
 
 func reconcileSQLTableWithSchema(sqlText string, schema *TableSchema) string {
 	if schema == nil || strings.TrimSpace(schema.TableName) == "" {
@@ -90,6 +97,57 @@ func reconcileSQLTableWithSchema(sqlText string, schema *TableSchema) string {
 		}
 		return parts[0] + ` "` + schema.TableName + `"`
 	})
+}
+
+func quoteDuckDBIdentifier(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
+}
+
+func buildDeterministicTextLookup(sqlText string, schema *TableSchema, maxRows int) (string, []interface{}, string, bool) {
+	if schema == nil || len(schema.Columns) == 0 {
+		return "", nil, "", false
+	}
+	normalized := strings.ToLower(sqlText)
+	for _, marker := range []string{" group by ", " having ", " order by ", " distinct ", "count(", "sum(", "avg(", "min(", "max("} {
+		if strings.Contains(normalized, marker) {
+			return "", nil, "", false
+		}
+	}
+	whereIndex := strings.Index(normalized, " where ")
+	if whereIndex < 0 {
+		return "", nil, "", false
+	}
+
+	match := simpleContainsFilterPattern.FindStringSubmatch(sqlText[whereIndex+7:])
+	if len(match) < 2 {
+		return "", nil, "", false
+	}
+	term := strings.TrimSpace(strings.ReplaceAll(match[1], "''", "'"))
+	if term == "" {
+		return "", nil, "", false
+	}
+
+	predicates := make([]string, 0, len(schema.Columns))
+	args := make([]interface{}, 0, len(schema.Columns))
+	for _, column := range schema.Columns {
+		columnType := strings.ToUpper(column.Type)
+		if !strings.Contains(columnType, "CHAR") && !strings.Contains(columnType, "TEXT") && !strings.Contains(columnType, "STRING") {
+			continue
+		}
+		if len(predicates) >= maxDeterministicTextColumns {
+			return "", nil, "", false
+		}
+		predicates = append(predicates, fmt.Sprintf("strpos(lower(coalesce(cast(%s AS VARCHAR), '')), lower(?)) > 0", quoteDuckDBIdentifier(column.Name)))
+		args = append(args, term)
+	}
+	if len(predicates) == 0 {
+		return "", nil, "", false
+	}
+	if maxRows <= 0 || maxRows > 1000 {
+		maxRows = 1000
+	}
+	query := fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT %d", quoteDuckDBIdentifier(schema.TableName), strings.Join(predicates, " OR "), maxRows)
+	return query, args, term, true
 }
 
 func buildMissingColumnSuggestion(sqlErr error, schema *TableSchema) string {
@@ -256,15 +314,23 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 
 	executionSQL := input.Sql
+	var executionArgs []interface{}
+	if deterministicSQL, args, _, ok := buildDeterministicTextLookup(input.Sql, schema, input.MaxRows); ok {
+		executionSQL = deterministicSQL
+		executionArgs = args
+		logger.Infof(ctx, "[Tool][DataAnalysis] Using deterministic cross-column lookup for session %s", t.sessionID)
+	}
 	if input.MaxRows < 0 || input.MaxRows > 10000 {
 		return &types.ToolResult{Success: false, Error: "max_rows must be between 1 and 10000"}, fmt.Errorf("invalid max_rows")
 	}
-	if input.MaxRows > 0 {
+	if input.MaxRows > 0 && len(executionArgs) == 0 {
 		executionSQL = fmt.Sprintf("SELECT * FROM (%s) AS limited_result LIMIT %d", strings.TrimSpace(strings.TrimSuffix(input.Sql, ";")), input.MaxRows)
 	}
 	logger.Infof(ctx, "[Tool][DataAnalysis] Received SQL query for session %s: %s", t.sessionID, executionSQL)
 	// Execute single query and get results
-	results, err := t.executeSingleQuery(ctx, executionSQL)
+	queryCtx, cancel := context.WithTimeout(ctx, dataAnalysisQueryTimeout)
+	defer cancel()
+	results, err := t.executeSingleQuery(queryCtx, executionSQL, executionArgs...)
 	if err != nil {
 		if suggestion := buildMissingColumnSuggestion(err, schema); suggestion != "" {
 			return &types.ToolResult{
@@ -303,8 +369,8 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 //   - []string: merged column names (existing + new columns, deduplicated)
 //   - []map[string]string: query results
 //   - error: any error that occurred during execution
-func (t *DataAnalysisTool) executeSingleQuery(ctx context.Context, sqlQuery string) ([]map[string]string, error) {
-	rows, err := t.db.QueryContext(ctx, sqlQuery)
+func (t *DataAnalysisTool) executeSingleQuery(ctx context.Context, sqlQuery string, args ...interface{}) ([]map[string]string, error) {
+	rows, err := t.db.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][DataAnalysis] Query execution failed: %v", err)
 		return nil, fmt.Errorf("query execution failed: %w", err)

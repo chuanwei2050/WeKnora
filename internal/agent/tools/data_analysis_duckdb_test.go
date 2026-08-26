@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "github.com/duckdb/duckdb-go/v2"
@@ -32,6 +33,116 @@ func TestExecuteRejectsNestedSubquery(t *testing.T) {
 	result, err := tool.Execute(ctx, payload)
 	if err == nil || result == nil || result.Success {
 		t.Fatalf("nested subquery was not rejected: result=%+v err=%v", result, err)
+	}
+}
+
+func TestBuildDeterministicTextLookupSearchesEveryTextColumn(t *testing.T) {
+	schema := &TableSchema{TableName: "people", Columns: []ColumnInfo{
+		{Name: "姓名", Type: "VARCHAR"},
+		{Name: "证书分类", Type: "VARCHAR"},
+		{Name: "证书详情", Type: "VARCHAR"},
+		{Name: "数量", Type: "INTEGER"},
+	}}
+	query, args, term, ok := buildDeterministicTextLookup(
+		`SELECT 姓名 FROM "people" WHERE 证书分类 LIKE '%系统集成项目管理工程师%'`, schema, 1000,
+	)
+	if !ok || term != "系统集成项目管理工程师" {
+		t.Fatalf("lookup was not recognized: ok=%v term=%q", ok, term)
+	}
+	for _, column := range []string{`"姓名"`, `"证书分类"`, `"证书详情"`} {
+		if !strings.Contains(query, column) {
+			t.Fatalf("query does not search text column %s: %s", column, query)
+		}
+	}
+	if strings.Contains(query, `"数量"`) || len(args) != 3 {
+		t.Fatalf("query included non-text columns or wrong args: query=%s args=%v", query, args)
+	}
+}
+
+func TestBuildDeterministicTextLookupLeavesAggregateSQLUnchanged(t *testing.T) {
+	schema := &TableSchema{TableName: "people", Columns: []ColumnInfo{{Name: "证书", Type: "VARCHAR"}}}
+	_, _, _, ok := buildDeterministicTextLookup(
+		`SELECT COUNT(*) FROM "people" WHERE 证书 LIKE '%工程师%'`, schema, 1000,
+	)
+	if ok {
+		t.Fatal("aggregate SQL must stay on the model-generated SQL path")
+	}
+}
+
+func TestBuildDeterministicTextLookupPreservesAdditionalFilters(t *testing.T) {
+	schema := &TableSchema{TableName: "people", Columns: []ColumnInfo{{Name: "证书", Type: "VARCHAR"}}}
+	_, _, _, ok := buildDeterministicTextLookup(
+		`SELECT * FROM "people" WHERE 证书 LIKE '%工程师%' AND 地点 = '成都'`, schema, 1000,
+	)
+	if ok {
+		t.Fatal("SQL with additional filters must stay on the model-generated SQL path")
+	}
+}
+
+func TestBuildDeterministicTextLookupPreservesNegativeAndAlternativeFilters(t *testing.T) {
+	schema := &TableSchema{TableName: "people", Columns: []ColumnInfo{
+		{Name: "证书", Type: "VARCHAR"},
+		{Name: "备注", Type: "VARCHAR"},
+	}}
+	for _, query := range []string{
+		`SELECT * FROM "people" WHERE 证书 NOT LIKE '%工程师%'`,
+		`SELECT * FROM "people" WHERE 证书 LIKE '%工程师%' OR 备注 LIKE '%工程师%'`,
+		`SELECT * FROM "people" WHERE 证书 LIKE '%工程师%' LIMIT 1`,
+		`SELECT * FROM "people" WHERE 证书 LIKE '%工程师%' OFFSET 1`,
+	} {
+		if _, _, _, ok := buildDeterministicTextLookup(query, schema, 1000); ok {
+			t.Fatalf("negative or alternative filter must stay on the model-generated SQL path: %s", query)
+		}
+	}
+}
+
+func TestBuildDeterministicTextLookupRejectsWideTables(t *testing.T) {
+	columns := make([]ColumnInfo, maxDeterministicTextColumns+1)
+	for index := range columns {
+		columns[index] = ColumnInfo{Name: fmt.Sprintf("字段%d", index), Type: "VARCHAR"}
+	}
+	schema := &TableSchema{TableName: "wide_table", Columns: columns}
+	if _, _, _, ok := buildDeterministicTextLookup(
+		`SELECT * FROM "wide_table" WHERE "字段0" LIKE '%工程师%'`, schema, 1000,
+	); ok {
+		t.Fatal("wide tables must stay on the model-generated SQL path")
+	}
+}
+
+func TestDeterministicTextLookupReturnsMatchesFromDifferentColumns(t *testing.T) {
+	db, err := sql.Open("duckdb", ":memory:")
+	if err != nil {
+		t.Fatalf("open DuckDB: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `CREATE TABLE people (姓名 VARCHAR, 证书分类 VARCHAR, 证书详情 VARCHAR)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO people VALUES
+		('许乃汉', '系统集成项目管理工程师', ''),
+		('夏雨欣', '', '计算机与软件专业技术资格 系统集成项目管理工程师（中级）'),
+		('其他人', '软件测试工程师', '')`); err != nil {
+		t.Fatalf("insert rows: %v", err)
+	}
+	schema := &TableSchema{TableName: "people", Columns: []ColumnInfo{
+		{Name: "姓名", Type: "VARCHAR"},
+		{Name: "证书分类", Type: "VARCHAR"},
+		{Name: "证书详情", Type: "VARCHAR"},
+	}}
+	query, args, _, ok := buildDeterministicTextLookup(
+		`SELECT 姓名 FROM people WHERE 证书分类 LIKE '%系统集成项目管理工程师%'`, schema, 1000,
+	)
+	if !ok {
+		t.Fatal("expected deterministic lookup")
+	}
+	tool := &DataAnalysisTool{db: db}
+	rows, err := tool.executeSingleQuery(ctx, query, args...)
+	if err != nil {
+		t.Fatalf("execute lookup: %v", err)
+	}
+	if len(rows) != 2 || rows[0]["姓名"] != "许乃汉" || rows[1]["姓名"] != "夏雨欣" {
+		t.Fatalf("expected both matching people, got %#v", rows)
 	}
 }
 

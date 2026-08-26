@@ -177,7 +177,7 @@ func (p *PluginDataAnalysis) OnEvent(
 	// Create a new SearchResult for the analysis output
 	analysisResult := &types.SearchResult{
 		ID:                   "analysis_" + knowledge.ID,
-		Content:              "结构化查询结果：请优先依据以下 SQL 查询结果，并结合其他检索证据回答。\n\n" + toolResult.Output,
+		Content:              dataAnalysisEvidenceInstruction + "\n\n" + toolResult.Output,
 		Score:                1.0,
 		MatchType:            types.MatchTypeDataAnalysis,
 		KnowledgeID:          knowledge.ID,
@@ -192,6 +192,8 @@ func (p *PluginDataAnalysis) OnEvent(
 	finishStage()
 	return next()
 }
+
+const dataAnalysisEvidenceInstruction = "结构化查询结果：请与其他检索证据交叉核对后回答。统计、聚合、排序和计算类问题以 SQL 结果为准；普通事实和列举类问题不得因 SQL 未命中而忽略其他证据。"
 
 func dataAnalysisPrompt(query, knowledgeID, schemaDescription, evidence string) string {
 	quotedEvidence, _ := json.Marshal(evidence)
