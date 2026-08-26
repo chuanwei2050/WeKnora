@@ -85,6 +85,11 @@ describe('stream lifecycle', () => {
 
     expect(fetchEventSource).toHaveBeenCalledTimes(1)
     activeOptions.onmessage({ data: JSON.stringify({ response_type: 'complete', done: true }) })
+
+    expect(stream.isStreaming.value).toBe(false)
+    await stream.startStream({ ...request, query: 'next question' })
+    expect(fetchEventSource).toHaveBeenCalledTimes(1)
+
     activeOptions.onclose()
     finishRequest()
     await activeRequest

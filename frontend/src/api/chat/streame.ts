@@ -27,6 +27,7 @@ export function useStream() {
   const isLoading = ref(false)        // 初始加载
   const error = ref<string | null>(null)// 错误信息
   let controller = new AbortController()
+  let connectionActive = false
 
   // 流式渲染缓冲
   let buffer: string[] = []
@@ -34,9 +35,10 @@ export function useStream() {
 
   // 启动流式请求
   const startStream = async (params: StreamRequestParams) => {
-    if (isStreaming.value) return;
+    if (connectionActive) return;
 
     // 重置状态
+    connectionActive = true;
     output.value = '';
     error.value = null;
     isStreaming.value = true;
@@ -166,7 +168,12 @@ export function useStream() {
           }
           const parsed = isIntegrationWidget ? mapIntegrationEvent(raw) : raw;
           if (!parsed) return;
-          if (isTerminalStreamResponse(parsed)) receivedTerminalEvent = true;
+          if (isTerminalStreamResponse(parsed)) {
+            receivedTerminalEvent = true;
+            // The answer is complete even if the connection remains briefly open
+            // for a late session_title event.
+            isStreaming.value = false;
+          }
           buffer.push(parsed); // 数据存入缓冲
           // 执行自定义处理
           if (chunkHandler) {
@@ -207,6 +214,7 @@ export function useStream() {
   const stopStream = () => {
     controller.abort();
     controller = new AbortController(); // 重置控制器（如需重新发起）
+    connectionActive = false;
     isStreaming.value = false;
     isLoading.value = false;
   }
