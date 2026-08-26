@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
@@ -21,8 +24,19 @@ func (s *knowledgeBaseService) GetQueryEmbedding(ctx context.Context, kbID strin
 	}
 
 	currentTenantID := types.MustTenantIDFromContext(ctx)
-	var embeddingModel embedding.Embedder
+	modelCtx := ctx
 
+	if kb.TenantID != currentTenantID {
+		modelCtx = context.WithValue(ctx, types.TenantIDContextKey, kb.TenantID)
+	}
+
+	modelConfig, _ := s.modelService.GetModelByID(modelCtx, kb.EmbeddingModelID)
+	cacheKey := queryEmbeddingCacheKey(kb, modelConfig, strings.TrimSpace(queryText))
+	if cached, ok := s.loadQueryEmbeddingCache(ctx, cacheKey); ok {
+		return cached, nil
+	}
+
+	var embeddingModel embedding.Embedder
 	if kb.TenantID != currentTenantID {
 		embeddingModel, err = s.modelService.GetEmbeddingModelForTenant(ctx, kb.EmbeddingModelID, kb.TenantID)
 	} else {
@@ -32,8 +46,49 @@ func (s *knowledgeBaseService) GetQueryEmbedding(ctx context.Context, kbID strin
 		logger.Errorf(ctx, "GetQueryEmbedding: failed to get embedding model %s: %v", kb.EmbeddingModelID, err)
 		return nil, err
 	}
+	embedded, err := embeddingModel.Embed(ctx, queryText)
+	if err != nil {
+		return nil, err
+	}
+	s.storeQueryEmbeddingCache(ctx, cacheKey, embedded)
+	return embedded, nil
+}
 
-	return embeddingModel.Embed(ctx, queryText)
+func queryEmbeddingCacheKey(kb *types.KnowledgeBase, model *types.Model, query string) string {
+	modelVersion := kb.EmbeddingModelID
+	if model != nil {
+		modelVersion = fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%d",
+			model.ID, model.Name, model.Parameters.BaseURL,
+			model.Parameters.EmbeddingParameters.Dimension, model.UpdatedAt.UnixNano())
+	}
+	payload := fmt.Sprintf("%d\x00%s\x00%s", kb.TenantID, modelVersion, query)
+	return fmt.Sprintf("rag:query-embedding:v1:%x", sha256.Sum256([]byte(payload)))
+}
+
+func (s *knowledgeBaseService) loadQueryEmbeddingCache(ctx context.Context, key string) ([]float32, bool) {
+	if s.embeddingCache == nil || key == "" {
+		return nil, false
+	}
+	raw, err := s.embeddingCache.Get(ctx, key).Bytes()
+	if err != nil {
+		return nil, false
+	}
+	var embedding []float32
+	if err := json.Unmarshal(raw, &embedding); err != nil || len(embedding) == 0 {
+		return nil, false
+	}
+	return embedding, true
+}
+
+func (s *knowledgeBaseService) storeQueryEmbeddingCache(ctx context.Context, key string, embedding []float32) {
+	if s.embeddingCache == nil || key == "" || len(embedding) == 0 {
+		return
+	}
+	raw, err := json.Marshal(embedding)
+	if err != nil {
+		return
+	}
+	_ = s.embeddingCache.Set(ctx, key, raw, queryEmbeddingCacheTTL).Err()
 }
 
 // ResolveEmbeddingModelKeys resolves embedding model IDs to their actual model
@@ -250,7 +305,6 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	vectorKnowledgeIDs []string,
 	vectorMatchCount, keywordMatchCount int,
 ) ([]types.RetrieveParams, error) {
-	currentTenantID := types.MustTenantIDFromContext(ctx)
 	var retrieveParams []types.RetrieveParams
 
 	// The platform default supplies a missing embedding model ID. Only the
@@ -267,31 +321,13 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 			queryEmbedding = params.QueryEmbedding
 			logger.Infof(ctx, "Using pre-computed query embedding, vector length: %d", len(queryEmbedding))
 		} else {
-			logger.Infof(ctx, "Getting embedding model, model ID: %s", kb.EmbeddingModelID)
-
-			// Check if this is a cross-tenant shared knowledge base
-			// For shared KB, we must use the source tenant's embedding model to ensure vector compatibility
-			var embeddingModel embedding.Embedder
-			var err error
-			if kb.TenantID != currentTenantID {
-				logger.Infof(ctx, "Cross-tenant knowledge base detected, using source tenant's embedding model. KB tenant: %d, current tenant: %d", kb.TenantID, currentTenantID)
-				embeddingModel, err = s.modelService.GetEmbeddingModelForTenant(ctx, kb.EmbeddingModelID, kb.TenantID)
-			} else {
-				embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
-			}
-
-			if err != nil {
-				logger.Errorf(ctx, "Failed to get embedding model, model ID: %s, error: %v", kb.EmbeddingModelID, err)
-				return nil, err
-			}
-			logger.Infof(ctx, "Embedding model retrieved: %v", embeddingModel)
-
 			logger.Info(ctx, "Starting to generate query embedding")
-			queryEmbedding, err = embeddingModel.Embed(ctx, params.QueryText)
+			embedded, err := s.GetQueryEmbedding(ctx, kb.ID, params.QueryText)
 			if err != nil {
 				logger.Errorf(ctx, "Failed to embed query text, query text: %s, error: %v", params.QueryText, err)
 				return nil, err
 			}
+			queryEmbedding = embedded
 			logger.Infof(ctx, "Query embedding generated successfully, embedding vector length: %d", len(queryEmbedding))
 		}
 

@@ -17,6 +17,7 @@ import (
 // Used for tracking conversation context and history
 type History struct {
 	Query               string     // User query text
+	OriginalQuery       string     // User query without persisted RAG context
 	Answer              string     // System response text
 	CreateAt            time.Time  // When this history entry was created
 	KnowledgeReferences References // Knowledge references used in the answer

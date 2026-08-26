@@ -2,6 +2,8 @@ package chatpipeline
 
 import (
 	"context"
+	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -110,6 +112,11 @@ func TestRoutingPromptUsesPreviousConversationForFollowUp(t *testing.T) {
 	if system == "" || !strings.Contains(user, "介绍这份规范") || !strings.Contains(user, "它的发布日期呢？") {
 		t.Fatalf("follow-up context was not included: system=%q user=%q", system, user)
 	}
+	for _, subtype := range []string{"explicit_fact", "contextual_fact", "multi_hop", "unknown"} {
+		if !strings.Contains(system, subtype) {
+			t.Fatalf("routing prompt must constrain subtype %q: %s", subtype, system)
+		}
+	}
 }
 
 func TestExplicitFactQueryUsesModelRouting(t *testing.T) {
@@ -141,6 +148,20 @@ func TestExplicitFactQueryUsesModelRouting(t *testing.T) {
 	}
 	if model.calls != 1 || !nextCalled {
 		t.Fatalf("explicit fact query bypassed model routing: calls=%d next=%v", model.calls, nextCalled)
+	}
+	if model.opts == nil || len(model.opts.Format) == 0 {
+		t.Fatal("routing request must enforce its structured output schema")
+	}
+	var schema struct {
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(model.opts.Format, &schema); err != nil {
+		t.Fatalf("invalid routing schema: %v", err)
+	}
+	for _, field := range []string{"complexity_level", "reasoning_subtype", "needs_entity_relation", "confidence"} {
+		if !slices.Contains(schema.Required, field) {
+			t.Fatalf("routing schema does not require %q: %s", field, model.opts.Format)
+		}
 	}
 	if manage.RewriteQuery != "系统集成项目管理工程师证书" || manage.RoutingDecision == nil {
 		t.Fatalf("model routing result was not applied: rewrite=%q routing=%#v", manage.RewriteQuery, manage.RoutingDecision)

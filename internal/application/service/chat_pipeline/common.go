@@ -19,6 +19,7 @@ import (
 )
 
 var regThinkTags = regexp.MustCompile(`(?s)<think>.*?</think>`)
+var regQuotedMessage = regexp.MustCompile(`(?s)<quoted_message>.*?</quoted_message>`)
 
 // pipelineInfo logs pipeline info level entries.
 func pipelineInfo(ctx context.Context, stage, action string, fields map[string]interface{}) {
@@ -103,7 +104,11 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 
 	// Add conversation history (already limited by maxRounds in load_history/rewrite plugins)
 	for _, history := range chatManage.History {
-		chatMessages = append(chatMessages, chat.Message{Role: "user", Content: history.Query})
+		query := history.Query
+		if history.OriginalQuery != "" {
+			query = history.OriginalQuery
+		}
+		chatMessages = append(chatMessages, chat.Message{Role: "user", Content: query})
 		chatMessages = append(chatMessages, chat.Message{Role: "assistant", Content: history.Answer})
 	}
 
@@ -140,6 +145,7 @@ func loadAndProcessHistory(
 			h = &types.History{}
 		}
 		if message.Role == "user" {
+			h.OriginalQuery = historicalUserContent(message)
 			if message.RenderedContent != "" {
 				h.Query = message.RenderedContent
 			} else {
@@ -173,6 +179,21 @@ func loadAndProcessHistory(
 
 	slices.Reverse(historyList)
 	return historyList, nil
+}
+
+// historicalUserContent rebuilds the non-RAG parts of a persisted user turn.
+// RenderedContent may contain retrieved evidence that must not leak into later
+// turns, while images, quoted messages and attachments remain valid context.
+func historicalUserContent(message *types.Message) string {
+	content := message.Content
+	if desc := extractImageCaptions(message.Images); desc != "" {
+		content += "\n\n[用户上传图片内容]\n" + desc
+	}
+	if quoted := regQuotedMessage.FindString(message.RenderedContent); quoted != "" {
+		content += "\n\n" + quoted
+	}
+	content += message.Attachments.BuildPrompt()
+	return content
 }
 
 // extractImageCaptions concatenates non-empty Caption fields from stored

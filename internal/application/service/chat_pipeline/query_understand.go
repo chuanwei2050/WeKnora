@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 )
 
@@ -82,7 +83,7 @@ func ClassifyQuery(ctx context.Context, model chat.Chat, appConfig *config.Confi
 	response, err := model.Chat(ctx, []chat.Message{
 		{Role: "system", Content: systemContent},
 		{Role: "user", Content: userContent},
-	}, &chat.ChatOptions{Temperature: 0.3, MaxCompletionTokens: 150, Thinking: &thinking})
+	}, routingChatOptions(&thinking, 150))
 	if err != nil {
 		decision := conservativeRoutingDecision(chatManage, types.DegradationMissingCapability)
 		return &decision, fmt.Errorf("classify query: %w", err)
@@ -265,11 +266,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	response, err := rewriteModel.Chat(ctx, []chat.Message{
 		{Role: "system", Content: systemContent},
 		userMsg,
-	}, &chat.ChatOptions{
-		Temperature:         0.3,
-		MaxCompletionTokens: maxTokens,
-		Thinking:            &thinking,
-	})
+	}, routingChatOptions(&thinking, maxTokens))
 	if err != nil {
 		if toolCallID != "" && chatManage.EventBus != nil {
 			chatManage.EventBus.Emit(ctx, types.Event{
@@ -363,6 +360,15 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	stageSuccess = true
 	finishStage()
 	return next()
+}
+
+func routingChatOptions(thinking *bool, maxTokens int) *chat.ChatOptions {
+	return &chat.ChatOptions{
+		Temperature:         0.3,
+		MaxCompletionTokens: maxTokens,
+		Thinking:            thinking,
+		Format:              utils.GenerateSchema[queryUnderstandOutput](),
+	}
 }
 
 // updateUserMessageImageCaption writes the generated ImageDescription back to
@@ -502,7 +508,7 @@ func (p *PluginQueryUnderstand) buildPrompts(chatManage *types.ChatManage, histo
 		"language":     chatManage.Language,
 	}
 	if chatManage.ComplexityRouting.Enabled {
-		systemPrompt += "\nReturn JSON fields complexity_level (L1/L2/L3/L4), reasoning_subtype, needs_entity_relation (true only when entity relations, hierarchy, or multi-hop graph reasoning is needed), confidence (0..1), and rationale_summary (one short sentence, no chain-of-thought)."
+		systemPrompt += "\nReturn JSON fields complexity_level (L1/L2/L3/L4), reasoning_subtype (one of explicit_fact, contextual_fact, comparison, multi_hop, causal, hypothetical, transfer, unknown), needs_entity_relation (true only when entity relations, hierarchy, or multi-hop graph reasoning is needed), confidence (0..1), and rationale_summary (one short sentence, no chain-of-thought)."
 		systemPrompt = AppendComplexityFewShotExamples(systemPrompt, chatManage.ComplexityRouting.FewShot, defaultComplexityFewShotLimit)
 	}
 
