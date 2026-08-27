@@ -36,6 +36,21 @@ type batchSearchSessionService struct {
 	calls     int
 }
 
+type duplicateBatchSearchSessionService struct {
+	interfaces.SessionService
+}
+
+func (duplicateBatchSearchSessionService) SearchKnowledge(_ context.Context, knowledgeBaseIDs []string, _ []string, _ bool, _ string) ([]*types.SearchResult, error) {
+	return []*types.SearchResult{{
+		ID:                 "shared-chunk",
+		KnowledgeBaseID:    knowledgeBaseIDs[0],
+		KnowledgeID:        "doc-1",
+		KnowledgeVersionID: "version-1",
+		Content:            "shared evidence",
+		Score:              0.9,
+	}}, nil
+}
+
 func (s *batchSearchSessionService) SearchKnowledgeWithFolders(_ context.Context, knowledgeBaseIDs []string, knowledgeIDs []string, folderIDs []string, filterDisabledFolders bool, query string) ([]*types.SearchResult, error) {
 	s.mu.Lock()
 	s.folderIDs = append([]string(nil), folderIDs...)
@@ -458,7 +473,7 @@ func TestApplyIntegrationBatchBudgetDeduplicatesAndDistributesFairly(t *testing.
 		{ID: "q-3", Status: "completed", Results: []gin.H{result("q3", "丙")}},
 	}
 
-	got, stats := applyIntegrationBatchBudget(input, 3, 10)
+	got, stats := applyIntegrationBatchBudget(input, 3, 10, false)
 	require.Equal(t, []string{"shared", "q2-extra", "q3"}, []string{
 		got[0].Results[0]["chunk_id"].(string),
 		got[1].Results[0]["chunk_id"].(string),
@@ -469,13 +484,93 @@ func TestApplyIntegrationBatchBudgetDeduplicatesAndDistributesFairly(t *testing.
 	require.Equal(t, 4, stats.ContentChars)
 }
 
+func TestApplyIntegrationBatchBudgetPreservesDuplicatesWhenRequested(t *testing.T) {
+	result := func() gin.H {
+		return gin.H{
+			"knowledge_id":         "doc-1",
+			"knowledge_version_id": "version-1",
+			"chunk_id":             "shared",
+			"content":              "共享",
+		}
+	}
+	input := []integrationBatchSearchResult{
+		{ID: "q-1", Status: "completed", Results: []gin.H{result()}},
+		{ID: "q-2", Status: "completed", Results: []gin.H{result()}},
+	}
+
+	got, stats := applyIntegrationBatchBudget(input, 10, 10, true)
+
+	require.Len(t, got[0].Results, 1)
+	require.Len(t, got[1].Results, 1)
+	require.Equal(t, 2, stats.AfterResults)
+	require.Equal(t, 4, stats.ContentChars)
+}
+
+func TestIntegrationBatchSearchPreserveDuplicatesHTTPContract(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&integrationauth.Audit{}))
+
+	handler := &IntegrationHandler{
+		service:  integrationauth.NewService(db, nil, nil),
+		kbs:      batchSearchKnowledgeBaseService{},
+		sessions: duplicateBatchSearchSessionService{},
+		limiter:  newIntegrationRateLimiter(),
+		limits: integrationLimits{
+			maxRequestBytes: 1024, maxKnowledgeBases: 5, maxKnowledgeIDs: 10,
+			maxBatchQueries: 5, batchConcurrency: 2, maxQueryBytes: 100, maxTopK: 10,
+		},
+	}
+	principal := &integrationauth.Principal{
+		ClientID: "client-1", TenantID: 1,
+		KnowledgeBaseIDs: []string{"kb-1"}, Scopes: []string{"rag:search"},
+	}
+	router := gin.New()
+	router.POST("/api/integration/v1/rag/search-batch", func(c *gin.Context) {
+		c.Set("integrationPrincipal", principal)
+		handler.SearchBatch(c)
+	})
+	server := httptest.NewServer(router)
+	t.Cleanup(server.Close)
+
+	for _, test := range []struct {
+		name               string
+		preserveDuplicates string
+		wantResultCounts   []int
+	}{
+		{name: "omitted defaults to deduplication", wantResultCounts: []int{1, 0}},
+		{name: "false keeps deduplication", preserveDuplicates: `,"preserve_duplicates":false`, wantResultCounts: []int{1, 0}},
+		{name: "true preserves duplicates", preserveDuplicates: `,"preserve_duplicates":true`, wantResultCounts: []int{1, 1}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := `{"knowledge_base_ids":["kb-1"],"queries":[{"id":"q-1","query":"first"},{"id":"q-2","query":"second"}]` + test.preserveDuplicates + `}`
+			response, err := http.Post(server.URL+"/api/integration/v1/rag/search-batch", "application/json", strings.NewReader(body))
+			require.NoError(t, err)
+			defer response.Body.Close()
+			require.Equal(t, http.StatusOK, response.StatusCode)
+
+			var payload struct {
+				Success bool `json:"success"`
+				Data    struct {
+					Results []integrationBatchSearchResult `json:"results"`
+				} `json:"data"`
+			}
+			require.NoError(t, json.NewDecoder(response.Body).Decode(&payload))
+			require.True(t, payload.Success)
+			require.Len(t, payload.Data.Results, 2)
+			require.Len(t, payload.Data.Results[0].Results, test.wantResultCounts[0])
+			require.Len(t, payload.Data.Results[1].Results, test.wantResultCounts[1])
+		})
+	}
+}
+
 func TestApplyIntegrationBatchBudgetEnforcesContentCharactersWithoutTruncation(t *testing.T) {
 	input := []integrationBatchSearchResult{
 		{ID: "q-1", Status: "completed", Results: []gin.H{{"chunk_id": "too-long", "content": "一二三四"}, {"chunk_id": "fits", "content": "一二"}}},
 		{ID: "q-2", Status: "completed", Results: []gin.H{{"chunk_id": "also-fits", "content": "三"}}},
 	}
 
-	got, stats := applyIntegrationBatchBudget(input, 10, 3)
+	got, stats := applyIntegrationBatchBudget(input, 10, 3, false)
 	require.Len(t, got[0].Results, 1)
 	require.Equal(t, "fits", got[0].Results[0]["chunk_id"])
 	require.Len(t, got[1].Results, 1)

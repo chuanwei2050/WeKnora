@@ -127,8 +127,9 @@ type integrationBatchSearchQuery struct {
 }
 
 type integrationBatchSearchRequest struct {
-	KnowledgeBaseIDs *[]string                     `json:"knowledge_base_ids" binding:"required"`
-	Queries          []integrationBatchSearchQuery `json:"queries" binding:"required"`
+	KnowledgeBaseIDs   *[]string                     `json:"knowledge_base_ids" binding:"required"`
+	Queries            []integrationBatchSearchQuery `json:"queries" binding:"required"`
+	PreserveDuplicates bool                          `json:"preserve_duplicates"`
 }
 
 type integrationBatchSearchResult struct {
@@ -1150,6 +1151,7 @@ func (h *IntegrationHandler) SearchBatch(c *gin.Context) {
 		results,
 		batchConfig.BatchMaxResults,
 		batchConfig.BatchMaxContentChars,
+		req.PreserveDuplicates,
 	)
 	logger.Infof(c.Request.Context(), "Integration batch response budget applied: before=%d after=%d content_chars=%d affected_queries=%d",
 		budgetStats.BeforeResults, budgetStats.AfterResults, budgetStats.ContentChars, budgetStats.AffectedQueries)
@@ -1266,7 +1268,7 @@ type integrationBatchBudgetStats struct {
 	AffectedQueries int
 }
 
-func applyIntegrationBatchBudget(results []integrationBatchSearchResult, maxResults, maxContentChars int) ([]integrationBatchSearchResult, integrationBatchBudgetStats) {
+func applyIntegrationBatchBudget(results []integrationBatchSearchResult, maxResults, maxContentChars int, preserveDuplicates bool) ([]integrationBatchSearchResult, integrationBatchBudgetStats) {
 	if maxResults <= 0 {
 		maxResults = types.DefaultBatchMaxResults
 	}
@@ -1292,7 +1294,10 @@ func applyIntegrationBatchBudget(results []integrationBatchSearchResult, maxResu
 				remainingCandidates = true
 				candidate := results[i].Results[positions[i]]
 				positions[i]++
-				identity := integrationBatchResultIdentity(candidate)
+				identity := ""
+				if !preserveDuplicates {
+					identity = integrationBatchResultIdentity(candidate)
+				}
 				if identity != "" {
 					if _, duplicate := seen[identity]; duplicate {
 						continue
