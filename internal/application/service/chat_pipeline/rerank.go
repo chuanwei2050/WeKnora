@@ -298,7 +298,7 @@ func preserveStrongKeywordResults(
 	}
 	missing := make([]*types.SearchResult, 0)
 	for _, candidate := range candidates {
-		if candidate.MatchType != types.MatchTypeKeywords || candidate.Metadata["keyword_leader"] != "true" {
+		if !candidate.KeywordLeader {
 			continue
 		}
 		if _, exists := seen[candidate.ID]; exists {

@@ -73,11 +73,36 @@ func TestMarkKeywordLeaderUsesPerSearchRankInsteadOfRawScore(t *testing.T) {
 	}
 
 	markKeywordLeader(results, keyword)
-	if results[0].Metadata["keyword_leader"] != "true" {
+	if !results[0].KeywordLeader {
 		t.Fatal("expected the retrieval-ranked leader to be marked")
 	}
-	if results[1].Metadata["keyword_leader"] == "true" {
+	if results[1].KeywordLeader {
 		t.Fatal("raw scores must not redefine the per-search leader")
+	}
+}
+
+func TestMarkKeywordLeaderKeepsOneLeaderPerKnowledgeBase(t *testing.T) {
+	results := []*types.SearchResult{
+		{ID: "kb-a-first"},
+		{ID: "kb-a-second"},
+		{ID: "kb-b-first"},
+	}
+	keyword := []*types.IndexWithScore{
+		{ChunkID: "kb-a-first", KnowledgeBaseID: "kb-a"},
+		{ChunkID: "kb-a-second", KnowledgeBaseID: "kb-a"},
+		{ChunkID: "kb-b-first", KnowledgeBaseID: "kb-b"},
+	}
+
+	markKeywordLeader(results, keyword)
+
+	if !results[0].KeywordLeader {
+		t.Fatal("expected first knowledge base leader to be marked")
+	}
+	if results[1].KeywordLeader {
+		t.Fatal("expected only one keyword leader per knowledge base")
+	}
+	if !results[2].KeywordLeader {
+		t.Fatal("expected second knowledge base leader to be marked")
 	}
 }
 

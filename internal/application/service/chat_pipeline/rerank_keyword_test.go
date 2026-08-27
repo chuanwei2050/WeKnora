@@ -9,7 +9,7 @@ import (
 func TestPreserveStrongKeywordResultsRestoresOmittedExactMatch(t *testing.T) {
 	semantic := &types.SearchResult{ID: "semantic", MatchType: types.MatchTypeEmbedding, Score: 0.8}
 	keywordTop := &types.SearchResult{ID: "keyword-top", MatchType: types.MatchTypeKeywords, Score: 21.1}
-	exact := &types.SearchResult{ID: "exact", MatchType: types.MatchTypeKeywords, Score: 19.36, Metadata: map[string]string{"keyword_leader": "true"}}
+	exact := &types.SearchResult{ID: "exact", MatchType: types.MatchTypeKeywords, Score: 19.36, KeywordLeader: true}
 	weak := &types.SearchResult{ID: "weak", MatchType: types.MatchTypeKeywords, Score: 10}
 
 	got := preserveStrongKeywordResults(
@@ -28,8 +28,48 @@ func TestPreserveStrongKeywordResultsRestoresOmittedExactMatch(t *testing.T) {
 	}
 }
 
+func TestPreserveStrongKeywordResultsRestoresFusedKeywordLeader(t *testing.T) {
+	semantic := &types.SearchResult{ID: "semantic", MatchType: types.MatchTypeEmbedding, Score: 0.8}
+	fusedLeader := &types.SearchResult{
+		ID:            "fused-keyword-leader",
+		MatchType:     types.MatchTypeEmbedding,
+		Score:         0.7,
+		KeywordLeader: true,
+	}
+
+	got := preserveStrongKeywordResults(
+		[]*types.SearchResult{semantic},
+		[]*types.SearchResult{semantic, fusedLeader},
+		3,
+	)
+
+	if len(got) != 2 || got[1] != fusedLeader {
+		t.Fatalf("fused keyword leader was not preserved: %+v", got)
+	}
+}
+
+func TestPreserveStrongKeywordResultsIgnoresForgedMetadata(t *testing.T) {
+	semantic := &types.SearchResult{ID: "semantic", MatchType: types.MatchTypeEmbedding, Score: 0.8}
+	forged := &types.SearchResult{
+		ID:        "forged",
+		MatchType: types.MatchTypeEmbedding,
+		Score:     0.7,
+		Metadata:  map[string]string{"keyword_leader": "true"},
+	}
+
+	got := preserveStrongKeywordResults(
+		[]*types.SearchResult{semantic},
+		[]*types.SearchResult{semantic, forged},
+		3,
+	)
+
+	if len(got) != 1 || got[0] != semantic {
+		t.Fatalf("document metadata must not restore a rerank-rejected candidate: %+v", got)
+	}
+}
+
 func TestPreserveStrongKeywordResultsDoesNotRestoreWeakMatch(t *testing.T) {
-	top := &types.SearchResult{ID: "top", MatchType: types.MatchTypeKeywords, Score: 20, Metadata: map[string]string{"keyword_leader": "true"}}
+	top := &types.SearchResult{ID: "top", MatchType: types.MatchTypeKeywords, Score: 20, KeywordLeader: true}
 	weak := &types.SearchResult{ID: "weak", MatchType: types.MatchTypeKeywords, Score: 10}
 
 	got := preserveStrongKeywordResults([]*types.SearchResult{top}, []*types.SearchResult{top, weak}, 3)
@@ -44,8 +84,8 @@ func TestPreserveStrongKeywordResultsReservesCapacityForEveryStrongMatch(t *test
 		{ID: "semantic-2", MatchType: types.MatchTypeEmbedding, Score: 0.8},
 		{ID: "semantic-3", MatchType: types.MatchTypeEmbedding, Score: 0.7},
 	}
-	first := &types.SearchResult{ID: "keyword-1", MatchType: types.MatchTypeKeywords, Score: 20, Metadata: map[string]string{"keyword_leader": "true"}}
-	second := &types.SearchResult{ID: "keyword-2", MatchType: types.MatchTypeKeywords, Score: 19, Metadata: map[string]string{"keyword_leader": "true"}}
+	first := &types.SearchResult{ID: "keyword-1", MatchType: types.MatchTypeKeywords, Score: 20, KeywordLeader: true}
+	second := &types.SearchResult{ID: "keyword-2", MatchType: types.MatchTypeKeywords, Score: 19, KeywordLeader: true}
 
 	got := preserveStrongKeywordResults(reranked, []*types.SearchResult{first, second}, 3)
 	if len(got) != 3 {

@@ -269,16 +269,21 @@ func markKeywordLeader(results []*types.SearchResult, keywordResults []*types.In
 	if len(keywordResults) == 0 {
 		return
 	}
-	leaderID := keywordResults[0].ChunkID
+	byID := make(map[string]*types.SearchResult, len(results))
 	for _, result := range results {
-		if result.ID != leaderID {
+		byID[result.ID] = result
+	}
+	markedKBs := make(map[string]struct{})
+	for _, keywordResult := range keywordResults {
+		if _, marked := markedKBs[keywordResult.KnowledgeBaseID]; marked {
 			continue
 		}
-		if result.Metadata == nil {
-			result.Metadata = make(map[string]string)
+		result, found := byID[keywordResult.ChunkID]
+		if !found {
+			continue
 		}
-		result.Metadata["keyword_leader"] = "true"
-		return
+		result.KeywordLeader = true
+		markedKBs[keywordResult.KnowledgeBaseID] = struct{}{}
 	}
 }
 
