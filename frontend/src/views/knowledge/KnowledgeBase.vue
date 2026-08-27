@@ -1581,15 +1581,7 @@ const handleFolderUpload = async (event: Event) => {
   const tagIdToUpload = uploadTargetTagId.value;
 
   for (const file of validFiles) {
-    const relativePath = (file as any).webkitRelativePath;
-    let fileName = file.name;
-    if (relativePath) {
-      const pathParts = relativePath.split('/');
-      if (pathParts.length > 2) {
-        const subPath = pathParts.slice(1, -1).join('/');
-        fileName = `${subPath}/${file.name}`;
-      }
-    }
+    const fileName = file.name;
 
     try {
       const metadata = buildKnowledgeUploadMetadata(

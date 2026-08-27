@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatFileSize, getFileIcon } from '@/utils/files';
 import FolderMoveCascader from './FolderMoveCascader.vue';
@@ -157,6 +157,74 @@ const someSelected = computed(() => (
   selectableIds.value.some(id => props.selectedIds.has(id)) && !allSelected.value
 ));
 
+const MIN_NAME_COLUMN_WIDTH = 220;
+const MAX_NAME_COLUMN_WIDTH = 1600;
+const NAME_COLUMN_KEYBOARD_STEP = 20;
+const nameColumnHeader = ref<HTMLElement>();
+const nameColumnWidth = ref(MIN_NAME_COLUMN_WIDTH);
+let stopNameColumnResize: (() => void) | undefined;
+
+const startNameColumnResize = (event: PointerEvent) => {
+  stopNameColumnResize?.();
+  const resizeHandle = event.currentTarget as HTMLElement;
+  const headerCell = resizeHandle.parentElement;
+  if (!headerCell) return;
+
+  event.preventDefault();
+  resizeHandle.setPointerCapture(event.pointerId);
+  const startX = event.clientX;
+  const startWidth = headerCell.getBoundingClientRect().width;
+  const onPointerMove = (moveEvent: PointerEvent) => {
+    nameColumnWidth.value = Math.min(
+      MAX_NAME_COLUMN_WIDTH,
+      Math.max(MIN_NAME_COLUMN_WIDTH, startWidth + moveEvent.clientX - startX),
+    );
+  };
+  const onPointerUp = () => stopNameColumnResize?.();
+
+  stopNameColumnResize = () => {
+    stopNameColumnResize = undefined;
+    resizeHandle.removeEventListener('pointermove', onPointerMove);
+    resizeHandle.removeEventListener('pointerup', onPointerUp);
+    resizeHandle.removeEventListener('pointercancel', onPointerUp);
+    resizeHandle.removeEventListener('lostpointercapture', onPointerUp);
+    window.removeEventListener('blur', onPointerUp);
+    if (resizeHandle.hasPointerCapture(event.pointerId)) {
+      resizeHandle.releasePointerCapture(event.pointerId);
+    }
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  };
+
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  resizeHandle.addEventListener('pointermove', onPointerMove);
+  resizeHandle.addEventListener('pointerup', onPointerUp);
+  resizeHandle.addEventListener('pointercancel', onPointerUp);
+  resizeHandle.addEventListener('lostpointercapture', onPointerUp);
+  window.addEventListener('blur', onPointerUp);
+};
+
+const resizeNameColumnWithKeyboard = (event: KeyboardEvent) => {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+  event.preventDefault();
+  const delta = event.key === 'ArrowRight' ? NAME_COLUMN_KEYBOARD_STEP : -NAME_COLUMN_KEYBOARD_STEP;
+  nameColumnWidth.value = Math.min(
+    MAX_NAME_COLUMN_WIDTH,
+    Math.max(MIN_NAME_COLUMN_WIDTH, nameColumnWidth.value + delta),
+  );
+};
+
+onMounted(() => {
+  if (nameColumnHeader.value) {
+    nameColumnWidth.value = Math.min(
+      MAX_NAME_COLUMN_WIDTH,
+      Math.max(MIN_NAME_COLUMN_WIDTH, Math.round(nameColumnHeader.value.getBoundingClientRect().width)),
+    );
+  }
+});
+onBeforeUnmount(() => stopNameColumnResize?.());
+
 const onHeaderToggle = (e: Event) => {
   const checked = (e.target as HTMLInputElement).checked;
   emit('toggle-all', checked, selectableIds.value);
@@ -174,7 +242,14 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
 </script>
 
 <template>
-  <div class="doc-list-view" :class="{ 'is-loading': loading }" :style="{ '--doc-list-actions-width': showActions ? (canEdit ? '320px' : '220px') : '0px' }">
+  <div
+    class="doc-list-view"
+    :class="{ 'is-loading': loading }"
+    :style="{
+      '--doc-list-actions-width': showActions ? (canEdit ? '320px' : '220px') : '0px',
+      '--doc-list-name-width': `${nameColumnWidth}px`,
+    }"
+  >
     <div class="doc-list-header" role="row">
       <div class="cell cell-check" role="columnheader">
         <label class="checkbox-wrap" @click.stop>
@@ -188,7 +263,21 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
           />
         </label>
       </div>
-      <div class="cell cell-name" role="columnheader">{{ t('knowledgeBase.columnName') }}</div>
+      <div ref="nameColumnHeader" class="cell cell-name" role="columnheader">
+        {{ t('knowledgeBase.columnName') }}
+        <span
+          class="column-resize-handle"
+          role="separator"
+          tabindex="0"
+          aria-orientation="vertical"
+          :aria-label="t('knowledgeBase.columnName')"
+          :aria-valuemin="MIN_NAME_COLUMN_WIDTH"
+          :aria-valuemax="MAX_NAME_COLUMN_WIDTH"
+          :aria-valuenow="nameColumnWidth"
+          @pointerdown="startNameColumnResize"
+          @keydown="resizeNameColumnWithKeyboard"
+        />
+      </div>
       <div class="cell cell-tag" role="columnheader">{{ t('knowledgeBase.columnTag') }}</div>
       <div class="cell cell-size" role="columnheader">{{ t('knowledgeBase.columnSize') }}</div>
       <div class="cell cell-type" role="columnheader">{{ t('knowledgeBase.columnType') }}</div>
@@ -320,7 +409,8 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
   background: var(--td-bg-color-container, #fff);
   border: 1px solid var(--td-component-stroke, #f0f0f0);
   border-radius: 8px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .doc-list-header,
@@ -328,7 +418,7 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
   display: grid;
   grid-template-columns:
     44px                       // checkbox
-    minmax(220px, 2.4fr)       // name
+    minmax(var(--doc-list-name-width), 2.4fr) // name
     minmax(100px, 0.9fr)       // tag
     96px                       // size
     72px                       // type
@@ -402,8 +492,33 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
 }
 
 .cell-name {
+  position: relative;
   gap: 8px;
   font-weight: 500;
+}
+
+.column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+
+  &::after {
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    left: 3px;
+    width: 1px;
+    content: '';
+    background: transparent;
+  }
+
+  &:hover::after {
+    background: var(--td-brand-color, #0052d9);
+  }
 }
 
 .cell-size,
