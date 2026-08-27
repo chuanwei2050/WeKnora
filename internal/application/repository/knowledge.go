@@ -12,6 +12,17 @@ import (
 
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
 
+const descendantTagFilterSQL = `tag_id IN (
+	WITH RECURSIVE tag_tree(id) AS (
+		SELECT id FROM knowledge_tags WHERE tenant_id = ? AND knowledge_base_id = ? AND id = ?
+		UNION
+		SELECT child.id FROM knowledge_tags child
+		JOIN tag_tree parent ON child.parent_id = parent.id
+		WHERE child.tenant_id = ? AND child.knowledge_base_id = ?
+	)
+	SELECT id FROM tag_tree
+)`
+
 // escapeLikeKeyword escapes SQL LIKE wildcards (%, _) in a keyword
 // so they are treated as literal characters.
 func escapeLikeKeyword(keyword string) string {
@@ -97,7 +108,7 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	query := r.db.WithContext(ctx).Model(&types.Knowledge{}).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?", tenantID, kbID, types.ParseStatusDeleting)
 	if tagID != "" {
-		query = query.Where("tag_id = ?", tagID)
+		query = query.Where(descendantTagFilterSQL, tenantID, kbID, tagID, tenantID, kbID)
 	}
 	if keyword != "" {
 		escaped := escapeLikeKeyword(keyword)
@@ -122,7 +133,7 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	dataQuery := r.db.Debug().WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?", tenantID, kbID, types.ParseStatusDeleting)
 	if tagID != "" {
-		dataQuery = dataQuery.Where("tag_id = ?", tagID)
+		dataQuery = dataQuery.Where(descendantTagFilterSQL, tenantID, kbID, tagID, tenantID, kbID)
 	}
 	if keyword != "" {
 		escaped := escapeLikeKeyword(keyword)

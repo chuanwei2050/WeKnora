@@ -339,6 +339,7 @@ func (h *TagHandler) UpdateTag(c *gin.Context) {
 // @Param        tag_id        path      string              true   "标签ID (UUID或seq_id)"
 // @Param        force         query     bool                false  "强制删除"
 // @Param        content_only  query     bool                false  "仅删除内容，保留标签"
+// @Param        recursive     query     bool                false  "仅在整棵子树为空时递归删除"
 // @Param        body          body      DeleteTagRequest    false  "删除选项"
 // @Success      200           {object}  map[string]interface{}  "删除成功"
 // @Failure      400           {object}  errors.AppError         "请求参数错误"
@@ -363,6 +364,7 @@ func (h *TagHandler) DeleteTag(c *gin.Context) {
 
 	force := c.Query("force") == "true"
 	contentOnly := c.Query("content_only") == "true"
+	recursive := c.Query("recursive") == "true"
 
 	var req DeleteTagRequest
 	_ = c.ShouldBindJSON(&req)
@@ -381,7 +383,7 @@ func (h *TagHandler) DeleteTag(c *gin.Context) {
 		}
 	}
 
-	if err := h.tagService.DeleteTag(effCtx, tagID, force, contentOnly, excludeUUIDs); err != nil {
+	if err := h.tagService.DeleteTag(effCtx, tagID, force, contentOnly, recursive, excludeUUIDs); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tag_id": tagID,
 		})

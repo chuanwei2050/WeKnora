@@ -330,7 +330,6 @@ const filteredDisplayTags = computed(() => {
   });
   return [...publicMatches, ...ordinaryMatches];
 });
-const isFolderNotEmpty = (tag: any) => Number(isFAQ.value ? tag.chunk_count : tag.knowledge_count) > 0;
 const hasFolderChildren = (tagId: string) => ordinaryChildTags.value.some(tag => tag.parent_id === tagId);
 const toggleOrdinaryFolder = (tagId: string) => {
   const next = new Set(collapsedOrdinaryFolderIds.value);
@@ -749,7 +748,7 @@ const tagDeleteDesc = computed(() => {
 
 const confirmDeleteTag = (tag: any) => {
   openTagMoreId.value = '';
-  if (isFolderNotEmpty(tag) || hasFolderChildren(tag.id)) {
+  if (Number(isFAQ.value ? tag.chunk_count : tag.knowledge_count) > 0) {
     MessagePlugin.warning(t('knowledgeBase.folderDeleteNotEmpty'));
     return;
   }
@@ -774,7 +773,7 @@ const confirmTagDelete = async () => {
   if (!kbId.value || !tag || tagDeleting.value) return;
   tagDeleting.value = true;
   try {
-    await deleteKnowledgeBaseTag(kbId.value, tag.seq_id, { force: false });
+    await deleteKnowledgeBaseTag(kbId.value, tag.seq_id, { force: false, recursive: true });
     MessagePlugin.success(t('knowledgeBase.tagDeleteSuccess'));
     tagDeleteDialog.value = false;
     tagPendingDelete.value = null;
@@ -1843,7 +1842,7 @@ const handleBatchMoveToFolder = async (targetTagId: string) => {
   if (!canEdit.value || batchMovingFolder.value) return;
   const target = tagMap.value[targetTagId];
   const items = selectedKnowledgeItems.value;
-  if (!target || items.length === 0 || targetTagId === selectedTagId.value) return;
+  if (!target || items.length === 0 || items.every(item => String(item.tag_id) === targetTagId)) return;
 
   batchMovingFolder.value = true;
   try {

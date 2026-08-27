@@ -578,7 +578,7 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 // @Param        id         path      string  true   "知识库ID"
 // @Param        page       query     int     false  "页码"
 // @Param        page_size  query     int     false  "每页数量"
-// @Param        tag_id     query     string  false  "标签ID筛选"
+// @Param        tag_id     query     string  false  "文件夹ID筛选（包含子文件夹）"
 // @Param        keyword    query     string  false  "关键词搜索"
 // @Param        file_type  query     string  false  "文件类型筛选"
 // @Success      200        {object}  map[string]interface{}  "知识列表"

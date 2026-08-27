@@ -21,15 +21,16 @@ func (s folderKBServiceStub) GetKnowledgeBaseByID(context.Context, string) (*typ
 
 type folderTagRepositoryStub struct {
 	interfaces.KnowledgeTagRepository
-	tags        []*types.KnowledgeTag
-	byID        map[string]*types.KnowledgeTag
-	rootIDs     []string
-	publicIDs   []string
-	childOrders map[string][]string
-	updateCall  bool
-	deleteCall  bool
-	created     *types.KnowledgeTag
-	hasChildren bool
+	tags                []*types.KnowledgeTag
+	byID                map[string]*types.KnowledgeTag
+	rootIDs             []string
+	publicIDs           []string
+	childOrders         map[string][]string
+	updateCall          bool
+	deleteCall          bool
+	created             *types.KnowledgeTag
+	hasChildren         bool
+	deleteSubtreeResult bool
 }
 
 func (s *folderTagRepositoryStub) GetByName(context.Context, uint64, string, string) (*types.KnowledgeTag, error) {
@@ -74,6 +75,11 @@ func (s *folderTagRepositoryStub) Delete(context.Context, uint64, string) error 
 
 func (s *folderTagRepositoryStub) HasChildren(context.Context, uint64, string, string) (bool, error) {
 	return s.hasChildren, nil
+}
+
+func (s *folderTagRepositoryStub) DeleteEmptySubtree(context.Context, uint64, string, string) (bool, error) {
+	s.deleteCall = s.deleteSubtreeResult
+	return s.deleteSubtreeResult, nil
 }
 
 type documentTagServiceStub struct {
@@ -242,7 +248,7 @@ func TestKnowledgeTagServiceProtectsUntaggedFolder(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, repo.updateCall)
 
-	err = svc.DeleteTag(ctx, "untagged", true, false, nil)
+	err = svc.DeleteTag(ctx, "untagged", true, false, false, nil)
 	require.Error(t, err)
 	require.False(t, repo.deleteCall)
 }
@@ -256,9 +262,23 @@ func TestKnowledgeTagServiceRejectsDeletingFolderWithChildren(t *testing.T) {
 	svc := &knowledgeTagService{repo: repo}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 
-	err := svc.DeleteTag(ctx, "parent", true, false, nil)
+	err := svc.DeleteTag(ctx, "parent", true, false, false, nil)
 	require.Error(t, err)
 	require.False(t, repo.deleteCall)
+}
+
+func TestKnowledgeTagServiceDeletesEmptySubtree(t *testing.T) {
+	tag := &types.KnowledgeTag{ID: "parent", TenantID: 1, KnowledgeBaseID: "kb", Name: "一级"}
+	repo := &folderTagRepositoryStub{
+		byID:                map[string]*types.KnowledgeTag{"parent": tag},
+		deleteSubtreeResult: true,
+	}
+	svc := &knowledgeTagService{repo: repo}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+
+	err := svc.DeleteTag(ctx, "parent", false, false, true, nil)
+	require.NoError(t, err)
+	require.True(t, repo.deleteCall)
 }
 
 func TestKnowledgeTagServiceUpdatesFolderSearchSwitch(t *testing.T) {

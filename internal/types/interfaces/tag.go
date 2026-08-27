@@ -20,7 +20,7 @@ type KnowledgeTagService interface {
 	// DeleteTag deletes a tag.
 	// When contentOnly=true, only deletes the content under the tag but keeps the tag itself.
 	// excludeIDs: IDs of chunks to exclude from deletion (only valid when deleting chunks)
-	DeleteTag(ctx context.Context, id string, force bool, contentOnly bool, excludeIDs []string) error
+	DeleteTag(ctx context.Context, id string, force bool, contentOnly bool, recursive bool, excludeIDs []string) error
 	// FindOrCreateTagByName finds a tag by name or creates it if not exists.
 	FindOrCreateTagByName(ctx context.Context, kbID string, name string) (*types.KnowledgeTag, error)
 	// ProcessIndexDelete handles async index deletion task
@@ -49,6 +49,8 @@ type KnowledgeTagRepository interface {
 	// Reorder atomically updates ordinary tag sort orders and keeps the default tag first.
 	Reorder(ctx context.Context, tenantID uint64, kbID string, rootIDs, publicIDs []string, childOrders map[string][]string) error
 	HasChildren(ctx context.Context, tenantID uint64, kbID string, parentID string) (bool, error)
+	// DeleteEmptySubtree atomically deletes a folder and all descendants only when none contain content.
+	DeleteEmptySubtree(ctx context.Context, tenantID uint64, kbID string, rootID string) (bool, error)
 	Delete(ctx context.Context, tenantID uint64, id string) error
 	// CountReferences returns number of knowledges and chunks that reference the tag.
 	CountReferences(
@@ -57,7 +59,7 @@ type KnowledgeTagRepository interface {
 		kbID string,
 		tagID string,
 	) (knowledgeCount int64, chunkCount int64, err error)
-	// BatchCountReferences returns number of knowledges and chunks for multiple tags in a single query.
+	// BatchCountReferences returns subtree knowledge and chunk counts for multiple tags.
 	// Returns a map of tagID -> {knowledgeCount, chunkCount}
 	BatchCountReferences(
 		ctx context.Context,

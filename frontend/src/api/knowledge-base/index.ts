@@ -251,9 +251,12 @@ export function reorderKnowledgeBaseTags(
   });
 }
 
-export function deleteKnowledgeBaseTag(kbId: string, tagSeqId: number, params?: { force?: boolean }) {
-  const forceQuery = params?.force ? '?force=true' : '';
-  return del(`/api/v1/knowledge-bases/${kbId}/tags/${tagSeqId}${forceQuery}`);
+export function deleteKnowledgeBaseTag(kbId: string, tagSeqId: number, params?: { force?: boolean; recursive?: boolean }) {
+  const query = new URLSearchParams();
+  if (params?.force) query.set('force', 'true');
+  if (params?.recursive) query.set('recursive', 'true');
+  const suffix = query.size ? `?${query.toString()}` : '';
+  return del(`/api/v1/knowledge-bases/${kbId}/tags/${tagSeqId}${suffix}`);
 }
 
 export function updateKnowledgeTagBatch(data: { updates: Record<string, string | null> }) {

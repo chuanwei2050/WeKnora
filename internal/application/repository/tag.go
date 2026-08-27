@@ -2,12 +2,14 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // knowledgeTagRepository is a repository for knowledge tags
@@ -201,6 +203,70 @@ func (r *knowledgeTagRepository) HasChildren(
 	return count > 0, err
 }
 
+// DeleteEmptySubtree atomically deletes a folder subtree when it contains no knowledge or chunks.
+func (r *knowledgeTagRepository) DeleteEmptySubtree(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	rootID string,
+) (bool, error) {
+	deleted := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var tags []*types.KnowledgeTag
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+			Find(&tags).Error; err != nil {
+			return err
+		}
+
+		childrenByParent := make(map[string][]string)
+		for _, tag := range tags {
+			if tag.ParentID != nil {
+				childrenByParent[*tag.ParentID] = append(childrenByParent[*tag.ParentID], tag.ID)
+			}
+		}
+		ids := make([]string, 0)
+		pending := []string{rootID}
+		visited := make(map[string]struct{})
+		for len(pending) > 0 {
+			id := pending[0]
+			pending = pending[1:]
+			if _, exists := visited[id]; exists {
+				continue
+			}
+			visited[id] = struct{}{}
+			ids = append(ids, id)
+			pending = append(pending, childrenByParent[id]...)
+		}
+
+		var knowledgeCount int64
+		if err := tx.Model(&types.Knowledge{}).
+			Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id IN ? AND parse_status <> ?", tenantID, kbID, ids, types.ParseStatusDeleting).
+			Count(&knowledgeCount).Error; err != nil {
+			return err
+		}
+		var chunkCount int64
+		if err := tx.Model(&types.Chunk{}).
+			Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id IN ?", tenantID, kbID, ids).
+			Count(&chunkCount).Error; err != nil {
+			return err
+		}
+		if knowledgeCount > 0 || chunkCount > 0 {
+			return nil
+		}
+
+		for i := len(ids) - 1; i >= 0; i-- {
+			if err := tx.Where("tenant_id = ? AND knowledge_base_id = ? AND id = ?", tenantID, kbID, ids[i]).
+				Delete(&types.KnowledgeTag{}).Error; err != nil {
+				return err
+			}
+		}
+		deleted = true
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	return deleted, err
+}
+
 // Delete deletes a knowledge tag
 func (r *knowledgeTagRepository) Delete(ctx context.Context, tenantID uint64, id string) error {
 	return r.db.WithContext(ctx).
@@ -237,7 +303,7 @@ type tagCountResult struct {
 	Count int64  `gorm:"column:count"`
 }
 
-// BatchCountReferences returns the number of knowledges and chunks for multiple tags in a single query.
+// BatchCountReferences returns subtree knowledge and chunk counts for multiple tags.
 func (r *knowledgeTagRepository) BatchCountReferences(
 	ctx context.Context,
 	tenantID uint64,
@@ -254,15 +320,25 @@ func (r *knowledgeTagRepository) BatchCountReferences(
 		result[tagID] = types.TagReferenceCounts{}
 	}
 
-	// Count knowledge references in a single query
 	var knowledgeCounts []tagCountResult
-	if err := r.db.WithContext(ctx).
-		Model(&types.Knowledge{}).
-		Select("tag_id, COUNT(*) as count").
-		Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id IN (?) AND parse_status <> ?",
-			tenantID, kbID, tagIDs, types.ParseStatusDeleting).
-		Group("tag_id").
-		Find(&knowledgeCounts).Error; err != nil {
+	if err := r.db.WithContext(ctx).Raw(`
+		WITH RECURSIVE tag_tree(root_id, id) AS (
+			SELECT id, id FROM knowledge_tags
+			WHERE tenant_id = ? AND knowledge_base_id = ? AND id IN ?
+			UNION
+			SELECT tree.root_id, child.id FROM knowledge_tags child
+			JOIN tag_tree tree ON child.parent_id = tree.id
+			WHERE child.tenant_id = ? AND child.knowledge_base_id = ?
+		)
+		SELECT tree.root_id AS tag_id, COUNT(knowledge.id) AS count
+		FROM tag_tree tree
+		JOIN knowledges knowledge ON knowledge.tag_id = tree.id
+		WHERE knowledge.tenant_id = ? AND knowledge.knowledge_base_id = ?
+			AND knowledge.parse_status <> ? AND knowledge.deleted_at IS NULL
+		GROUP BY tree.root_id`,
+		tenantID, kbID, tagIDs, tenantID, kbID,
+		tenantID, kbID, types.ParseStatusDeleting,
+	).Scan(&knowledgeCounts).Error; err != nil {
 		return nil, err
 	}
 	for _, kc := range knowledgeCounts {
@@ -271,14 +347,23 @@ func (r *knowledgeTagRepository) BatchCountReferences(
 		result[kc.TagID] = counts
 	}
 
-	// Count chunk references in a single query
 	var chunkCounts []tagCountResult
-	if err := r.db.WithContext(ctx).
-		Model(&types.Chunk{}).
-		Select("tag_id, COUNT(*) as count").
-		Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id IN (?)", tenantID, kbID, tagIDs).
-		Group("tag_id").
-		Find(&chunkCounts).Error; err != nil {
+	if err := r.db.WithContext(ctx).Raw(`
+		WITH RECURSIVE tag_tree(root_id, id) AS (
+			SELECT id, id FROM knowledge_tags
+			WHERE tenant_id = ? AND knowledge_base_id = ? AND id IN ?
+			UNION
+			SELECT tree.root_id, child.id FROM knowledge_tags child
+			JOIN tag_tree tree ON child.parent_id = tree.id
+			WHERE child.tenant_id = ? AND child.knowledge_base_id = ?
+		)
+		SELECT tree.root_id AS tag_id, COUNT(chunk.id) AS count
+		FROM tag_tree tree
+		JOIN chunks chunk ON chunk.tag_id = tree.id
+		WHERE chunk.tenant_id = ? AND chunk.knowledge_base_id = ? AND chunk.deleted_at IS NULL
+		GROUP BY tree.root_id`,
+		tenantID, kbID, tagIDs, tenantID, kbID, tenantID, kbID,
+	).Scan(&chunkCounts).Error; err != nil {
 		return nil, err
 	}
 	for _, cc := range chunkCounts {

@@ -331,7 +331,7 @@ func (s *knowledgeTagService) ReorderTags(ctx context.Context, kbID string, root
 // DeleteTag deletes a tag. When force=true, also deletes all chunks under this tag.
 // For document-type knowledge bases, also deletes all knowledge files under this tag.
 // When contentOnly=true, only deletes the content under the tag but keeps the tag itself.
-func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bool, contentOnly bool, excludeIDs []string) error {
+func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bool, contentOnly bool, recursive bool, excludeIDs []string) error {
 	if id == "" {
 		return werrors.NewBadRequestError("标签ID不能为空")
 	}
@@ -342,6 +342,19 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 	}
 	if tag.Name == types.UntaggedTagName {
 		return werrors.NewBadRequestError("未分类文件夹不能删除")
+	}
+	if recursive {
+		if force || contentOnly || len(excludeIDs) > 0 {
+			return werrors.NewBadRequestError("递归删除仅支持空文件夹")
+		}
+		deleted, deleteErr := s.repo.DeleteEmptySubtree(ctx, tenantID, tag.KnowledgeBaseID, tag.ID)
+		if deleteErr != nil {
+			return deleteErr
+		}
+		if !deleted {
+			return werrors.NewBadRequestError("该文件夹或子文件夹仍有内容，无法删除")
+		}
+		return nil
 	}
 	if !contentOnly {
 		hasChildren, childrenErr := s.repo.HasChildren(ctx, tenantID, tag.KnowledgeBaseID, tag.ID)
