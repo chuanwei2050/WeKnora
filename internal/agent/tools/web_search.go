@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/retrievalkernel"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -175,7 +176,12 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		resolvedProviderID,
 		searchConfig.MaxResults,
 	)
+	limiter := retrievalkernel.LimiterFromContext(ctx, 4)
+	if !limiter.Acquire(ctx) {
+		return &types.ToolResult{Success: false, Error: ctx.Err().Error()}, ctx.Err()
+	}
 	webResults, err := t.webSearchService.Search(ctx, resolvedProviderID, &searchConfig, query)
+	limiter.Release()
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][WebSearch] Web search failed: %v", err)
 		return &types.ToolResult{
@@ -196,10 +202,14 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		questions := []string{strings.TrimSpace(query)}
 
 		logger.Infof(ctx, "[Tool][WebSearch] Applying RAG compression")
+		if !limiter.Acquire(ctx) {
+			return &types.ToolResult{Success: false, Error: ctx.Err().Error()}, ctx.Err()
+		}
 		compressed, kbID, newSeen, newIDs, err := t.webSearchService.CompressWithRAG(
 			ctx, t.sessionID, tempKBID, questions, webResults, tenant.WebSearchConfig,
 			t.knowledgeBaseService, t.knowledgeService, seen, ids,
 		)
+		limiter.Release()
 		if err != nil {
 			logger.Warnf(ctx, "[Tool][WebSearch] RAG compression failed, using raw results: %v", err)
 		} else {

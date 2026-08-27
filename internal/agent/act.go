@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/retrievalkernel"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"golang.org/x/sync/errgroup"
@@ -174,6 +175,13 @@ func (e *AgentEngine) executeToolCalls(
 	round := iteration + 1
 	n := len(response.ToolCalls)
 	logger.Infof(ctx, "[Agent][Round-%d] Executing %d tool call(s)", round, n)
+	roundLimiter := retrievalkernel.NewLimiter(4)
+	ctx = retrievalkernel.WithLimiter(ctx, roundLimiter)
+	defer func() {
+		waitDuration, cancellations := roundLimiter.Stats()
+		logger.Infof(ctx, "[Agent][Round-%d] Retrieval resource bounds: queue_ms=%d canceled=%d",
+			round, waitDuration.Milliseconds(), cancellations)
+	}()
 
 	// Use parallel execution when enabled and there are multiple tool calls
 	if e.config.ParallelToolCalls && n >= 2 {

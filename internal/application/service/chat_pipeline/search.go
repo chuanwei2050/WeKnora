@@ -11,6 +11,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/retrievalkernel"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -80,6 +81,13 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 		})
 		return nil
 	}
+	chatManage.EmbeddingTopK = retrievalkernel.BoundCandidateLimit(chatManage.EmbeddingTopK)
+	chatManage.VectorRecallTopK = retrievalkernel.BoundRecallLimit(chatManage.VectorRecallTopK)
+	chatManage.KeywordRecallTopK = retrievalkernel.BoundRecallLimit(chatManage.KeywordRecallTopK)
+	if err := retrievalkernel.ValidateTargetBounds(chatManage.SearchTargets, chatManage.EmbeddingTopK); err != nil {
+		pipelineWarn(ctx, "Search", "invalid_target_bounds", map[string]interface{}{"error": err.Error()})
+		return ErrSearch.WithError(err)
+	}
 
 	pipelineInfo(ctx, "Search", "input", map[string]interface{}{
 		"session_id":     chatManage.SessionID,
@@ -103,13 +111,14 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	allResults := make([]*types.SearchResult, 0)
+	limiter := retrievalkernel.NewLimiter(4)
 
 	wg.Add(2)
 	// Goroutine 1: Knowledge base search using SearchTargets
 	go func() {
 		defer wg.Done()
-		kbResults := p.searchByTargets(ctx, chatManage)
-		kbResults = p.filterGovernedSearchResults(ctx, chatManage.TenantID, kbResults)
+		kbResults := p.searchByTargets(ctx, chatManage, limiter)
+		kbResults = p.governAndLimitResults(ctx, chatManage, kbResults)
 		if len(kbResults) > 0 {
 			mu.Lock()
 			allResults = append(allResults, kbResults...)
@@ -120,7 +129,7 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	// Goroutine 2: Web search (if enabled)
 	go func() {
 		defer wg.Done()
-		webResults := p.searchWebIfEnabled(ctx, chatManage)
+		webResults := p.searchWebIfEnabled(ctx, chatManage, limiter)
 		if len(webResults) > 0 {
 			mu.Lock()
 			allResults = append(allResults, webResults...)
@@ -131,16 +140,27 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	wg.Wait()
 
 	chatManage.SearchResult = allResults
+	beforeLimit := len(chatManage.SearchResult)
+	chatManage.SearchResult = limitRetrievalCandidates(chatManage.SearchResult, chatManage.EmbeddingTopK, chatManage.SearchTargets)
+	logCandidateTruncation(ctx, beforeLimit, len(chatManage.SearchResult), chatManage.EmbeddingTopK)
 
 	logSearchScoreSample(ctx, "result_score_before_normalize", chatManage.SearchResult)
 
 	// If recall is low, attempt query expansion with keyword-focused search
 	if chatManage.EnableQueryExpansion && len(chatManage.SearchResult) < max(1, chatManage.EmbeddingTopK) {
-		expResults := p.runQueryExpansion(ctx, chatManage)
+		expResults := p.runQueryExpansion(ctx, chatManage, limiter)
+		expResults = p.governAndLimitResults(ctx, chatManage, expResults)
 		if len(expResults) > 0 {
 			chatManage.SearchResult = append(chatManage.SearchResult, expResults...)
+			beforeLimit = len(chatManage.SearchResult)
+			chatManage.SearchResult = limitRetrievalCandidates(chatManage.SearchResult, chatManage.EmbeddingTopK, chatManage.SearchTargets)
+			logCandidateTruncation(ctx, beforeLimit, len(chatManage.SearchResult), chatManage.EmbeddingTopK)
 		}
 	}
+	waitDuration, cancellations := limiter.Stats()
+	pipelineInfo(ctx, "Search", "resource_bounds", map[string]interface{}{
+		"queue_ms": waitDuration.Milliseconds(), "canceled": cancellations,
+	})
 
 	logSearchScoreSample(ctx, "final_score", chatManage.SearchResult)
 
@@ -157,6 +177,19 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 		"result_count": 0,
 	})
 	return ErrSearchNothing
+}
+
+func logCandidateTruncation(ctx context.Context, before, after, limit int) {
+	if before > after {
+		pipelineInfo(ctx, "Search", "candidate_truncated", map[string]interface{}{
+			"before": before, "after": after, "limit": limit, "truncated": before - after,
+		})
+	}
+}
+
+func (p *PluginSearch) governAndLimitResults(ctx context.Context, chatManage *types.ChatManage, results []*types.SearchResult) []*types.SearchResult {
+	results = p.filterGovernedSearchResults(ctx, chatManage.TenantID, results)
+	return limitRetrievalCandidates(results, chatManage.EmbeddingTopK, chatManage.SearchTargets)
 }
 
 func (p *PluginSearch) filterGovernedSearchResults(ctx context.Context, tenantID uint64, results []*types.SearchResult) []*types.SearchResult {
@@ -225,29 +258,71 @@ func getSearchResultFromHistory(chatManage *types.ChatManage) []*types.SearchRes
 }
 
 func removeDuplicateResults(results []*types.SearchResult) []*types.SearchResult {
+	bestByID := make(map[string]*types.SearchResult, len(results))
+	for _, result := range results {
+		if result == nil || result.ID == "" {
+			continue
+		}
+		best := bestByID[result.ID]
+		if best == nil || preferSearchResult(result, best) {
+			bestByID[result.ID] = result
+		}
+	}
+	bestByContent := make(map[string]*types.SearchResult, len(results))
+	for _, result := range results {
+		if result == nil || (result.ID != "" && bestByID[result.ID] != result) {
+			continue
+		}
+		sig := buildContentSignature(result.Content)
+		if sig == "" {
+			continue
+		}
+		key := result.KnowledgeID + "\x00" + sig
+		best := bestByContent[key]
+		if best == nil || preferSearchResult(result, best) {
+			bestByContent[key] = result
+		}
+	}
 	seen := make(map[string]bool)
-	contentSig := make(map[string]string) // sig -> first chunk ID
 	var uniqueResults []*types.SearchResult
 	for _, r := range results {
+		if r == nil || (r.ID != "" && bestByID[r.ID] != r) {
+			continue
+		}
 		// Only deduplicate by exact chunk ID — do NOT treat shared ParentChunkID
 		// as duplicates, because different child chunks of the same parent carry
 		// different content segments that may all be relevant.
-		if seen[r.ID] {
+		if r.ID != "" && seen[r.ID] {
 			logger.Debugf(context.Background(), "Dedup: chunk %s removed due to duplicate ID", r.ID)
 			continue
 		}
 		sig := buildContentSignature(r.Content)
 		if sig != "" {
-			if firstChunk, exists := contentSig[sig]; exists {
-				logger.Debugf(context.Background(), "Dedup: chunk %s removed due to content signature (dup of %s, sig prefix: %.50s...)", r.ID, firstChunk, sig)
+			contentKey := r.KnowledgeID + "\x00" + sig
+			if bestByContent[contentKey] != r {
+				logger.Debugf(context.Background(), "Dedup: chunk %s removed due to lower-scored content duplicate", r.ID)
 				continue
 			}
-			contentSig[sig] = r.ID
 		}
-		seen[r.ID] = true
+		if r.ID != "" {
+			seen[r.ID] = true
+		}
 		uniqueResults = append(uniqueResults, r)
 	}
 	return uniqueResults
+}
+
+func preferSearchResult(candidate, current *types.SearchResult) bool {
+	if candidate.Score != current.Score {
+		return candidate.Score > current.Score
+	}
+	if candidate.ID != current.ID {
+		return candidate.ID < current.ID
+	}
+	if candidate.ChunkIndex != current.ChunkIndex {
+		return candidate.ChunkIndex < current.ChunkIndex
+	}
+	return candidate.Content < current.Content
 }
 
 func buildContentSignature(content string) string {
@@ -375,6 +450,7 @@ func logSearchScoreSample(ctx context.Context, action string, results []*types.S
 func (p *PluginSearch) searchByTargets(
 	ctx context.Context,
 	chatManage *types.ChatManage,
+	limiter *retrievalkernel.Limiter,
 ) []*types.SearchResult {
 	if len(chatManage.SearchTargets) == 0 {
 		return nil
@@ -408,11 +484,8 @@ func (p *PluginSearch) searchByTargets(
 	// KBs backed by the same physical model share one embedding computation.
 	modelKeyMap := p.knowledgeBaseService.ResolveEmbeddingModelKeys(ctx, kbList)
 
-	groups := make(map[string][]*types.SearchTarget)
-	for _, t := range chatManage.SearchTargets {
-		key := modelKeyMap[t.KnowledgeBaseID] // empty string if unresolved
-		groups[key] = append(groups[key], t)
-	}
+	plan := retrievalkernel.PlanTargets(chatManage.SearchTargets, modelKeyMap)
+	groups := plan.Groups
 
 	pipelineInfo(ctx, "Search", "embedding_groups", map[string]interface{}{
 		"total_targets": len(chatManage.SearchTargets),
@@ -429,26 +502,8 @@ func (p *PluginSearch) searchByTargets(
 			directOrder[target] = len(directOrder)
 		}
 	}
-	groupKeys := make([]string, 0, len(groups))
-	for key := range groups {
-		groupKeys = append(groupKeys, key)
-	}
-	sort.Strings(groupKeys)
-	taskCount := 0
-	for _, key := range groupKeys {
-		targets := groups[key]
-		hasFullKB := false
-		for _, target := range targets {
-			if target.Type == types.SearchTargetTypeKnowledgeBase {
-				hasFullKB = true
-			} else {
-				taskCount++
-			}
-		}
-		if hasFullKB {
-			taskCount++
-		}
-	}
+	groupKeys := plan.GroupKeys
+	taskCount := plan.TasksPerQuery
 	taskIndex := 0
 
 	for _, modelKey := range groupKeys {
@@ -470,11 +525,25 @@ func (p *PluginSearch) searchByTargets(
 		wg.Add(1)
 		go func(modelKey string, targets []*types.SearchTarget, groupStart int) {
 			defer wg.Done()
+			finishSkippedDirectTurns := func() {
+				for _, target := range targets {
+					if target != nil && target.Type == types.SearchTargetTypeKnowledge {
+						if directBudget.waitTurn(ctx, directOrder[target]) {
+							directBudget.finishTurn()
+						}
+					}
+				}
+			}
 
 			// Compute embedding once for this model group.
 			var queryEmbedding []float32
 			if modelKey != "" {
+				if !limiter.Acquire(ctx) {
+					finishSkippedDirectTurns()
+					return
+				}
 				emb, err := p.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, queryText)
+				limiter.Release()
 				if err != nil {
 					pipelineWarn(ctx, "Search", "group_embed_error", map[string]interface{}{
 						"model_key": modelKey,
@@ -517,6 +586,10 @@ func (p *PluginSearch) searchByTargets(
 				innerWg.Add(1)
 				go func(index int) {
 					defer innerWg.Done()
+					if !limiter.Acquire(ctx) {
+						return
+					}
+					defer limiter.Release()
 					fusionBudget := searchutil.SplitBudget(chatManage.EmbeddingTopK, taskCount, index)
 					vectorBudget := searchutil.SplitBudget(chatManage.VectorRecallTopK, taskCount, index)
 					keywordBudget := searchutil.SplitBudget(chatManage.KeywordRecallTopK, taskCount, index)
@@ -565,8 +638,14 @@ func (p *PluginSearch) searchByTargets(
 				innerWg.Add(1)
 				go func(t *types.SearchTarget, index int) {
 					defer innerWg.Done()
-					directBudget.waitTurn(directOrder[t])
+					if !directBudget.waitTurn(ctx, directOrder[t]) {
+						return
+					}
 					defer directBudget.finishTurn()
+					if !limiter.Acquire(ctx) {
+						return
+					}
+					defer limiter.Release()
 					p.searchSingleTarget(ctx, chatManage, t, queryText, queryEmbedding, taskCount, index, directBudget, &mu, &results)
 				}(target, budgetIndex)
 			}
@@ -576,9 +655,12 @@ func (p *PluginSearch) searchByTargets(
 	}
 
 	wg.Wait()
+	waitDuration, cancellations := limiter.Stats()
 
 	pipelineInfo(ctx, "Search", "kb_result_summary", map[string]interface{}{
 		"total_hits": len(results),
+		"queue_ms":   waitDuration.Milliseconds(),
+		"canceled":   cancellations,
 	})
 	return results
 }
@@ -586,7 +668,8 @@ func (p *PluginSearch) searchByTargets(
 func limitRetrievalCandidates(results []*types.SearchResult, configuredLimit int, targets []*types.SearchTarget) []*types.SearchResult {
 	direct, regular := preserveBoundedFullDocumentResults(results, targets)
 	if len(direct) > 0 {
-		regular = limitRetrievalCandidates(regular, configuredLimit, targets)
+		remainingHardLimit := max(0, retrievalkernel.MaxCandidatesPerRequest-len(direct))
+		regular = limitRetrievalCandidates(regular, min(configuredLimit, remainingHardLimit), targets)
 		return append(direct, regular...)
 	}
 	results = removeDuplicateResults(results)
@@ -681,7 +764,7 @@ func preserveBoundedFullDocumentResults(results []*types.SearchResult, targets [
 
 type directLoadBudget struct {
 	mu        sync.Mutex
-	cond      *sync.Cond
+	changed   chan struct{}
 	nextOrder int
 	chunks    int
 	bytes     int64
@@ -690,21 +773,33 @@ type directLoadBudget struct {
 }
 
 func newDirectLoadBudget() *directLoadBudget {
-	budget := &directLoadBudget{maxChunks: maxDirectLoadChunks, maxBytes: maxDirectLoadBytes}
-	budget.cond = sync.NewCond(&budget.mu)
-	return budget
+	return &directLoadBudget{
+		changed: make(chan struct{}), maxChunks: maxDirectLoadChunks, maxBytes: maxDirectLoadBytes,
+	}
 }
 
-func (b *directLoadBudget) waitTurn(order int) {
-	b.mu.Lock()
-	for order != b.nextOrder {
-		b.cond.Wait()
+func (b *directLoadBudget) waitTurn(ctx context.Context, order int) bool {
+	for {
+		b.mu.Lock()
+		if order == b.nextOrder {
+			b.mu.Unlock()
+			return true
+		}
+		changed := b.changed
+		b.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return false
+		case <-changed:
+		}
 	}
 }
 
 func (b *directLoadBudget) finishTurn() {
+	b.mu.Lock()
 	b.nextOrder++
-	b.cond.Broadcast()
+	close(b.changed)
+	b.changed = make(chan struct{})
 	b.mu.Unlock()
 }
 
@@ -914,7 +1009,7 @@ func (p *PluginSearch) tryDirectChunkLoading(
 }
 
 // searchWebIfEnabled executes web search when enabled and returns converted results
-func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types.ChatManage) []*types.SearchResult {
+func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types.ChatManage, limiter *retrievalkernel.Limiter) []*types.SearchResult {
 	if !chatManage.WebSearchEnabled || p.webSearchService == nil || p.tenantService == nil {
 		return nil
 	}
@@ -946,6 +1041,10 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 		"tenant_id":   chatManage.TenantID,
 		"provider_id": providerID,
 	})
+	if !limiter.Acquire(ctx) {
+		return nil
+	}
+	defer limiter.Release()
 	webResults, err := p.webSearchService.Search(ctx, providerID, webConfig, chatManage.RewriteQuery)
 	if err != nil {
 		pipelineWarn(ctx, "Search", "web_search_error", map[string]interface{}{

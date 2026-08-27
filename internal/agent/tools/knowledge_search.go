@@ -110,6 +110,63 @@ type KnowledgeSearchInput struct {
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"`
 }
 
+const (
+	maxKnowledgeSearchQueries    = 5
+	maxKnowledgeSearchQueryBytes = 4096
+	maxKnowledgeSearchTotalBytes = 8192
+	maxKnowledgeSearchKBIDs      = 10
+	maxKnowledgeSearchKBIDBytes  = 256
+	maxKnowledgeSearchKBTotal    = 2048
+)
+
+func validateKnowledgeSearchInput(input KnowledgeSearchInput) error {
+	if err := validateKnowledgeSearchQueries(input.Queries); err != nil {
+		return err
+	}
+	if len(input.KnowledgeBaseIDs) > maxKnowledgeSearchKBIDs {
+		return fmt.Errorf("knowledge base ID count %d exceeds limit %d", len(input.KnowledgeBaseIDs), maxKnowledgeSearchKBIDs)
+	}
+	totalBytes := 0
+	for i, id := range input.KnowledgeBaseIDs {
+		idBytes := len([]byte(id))
+		if strings.TrimSpace(id) == "" {
+			return fmt.Errorf("knowledge base ID %d must not be empty", i+1)
+		}
+		if idBytes > maxKnowledgeSearchKBIDBytes {
+			return fmt.Errorf("knowledge base ID %d size %d exceeds limit %d bytes", i+1, idBytes, maxKnowledgeSearchKBIDBytes)
+		}
+		totalBytes += idBytes
+	}
+	if totalBytes > maxKnowledgeSearchKBTotal {
+		return fmt.Errorf("knowledge base IDs total size %d exceeds limit %d bytes", totalBytes, maxKnowledgeSearchKBTotal)
+	}
+	return nil
+}
+
+func validateKnowledgeSearchQueries(queries []string) error {
+	if len(queries) == 0 {
+		return fmt.Errorf("queries parameter is required")
+	}
+	if len(queries) > maxKnowledgeSearchQueries {
+		return fmt.Errorf("queries count %d exceeds limit %d", len(queries), maxKnowledgeSearchQueries)
+	}
+	totalBytes := 0
+	for i, query := range queries {
+		queryBytes := len([]byte(query))
+		if strings.TrimSpace(query) == "" {
+			return fmt.Errorf("query %d must not be empty", i+1)
+		}
+		if queryBytes > maxKnowledgeSearchQueryBytes {
+			return fmt.Errorf("query %d size %d exceeds limit %d bytes", i+1, queryBytes, maxKnowledgeSearchQueryBytes)
+		}
+		totalBytes += queryBytes
+	}
+	if totalBytes > maxKnowledgeSearchTotalBytes {
+		return fmt.Errorf("queries total size %d exceeds limit %d bytes", totalBytes, maxKnowledgeSearchTotalBytes)
+	}
+	return nil
+}
+
 // searchResultWithMeta wraps search result with metadata about which query matched it
 type searchResultWithMeta struct {
 	*types.SearchResult
@@ -192,16 +249,17 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 			Error:   fmt.Sprintf("Failed to parse args: %v", err),
 		}, err
 	}
-
-	// Log input arguments
-	argsJSON, _ := json.MarshalIndent(input, "", "  ")
-	logger.Debugf(ctx, "[Tool][KnowledgeSearch] Input args:\n%s", string(argsJSON))
+	if err := validateKnowledgeSearchInput(input); err != nil {
+		logger.Warnf(ctx, "[Tool][KnowledgeSearch] Invalid input: %v", err)
+		return &types.ToolResult{Success: false, Error: err.Error()}, err
+	}
+	logger.Debugf(ctx, "[Tool][KnowledgeSearch] Input summary: queries=%d knowledge_bases=%d", len(input.Queries), len(input.KnowledgeBaseIDs))
 
 	// Determine which KBs to search - user can optionally filter to specific KBs
 	var userSpecifiedKBs []string
 	if len(input.KnowledgeBaseIDs) > 0 {
 		userSpecifiedKBs = input.KnowledgeBaseIDs
-		logger.Infof(ctx, "[Tool][KnowledgeSearch] User specified %d knowledge bases: %v", len(userSpecifiedKBs), userSpecifiedKBs)
+		logger.Infof(ctx, "[Tool][KnowledgeSearch] User specified %d knowledge bases", len(userSpecifiedKBs))
 	}
 
 	// Use pre-computed search targets, optionally filtered by user-specified KBs.
@@ -209,8 +267,7 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	searchTargets, usedSingleTargetFallback := resolveSearchTargets(t.searchTargets, userSpecifiedKBs)
 	if usedSingleTargetFallback {
 		logger.Warnf(ctx,
-			"[Tool][KnowledgeSearch] Requested KBs %v did not match; using the sole authorized search target %s",
-			userSpecifiedKBs, searchTargets[0].KnowledgeBaseID)
+			"[Tool][KnowledgeSearch] Requested KBs did not match; using the sole authorized search target")
 	}
 
 	// Validate search targets
@@ -232,18 +289,16 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	// Parse query parameter
 	queries := input.Queries
 
-	// Validate: query must be provided
-	if len(queries) == 0 {
-		logger.Errorf(ctx, "[Tool][KnowledgeSearch] No queries provided")
-		return &types.ToolResult{
-			Success: false,
-			Error:   "queries parameter is required",
-		}, fmt.Errorf("no queries provided")
-	}
-
-	logger.Infof(ctx, "[Tool][KnowledgeSearch] Queries: %v", queries)
+	logger.Infof(ctx, "[Tool][KnowledgeSearch] Query count: %d", len(queries))
 
 	params := t.resolveSearchParams(ctx)
+	params.topK = retrievalkernel.BoundCandidateLimit(params.topK)
+	params.vectorRecallTopK = retrievalkernel.BoundRecallLimit(params.vectorRecallTopK)
+	params.keywordRecallTopK = retrievalkernel.BoundRecallLimit(params.keywordRecallTopK)
+	if err := retrievalkernel.ValidateTargetBounds(searchTargets, params.topK); err != nil {
+		logger.Warnf(ctx, "[Tool][KnowledgeSearch] Invalid search target bounds: %v", err)
+		return &types.ToolResult{Success: false, Error: err.Error()}, nil
+	}
 	rerankCandidateTopK := 0
 	if t.retrievalConfig != nil {
 		rerankCandidateTopK = t.retrievalConfig.RerankCandidateTopK
@@ -277,11 +332,15 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	// Deduplicate before reranking to reduce processing overhead
 	deduplicatedBeforeRerank := t.deduplicateResults(allResults)
 
-	if t.retrievalConfig != nil {
-		limit := t.retrievalConfig.RerankCandidateTopK
-		if limit > 0 && len(deduplicatedBeforeRerank) > limit {
-			deduplicatedBeforeRerank = deduplicatedBeforeRerank[:limit]
-		}
+	limit := params.topK
+	if rerankCandidateTopK > 0 {
+		limit = min(limit, rerankCandidateTopK)
+	}
+	beforeLimit := len(deduplicatedBeforeRerank)
+	deduplicatedBeforeRerank = limitAgentCandidates(deduplicatedBeforeRerank, limit, searchTargets)
+	if beforeLimit > len(deduplicatedBeforeRerank) {
+		logger.Infof(ctx, "[Tool][KnowledgeSearch] Candidate truncation: before=%d after=%d limit=%d truncated=%d",
+			beforeLimit, len(deduplicatedBeforeRerank), limit, beforeLimit-len(deduplicatedBeforeRerank))
 	}
 
 	// Apply ReRank if model is configured
@@ -300,8 +359,8 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	var filteredResults []*searchResultWithMeta
 
 	if (t.rerankModel != nil || t.chatModel != nil) && len(deduplicatedBeforeRerank) > 0 && rerankQuery != "" {
-		logger.Infof(ctx, "[Tool][KnowledgeSearch] Applying rerank, input: %d results, queries: %v",
-			len(deduplicatedBeforeRerank), queries)
+		logger.Infof(ctx, "[Tool][KnowledgeSearch] Applying rerank, input=%d query_count=%d",
+			len(deduplicatedBeforeRerank), len(queries))
 		rerankedResults, err := t.rerankResults(ctx, rerankQuery, deduplicatedBeforeRerank)
 		if err != nil {
 			if errors.Is(err, rerank.ErrInvalidResponse) {
@@ -438,6 +497,9 @@ func (t *KnowledgeSearchTool) resolveSearchParams(ctx context.Context) knowledge
 	if params.keywordRecallTopK <= 0 {
 		params.keywordRecallTopK = 50
 	}
+	params.topK = retrievalkernel.BoundCandidateLimit(params.topK)
+	params.vectorRecallTopK = retrievalkernel.BoundRecallLimit(params.vectorRecallTopK)
+	params.keywordRecallTopK = retrievalkernel.BoundRecallLimit(params.keywordRecallTopK)
 	if t.retrievalConfig == nil && params.vectorThreshold == 0 {
 		params.vectorThreshold = 0.6
 	}
@@ -532,34 +594,15 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 	// Resolve actual model identities (name + endpoint) for cross-tenant grouping
 	modelKeyMap := t.knowledgeBaseService.ResolveEmbeddingModelKeys(ctx, kbList)
 
-	groups := make(map[string][]*types.SearchTarget)
-	for _, st := range searchTargets {
-		key := modelKeyMap[st.KnowledgeBaseID]
-		groups[key] = append(groups[key], st)
-	}
+	plan := retrievalkernel.PlanTargets(searchTargets, modelKeyMap)
+	groups := plan.Groups
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	allResults := make([]*searchResultWithMeta, 0)
-	groupKeys := make([]string, 0, len(groups))
-	for key := range groups {
-		groupKeys = append(groupKeys, key)
-	}
-	sort.Strings(groupKeys)
-	tasksPerQuery := 0
-	for _, key := range groupKeys {
-		hasFullKB := false
-		for _, target := range groups[key] {
-			if target.Type == types.SearchTargetTypeKnowledgeBase {
-				hasFullKB = true
-			} else {
-				tasksPerQuery++
-			}
-		}
-		if hasFullKB {
-			tasksPerQuery++
-		}
-	}
+	limiter := retrievalkernel.LimiterFromContext(ctx, 4)
+	groupKeys := plan.GroupKeys
+	tasksPerQuery := plan.TasksPerQuery
 	taskCount := len(queries) * tasksPerQuery
 	taskIndex := 0
 
@@ -588,7 +631,11 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 				// Compute embedding once for this (model, query) pair
 				var queryEmbedding []float32
 				if modelKey != "" {
+					if !limiter.Acquire(ctx) {
+						return
+					}
 					emb, err := t.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, q)
+					limiter.Release()
 					if err != nil {
 						logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to pre-compute embedding for model %s: %v", modelKey, err)
 					} else {
@@ -619,6 +666,10 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 					innerWg.Add(1)
 					go func(index int) {
 						defer innerWg.Done()
+						if !limiter.Acquire(ctx) {
+							return
+						}
+						defer limiter.Release()
 						fusionBudget := searchutil.SplitBudget(topK, taskCount, index)
 						vectorBudget := searchutil.SplitBudget(vectorRecallTopK, taskCount, index)
 						keywordBudget := searchutil.SplitBudget(keywordRecallTopK, taskCount, index)
@@ -667,6 +718,10 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 					innerWg.Add(1)
 					go func(index int) {
 						defer innerWg.Done()
+						if !limiter.Acquire(ctx) {
+							return
+						}
+						defer limiter.Release()
 						fusionBudget := searchutil.SplitBudget(topK, taskCount, index)
 						vectorBudget := searchutil.SplitBudget(vectorRecallTopK, taskCount, index)
 						keywordBudget := searchutil.SplitBudget(keywordRecallTopK, taskCount, index)
@@ -712,6 +767,8 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 		}
 	}
 	wg.Wait()
+	waitDuration, cancellations := limiter.Stats()
+	logger.Infof(ctx, "[Tool][KnowledgeSearch] Resource bounds: queue_ms=%d canceled=%d", waitDuration.Milliseconds(), cancellations)
 	return allResults
 }
 
@@ -1128,10 +1185,11 @@ func (t *KnowledgeSearchTool) deduplicateResults(results []*searchResultWithMeta
 		// Check content signature for near-duplicate content
 		sig := t.buildContentSignature(r.Content)
 		if sig != "" {
-			if contentSig[sig] {
+			contentKey := r.KnowledgeID + "\x00" + sig
+			if contentSig[contentKey] {
 				continue
 			}
-			contentSig[sig] = true
+			contentSig[contentKey] = true
 		}
 
 		// Mark all keys as seen
@@ -1143,6 +1201,46 @@ func (t *KnowledgeSearchTool) deduplicateResults(results []*searchResultWithMeta
 	}
 
 	return uniqueResults
+}
+
+func limitAgentCandidates(results []*searchResultWithMeta, limit int, targets types.SearchTargets) []*searchResultWithMeta {
+	limit = retrievalkernel.BoundCandidateLimit(limit)
+	if len(results) <= limit {
+		return results
+	}
+	selected := make([]*searchResultWithMeta, 0, limit)
+	selectedSet := make(map[*searchResultWithMeta]struct{}, limit)
+	seenKnowledge := make(map[string]struct{})
+	for _, target := range targets {
+		if target == nil || target.Type != types.SearchTargetTypeKnowledge {
+			continue
+		}
+		for _, knowledgeID := range target.KnowledgeIDs {
+			if len(selected) == limit {
+				return selected
+			}
+			if _, seen := seenKnowledge[knowledgeID]; seen {
+				continue
+			}
+			seenKnowledge[knowledgeID] = struct{}{}
+			for _, result := range results {
+				if result != nil && result.KnowledgeID == knowledgeID {
+					selected = append(selected, result)
+					selectedSet[result] = struct{}{}
+					break
+				}
+			}
+		}
+	}
+	for _, result := range results {
+		if len(selected) == limit {
+			break
+		}
+		if _, selectedAlready := selectedSet[result]; !selectedAlready {
+			selected = append(selected, result)
+		}
+	}
+	return selected
 }
 
 // buildContentSignature creates a normalized signature for content to detect near-duplicates

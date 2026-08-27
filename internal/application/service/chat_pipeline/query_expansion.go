@@ -7,13 +7,14 @@ import (
 	"sync"
 	"unicode"
 
+	"github.com/Tencent/WeKnora/internal/retrievalkernel"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // runQueryExpansion performs query expansion when initial recall is low.
 // It generates query variants and runs concurrent retrieval across search targets.
-func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.ChatManage) []*types.SearchResult {
+func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.ChatManage, limiter *retrievalkernel.Limiter) []*types.SearchResult {
 	pipelineInfo(ctx, "Search", "recall_low", map[string]interface{}{
 		"current":   len(chatManage.SearchResult),
 		"threshold": chatManage.EmbeddingTopK,
@@ -34,17 +35,9 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 	var muExp sync.Mutex
 	var wgExp sync.WaitGroup
 	jobs := len(expansions) * len(chatManage.SearchTargets)
-	capSem := 16
-	if jobs < capSem {
-		capSem = jobs
-	}
-	if capSem <= 0 {
-		capSem = 1
-	}
-	sem := make(chan struct{}, capSem)
 	pipelineInfo(ctx, "Search", "expansion_concurrency", map[string]interface{}{
 		"jobs": jobs,
-		"cap":  capSem,
+		"cap":  4,
 	})
 	taskIndex := 0
 	for _, q := range expansions {
@@ -54,8 +47,10 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 			wgExp.Add(1)
 			go func(q string, t *types.SearchTarget, index int) {
 				defer wgExp.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
+				if !limiter.Acquire(ctx) {
+					return
+				}
+				defer limiter.Release()
 				fusionBudget := searchutil.SplitBudget(expTopK, jobs, index)
 				vectorBudget := searchutil.SplitBudget(chatManage.VectorRecallTopK, jobs, index)
 				keywordBudget := searchutil.SplitBudget(chatManage.KeywordRecallTopK, jobs, index)
