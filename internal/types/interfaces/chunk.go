@@ -30,6 +30,8 @@ type ChunkRepository interface {
 	ListChunksBySeqID(ctx context.Context, tenantID uint64, seqIDs []int64) ([]*types.Chunk, error)
 	// ListChunksByKnowledgeID lists chunks by knowledge id
 	ListChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// ListChunksByKnowledgeIDBounded loads a whole text document only when it fits both limits.
+	ListChunksByKnowledgeIDBounded(ctx context.Context, tenantID uint64, knowledgeID string, maxChunks int, maxBytes int64) ([]*types.Chunk, bool, error)
 	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id.
 	// When tagID is non-empty, results are filtered by tag_id.
 	// knowledgeType: "faq" or "manual" - determines sort order and search behavior
@@ -122,6 +124,8 @@ type ChunkService interface {
 	GetChunkByIDOnly(ctx context.Context, id string) (*types.Chunk, error)
 	// ListChunksByKnowledgeID lists chunks by knowledge id
 	ListChunksByKnowledgeID(ctx context.Context, knowledgeID string) ([]*types.Chunk, error)
+	// ListChunksByKnowledgeIDBounded loads a whole text document only when it fits both limits.
+	ListChunksByKnowledgeIDBounded(ctx context.Context, tenantID uint64, knowledgeID string, maxChunks int, maxBytes int64) ([]*types.Chunk, bool, error)
 	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id
 	ListPagedChunksByKnowledgeID(
 		ctx context.Context,

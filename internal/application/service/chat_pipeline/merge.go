@@ -39,7 +39,7 @@ func (p *PluginMerge) ActivationEvents() []types.EventType {
 //  5. Group by knowledge source + chunk type, merge overlapping ranges
 //  6. Populate FAQ answers
 //  7. Expand short contexts with neighboring chunks
-//  7.5. Re-merge overlapping ranges introduced by expansion
+//     7.5. Re-merge overlapping ranges introduced by expansion
 //  8. Final deduplication (ID + signature + partial content overlap)
 func (p *PluginMerge) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
@@ -54,6 +54,7 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 
 	// Step 1: Select input
 	searchResult := p.selectInputResults(ctx, chatManage)
+	directResults, searchResult := partitionDirectLoadResults(searchResult)
 
 	// Step 2: Initial dedup
 	searchResult = p.dedup(ctx, "dedup_summary", searchResult)
@@ -66,9 +67,10 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 	})
 
 	if len(searchResult) == 0 {
+		chatManage.MergeResult = directResults
 		pipelineWarn(ctx, "Merge", "output", map[string]interface{}{
-			"chunk_cnt": 0,
-			"reason":    "no_candidates",
+			"chunk_cnt": len(directResults),
+			"reason":    "no_enrichment_candidates",
 		})
 		return next()
 	}
@@ -92,8 +94,21 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 	mergedChunks = p.dedup(ctx, "final_dedup", mergedChunks)
 	mergedChunks = removePartialOverlaps(ctx, mergedChunks)
 
-	chatManage.MergeResult = mergedChunks
+	chatManage.MergeResult = append(directResults, mergedChunks...)
 	return next()
+}
+
+func partitionDirectLoadResults(results []*types.SearchResult) ([]*types.SearchResult, []*types.SearchResult) {
+	direct := make([]*types.SearchResult, 0)
+	regular := make([]*types.SearchResult, 0, len(results))
+	for _, result := range results {
+		if result != nil && result.MatchType == types.MatchTypeDirectLoad {
+			direct = append(direct, result)
+			continue
+		}
+		regular = append(regular, result)
+	}
+	return direct, regular
 }
 
 // selectInputResults picks rerank results if available, falling back to search

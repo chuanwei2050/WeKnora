@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -142,6 +143,41 @@ func (r *chunkRepository) ListChunksByKnowledgeID(
 		return nil, err
 	}
 	return chunks, nil
+}
+
+func (r *chunkRepository) ListChunksByKnowledgeIDBounded(
+	ctx context.Context, tenantID uint64, knowledgeID string, maxChunks int, maxBytes int64,
+) (chunks []*types.Chunk, fits bool, err error) {
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var stats struct {
+			ChunkCount int64 `gorm:"column:chunk_count"`
+			TotalBytes int64 `gorm:"column:total_bytes"`
+		}
+		if err := tx.Model(&types.Chunk{}).
+			Select("COUNT(*) AS chunk_count, COALESCE(SUM(octet_length(content)), 0) AS total_bytes").
+			Where("tenant_id = ? AND knowledge_id = ? AND chunk_type = ?", tenantID, knowledgeID, "text").
+			Scan(&stats).Error; err != nil {
+			return err
+		}
+		if stats.ChunkCount > int64(maxChunks) || stats.TotalBytes > maxBytes {
+			return nil
+		}
+		if err := tx.Select("id", "content", "knowledge_id", "knowledge_version_id", "chunk_index", "chunk_type", "parent_chunk_id", "start_at", "end_at").
+			Where("tenant_id = ? AND knowledge_id = ? AND chunk_type = ?", tenantID, knowledgeID, "text").
+			Order("chunk_index ASC").Limit(maxChunks + 1).Find(&chunks).Error; err != nil {
+			return err
+		}
+		actualBytes := int64(0)
+		for _, chunk := range chunks {
+			actualBytes += int64(len([]byte(chunk.Content)))
+		}
+		fits = len(chunks) <= maxChunks && actualBytes <= maxBytes && int64(len(chunks)) == stats.ChunkCount
+		if !fits {
+			chunks = nil
+		}
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	return chunks, fits, err
 }
 
 // ListPagedChunksByKnowledgeID lists chunks for a knowledge ID with pagination

@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,6 +14,11 @@ import (
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+)
+
+const (
+	maxDirectLoadChunks = 50
+	maxDirectLoadBytes  = 100_000
 )
 
 // PluginSearch implements search functionality for chat pipeline
@@ -416,6 +422,13 @@ func (p *PluginSearch) searchByTargets(
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var results []*types.SearchResult
+	directBudget := newDirectLoadBudget()
+	directOrder := make(map[*types.SearchTarget]int)
+	for _, target := range chatManage.SearchTargets {
+		if target != nil && target.Type == types.SearchTargetTypeKnowledge {
+			directOrder[target] = len(directOrder)
+		}
+	}
 	groupKeys := make([]string, 0, len(groups))
 	for key := range groups {
 		groupKeys = append(groupKeys, key)
@@ -552,7 +565,9 @@ func (p *PluginSearch) searchByTargets(
 				innerWg.Add(1)
 				go func(t *types.SearchTarget, index int) {
 					defer innerWg.Done()
-					p.searchSingleTarget(ctx, chatManage, t, queryText, queryEmbedding, taskCount, index, &mu, &results)
+					directBudget.waitTurn(directOrder[t])
+					defer directBudget.finishTurn()
+					p.searchSingleTarget(ctx, chatManage, t, queryText, queryEmbedding, taskCount, index, directBudget, &mu, &results)
 				}(target, budgetIndex)
 			}
 
@@ -568,6 +583,131 @@ func (p *PluginSearch) searchByTargets(
 	return results
 }
 
+func limitRetrievalCandidates(results []*types.SearchResult, configuredLimit int, targets []*types.SearchTarget) []*types.SearchResult {
+	direct, regular := preserveBoundedFullDocumentResults(results, targets)
+	if len(direct) > 0 {
+		regular = limitRetrievalCandidates(regular, configuredLimit, targets)
+		return append(direct, regular...)
+	}
+	results = removeDuplicateResults(results)
+	explicitIDs := make([]string, 0)
+	seenExplicit := make(map[string]struct{})
+	for _, target := range targets {
+		if target == nil || target.Type != types.SearchTargetTypeKnowledge {
+			continue
+		}
+		for _, id := range target.KnowledgeIDs {
+			if _, exists := seenExplicit[id]; !exists {
+				seenExplicit[id] = struct{}{}
+				explicitIDs = append(explicitIDs, id)
+			}
+		}
+	}
+	limit := configuredLimit
+	if limit <= 0 {
+		limit = types.DefaultEmbeddingTopK
+	}
+	if limit <= 0 || len(results) <= limit {
+		return results
+	}
+	selected := make([]*types.SearchResult, 0, limit)
+	selectedIDs := make(map[string]struct{}, limit)
+	for _, knowledgeID := range explicitIDs {
+		if len(selected) == limit {
+			break
+		}
+		var best *types.SearchResult
+		for _, result := range results {
+			if result != nil && result.KnowledgeID == knowledgeID && (best == nil || result.Score > best.Score) {
+				best = result
+			}
+		}
+		if best != nil {
+			selected = append(selected, best)
+			selectedIDs[best.ID] = struct{}{}
+		}
+	}
+	remaining := make([]*types.SearchResult, 0, len(results)-len(selected))
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		if _, exists := selectedIDs[result.ID]; !exists {
+			remaining = append(remaining, result)
+		}
+	}
+	sort.SliceStable(remaining, func(i, j int) bool { return remaining[i].Score > remaining[j].Score })
+	remainingLimit := min(limit-len(selected), len(remaining))
+	return append(selected, remaining[:remainingLimit]...)
+}
+
+func preserveBoundedFullDocumentResults(results []*types.SearchResult, targets []*types.SearchTarget) ([]*types.SearchResult, []*types.SearchResult) {
+	byKnowledge := make(map[string][]*types.SearchResult)
+	regular := make([]*types.SearchResult, 0, len(results))
+	for _, result := range results {
+		if result != nil && result.MatchType == types.MatchTypeDirectLoad && result.Metadata["direct_load_reason"] == "full_document_intent" {
+			byKnowledge[result.KnowledgeID] = append(byKnowledge[result.KnowledgeID], result)
+		} else {
+			regular = append(regular, result)
+		}
+	}
+	if len(byKnowledge) == 0 {
+		return nil, results
+	}
+	direct := make([]*types.SearchResult, 0)
+	for _, target := range targets {
+		if target == nil || target.Type != types.SearchTargetTypeKnowledge {
+			continue
+		}
+		for _, knowledgeID := range target.KnowledgeIDs {
+			group := byKnowledge[knowledgeID]
+			sort.SliceStable(group, func(i, j int) bool { return group[i].ChunkIndex < group[j].ChunkIndex })
+			direct = append(direct, group...)
+			delete(byKnowledge, knowledgeID)
+		}
+	}
+	leftoverIDs := make([]string, 0, len(byKnowledge))
+	for knowledgeID := range byKnowledge {
+		leftoverIDs = append(leftoverIDs, knowledgeID)
+	}
+	sort.Strings(leftoverIDs)
+	for _, knowledgeID := range leftoverIDs {
+		group := byKnowledge[knowledgeID]
+		sort.SliceStable(group, func(i, j int) bool { return group[i].ChunkIndex < group[j].ChunkIndex })
+		direct = append(direct, group...)
+	}
+	return direct, regular
+}
+
+type directLoadBudget struct {
+	mu        sync.Mutex
+	cond      *sync.Cond
+	nextOrder int
+	chunks    int
+	bytes     int64
+	maxChunks int
+	maxBytes  int64
+}
+
+func newDirectLoadBudget() *directLoadBudget {
+	budget := &directLoadBudget{maxChunks: maxDirectLoadChunks, maxBytes: maxDirectLoadBytes}
+	budget.cond = sync.NewCond(&budget.mu)
+	return budget
+}
+
+func (b *directLoadBudget) waitTurn(order int) {
+	b.mu.Lock()
+	for order != b.nextOrder {
+		b.cond.Wait()
+	}
+}
+
+func (b *directLoadBudget) finishTurn() {
+	b.nextOrder++
+	b.cond.Broadcast()
+	b.mu.Unlock()
+}
+
 // searchSingleTarget handles the search logic for a single SearchTarget
 // with specific knowledge IDs, including direct chunk loading and HybridSearch.
 func (p *PluginSearch) searchSingleTarget(
@@ -577,13 +717,14 @@ func (p *PluginSearch) searchSingleTarget(
 	queryText string,
 	queryEmbedding []float32,
 	taskCount, taskIndex int,
+	directBudget *directLoadBudget,
 	mu *sync.Mutex,
 	results *[]*types.SearchResult,
 ) {
 	searchKnowledgeIDs := t.KnowledgeIDs
 
-	if t.Type == types.SearchTargetTypeKnowledge {
-		directResults, skippedIDs := p.tryDirectChunkLoading(ctx, chatManage.TenantID, t.KnowledgeIDs)
+	if t.Type == types.SearchTargetTypeKnowledge && chatManage.Intent == types.IntentSummarize {
+		directResults, skippedIDs := p.tryDirectChunkLoading(ctx, chatManage.TenantID, t.KnowledgeBaseID, t.KnowledgeIDs, "full_document_intent", directBudget)
 
 		if len(directResults) > 0 {
 			for _, r := range directResults {
@@ -641,7 +782,20 @@ func (p *PluginSearch) searchSingleTarget(
 			"query":       params.QueryText,
 			"error":       err.Error(),
 		})
-		return
+		if t.Type != types.SearchTargetTypeKnowledge {
+			return
+		}
+		if !errors.Is(err, searchutil.ErrIndexUnavailable) {
+			return
+		}
+		directResults, _ := p.tryDirectChunkLoading(ctx, chatManage.TenantID, t.KnowledgeBaseID, searchKnowledgeIDs, "index_unavailable", directBudget)
+		if len(directResults) == 0 {
+			return
+		}
+		for _, result := range directResults {
+			result.KnowledgeBaseID = t.KnowledgeBaseID
+		}
+		res = directResults
 	}
 	pipelineInfo(ctx, "Search", "kb_result", map[string]interface{}{
 		"kb_id":       t.KnowledgeBaseID,
@@ -655,34 +809,64 @@ func (p *PluginSearch) searchSingleTarget(
 
 // tryDirectChunkLoading attempts to load chunks for given knowledge IDs directly
 // Returns loaded results and a list of knowledge IDs that were skipped (e.g. due to size limits)
-func (p *PluginSearch) tryDirectChunkLoading(ctx context.Context, tenantID uint64, knowledgeIDs []string) ([]*types.SearchResult, []string) {
+func (p *PluginSearch) tryDirectChunkLoading(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseID string,
+	knowledgeIDs []string,
+	reason string,
+	budget *directLoadBudget,
+) ([]*types.SearchResult, []string) {
 	if len(knowledgeIDs) == 0 {
 		return nil, nil
 	}
 
-	// Limit direct loading to avoid OOM or context overflow
-	// 50 chunks * ~500 chars/chunk ~= 25k chars
-	const maxTotalChunks = 50
-
 	var allChunks []*types.Chunk
 	var skippedIDs []string
 	loadedKnowledgeIDs := make(map[string]bool)
+	if budget == nil {
+		budget = newDirectLoadBudget()
+	}
+	knowledges, err := p.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
+	if err != nil {
+		return nil, append(skippedIDs, knowledgeIDs...)
+	}
+	authorized := make(map[string]*types.Knowledge, len(knowledges))
+	for _, knowledge := range knowledges {
+		if knowledge != nil && knowledge.KnowledgeBaseID == knowledgeBaseID {
+			authorized[knowledge.ID] = knowledge
+		}
+	}
 
 	for _, kid := range knowledgeIDs {
-		// Optimization: Check chunk count first if possible?
-		chunks, err := p.chunkService.ListChunksByKnowledgeID(ctx, kid)
+		knowledge := authorized[kid]
+		if knowledge == nil {
+			skippedIDs = append(skippedIDs, kid)
+			continue
+		}
+		remainingChunks := budget.maxChunks - budget.chunks
+		remainingBytes := budget.maxBytes - budget.bytes
+		if remainingChunks <= 0 || remainingBytes <= 0 {
+			skippedIDs = append(skippedIDs, kid)
+			continue
+		}
+		chunks, fits, err := p.chunkService.ListChunksByKnowledgeIDBounded(ctx, knowledge.TenantID, kid, remainingChunks, remainingBytes)
 		if err != nil {
-			logger.Warnf(ctx, "DirectLoad: Failed to list chunks for knowledge %s: %v", kid, err)
+			logger.Warnf(ctx, "DirectLoad: Failed to load bounded chunks for knowledge %s: %v", kid, err)
 			skippedIDs = append(skippedIDs, kid)
 			continue
 		}
-
-		if len(allChunks)+len(chunks) > maxTotalChunks {
-			logger.Infof(ctx, "DirectLoad: Skipped knowledge %s due to size limit (%d + %d > %d)",
-				kid, len(allChunks), len(chunks), maxTotalChunks)
+		if !fits {
+			logger.Infof(ctx, "DirectLoad: Skipped knowledge %s due to context limit", kid)
 			skippedIDs = append(skippedIDs, kid)
 			continue
 		}
+		actualBytes := int64(0)
+		for _, chunk := range chunks {
+			actualBytes += int64(len([]byte(chunk.Content)))
+		}
+		budget.chunks += len(chunks)
+		budget.bytes += actualBytes
 		allChunks = append(allChunks, chunks...)
 		loadedKnowledgeIDs[kid] = true
 	}
@@ -691,40 +875,27 @@ func (p *PluginSearch) tryDirectChunkLoading(ctx context.Context, tenantID uint6
 		return nil, skippedIDs
 	}
 
-	// Fetch Knowledge metadata
-	var uniqueKIDs []string
-	for kid := range loadedKnowledgeIDs {
-		uniqueKIDs = append(uniqueKIDs, kid)
-	}
-
 	knowledgeMap := make(map[string]*types.Knowledge)
-	if len(uniqueKIDs) > 0 {
-		knowledges, err := p.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, uniqueKIDs)
-		if err != nil {
-			logger.Warnf(ctx, "DirectLoad: Failed to fetch knowledge batch: %v", err)
-			// Continue without metadata
-		} else {
-			for _, k := range knowledges {
-				knowledgeMap[k.ID] = k
-			}
+	for kid := range loadedKnowledgeIDs {
+		if knowledge := authorized[kid]; knowledge != nil {
+			knowledgeMap[kid] = knowledge
 		}
 	}
 
 	var results []*types.SearchResult
 	for _, chunk := range allChunks {
 		res := &types.SearchResult{
-			ID:            chunk.ID,
-			Content:       chunk.Content,
-			Score:         1.0, // Maximum score for direct matches
-			KnowledgeID:   chunk.KnowledgeID,
-			ChunkIndex:    chunk.ChunkIndex,
-			MatchType:     types.MatchTypeDirectLoad,
-			ChunkType:     string(chunk.ChunkType),
-			ParentChunkID: chunk.ParentChunkID,
-			ImageInfo:     chunk.ImageInfo,
-			ChunkMetadata: chunk.Metadata,
-			StartAt:       chunk.StartAt,
-			EndAt:         chunk.EndAt,
+			ID:                 chunk.ID,
+			Content:            chunk.Content,
+			Score:              0,
+			KnowledgeID:        chunk.KnowledgeID,
+			KnowledgeVersionID: chunk.KnowledgeVersionID,
+			ChunkIndex:         chunk.ChunkIndex,
+			MatchType:          types.MatchTypeDirectLoad,
+			ChunkType:          string(chunk.ChunkType),
+			ParentChunkID:      chunk.ParentChunkID,
+			StartAt:            chunk.StartAt,
+			EndAt:              chunk.EndAt,
 		}
 
 		if k, ok := knowledgeMap[chunk.KnowledgeID]; ok {
@@ -732,13 +903,12 @@ func (p *PluginSearch) tryDirectChunkLoading(ctx context.Context, tenantID uint6
 			res.KnowledgeFilename = k.FileName
 			res.KnowledgeSource = k.Source
 			res.KnowledgeChannel = k.Channel
-			res.Metadata = k.GetMetadata()
 		}
+		res.Metadata = make(map[string]string, 1)
+		res.Metadata["direct_load_reason"] = reason
 
 		results = append(results, res)
 	}
-
-	searchutil.EnrichSearchResultsImageInfo(ctx, p.chunkService.GetRepository(), tenantID, results)
 
 	return results, skippedIDs
 }

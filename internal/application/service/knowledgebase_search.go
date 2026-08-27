@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -161,7 +162,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, ErrKnowledgeBaseAccessDenied
 	}
 
-	logger.Infof(ctx, "Hybrid search parameters, knowledge base IDs: %v, query text: %s", searchKBIDs, params.QueryText)
+	logger.Infof(ctx, "Hybrid search parameters, knowledge base count: %d, query bytes: %d", len(searchKBIDs), len([]byte(params.QueryText)))
 
 	tenantInfo, _ := types.TenantInfoFromContext(ctx)
 
@@ -220,9 +221,9 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"knowledge_base_ids": searchKBIDs,
-			"query_text":         params.QueryText,
+			"query_bytes":        len([]byte(params.QueryText)),
 		})
-		return nil, err
+		return nil, searchutil.ClassifyIndexError(err)
 	}
 
 	// Separate and fuse retrieval results
@@ -324,7 +325,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 			logger.Info(ctx, "Starting to generate query embedding")
 			embedded, err := s.GetQueryEmbedding(ctx, kb.ID, params.QueryText)
 			if err != nil {
-				logger.Errorf(ctx, "Failed to embed query text, query text: %s, error: %v", params.QueryText, err)
+				logger.Errorf(ctx, "Failed to embed query text (%d bytes): %v", len([]byte(params.QueryText)), err)
 				return nil, err
 			}
 			queryEmbedding = embedded

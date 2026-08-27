@@ -142,6 +142,12 @@ func (s *chunkService) ListChunksByKnowledgeID(ctx context.Context, knowledgeID 
 	return chunks, nil
 }
 
+func (s *chunkService) ListChunksByKnowledgeIDBounded(
+	ctx context.Context, tenantID uint64, knowledgeID string, maxChunks int, maxBytes int64,
+) ([]*types.Chunk, bool, error) {
+	return s.chunkRepository.ListChunksByKnowledgeIDBounded(ctx, tenantID, knowledgeID, maxChunks, maxBytes)
+}
+
 // ListPagedChunksByKnowledgeID lists chunks for a knowledge ID with pagination
 // This method retrieves chunks with pagination support for better performance with large datasets
 // Parameters:
