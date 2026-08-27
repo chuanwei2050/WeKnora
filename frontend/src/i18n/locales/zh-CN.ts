@@ -866,7 +866,7 @@ export default {
     description: "配置所有问答、智能体和接口共用的平台检索预算",
     queryExpansionLabel: "查询扩展",
     queryExpansionDescription: "允许路由在需要时扩展查询以提高召回率；关闭后所有入口均不会执行查询扩展",
-    embeddingTopKLabel: "融合候选数量",
+    embeddingTopKLabel: "RRF 融合保留数量",
     embeddingTopKDescription: "向量与关键词结果融合后保留的候选数量",
     vectorRecallTopKLabel: "向量预召回数量",
     vectorRecallTopKDescription: "向量检索进入融合阶段前的最大召回数量",
@@ -1518,7 +1518,7 @@ export default {
       // 检索策略
       retrievalStrategy: "检索策略",
       responseStrategy: "回答策略",
-      embeddingTopK: "融合候选数量",
+      embeddingTopK: "RRF 融合保留数量",
       vectorRecallTopK: "向量预召回数量",
       keywordRecallTopK: "关键词预召回数量",
       rrfVectorWeight: "RRF 融合权重（向量 / 关键词）",
