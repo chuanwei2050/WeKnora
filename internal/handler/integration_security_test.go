@@ -283,6 +283,29 @@ func TestIntegrationFoldersByIDsReturnsStableOrdinaryFolderDTOAndAudits(t *testi
 	require.Contains(t, audit.ResourceIDsJSON, "kb-2")
 }
 
+func TestIntegrationFoldersWithoutIDsUsesAllAuthorizedKnowledgeBases(t *testing.T) {
+	for _, path := range []string{
+		"/api/integration/v1/knowledge-bases/folders",
+		"/api/integration/v1/knowledge-bases/folders?knowledge_base_ids=",
+		"/api/integration/v1/knowledge-bases/folders?knowledge_base_ids=null",
+	} {
+		t.Run(path, func(t *testing.T) {
+			handler, _ := newFolderEndpointHandler(t, map[string]*types.KnowledgeBase{
+				"kb-1": {ID: "kb-1", TenantID: 1},
+				"kb-2": {ID: "kb-2", TenantID: 1},
+			}, []*types.KnowledgeTag{{ID: "folder-1", Name: "普通文件夹"}})
+			principal := &integrationauth.Principal{ClientID: "client-1", TenantID: 1, KnowledgeBaseIDs: []string{"kb-1", "kb-2"}, Scopes: []string{"kb:list", "knowledge:read"}}
+			ctx, recorder := folderEndpointContext(http.MethodGet, path, "", principal)
+
+			handler.ListKnowledgeBaseFolders(ctx)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			require.Contains(t, recorder.Body.String(), `"knowledge_base_id":"kb-1"`)
+			require.Contains(t, recorder.Body.String(), `"knowledge_base_id":"kb-2"`)
+		})
+	}
+}
+
 func TestIntegrationFoldersByIDsRejectsInvalidNotFoundAndUnauthorizedWithoutLeaking(t *testing.T) {
 	handler, db := newFolderEndpointHandler(t, map[string]*types.KnowledgeBase{"kb-1": {ID: "kb-1", TenantID: 1}}, nil)
 	basePrincipal := &integrationauth.Principal{ClientID: "client-1", TenantID: 1, KnowledgeBaseIDs: []string{"kb-1"}, Scopes: []string{"kb:list", "knowledge:read"}}

@@ -568,22 +568,23 @@ func (h *IntegrationHandler) ListKnowledgeBaseFolders(c *gin.Context) {
 	if !h.requireScope(c, "kb:list") || !h.requireScope(c, "knowledge:read") {
 		return
 	}
+	principal := integrationPrincipal(c)
 	rawIDs := strings.TrimSpace(c.Query("knowledge_base_ids"))
-	if rawIDs == "" {
-		h.audit(c, "api.knowledge_base.folders", "denied", "invalid_knowledge_base_ids")
-		integrationError(c, http.StatusBadRequest, "invalid_knowledge_base_ids", "knowledge base IDs are required")
-		return
+	useAll := rawIDs == "" || strings.EqualFold(rawIDs, "null")
+	var knowledgeBaseIDs []string
+	if useAll {
+		knowledgeBaseIDs = principal.KnowledgeBaseIDs
+	} else {
+		knowledgeBaseIDs = strings.Split(rawIDs, ",")
+		for i := range knowledgeBaseIDs {
+			knowledgeBaseIDs[i] = strings.TrimSpace(knowledgeBaseIDs[i])
+		}
 	}
-	knowledgeBaseIDs := strings.Split(rawIDs, ",")
-	for i := range knowledgeBaseIDs {
-		knowledgeBaseIDs[i] = strings.TrimSpace(knowledgeBaseIDs[i])
-	}
-	if len(knowledgeBaseIDs) > h.limits.maxKnowledgeBases || !validIntegrationKnowledgeIDs(knowledgeBaseIDs, h.limits.maxKnowledgeBases) {
+	if !useAll && (len(knowledgeBaseIDs) > h.limits.maxKnowledgeBases || !validIntegrationKnowledgeIDs(knowledgeBaseIDs, h.limits.maxKnowledgeBases)) {
 		h.audit(c, "api.knowledge_base.folders", "denied", "invalid_knowledge_base_ids")
 		integrationError(c, http.StatusBadRequest, "invalid_knowledge_base_ids", "invalid knowledge base IDs")
 		return
 	}
-	principal := integrationPrincipal(c)
 	if h.service.AuthorizeKnowledgeBases(principal, knowledgeBaseIDs) != nil {
 		h.audit(c, "api.knowledge_base.folders", "denied", "not_found_or_denied")
 		integrationError(c, http.StatusNotFound, "knowledge_base_not_found", "knowledge base not found")

@@ -64,8 +64,12 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 - **THEN** 系统统一返回 `404` 且不泄露知识库是否存在
 - **AND** 系统在审计中记录实际拒绝原因
 
-#### Scenario: 知识库 ID 列表缺失或格式非法
-- **WHEN** `knowledge_base_ids` 缺失、为空、超过数量限制或包含格式非法的 ID
+#### Scenario: 知识库 ID 列表缺失或为空
+- **WHEN** `knowledge_base_ids` 缺失、为空或值为 `null`
+- **THEN** 系统返回当前主体在租户内有权访问的全部知识库文件夹
+
+#### Scenario: 知识库 ID 列表格式非法
+- **WHEN** `knowledge_base_ids` 超过数量限制或包含格式非法的 ID
 - **THEN** 系统返回稳定的 `400 invalid_knowledge_base_ids`
 
 #### Scenario: 客户端只有知识库列表权限
