@@ -65,7 +65,7 @@ type KnowledgeService interface {
 	// ListKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base.
 	ListKnowledgeByKnowledgeBaseID(ctx context.Context, kbID string) ([]*types.Knowledge, error)
 	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base with pagination.
-	// When tagID is non-empty, results are filtered by tag_id.
+	// When tagID is non-empty, results include that folder and all descendants.
 	// When keyword is non-empty, results are filtered by file_name.
 	// When fileType is non-empty, results are filtered by file_type or type.
 	ListPagedKnowledgeByKnowledgeBaseID(
@@ -182,7 +182,7 @@ type KnowledgeRepository interface {
 	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
 	ListKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) ([]*types.Knowledge, error)
 	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge in a knowledge base with pagination.
-	// When tagID is non-empty, results are filtered by tag_id.
+	// When tagID is non-empty, results include that folder and all descendants.
 	// When keyword is non-empty, results are filtered by file_name.
 	// When fileType is non-empty, results are filtered by file_type or type.
 	ListPagedKnowledgeByKnowledgeBaseID(ctx context.Context,

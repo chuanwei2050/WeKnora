@@ -12,6 +12,15 @@ const (
 // MatchType represents the type of matching algorithm
 type MatchType int
 
+// RetrievalScoreDomain identifies a trusted score scale at retrieval boundaries.
+type RetrievalScoreDomain string
+
+const (
+	RetrievalScoreDomainUnknown   RetrievalScoreDomain = ""
+	RetrievalScoreDomainRelevance RetrievalScoreDomain = "relevance"
+	RetrievalScoreDomainRRF       RetrievalScoreDomain = "rrf"
+)
+
 const (
 	MatchTypeEmbedding MatchType = iota
 	MatchTypeKeywords

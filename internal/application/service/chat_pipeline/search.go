@@ -69,6 +69,17 @@ func (p *PluginSearch) ActivationEvents() []types.EventType {
 	return []types.EventType{types.CHUNK_SEARCH}
 }
 
+func normalizePipelineRetrievalRequest(chatManage *types.ChatManage) (retrievalkernel.NormalizedRequest, error) {
+	return retrievalkernel.NormalizeRequest(retrievalkernel.Request{
+		TenantID:           chatManage.TenantID,
+		Queries:            []string{chatManage.RewriteQuery},
+		Targets:            chatManage.SearchTargets,
+		CandidateLimit:     chatManage.EmbeddingTopK,
+		VectorRecallLimit:  chatManage.VectorRecallTopK,
+		KeywordRecallLimit: chatManage.KeywordRecallTopK,
+	})
+}
+
 // OnEvent handles search events in the chat pipeline
 func (p *PluginSearch) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
@@ -81,17 +92,19 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 		})
 		return nil
 	}
-	chatManage.EmbeddingTopK = retrievalkernel.BoundCandidateLimit(chatManage.EmbeddingTopK)
-	chatManage.VectorRecallTopK = retrievalkernel.BoundRecallLimit(chatManage.VectorRecallTopK)
-	chatManage.KeywordRecallTopK = retrievalkernel.BoundRecallLimit(chatManage.KeywordRecallTopK)
-	if err := retrievalkernel.ValidateTargetBounds(chatManage.SearchTargets, chatManage.EmbeddingTopK); err != nil {
+	normalized, err := normalizePipelineRetrievalRequest(chatManage)
+	if err != nil {
 		pipelineWarn(ctx, "Search", "invalid_target_bounds", map[string]interface{}{"error": err.Error()})
 		return ErrSearch.WithError(err)
 	}
+	chatManage.EmbeddingTopK = normalized.CandidateLimit
+	chatManage.VectorRecallTopK = normalized.VectorRecallLimit
+	chatManage.KeywordRecallTopK = normalized.KeywordRecallLimit
+	chatManage.SearchTargets = normalized.Targets
 
 	pipelineInfo(ctx, "Search", "input", map[string]interface{}{
 		"session_id":     chatManage.SessionID,
-		"rewrite_query":  chatManage.RewriteQuery,
+		"query_bytes":    len([]byte(chatManage.RewriteQuery)),
 		"search_targets": len(chatManage.SearchTargets),
 		"tenant_id":      chatManage.TenantID,
 		"web_enabled":    chatManage.WebSearchEnabled,
@@ -147,9 +160,8 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	logSearchScoreSample(ctx, "result_score_before_normalize", chatManage.SearchResult)
 
 	// If recall is low, attempt query expansion with keyword-focused search
-	if chatManage.EnableQueryExpansion && len(chatManage.SearchResult) < max(1, chatManage.EmbeddingTopK) {
+	if shouldExpandQuery(chatManage) {
 		expResults := p.runQueryExpansion(ctx, chatManage, limiter)
-		expResults = p.governAndLimitResults(ctx, chatManage, expResults)
 		if len(expResults) > 0 {
 			chatManage.SearchResult = append(chatManage.SearchResult, expResults...)
 			beforeLimit = len(chatManage.SearchResult)
@@ -188,53 +200,48 @@ func logCandidateTruncation(ctx context.Context, before, after, limit int) {
 }
 
 func (p *PluginSearch) governAndLimitResults(ctx context.Context, chatManage *types.ChatManage, results []*types.SearchResult) []*types.SearchResult {
-	results = p.filterGovernedSearchResults(ctx, chatManage.TenantID, results)
+	results = p.filterGovernedSearchResults(ctx, chatManage.TenantID, chatManage.SearchTargets, results)
 	return limitRetrievalCandidates(results, chatManage.EmbeddingTopK, chatManage.SearchTargets)
 }
 
-func (p *PluginSearch) filterGovernedSearchResults(ctx context.Context, tenantID uint64, results []*types.SearchResult) []*types.SearchResult {
-	if len(results) == 0 || p.knowledgeService == nil {
+func (p *PluginSearch) filterGovernedSearchResults(
+	ctx context.Context,
+	tenantID uint64,
+	targets types.SearchTargets,
+	results []*types.SearchResult,
+) []*types.SearchResult {
+	if len(results) == 0 {
 		return results
 	}
-	ids := make([]string, 0, len(results))
-	seen := make(map[string]bool)
-	for _, result := range results {
-		if result != nil && result.KnowledgeID != "" && !seen[result.KnowledgeID] {
-			seen[result.KnowledgeID] = true
-			ids = append(ids, result.KnowledgeID)
+	candidates := make([]retrievalkernel.GovernanceCandidate, len(results))
+	for index, result := range results {
+		expectedKBID := ""
+		if result != nil && targets.ContainsKB(result.KnowledgeBaseID) {
+			expectedKBID = result.KnowledgeBaseID
+		}
+		candidates[index] = retrievalkernel.GovernanceCandidate{
+			Result: result, AccessTenantID: tenantID, ExpectedKnowledgeBaseID: expectedKBID,
 		}
 	}
-	knowledges, err := p.knowledgeService.GetKnowledgeBatch(ctx, tenantID, ids)
-	if err != nil {
-		pipelineWarn(ctx, "Search", "governance_visibility", map[string]interface{}{"error": err.Error()})
-		return nil
+	var knowledgeLoader retrievalkernel.KnowledgeLoader
+	if p.knowledgeService != nil {
+		knowledgeLoader = p.knowledgeService.GetKnowledgeBatchWithSharedAccess
 	}
-	byID := make(map[string]*types.Knowledge, len(knowledges))
-	for _, knowledge := range knowledges {
-		byID[knowledge.ID] = knowledge
+	var versionLoader retrievalkernel.VersionLoader
+	if p.governanceRepo != nil {
+		versionLoader = p.governanceRepo.GetVersion
 	}
+	decision := retrievalkernel.FilterGoverned(ctx, candidates, knowledgeLoader, versionLoader, time.Now().UTC())
 	filtered := make([]*types.SearchResult, 0, len(results))
-	now := time.Now().UTC()
-	for _, result := range results {
-		knowledge := byID[result.KnowledgeID]
-		if knowledge == nil || knowledge.CurrentVersionID == "" {
-			filtered = append(filtered, result)
-			continue
+	for index, accepted := range decision.Accepted {
+		if accepted {
+			filtered = append(filtered, results[index])
 		}
-		if result.KnowledgeVersionID != knowledge.CurrentVersionID || p.governanceRepo == nil {
-			if p.governanceRepo == nil && result.KnowledgeVersionID == knowledge.CurrentVersionID {
-				filtered = append(filtered, result)
-			}
-			continue
-		}
-		version, err := p.governanceRepo.GetVersion(ctx, tenantID, knowledge.CurrentVersionID)
-		if err != nil || version == nil || !version.IsRetrievable(now) {
-			continue
-		}
-		result.KnowledgeLayer = version.SourceMetadata.Layer
-		result.SourceCategory = version.SourceMetadata.SourceCategory
-		result.EffectiveAt = version.EffectiveAt
-		filtered = append(filtered, result)
+	}
+	if len(decision.Rejected) > 0 {
+		pipelineWarn(ctx, "Search", "governance_visibility", map[string]interface{}{
+			"rejected": decision.Rejected,
+		})
 	}
 	return filtered
 }
@@ -874,7 +881,7 @@ func (p *PluginSearch) searchSingleTarget(
 		pipelineWarn(ctx, "Search", "kb_search_error", map[string]interface{}{
 			"kb_id":       t.KnowledgeBaseID,
 			"target_type": t.Type,
-			"query":       params.QueryText,
+			"query_bytes": len([]byte(params.QueryText)),
 			"error":       err.Error(),
 		})
 		if t.Type != types.SearchTargetTypeKnowledge {

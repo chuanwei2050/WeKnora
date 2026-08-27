@@ -76,7 +76,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		"candidate_cnt": len(chatManage.SearchResult),
 		"rerank_model":  chatManage.RerankModelID,
 		"rerank_thresh": chatManage.RerankThreshold,
-		"rewrite_query": chatManage.RewriteQuery,
+		"query_bytes":   len([]byte(chatManage.RewriteQuery)),
 	})
 	if len(chatManage.SearchResult) == 0 {
 		pipelineInfo(ctx, "Rerank", "skip", map[string]interface{}{
@@ -210,20 +210,18 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		modelScore := rr.RelevanceScore
 		sr.Score = compositeScore(sr, modelScore, base)
 
-		// Apply FAQ score boost if enabled
+		prior := sr.RankingSourcePrior
+		priorKind := sr.RankingSourcePriorKind
+		// Apply at most one bounded source prior before MMR.
 		if chatManage.FAQPriorityEnabled && chatManage.FAQScoreBoost > 1.0 &&
 			sr.ChunkType == string(types.ChunkTypeFAQ) {
-			originalScore := sr.Score
-			sr.Score = math.Min(sr.Score*chatManage.FAQScoreBoost, 1.0)
-			sr.Metadata["faq_boosted"] = "true"
-			sr.Metadata["faq_original_score"] = fmt.Sprintf("%.4f", originalScore)
-			pipelineInfo(ctx, "Rerank", "faq_boost", map[string]interface{}{
-				"chunk_id":       sr.ID,
-				"original_score": fmt.Sprintf("%.4f", originalScore),
-				"boosted_score":  fmt.Sprintf("%.4f", sr.Score),
-				"boost_factor":   chatManage.FAQScoreBoost,
-			})
+			faqPrior := min(0.08, (chatManage.FAQScoreBoost-1)*0.1)
+			if faqPrior > prior {
+				prior = faqPrior
+				priorKind = "faq"
+			}
 		}
+		applyBoundedSourcePrior(sr, prior, priorKind)
 
 		reranked = append(reranked, sr)
 	}
@@ -267,6 +265,22 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	})
 	emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "相关内容筛选完成", stageStarted, true, map[string]interface{}{"status": "completed", "input_count": len(chatManage.SearchResult), "output_count": len(chatManage.RerankResult)})
 	return next()
+}
+
+func applyBoundedSourcePrior(result *types.SearchResult, prior float64, source string) {
+	if result == nil || prior <= 0 || math.IsNaN(prior) || math.IsInf(prior, 0) || math.IsNaN(result.Score) || math.IsInf(result.Score, 0) {
+		return
+	}
+	prior = math.Min(prior, 0.08)
+	result.Metadata = ensureMetadata(result.Metadata)
+	raw := result.Score
+	// A convex blend keeps the final score in range and makes a source prior
+	// unable to overturn a materially stronger relevance score.
+	result.Score = max(0, min(1, raw*(1-prior)+prior))
+	result.Metadata["raw_relevance_score"] = fmt.Sprintf("%.4f", raw)
+	result.Metadata["ranking_source_prior"] = fmt.Sprintf("%.4f", prior)
+	result.Metadata["ranking_source_prior_kind"] = source
+	result.Metadata["final_ranking_score"] = fmt.Sprintf("%.4f", result.Score)
 }
 
 // preserveStrongKeywordResults prevents the semantic reranker from completely

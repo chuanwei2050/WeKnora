@@ -95,6 +95,7 @@ type chunkIndex struct {
 	knowledgeIDs    []string
 	chunkIDs        []string
 	scores          map[string]float64
+	scoreDomains    map[string]types.RetrievalScoreDomain
 	matchTypes      map[string]types.MatchType
 	matchedContents map[string]string
 	processedIDs    map[string]bool // tracks all IDs (chunk + enrichment) to avoid duplicates
@@ -105,6 +106,7 @@ type chunkIndex struct {
 func (s *knowledgeBaseService) buildChunkIndex(chunks []*types.IndexWithScore) *chunkIndex {
 	idx := &chunkIndex{
 		scores:          make(map[string]float64, len(chunks)),
+		scoreDomains:    make(map[string]types.RetrievalScoreDomain, len(chunks)),
 		matchTypes:      make(map[string]types.MatchType, len(chunks)),
 		matchedContents: make(map[string]string, len(chunks)),
 		processedIDs:    make(map[string]bool, len(chunks)*2),
@@ -118,6 +120,7 @@ func (s *knowledgeBaseService) buildChunkIndex(chunks []*types.IndexWithScore) *
 		}
 		idx.chunkIDs = append(idx.chunkIDs, chunk.ChunkID)
 		idx.scores[chunk.ChunkID] = chunk.Score
+		idx.scoreDomains[chunk.ChunkID] = chunk.ScoreDomain
 		idx.matchTypes[chunk.ChunkID] = chunk.MatchType
 		idx.matchedContents[chunk.ChunkID] = chunk.Content
 	}
@@ -144,6 +147,7 @@ func (s *knowledgeBaseService) collectEnrichmentChunkIDs(
 			additionalIDs = append(additionalIDs, chunk.ParentChunkID)
 			idx.processedIDs[chunk.ParentChunkID] = true
 			idx.scores[chunk.ParentChunkID] = idx.scores[chunk.ID]
+			idx.scoreDomains[chunk.ParentChunkID] = idx.scoreDomains[chunk.ID]
 			idx.matchTypes[chunk.ParentChunkID] = types.MatchTypeParentChunk
 		}
 
@@ -186,6 +190,7 @@ func (s *knowledgeBaseService) collectParentChunkIDs(
 			ids = append(ids, chunk.ParentChunkID)
 			idx.processedIDs[chunk.ParentChunkID] = true
 			idx.scores[chunk.ParentChunkID] = idx.scores[chunk.ID]
+			idx.scoreDomains[chunk.ParentChunkID] = idx.scoreDomains[chunk.ID]
 			idx.matchTypes[chunk.ParentChunkID] = types.MatchTypeParentChunk
 		}
 	}
@@ -240,7 +245,9 @@ func (s *knowledgeBaseService) assembleSearchResults(
 		if knowledge, ok := knowledgeMap[chunk.KnowledgeID]; ok {
 			matchType := idx.matchTypes[chunk.ID]
 			matchedContent := idx.matchedContents[chunk.ID]
-			searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent))
+			result := s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent)
+			result.ScoreDomain = idx.scoreDomains[chunk.ID]
+			searchResults = append(searchResults, result)
 			addedChunkIDs[chunk.ID] = true
 		} else {
 			logger.Warnf(ctx, "Knowledge not found for chunk: %s, knowledge_id: %s", chunk.ID, chunk.KnowledgeID)
@@ -274,7 +281,9 @@ func (s *knowledgeBaseService) assembleSearchResults(
 					continue
 				}
 				matchedContent := idx.matchedContents[chunkID]
-				searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent))
+				result := s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent)
+				result.ScoreDomain = idx.scoreDomains[chunkID]
+				searchResults = append(searchResults, result)
 			}
 		}
 	}
@@ -307,28 +316,28 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 	matchedContent string,
 ) *types.SearchResult {
 	return &types.SearchResult{
-		ID:                chunk.ID,
-		Content:           chunk.Content,
-		KnowledgeID:       chunk.KnowledgeID,
-		KnowledgeVersionID: chunk.KnowledgeVersionID,
-		ChunkIndex:        chunk.ChunkIndex,
-		KnowledgeTitle:    knowledge.Title,
-		StartAt:           chunk.StartAt,
-		EndAt:             chunk.EndAt,
-		Seq:               chunk.ChunkIndex,
-		Score:             score,
-		MatchType:         matchType,
-		Metadata:          knowledge.GetMetadata(),
-		ChunkType:         string(chunk.ChunkType),
-		ParentChunkID:     chunk.ParentChunkID,
-		ImageInfo:         chunk.ImageInfo,
+		ID:                   chunk.ID,
+		Content:              chunk.Content,
+		KnowledgeID:          chunk.KnowledgeID,
+		KnowledgeVersionID:   chunk.KnowledgeVersionID,
+		ChunkIndex:           chunk.ChunkIndex,
+		KnowledgeTitle:       knowledge.Title,
+		StartAt:              chunk.StartAt,
+		EndAt:                chunk.EndAt,
+		Seq:                  chunk.ChunkIndex,
+		Score:                score,
+		MatchType:            matchType,
+		Metadata:             knowledge.GetMetadata(),
+		ChunkType:            string(chunk.ChunkType),
+		ParentChunkID:        chunk.ParentChunkID,
+		ImageInfo:            chunk.ImageInfo,
 		KnowledgeFilename:    knowledge.FileName,
 		KnowledgeSource:      knowledge.Source,
 		KnowledgeChannel:     knowledge.Channel,
 		KnowledgeDescription: knowledge.Description,
-		ChunkMetadata:     chunk.Metadata,
-		MatchedContent:    matchedContent,
-		KnowledgeBaseID:   knowledge.KnowledgeBaseID,
+		ChunkMetadata:        chunk.Metadata,
+		MatchedContent:       matchedContent,
+		KnowledgeBaseID:      knowledge.KnowledgeBaseID,
 	}
 }
 

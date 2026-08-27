@@ -145,12 +145,17 @@ type SearchResult struct {
 	Seq int `gorm:"column:seq"             json:"seq"`
 	// Score
 	Score float64 `                              json:"score"`
+	// ScoreDomain identifies the trusted internal scale used by Score.
+	ScoreDomain RetrievalScoreDomain `gorm:"-" json:"-"`
 	// Match type
 	MatchType MatchType `                              json:"match_type"`
 	// SubChunkIndex
 	SubChunkID []string `                              json:"sub_chunk_id"`
 	// Metadata
 	Metadata map[string]string `                              json:"metadata"`
+	// RankingSourcePrior is an internal, trusted ranking signal. It must never be populated from document metadata.
+	RankingSourcePrior     float64 `gorm:"-" json:"-"`
+	RankingSourcePriorKind string  `gorm:"-" json:"-"`
 
 	// Chunk 类型
 	ChunkType string `json:"chunk_type"`

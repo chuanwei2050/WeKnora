@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewKnowledgeSearchToolUsesConfiguredRerankValues(t *testing.T) {
-	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, nil, 10)
+	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, nil, nil, 10)
 
 	if tool.rerankTopK != 10 {
 		t.Fatalf("rerankTopK = %d, want 10", tool.rerankTopK)
@@ -19,7 +19,7 @@ func TestNewKnowledgeSearchToolUsesConfiguredRerankValues(t *testing.T) {
 }
 
 func TestNewKnowledgeSearchToolDefaultsRerankTopK(t *testing.T) {
-	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, nil, 0)
+	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, nil, nil, 0)
 
 	if tool.rerankTopK != 5 {
 		t.Fatalf("rerankTopK = %d, want default 5", tool.rerankTopK)
@@ -37,7 +37,7 @@ func TestKnowledgeSearchParamsPreferCurrentAgentConfig(t *testing.T) {
 		RerankCandidateTopK: 10,
 		RerankTopK:          5,
 	}
-	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, agentConfig, 5)
+	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, agentConfig, nil, 5)
 	tenant := &types.Tenant{RetrievalConfig: &types.RetrievalConfig{
 		EmbeddingTopK:    3,
 		VectorThreshold:  0.8,
@@ -59,7 +59,7 @@ func TestKnowledgeSearchParamsPreferCurrentAgentConfig(t *testing.T) {
 }
 
 func TestKnowledgeSearchParamsUsePlatformSnapshotWithoutAgentConfig(t *testing.T) {
-	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, nil, 10)
+	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, nil, nil, 10)
 	platform := types.DefaultRetrievalConfig()
 	platform.EmbeddingTopK = 24
 	platform.VectorRecallTopK = 31
@@ -80,7 +80,7 @@ func TestKnowledgeSearchParamsUsePlatformSnapshotWithoutAgentConfig(t *testing.T
 }
 
 func TestKnowledgeSearchParamsUseEffectiveDefaultsWithoutAgentConfig(t *testing.T) {
-	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, nil, 5)
+	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, nil, nil, 5)
 
 	params := tool.resolveSearchParams(t.Context())
 
@@ -101,7 +101,7 @@ func TestKnowledgeSearchParamsPreserveExplicitZeroThresholds(t *testing.T) {
 		RerankCandidateTopK: 20,
 		RerankTopK:          5,
 	}
-	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, agentConfig, 5)
+	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, agentConfig, nil, 5)
 	tenant := &types.Tenant{ConversationConfig: &types.ConversationConfig{
 		VectorThreshold:  0.8,
 		KeywordThreshold: 0.7,
@@ -116,7 +116,7 @@ func TestKnowledgeSearchParamsPreserveExplicitZeroThresholds(t *testing.T) {
 }
 
 func TestDeduplicateResultsSortsByScoreBeforeCandidateLimit(t *testing.T) {
-	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, nil, 5)
+	tool := NewKnowledgeSearchTool(nil, nil, nil, nil, nil, nil, nil, nil, nil, 5)
 	results := []*searchResultWithMeta{
 		{SearchResult: &types.SearchResult{ID: "low", Score: 0.1}},
 		{SearchResult: &types.SearchResult{ID: "high", Score: 0.9}},

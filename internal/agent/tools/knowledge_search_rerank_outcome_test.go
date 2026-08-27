@@ -68,7 +68,7 @@ func TestAgentExecuteInvalidRerankResponseDoesNotRestoreRawRecall(t *testing.T) 
 	tool := &KnowledgeSearchTool{
 		knowledgeBaseService: rerankOutcomeKBService{result: candidate},
 		knowledgeService: rerankOutcomeKnowledgeService{items: []*types.Knowledge{
-			{ID: "knowledge", TenantID: 9},
+			{ID: "knowledge", TenantID: 9, KnowledgeBaseID: "kb"},
 		}},
 		searchTargets: types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb", TenantID: 9}},
 		rerankModel: outcomeReranker{results: []rerank.RankResult{

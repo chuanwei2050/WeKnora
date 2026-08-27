@@ -5,11 +5,16 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/retrievalkernel"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
+)
+
+const (
+	maxQueryExpansionVariants  = 3
+	maxQueryExpansionCalls     = 8
+	maxExpansionGovernanceScan = retrievalkernel.MaxCandidatesPerRequest
 )
 
 // runQueryExpansion performs query expansion when initial recall is low.
@@ -27,14 +32,14 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 	pipelineInfo(ctx, "Search", "expansion_start", map[string]interface{}{
 		"variants": len(expansions),
 	})
-	expTopK := max(chatManage.EmbeddingTopK*2, chatManage.RerankTopK*2)
+	expTopK := expansionCandidateLimit(chatManage)
 	expKwTh := chatManage.KeywordThreshold * 0.8
 
 	// Concurrent expansion retrieval across queries and search targets
-	expResults := make([]*types.SearchResult, 0, expTopK*len(expansions))
+	expResults := make([]*types.SearchResult, 0, expTopK)
 	var muExp sync.Mutex
 	var wgExp sync.WaitGroup
-	jobs := len(expansions) * len(chatManage.SearchTargets)
+	jobs := min(len(expansions)*len(chatManage.SearchTargets), maxQueryExpansionCalls)
 	pipelineInfo(ctx, "Search", "expansion_concurrency", map[string]interface{}{
 		"jobs": jobs,
 		"cap":  4,
@@ -42,6 +47,9 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 	taskIndex := 0
 	for _, q := range expansions {
 		for _, target := range chatManage.SearchTargets {
+			if taskIndex == jobs {
+				break
+			}
 			index := taskIndex
 			taskIndex++
 			wgExp.Add(1)
@@ -83,29 +91,47 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 					return
 				}
 				if len(res) > 0 {
-					for _, r := range res {
-						r.KnowledgeBaseID = t.KnowledgeBaseID
+					if len(res) > maxExpansionGovernanceScan {
+						res = res[:maxExpansionGovernanceScan]
 					}
+					for _, r := range res {
+						if r != nil {
+							r.KnowledgeBaseID = t.KnowledgeBaseID
+						}
+					}
+					res = p.filterGovernedSearchResults(ctx, chatManage.TenantID, types.SearchTargets{t}, res)
 					pipelineInfo(ctx, "Search", "expansion_hits", map[string]interface{}{
-						"kb_id": t.KnowledgeBaseID,
-						"query": q,
-						"hits":  len(res),
+						"kb_id":       t.KnowledgeBaseID,
+						"query_bytes": len([]byte(q)),
+						"hits":        len(res),
 					})
 					muExp.Lock()
-					expResults = append(expResults, res...)
+					remaining := expTopK - len(expResults)
+					if remaining > 0 {
+						if len(res) > remaining {
+							res = res[:remaining]
+						}
+						expResults = append(expResults, res...)
+					}
 					muExp.Unlock()
 				}
 			}(q, target, index)
 		}
+		if taskIndex == jobs {
+			break
+		}
 	}
 	wgExp.Wait()
-
 	if len(expResults) > 0 {
 		pipelineInfo(ctx, "Search", "expansion_done", map[string]interface{}{
 			"added": len(expResults),
 		})
 	}
 	return expResults
+}
+
+func expansionCandidateLimit(chatManage *types.ChatManage) int {
+	return retrievalkernel.BoundCandidateLimit(max(chatManage.EmbeddingTopK, chatManage.RerankTopK*2))
 }
 
 // expandQueries generates query variants locally without LLM to improve keyword recall.
@@ -116,7 +142,7 @@ func (p *PluginSearch) expandQueries(ctx context.Context, chatManage *types.Chat
 		return nil
 	}
 
-	expansions := make([]string, 0, 5)
+	expansions := make([]string, 0, 3)
 	seen := make(map[string]struct{})
 	seen[strings.ToLower(query)] = struct{}{}
 	if q := strings.ToLower(chatManage.Query); q != "" {
@@ -162,9 +188,9 @@ func (p *PluginSearch) expandQueries(ctx context.Context, chatManage *types.Chat
 		addIfNew(cleaned)
 	}
 
-	// Limit to 5 expansions
-	if len(expansions) > 5 {
-		expansions = expansions[:5]
+	// Keep expansion fan-out within the request budget.
+	if len(expansions) > maxQueryExpansionVariants {
+		expansions = expansions[:maxQueryExpansionVariants]
 	}
 
 	pipelineInfo(ctx, "Search", "local_expansion_result", map[string]interface{}{
@@ -233,30 +259,49 @@ func removeQuestionWords(text string) string {
 }
 
 func tokenize(text string) []string {
-	var tokens []string
-	var current strings.Builder
+	return types.Jieba.CutForSearch(strings.TrimSpace(text), true)
+}
 
-	for _, r := range text {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			current.WriteRune(r)
-		} else if unicode.Is(unicode.Han, r) {
-			// Flush current token
-			if current.Len() > 0 {
-				tokens = append(tokens, current.String())
-				current.Reset()
-			}
-			// Chinese character as single token
-			tokens = append(tokens, string(r))
-		} else {
-			// Delimiter
-			if current.Len() > 0 {
-				tokens = append(tokens, current.String())
-				current.Reset()
-			}
+func shouldExpandQuery(chatManage *types.ChatManage) bool {
+	if chatManage == nil || !chatManage.EnableQueryExpansion {
+		return false
+	}
+	if chatManage.RoutingDecision != nil && !chatManage.RoutingDecision.Budget.QueryExpansion {
+		return false
+	}
+	if len(chatManage.SearchResult) == 0 {
+		return true
+	}
+	effectiveCandidates := 0
+	for _, result := range chatManage.SearchResult {
+		if result == nil {
+			continue
 		}
+		effectiveCandidates++
 	}
-	if current.Len() > 0 {
-		tokens = append(tokens, current.String())
+	if effectiveCandidates == 0 {
+		return true
 	}
-	return tokens
+	quality := normalizedRetrievalQuality(chatManage.SearchResult)
+	if quality >= 0.65 {
+		return false
+	}
+	return effectiveCandidates < max(1, chatManage.EmbeddingTopK) || quality < 0.35
+}
+
+func normalizedRetrievalQuality(results []*types.SearchResult) float64 {
+	quality := 0.0
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		score := result.Score
+		if result.ScoreDomain == types.RetrievalScoreDomainRRF {
+			// Weighted RRF uses k=60 and weights summing to one, so rank one
+			// from both channels has a maximum score of 1/(60+1).
+			score *= 61
+		}
+		quality = max(quality, max(0, min(1, score)))
+	}
+	return quality
 }

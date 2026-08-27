@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -111,9 +112,7 @@ type KnowledgeSearchInput struct {
 }
 
 const (
-	maxKnowledgeSearchQueries    = 5
-	maxKnowledgeSearchQueryBytes = 4096
-	maxKnowledgeSearchTotalBytes = 8192
+	maxKnowledgeSearchQueryBytes = retrievalkernel.MaxQueryBytes
 	maxKnowledgeSearchKBIDs      = 10
 	maxKnowledgeSearchKBIDBytes  = 256
 	maxKnowledgeSearchKBTotal    = 2048
@@ -144,27 +143,7 @@ func validateKnowledgeSearchInput(input KnowledgeSearchInput) error {
 }
 
 func validateKnowledgeSearchQueries(queries []string) error {
-	if len(queries) == 0 {
-		return fmt.Errorf("queries parameter is required")
-	}
-	if len(queries) > maxKnowledgeSearchQueries {
-		return fmt.Errorf("queries count %d exceeds limit %d", len(queries), maxKnowledgeSearchQueries)
-	}
-	totalBytes := 0
-	for i, query := range queries {
-		queryBytes := len([]byte(query))
-		if strings.TrimSpace(query) == "" {
-			return fmt.Errorf("query %d must not be empty", i+1)
-		}
-		if queryBytes > maxKnowledgeSearchQueryBytes {
-			return fmt.Errorf("query %d size %d exceeds limit %d bytes", i+1, queryBytes, maxKnowledgeSearchQueryBytes)
-		}
-		totalBytes += queryBytes
-	}
-	if totalBytes > maxKnowledgeSearchTotalBytes {
-		return fmt.Errorf("queries total size %d exceeds limit %d bytes", totalBytes, maxKnowledgeSearchTotalBytes)
-	}
-	return nil
+	return retrievalkernel.ValidateQueries(queries)
 }
 
 // searchResultWithMeta wraps search result with metadata about which query matched it
@@ -190,6 +169,7 @@ type KnowledgeSearchTool struct {
 	chatModel            chat.Chat      // Optional chat model for LLM-based reranking
 	config               *config.Config // Global config for fallback values
 	retrievalConfig      *types.AgentConfig
+	governanceRepo       interfaces.KnowledgeGovernanceRepository
 	rerankTopK           int
 
 	seenMu     sync.Mutex
@@ -206,6 +186,23 @@ type knowledgeSearchParams struct {
 	minScore          float64
 }
 
+func normalizeAgentRetrievalRequest(
+	ctx context.Context,
+	queries []string,
+	targets types.SearchTargets,
+	params knowledgeSearchParams,
+) (retrievalkernel.NormalizedRequest, error) {
+	accessTenantID, _ := types.TenantIDFromContext(ctx)
+	return retrievalkernel.NormalizeRequest(retrievalkernel.Request{
+		TenantID:           accessTenantID,
+		Queries:            queries,
+		Targets:            targets,
+		CandidateLimit:     params.topK,
+		VectorRecallLimit:  params.vectorRecallTopK,
+		KeywordRecallLimit: params.keywordRecallTopK,
+	})
+}
+
 // NewKnowledgeSearchTool creates a new knowledge search tool
 func NewKnowledgeSearchTool(
 	knowledgeBaseService interfaces.KnowledgeBaseService,
@@ -216,6 +213,7 @@ func NewKnowledgeSearchTool(
 	chatModel chat.Chat,
 	cfg *config.Config,
 	retrievalConfig *types.AgentConfig,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
 	rerankTopK int,
 ) *KnowledgeSearchTool {
 	if rerankTopK <= 0 {
@@ -231,6 +229,7 @@ func NewKnowledgeSearchTool(
 		chatModel:            chatModel,
 		config:               cfg,
 		retrievalConfig:      retrievalConfig,
+		governanceRepo:       governanceRepo,
 		rerankTopK:           rerankTopK,
 		seenChunks:           make(map[string]bool),
 	}
@@ -292,13 +291,16 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Query count: %d", len(queries))
 
 	params := t.resolveSearchParams(ctx)
-	params.topK = retrievalkernel.BoundCandidateLimit(params.topK)
-	params.vectorRecallTopK = retrievalkernel.BoundRecallLimit(params.vectorRecallTopK)
-	params.keywordRecallTopK = retrievalkernel.BoundRecallLimit(params.keywordRecallTopK)
-	if err := retrievalkernel.ValidateTargetBounds(searchTargets, params.topK); err != nil {
+	normalized, err := normalizeAgentRetrievalRequest(ctx, queries, searchTargets, params)
+	if err != nil {
 		logger.Warnf(ctx, "[Tool][KnowledgeSearch] Invalid search target bounds: %v", err)
 		return &types.ToolResult{Success: false, Error: err.Error()}, nil
 	}
+	queries = normalized.Queries
+	searchTargets = normalized.Targets
+	params.topK = normalized.CandidateLimit
+	params.vectorRecallTopK = normalized.VectorRecallLimit
+	params.keywordRecallTopK = normalized.KeywordRecallLimit
 	rerankCandidateTopK := 0
 	if t.retrievalConfig != nil {
 		rerankCandidateTopK = t.retrievalConfig.RerankCandidateTopK
@@ -324,6 +326,7 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		params.topK, params.vectorRecallTopK, params.keywordRecallTopK, params.rrfVectorWeight,
 		params.vectorThreshold, params.keywordThreshold, rerankCandidateTopK, kbTypeMap)
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Concurrent search completed: %d raw results", len(allResults))
+	allResults = t.filterGovernedResults(ctx, allResults)
 
 	// Note: HybridSearch now uses RRF (Reciprocal Rank Fusion) which produces normalized scores
 	// RRF scores are in range [0, ~0.033] (max when rank=1 on both sides: 2/(60+1))
@@ -452,6 +455,44 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Output: %s", result.Output)
 	return result, nil
+}
+
+func (t *KnowledgeSearchTool) filterGovernedResults(ctx context.Context, results []*searchResultWithMeta) []*searchResultWithMeta {
+	if len(results) == 0 {
+		return results
+	}
+	accessTenantID, _ := types.TenantIDFromContext(ctx)
+	candidates := make([]retrievalkernel.GovernanceCandidate, len(results))
+	for index, result := range results {
+		if result != nil {
+			expectedKBID := result.KnowledgeBaseID
+			if !t.searchTargets.ContainsKB(expectedKBID) {
+				expectedKBID = ""
+			}
+			candidates[index] = retrievalkernel.GovernanceCandidate{
+				Result: result.SearchResult, AccessTenantID: accessTenantID, ExpectedKnowledgeBaseID: expectedKBID,
+			}
+		}
+	}
+	var knowledgeLoader retrievalkernel.KnowledgeLoader
+	if t.knowledgeService != nil {
+		knowledgeLoader = t.knowledgeService.GetKnowledgeBatchWithSharedAccess
+	}
+	var versionLoader retrievalkernel.VersionLoader
+	if t.governanceRepo != nil {
+		versionLoader = t.governanceRepo.GetVersion
+	}
+	decision := retrievalkernel.FilterGoverned(ctx, candidates, knowledgeLoader, versionLoader, time.Now().UTC())
+	filtered := make([]*searchResultWithMeta, 0, len(results))
+	for index, accepted := range decision.Accepted {
+		if accepted {
+			filtered = append(filtered, results[index])
+		}
+	}
+	if len(decision.Rejected) > 0 {
+		logger.Warnf(ctx, "[Tool][KnowledgeSearch] Governance visibility rejected=%v", decision.Rejected)
+	}
+	return filtered
 }
 
 // resolveSearchParams uses the request-scoped platform retrieval snapshot and

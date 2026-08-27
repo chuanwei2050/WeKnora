@@ -142,6 +142,18 @@ func TestFuseWithRRFDoesNotOverwriteRetrieverScores(t *testing.T) {
 	if keyword.Score != 19.3 {
 		t.Fatalf("keyword score was overwritten with %f", keyword.Score)
 	}
+	for _, candidate := range fused {
+		if candidate.ScoreDomain != types.RetrievalScoreDomainRRF {
+			t.Fatalf("fused candidate has untrusted score domain: %+v", candidate)
+		}
+	}
+}
+
+func TestDeduplicateMarksRelevanceScoreDomain(t *testing.T) {
+	result := deduplicateByScore([]*types.IndexWithScore{{ChunkID: "vector", Score: 0.8}})
+	if len(result) != 1 || result[0].ScoreDomain != types.RetrievalScoreDomainRelevance {
+		t.Fatalf("single-channel candidate has wrong score domain: %+v", result)
+	}
 }
 
 func TestFuseWithRRFUsesConfiguredVectorWeight(t *testing.T) {

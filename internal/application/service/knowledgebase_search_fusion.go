@@ -74,6 +74,7 @@ func deduplicateByScore(results []*types.IndexWithScore) []*types.IndexWithScore
 	}
 	deduped := make([]*types.IndexWithScore, 0, len(chunkInfoMap))
 	for _, info := range chunkInfoMap {
+		info.ScoreDomain = types.RetrievalScoreDomainRelevance
 		deduped = append(deduped, info)
 	}
 	slices.SortFunc(deduped, sortByScoreDesc)
@@ -135,6 +136,7 @@ func fuseWithRRF(
 		// reused below to preserve strong single-channel candidates for rerank.
 		fusedInfo := *info
 		fusedInfo.Score = rrfScore
+		fusedInfo.ScoreDomain = types.RetrievalScoreDomainRRF
 		result = append(result, &fusedInfo)
 	}
 	slices.SortFunc(result, sortByScoreDesc)

@@ -2,24 +2,20 @@ package chatpipeline
 
 import (
 	"context"
-	"sort"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// wikiBoostFactor is the score multiplier applied to wiki page chunks.
-// Wiki pages contain LLM-synthesized, cross-referenced knowledge and should
-// be preferred over raw document chunks when both are available.
-const wikiBoostFactor = 1.3
+const wikiSourcePrior = 0.05
 
-// PluginWikiBoost boosts the relevance score of wiki page chunks in search results.
+// PluginWikiBoost marks wiki page chunks with a bounded source prior.
 // Wiki pages contain pre-synthesized knowledge that is more coherent and
 // cross-referenced than raw document chunks, so they should rank higher.
 //
-// This plugin runs in the CHUNK_RERANK phase, after initial retrieval and reranking.
-// It identifies chunks with ChunkType == "wiki_page" and multiplies their score.
+// It runs before the reranker in the CHUNK_RERANK chain so the prior participates
+// in diversity selection without overwriting raw relevance.
 type PluginWikiBoost struct {
 	kbService interfaces.KnowledgeBaseService
 }
@@ -45,53 +41,49 @@ func (p *PluginWikiBoost) OnEvent(
 	chatManage *types.ChatManage,
 	next func() *PluginError,
 ) *PluginError {
-	// Run the normal reranking first
-	if err := next(); err != nil {
-		return err
-	}
-
 	// Fast path: skip all work if there are no wiki_page chunks in the result set.
 	// This avoids hitting the KB service on every chat turn for non-wiki queries.
 	hasWikiChunk := false
-	for i := range chatManage.RerankResult {
-		if chatManage.RerankResult[i].ChunkType == types.ChunkTypeWikiPage {
+	for i := range chatManage.SearchResult {
+		if chatManage.SearchResult[i] != nil && chatManage.SearchResult[i].ChunkType == types.ChunkTypeWikiPage {
 			hasWikiChunk = true
 			break
 		}
 	}
 	if !hasWikiChunk {
-		return nil
+		return next()
 	}
 
 	// Confirm at least one search target is actually a wiki KB.
-	hasWikiKB := false
+	wikiKBs := make(map[string]struct{})
 	for _, target := range chatManage.SearchTargets {
+		if target == nil {
+			continue
+		}
 		kb, err := p.kbService.GetKnowledgeBaseByIDOnly(ctx, target.KnowledgeBaseID)
 		if err == nil && kb != nil && kb.IsWikiEnabled() {
-			hasWikiKB = true
-			break
+			wikiKBs[target.KnowledgeBaseID] = struct{}{}
 		}
 	}
-	if !hasWikiKB {
-		return nil
+	if len(wikiKBs) == 0 {
+		return next()
 	}
 
-	// Boost wiki page chunks in RerankResult
-	boostedCount := 0
-	for i := range chatManage.RerankResult {
-		if chatManage.RerankResult[i].ChunkType == types.ChunkTypeWikiPage {
-			chatManage.RerankResult[i].Score *= wikiBoostFactor
-			boostedCount++
+	markedCount := 0
+	for i := range chatManage.SearchResult {
+		result := chatManage.SearchResult[i]
+		if result != nil && result.ChunkType == types.ChunkTypeWikiPage {
+			if _, ok := wikiKBs[result.KnowledgeBaseID]; !ok {
+				continue
+			}
+			result.RankingSourcePrior = wikiSourcePrior
+			result.RankingSourcePriorKind = "wiki"
+			markedCount++
 		}
 	}
 
-	if boostedCount > 0 {
-		logger.Infof(ctx, "WikiBoost: boosted %d wiki page chunks by %.1fx", boostedCount, wikiBoostFactor)
-		// Re-sort by score after boosting; stable sort preserves ordering for ties.
-		sort.SliceStable(chatManage.RerankResult, func(i, j int) bool {
-			return chatManage.RerankResult[i].Score > chatManage.RerankResult[j].Score
-		})
+	if markedCount > 0 {
+		logger.Infof(ctx, "WikiBoost: marked %d wiki page chunks with bounded prior %.2f", markedCount, wikiSourcePrior)
 	}
-
-	return nil
+	return next()
 }

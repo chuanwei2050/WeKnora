@@ -81,6 +81,8 @@ type IndexWithScore struct {
 	TagID string
 	// Score
 	Score float64
+	// ScoreDomain identifies the scale used by Score after retrieval fusion.
+	ScoreDomain RetrievalScoreDomain
 	// Match type
 	MatchType MatchType
 	// IsEnabled
