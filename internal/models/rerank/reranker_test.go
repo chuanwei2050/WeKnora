@@ -2,8 +2,29 @@ package rerank
 
 import (
 	"encoding/json"
+	"errors"
+	"math"
 	"testing"
 )
+
+func TestValidateResultsRejectsMalformedResponse(t *testing.T) {
+	tests := map[string][]RankResult{
+		"negative index": {{Index: -1, RelevanceScore: 0.5}},
+		"large index":    {{Index: 1, RelevanceScore: 0.5}},
+		"duplicate index": {
+			{Index: 0, RelevanceScore: 0.5},
+			{Index: 0, RelevanceScore: 0.4},
+		},
+		"non-finite score": {{Index: 0, RelevanceScore: math.NaN()}},
+	}
+	for name, results := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateResults(results, 1); !errors.Is(err, ErrInvalidResponse) {
+				t.Fatalf("ValidateResults() error = %v, want ErrInvalidResponse", err)
+			}
+		})
+	}
+}
 
 func TestRankResultUnmarshalJSON(t *testing.T) {
 	tests := []struct {

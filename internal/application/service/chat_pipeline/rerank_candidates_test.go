@@ -33,11 +33,15 @@ func TestRerankUsesPlatformModelWhenRequestModelIDIsEmpty(t *testing.T) {
 		},
 	}
 
-	if err := plugin.OnEvent(context.Background(), types.CHUNK_RERANK, manage, func() *PluginError { return nil }); err == nil {
-		t.Fatal("expected model resolution error")
+	nextCalled := false
+	if err := plugin.OnEvent(context.Background(), types.CHUNK_RERANK, manage, func() *PluginError { nextCalled = true; return nil }); err != nil {
+		t.Fatalf("model unavailability should degrade to raw recall: %v", err)
 	}
 	if models.requestedModelID != "" {
 		t.Fatalf("requested model ID = %q, want platform default", models.requestedModelID)
+	}
+	if !nextCalled || manage.RerankOutcome != types.RerankOutcomeUnavailable || len(manage.RerankResult) != 1 {
+		t.Fatalf("unexpected model-unavailable fallback: next=%v outcome=%q results=%d", nextCalled, manage.RerankOutcome, len(manage.RerankResult))
 	}
 }
 
@@ -146,6 +150,98 @@ func (f *fakeRerankRedisCache) Set(
 type countingReranker struct {
 	mu    sync.Mutex
 	calls int
+}
+
+type fixedRerankModelService struct {
+	interfaces.ModelService
+	model rerank.Reranker
+}
+
+func (s fixedRerankModelService) GetRerankModel(context.Context, string) (rerank.Reranker, error) {
+	return s.model, nil
+}
+
+type fixedReranker struct {
+	results []rerank.RankResult
+	err     error
+}
+
+func (r fixedReranker) Rerank(context.Context, string, []string) ([]rerank.RankResult, error) {
+	return r.results, r.err
+}
+
+func (fixedReranker) GetModelName() string { return "fixed-reranker" }
+func (fixedReranker) GetModelID() string   { return "fixed-reranker-id" }
+
+func TestRerankEmptyResultIsNoRelevantResult(t *testing.T) {
+	plugin := &PluginRerank{modelService: fixedRerankModelService{model: fixedReranker{}}}
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankThreshold: 0.3, RerankTopK: 3},
+		PipelineState: types.PipelineState{
+			RewriteQuery: "query",
+			SearchResult: []*types.SearchResult{{ID: "chunk", Content: "unrelated", MatchType: types.MatchTypeEmbedding}},
+		},
+	}
+	nextCalled := false
+
+	err := plugin.OnEvent(context.Background(), types.CHUNK_RERANK, manage, func() *PluginError {
+		nextCalled = true
+		return nil
+	})
+	if err != ErrSearchNothing || manage.RerankOutcome != types.RerankOutcomeNoRelevantResult || nextCalled {
+		t.Fatalf("unexpected empty rerank control flow: err=%v outcome=%q next=%v", err, manage.RerankOutcome, nextCalled)
+	}
+}
+
+func TestRerankUnavailableFallsBackToRawRecall(t *testing.T) {
+	plugin := &PluginRerank{modelService: fixedRerankModelService{model: fixedReranker{err: errors.New("service unavailable")}}}
+	candidate := &types.SearchResult{ID: "chunk", Content: "candidate", MatchType: types.MatchTypeEmbedding}
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankThreshold: 0.3, RerankTopK: 3},
+		PipelineState:   types.PipelineState{RewriteQuery: "query", SearchResult: []*types.SearchResult{candidate}},
+	}
+	nextCalled := false
+
+	err := plugin.OnEvent(context.Background(), types.CHUNK_RERANK, manage, func() *PluginError {
+		nextCalled = true
+		return nil
+	})
+	if err != nil || manage.RerankOutcome != types.RerankOutcomeUnavailable || !nextCalled {
+		t.Fatalf("unexpected unavailable control flow: err=%v outcome=%q next=%v", err, manage.RerankOutcome, nextCalled)
+	}
+	if len(manage.RerankResult) != 1 || manage.RerankResult[0] != candidate {
+		t.Fatalf("raw recall was not preserved: %+v", manage.RerankResult)
+	}
+}
+
+func TestRerankInvalidResponseIndexIsInvalidCandidate(t *testing.T) {
+	plugin := &PluginRerank{modelService: fixedRerankModelService{model: fixedReranker{results: []rerank.RankResult{{Index: -1, RelevanceScore: 0.9}}}}}
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankThreshold: 0.3, RerankTopK: 3},
+		PipelineState: types.PipelineState{RewriteQuery: "query", SearchResult: []*types.SearchResult{
+			{ID: "chunk", Content: "candidate", MatchType: types.MatchTypeEmbedding},
+		}},
+	}
+	nextCalled := false
+	err := plugin.OnEvent(context.Background(), types.CHUNK_RERANK, manage, func() *PluginError { nextCalled = true; return nil })
+	if err == nil || manage.RerankOutcome != types.RerankOutcomeInvalidCandidate || nextCalled {
+		t.Fatalf("invalid rerank response was not rejected: err=%v outcome=%q next=%v", err, manage.RerankOutcome, nextCalled)
+	}
+}
+
+func TestRerankEmptyPassagesAreInvalidCandidates(t *testing.T) {
+	plugin := &PluginRerank{modelService: fixedRerankModelService{model: fixedReranker{}}}
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankThreshold: 0.3, RerankTopK: 3},
+		PipelineState: types.PipelineState{RewriteQuery: "query", SearchResult: []*types.SearchResult{
+			{ID: "chunk", Content: "", MatchType: types.MatchTypeEmbedding},
+		}},
+	}
+	nextCalled := false
+	err := plugin.OnEvent(context.Background(), types.CHUNK_RERANK, manage, func() *PluginError { nextCalled = true; return nil })
+	if err == nil || manage.RerankOutcome != types.RerankOutcomeInvalidCandidate || nextCalled {
+		t.Fatalf("empty rerank passages were not rejected: err=%v outcome=%q next=%v", err, manage.RerankOutcome, nextCalled)
+	}
 }
 
 func (r *countingReranker) Rerank(

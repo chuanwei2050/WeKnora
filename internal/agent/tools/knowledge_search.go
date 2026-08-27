@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -14,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/retrievalkernel"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -302,6 +304,10 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 			len(deduplicatedBeforeRerank), queries)
 		rerankedResults, err := t.rerankResults(ctx, rerankQuery, deduplicatedBeforeRerank)
 		if err != nil {
+			if errors.Is(err, rerank.ErrInvalidResponse) {
+				logger.Errorf(ctx, "[Tool][KnowledgeSearch] Invalid rerank response: %v", err)
+				return &types.ToolResult{Success: false, Error: "invalid rerank response"}, err
+			}
 			logger.Warnf(ctx, "[Tool][KnowledgeSearch] Rerank failed, using original results: %v", err)
 			filteredResults = deduplicatedBeforeRerank
 		} else {
@@ -743,13 +749,13 @@ func (t *KnowledgeSearchTool) rerankResults(
 	// Try rerankModel first, fallback to chatModel if rerankModel fails or returns no results
 	if t.rerankModel != nil {
 		rerankedCandidates, err = t.rerankWithModel(ctx, query, rerankCandidates)
-		// If rerankModel fails or returns no results, fallback to chatModel
-		if err != nil || len(rerankedCandidates) == 0 {
-			if err != nil {
-				logger.Warnf(ctx, "[Tool][KnowledgeSearch] Rerank model failed, falling back to chat model: %v", err)
-			} else {
-				logger.Warnf(ctx, "[Tool][KnowledgeSearch] Rerank model returned no results, falling back to chat model")
-			}
+		if errors.Is(err, rerank.ErrInvalidResponse) {
+			return nil, err
+		}
+		outcome := retrievalkernel.ClassifyRerank(len(rerankedCandidates), err, true)
+		// Only infrastructure failure may use another reranker or raw recall.
+		if outcome == retrievalkernel.OutcomeUnavailable {
+			logger.Warnf(ctx, "[Tool][KnowledgeSearch] Rerank model failed, falling back to chat model: %v", err)
 			// Reset error to allow fallback
 			err = nil
 			// Try chatModel if available
@@ -759,6 +765,8 @@ func (t *KnowledgeSearchTool) rerankResults(
 				// No fallback available, use original results
 				rerankedCandidates = rerankCandidates
 			}
+		} else if outcome == retrievalkernel.OutcomeNoRelevantResult {
+			rerankedCandidates = nil
 		}
 	} else if t.chatModel != nil {
 		// No rerankModel, use chatModel directly
@@ -955,18 +963,8 @@ Output only the scores, no explanations or additional text.`,
 		// Parse scores from response
 		batchScores, err := t.parseScoresFromResponse(response.Content, len(batch))
 		if err != nil {
-			logger.Warnf(
-				ctx,
-				"[Tool][KnowledgeSearch] Failed to parse LLM scores for batch %d-%d: %v, using original scores",
-				batchStart+1,
-				batchEnd,
-				err,
-			)
-			// Use original scores for this batch on parsing error
-			for i := batchStart; i < batchEnd; i++ {
-				allScores[i] = results[i].Score
-			}
-			continue
+			return nil, rerank.InvalidResponse(fmt.Errorf(
+				"parse LLM scores for batch %d-%d: %w", batchStart+1, batchEnd, err))
 		}
 
 		// Store scores for this batch
@@ -1001,11 +999,13 @@ func (t *KnowledgeSearchTool) parseScoresFromResponse(responseText string, expec
 	lines := strings.Split(strings.TrimSpace(responseText), "\n")
 	scores := make([]float64, 0, expectedCount)
 
+	lineIndex := 0
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
+		lineIndex++
 
 		// Try to extract score from various formats:
 		// "Passage 1: 0.85"
@@ -1014,53 +1014,35 @@ func (t *KnowledgeSearchTool) parseScoresFromResponse(responseText string, expec
 		// etc.
 		parts := strings.Split(line, ":")
 		var scoreStr string
-		if len(parts) >= 2 {
-			scoreStr = strings.TrimSpace(parts[len(parts)-1])
+		if len(parts) == 2 {
+			expectedLabel := fmt.Sprintf("Passage %d", lineIndex)
+			if strings.TrimSpace(parts[0]) != expectedLabel {
+				return nil, fmt.Errorf("unexpected score label %q, want %q", strings.TrimSpace(parts[0]), expectedLabel)
+			}
+			scoreStr = strings.TrimSpace(parts[1])
+		} else if len(parts) > 2 {
+			return nil, fmt.Errorf("invalid score line %q", line)
 		} else {
 			scoreStr = strings.TrimSpace(line)
 		}
 
-		// Remove any non-numeric characters except decimal point
-		scoreStr = strings.TrimFunc(scoreStr, func(r rune) bool {
-			return (r < '0' || r > '9') && r != '.'
-		})
-
 		if scoreStr == "" {
-			continue
+			return nil, fmt.Errorf("empty score line %q", line)
 		}
 
 		score, err := strconv.ParseFloat(scoreStr, 64)
 		if err != nil {
-			continue // Skip invalid scores
+			return nil, fmt.Errorf("invalid score line %q: %w", line, err)
 		}
-
-		// Clamp score to [0.0, 1.0]
-		if score < 0.0 {
-			score = 0.0
-		}
-		if score > 1.0 {
-			score = 1.0
+		if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 {
+			return nil, fmt.Errorf("score out of range in line %q", line)
 		}
 
 		scores = append(scores, score)
 	}
 
-	if len(scores) == 0 {
-		return nil, fmt.Errorf("no valid scores found in response")
-	}
-
-	// If we got fewer scores than expected, pad with last score or 0.5
-	for len(scores) < expectedCount {
-		if len(scores) > 0 {
-			scores = append(scores, scores[len(scores)-1])
-		} else {
-			scores = append(scores, 0.5)
-		}
-	}
-
-	// Truncate if we got more scores than expected
-	if len(scores) > expectedCount {
-		scores = scores[:expectedCount]
+	if len(scores) != expectedCount {
+		return nil, fmt.Errorf("score count %d does not match expected %d", len(scores), expectedCount)
 	}
 
 	return scores, nil
@@ -1083,16 +1065,17 @@ func (t *KnowledgeSearchTool) rerankWithModel(
 	if err != nil {
 		return nil, fmt.Errorf("rerank call failed: %w", err)
 	}
+	if err := rerank.ValidateResults(rerankResp, len(results)); err != nil {
+		return nil, err
+	}
 
 	// Map reranked results back with new scores
 	reranked := make([]*searchResultWithMeta, 0, len(rerankResp))
 	for _, rr := range rerankResp {
-		if rr.Index >= 0 && rr.Index < len(results) {
-			// Create new result with reranked score
-			newResult := *results[rr.Index]
-			newResult.Score = rr.RelevanceScore
-			reranked = append(reranked, &newResult)
-		}
+		// Create new result with reranked score
+		newResult := *results[rr.Index]
+		newResult.Score = rr.RelevanceScore
+		reranked = append(reranked, &newResult)
 	}
 
 	logger.Infof(

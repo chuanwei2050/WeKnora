@@ -120,6 +120,7 @@ type PipelineState struct {
 
 	SearchResult         []*SearchResult    `json:"-"`
 	RerankResult         []*SearchResult    `json:"-"`
+	RerankOutcome        RerankOutcome      `json:"rerank_outcome,omitempty"`
 	MergeResult          []*SearchResult    `json:"-"`
 	Entity               []string           `json:"-"`
 	EntityKBIDs          []string           `json:"-"`
@@ -136,6 +137,15 @@ type PipelineState struct {
 	RoutingDecision      *RoutingDecision   `json:"routing_decision,omitempty"`
 	VerifiedResult       *VerifiedAnswer    `json:"verified_result,omitempty"`
 }
+
+type RerankOutcome string
+
+const (
+	RerankOutcomeSuccess          RerankOutcome = "success"
+	RerankOutcomeNoRelevantResult RerankOutcome = "no_relevant_result"
+	RerankOutcomeUnavailable      RerankOutcome = "unavailable"
+	RerankOutcomeInvalidCandidate RerankOutcome = "invalid_candidate"
+)
 
 // PipelineContext holds runtime context for the current pipeline execution.
 type PipelineContext struct {

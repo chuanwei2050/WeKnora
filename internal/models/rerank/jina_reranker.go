@@ -115,7 +115,7 @@ func (r *JinaReranker) Rerank(ctx context.Context, query string, documents []str
 
 	var response JinaRerankResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
+		return nil, InvalidResponse(fmt.Errorf("unmarshal response: %w", err))
 	}
 	return response.Results, nil
 }

@@ -127,7 +127,7 @@ func (r *ZhipuReranker) Rerank(ctx context.Context, query string, documents []st
 
 	var response ZhipuRerankResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
+		return nil, InvalidResponse(fmt.Errorf("unmarshal response: %w", err))
 	}
 
 	// Convert Zhipu results to standard RankResult format

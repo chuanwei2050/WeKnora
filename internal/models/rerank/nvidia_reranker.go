@@ -125,7 +125,7 @@ func (r *NvidiaReranker) Rerank(ctx context.Context, query string, documents []s
 
 	var response NvidiaRerankResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
+		return nil, InvalidResponse(fmt.Errorf("unmarshal response: %w", err))
 	}
 	ret := make([]RankResult, len(response.Results))
 	for i, result := range response.Results {

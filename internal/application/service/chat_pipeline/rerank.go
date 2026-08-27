@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/retrievalkernel"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -90,8 +92,10 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 			"model_id": chatManage.RerankModelID,
 			"error":    err.Error(),
 		})
-		emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "相关内容筛选失败", stageStarted, false)
-		return ErrGetRerankModel.WithError(err)
+		chatManage.RerankOutcome = types.RerankOutcomeUnavailable
+		chatManage.RerankResult = append([]*types.SearchResult(nil), chatManage.SearchResult...)
+		emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "相关内容筛选不可用，已使用原始召回", stageStarted, false, map[string]interface{}{"status": "degraded", "reason": "rerank_model_unavailable", "output_count": len(chatManage.RerankResult)})
+		return next()
 	}
 
 	// Prepare passages for reranking (excluding DirectLoad results)
@@ -132,7 +136,24 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	if len(candidatesToRerank) > 0 {
 		// Single rerank call with RewriteQuery, use threshold degradation if no results
 		originalThreshold := chatManage.RerankThreshold
-		rerankResp = p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages, candidatesToRerank)
+		var rerankErr error
+		rerankResp, rerankErr = p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages, candidatesToRerank)
+		if rerankErr != nil {
+			if errors.Is(rerankErr, rerank.ErrInvalidResponse) {
+				chatManage.RerankOutcome = types.RerankOutcomeInvalidCandidate
+				emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "相关内容筛选响应无效", stageStarted, false)
+				return ErrRerank.WithError(rerankErr)
+			}
+			chatManage.RerankOutcome = types.RerankOutcome(retrievalkernel.ClassifyRerank(0, rerankErr, true))
+			chatManage.RerankResult = append([]*types.SearchResult(nil), chatManage.SearchResult...)
+			pipelineWarn(ctx, "Rerank", "fallback", map[string]interface{}{
+				"reason":        "rerank_unavailable",
+				"candidate_cnt": len(chatManage.RerankResult),
+				"error":         rerankErr.Error(),
+			})
+			emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "相关内容筛选不可用，已使用原始召回", stageStarted, false, map[string]interface{}{"status": "degraded", "reason": "rerank_unavailable", "output_count": len(chatManage.RerankResult)})
+			return next()
+		}
 
 		// If no results and threshold is high enough, try with lower threshold
 		if len(rerankResp) == 0 && originalThreshold > 0.3 {
@@ -147,10 +168,24 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 				"reason":        "no results above original threshold, retrying with lower threshold",
 			})
 			chatManage.RerankThreshold = degradedThreshold
-			rerankResp = p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages, candidatesToRerank)
+			rerankResp, rerankErr = p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages, candidatesToRerank)
 			// Restore original threshold
 			chatManage.RerankThreshold = originalThreshold
+			if rerankErr != nil {
+				if errors.Is(rerankErr, rerank.ErrInvalidResponse) {
+					chatManage.RerankOutcome = types.RerankOutcomeInvalidCandidate
+					return ErrRerank.WithError(rerankErr)
+				}
+				chatManage.RerankOutcome = types.RerankOutcome(retrievalkernel.ClassifyRerank(0, rerankErr, true))
+				chatManage.RerankResult = append([]*types.SearchResult(nil), chatManage.SearchResult...)
+				pipelineWarn(ctx, "Rerank", "fallback", map[string]interface{}{"reason": "rerank_unavailable", "error": rerankErr.Error()})
+				return next()
+			}
 		}
+	}
+	if len(candidatesToRerank) == 0 && len(directLoadResults) == 0 {
+		chatManage.RerankOutcome = types.RerankOutcome(retrievalkernel.ClassifyRerank(0, nil, false))
+		return ErrRerank.WithError(fmt.Errorf("no valid rerank candidates"))
 	}
 
 	pipelineInfo(ctx, "Rerank", "model_response", map[string]interface{}{
@@ -218,12 +253,14 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	}
 
 	if len(chatManage.RerankResult) == 0 {
+		chatManage.RerankOutcome = types.RerankOutcome(retrievalkernel.ClassifyRerank(0, nil, true))
 		pipelineWarn(ctx, "Rerank", "output", map[string]interface{}{
 			"filtered_cnt": 0,
 		})
 		emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "未筛选出相关内容", stageStarted, true, map[string]interface{}{"status": "empty", "input_count": len(chatManage.SearchResult), "output_count": 0})
 		return ErrSearchNothing
 	}
+	chatManage.RerankOutcome = types.RerankOutcome(retrievalkernel.ClassifyRerank(len(chatManage.RerankResult), nil, true))
 
 	pipelineInfo(ctx, "Rerank", "output", map[string]interface{}{
 		"filtered_cnt": len(chatManage.RerankResult),
@@ -344,7 +381,7 @@ func isComplexRerankQuery(query string) bool {
 func (p *PluginRerank) rerank(ctx context.Context,
 	chatManage *types.ChatManage, rerankModel rerank.Reranker, query string, passages []string,
 	candidates []*types.SearchResult,
-) []rerank.RankResult {
+) ([]rerank.RankResult, error) {
 	pipelineInfo(ctx, "Rerank", "model_call", map[string]interface{}{
 		"query_variant": query,
 		"passages":      len(passages),
@@ -365,7 +402,7 @@ func (p *PluginRerank) rerank(ctx context.Context,
 		pipelineInfo(ctx, "Rerank", "model_call_skip", map[string]interface{}{
 			"reason": "all_passages_empty",
 		})
-		return nil
+		return nil, rerank.InvalidResponse(errors.New("all rerank passages are empty"))
 	}
 	passages = cleanPassages
 	candidates = cleanCandidates
@@ -376,7 +413,13 @@ func (p *PluginRerank) rerank(ctx context.Context,
 			"query_variant": query,
 			"error":         err.Error(),
 		})
-		return nil
+		return nil, err
+	}
+	if err := rerank.ValidateResults(rerankResp, len(candidates)); err != nil {
+		pipelineError(ctx, "Rerank", "invalid_response", map[string]interface{}{
+			"candidate_count": len(candidates), "error": err.Error(),
+		})
+		return nil, err
 	}
 
 	// Log top scores for debugging
@@ -385,7 +428,7 @@ func (p *PluginRerank) rerank(ctx context.Context,
 	})
 	logged := min(5, len(rerankResp))
 	for i := range logged {
-		if rerankResp[i].Index < len(candidates) {
+		if rerankResp[i].Index >= 0 && rerankResp[i].Index < len(candidates) {
 			pipelineInfo(ctx, "Rerank", "top_score", map[string]interface{}{
 				"rank":        i + 1,
 				"score":       rerankResp[i].RelevanceScore,
@@ -407,7 +450,7 @@ func (p *PluginRerank) rerank(ctx context.Context,
 	// Filter results based on threshold
 	rankFilter := []rerank.RankResult{}
 	for _, result := range rerankResp {
-		if result.Index >= len(candidates) {
+		if result.Index < 0 || result.Index >= len(candidates) {
 			continue
 		}
 		if result.RelevanceScore >= chatManage.RerankThreshold {
@@ -435,7 +478,7 @@ func (p *PluginRerank) rerank(ctx context.Context,
 		})
 	}
 
-	return rankFilter
+	return rankFilter, nil
 }
 
 func (p *PluginRerank) rerankWithCache(

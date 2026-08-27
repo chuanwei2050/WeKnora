@@ -110,7 +110,7 @@ func (r *WeKnoraCloudReranker) Rerank(ctx context.Context, query string, documen
 
 	var rerankResp weKnoraCloudRerankResponse
 	if err := json.Unmarshal(respBytes, &rerankResp); err != nil {
-		return nil, fmt.Errorf("weknoracloud reranker: unmarshal: %w", err)
+		return nil, InvalidResponse(fmt.Errorf("weknoracloud reranker: unmarshal: %w", err))
 	}
 
 	results := make([]RankResult, 0, len(rerankResp.Results))

@@ -3,13 +3,38 @@ package rerank
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"net"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+var ErrInvalidResponse = errors.New("invalid rerank response")
+
+func InvalidResponse(err error) error {
+	return fmt.Errorf("%w: %v", ErrInvalidResponse, err)
+}
+
+func ValidateResults(results []RankResult, candidateCount int) error {
+	seen := make(map[int]struct{}, len(results))
+	for _, result := range results {
+		if result.Index < 0 || result.Index >= candidateCount {
+			return InvalidResponse(fmt.Errorf("candidate index %d out of range [0,%d)", result.Index, candidateCount))
+		}
+		if _, ok := seen[result.Index]; ok {
+			return InvalidResponse(fmt.Errorf("duplicate candidate index %d", result.Index))
+		}
+		if math.IsNaN(result.RelevanceScore) || math.IsInf(result.RelevanceScore, 0) {
+			return InvalidResponse(fmt.Errorf("candidate index %d has non-finite score", result.Index))
+		}
+		seen[result.Index] = struct{}{}
+	}
+	return nil
+}
 
 // Reranker defines the interface for document reranking
 type Reranker interface {

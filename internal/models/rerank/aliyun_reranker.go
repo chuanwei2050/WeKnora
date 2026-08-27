@@ -146,7 +146,7 @@ func (r *AliyunReranker) Rerank(ctx context.Context, query string, documents []s
 
 	var response AliyunRerankResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
+		return nil, InvalidResponse(fmt.Errorf("unmarshal response: %w", err))
 	}
 
 	// Convert Aliyun results to standard RankResult format

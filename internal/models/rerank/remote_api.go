@@ -116,7 +116,7 @@ func (r *OpenAIReranker) Rerank(ctx context.Context, query string, documents []s
 
 	var response RerankResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
+		return nil, InvalidResponse(fmt.Errorf("unmarshal response: %w", err))
 	}
 	return response.Results, nil
 }
