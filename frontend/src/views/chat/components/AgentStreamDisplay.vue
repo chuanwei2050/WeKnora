@@ -6,7 +6,7 @@
       <div class="tree-root" @click="toggleIntermediateSteps">
         <div class="tree-root-title">
           <img :src="agentIcon" alt="" />
-          <span v-html="intermediateStepsSummaryHtml"></span>
+          <span>{{ intermediateStepsSummary }}</span>
         </div>
         <div class="tree-root-toggle">
           <t-icon :name="showIntermediateSteps ? 'chevron-up' : 'chevron-down'" />
@@ -939,11 +939,6 @@ const intermediateStepsSummary = computed(() => {
   }
 
   return t('agent.stepsCompleted', { steps });
-});
-
-// HTML version of intermediate steps summary with colored numbers
-const intermediateStepsSummaryHtml = computed(() => {
-  return intermediateStepsSummary.value;
 });
 
 // Should show the collapsed steps indicator (tree root)
