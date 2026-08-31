@@ -45,6 +45,10 @@ func (f *graphRepositoryFixture) RemoveCanonicalSource(context.Context, uint64, 
 	return nil
 }
 
+func (f *graphRepositoryFixture) DeleteCanonicalKnowledge(context.Context, uint64, string, string) error {
+	return nil
+}
+
 func (f *graphRepositoryFixture) DeleteCanonicalKnowledgeBase(context.Context, uint64, string) error {
 	return nil
 }

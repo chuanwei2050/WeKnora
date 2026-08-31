@@ -92,6 +92,9 @@ func NewChunkExtractTask(
 		logger.Warn(ctx, "NEO4J is not enabled, skip chunk extract task")
 		return nil
 	}
+	if client == nil {
+		return fmt.Errorf("task enqueuer is not configured")
+	}
 	taskPayload := types.ExtractChunkPayload{
 		TenantID: tenantID,
 		ChunkID:  chunkID,

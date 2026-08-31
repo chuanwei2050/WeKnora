@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"gorm.io/gorm"
 )
@@ -104,16 +105,26 @@ type DatabaseQueryInput struct {
 // DatabaseQueryTool allows AI to query the database with auto-injected tenant_id for security
 type DatabaseQueryTool struct {
 	BaseTool
-	db            *gorm.DB
-	searchTargets types.SearchTargets
+	db             *gorm.DB
+	searchTargets  types.SearchTargets
+	governanceRepo interfaces.KnowledgeGovernanceRepository
 }
 
 // NewDatabaseQueryTool creates a new database query tool
 func NewDatabaseQueryTool(db *gorm.DB, searchTargets types.SearchTargets) *DatabaseQueryTool {
+	return NewDatabaseQueryToolWithGovernance(db, searchTargets, nil)
+}
+
+func NewDatabaseQueryToolWithGovernance(
+	db *gorm.DB,
+	searchTargets types.SearchTargets,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
+) *DatabaseQueryTool {
 	return &DatabaseQueryTool{
-		BaseTool:      databaseQueryTool,
-		db:            db,
-		searchTargets: searchTargets,
+		BaseTool:       databaseQueryTool,
+		db:             db,
+		searchTargets:  searchTargets,
+		governanceRepo: governanceRepo,
 	}
 }
 
@@ -150,7 +161,7 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 
 	// Validate and secure the SQL query
 	logger.Debugf(ctx, "[Tool][DatabaseQuery] Validating and securing SQL...")
-	securedSQL, err := t.validateAndSecureSQL(input.SQL, tenantID)
+	securedSQL, err := t.validateAndSecureSQL(ctx, input.SQL, tenantID)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][DatabaseQuery] SQL validation failed: %v", err)
 		return &types.ToolResult{
@@ -254,23 +265,35 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 }
 
 // validateAndSecureSQL validates the SQL query and injects tenant_id conditions
-func (t *DatabaseQueryTool) validateAndSecureSQL(sqlQuery string, tenantID uint64) (string, error) {
+func (t *DatabaseQueryTool) validateAndSecureSQL(ctx context.Context, sqlQuery string, tenantID uint64) (string, error) {
 	kbIDs := t.searchTargets.GetAllKnowledgeBaseIDs()
 	var knowledgeIDs []string
+	var currentVersions map[string]string
 	for _, target := range t.searchTargets {
 		if target.Type == types.SearchTargetTypeKnowledge && len(target.KnowledgeIDs) > 0 {
 			knowledgeIDs = append(knowledgeIDs, target.KnowledgeIDs...)
 		}
 	}
+	if t.searchTargets != nil {
+		visibleIDs, versions, err := t.visibleKnowledgeVersions(ctx)
+		if err != nil {
+			return "", err
+		}
+		knowledgeIDs = visibleIDs
+		currentVersions = versions
+	}
 
-	securedSQL, validationResult, err := utils.ValidateAndSecureSQL(
-		sqlQuery,
+	options := []utils.SQLValidationOption{
 		utils.WithSecurityDefaults(tenantID),
 		utils.WithSoftDeleteFilter("knowledge_bases", "knowledges", "chunks"),
 		utils.WithHiddenKBFilter(),
 		utils.WithInjectionRiskCheck(),
 		utils.WithSearchScopeFilter(kbIDs, knowledgeIDs),
-	)
+	}
+	if t.searchTargets != nil {
+		options = append(options, utils.WithKnowledgeVersionFilter(currentVersions))
+	}
+	securedSQL, validationResult, err := utils.ValidateAndSecureSQL(sqlQuery, options...)
 	if err != nil {
 		return "", err
 	}
@@ -284,6 +307,51 @@ func (t *DatabaseQueryTool) validateAndSecureSQL(sqlQuery string, tenantID uint6
 	}
 
 	return securedSQL, nil
+}
+
+const noVisibleKnowledgeID = "__weknora_no_visible_knowledge__"
+
+func (t *DatabaseQueryTool) visibleKnowledgeVersions(ctx context.Context) ([]string, map[string]string, error) {
+	type knowledgeScopeRow struct {
+		ID               string `gorm:"column:id"`
+		KnowledgeBaseID  string `gorm:"column:knowledge_base_id"`
+		TenantID         uint64 `gorm:"column:tenant_id"`
+		CurrentVersionID string `gorm:"column:current_version_id"`
+		PendingVersionID string `gorm:"column:pending_version_id"`
+	}
+	var rows []knowledgeScopeRow
+	query := t.db.WithContext(ctx).Table("knowledges").Select("id, knowledge_base_id, tenant_id, current_version_id, pending_version_id").Where("deleted_at IS NULL")
+	if len(t.searchTargets) > 0 {
+		conditions := make([]string, 0, len(t.searchTargets))
+		args := make([]interface{}, 0, len(t.searchTargets)*2)
+		for _, target := range t.searchTargets {
+			if target == nil || target.KnowledgeBaseID == "" || target.TenantID == 0 {
+				continue
+			}
+			conditions = append(conditions, "(knowledge_base_id = ? AND tenant_id = ?)")
+			args = append(args, target.KnowledgeBaseID, target.TenantID)
+		}
+		if len(conditions) == 0 {
+			return []string{noVisibleKnowledgeID}, map[string]string{noVisibleKnowledgeID: ""}, nil
+		}
+		query = query.Where("("+strings.Join(conditions, " OR ")+")", args...)
+	}
+	if err := query.Find(&rows).Error; err != nil {
+		return nil, nil, fmt.Errorf("load authorized knowledge scope: %w", err)
+	}
+	visible := make([]string, 0, len(rows))
+	currentVersions := make(map[string]string, len(rows))
+	for _, row := range rows {
+		knowledge := &types.Knowledge{ID: row.ID, TenantID: row.TenantID, KnowledgeBaseID: row.KnowledgeBaseID, CurrentVersionID: row.CurrentVersionID, PendingVersionID: row.PendingVersionID}
+		if agentKnowledgeVisible(ctx, knowledge, t.searchTargets, t.governanceRepo) {
+			visible = append(visible, row.ID)
+			currentVersions[row.ID] = row.CurrentVersionID
+		}
+	}
+	if len(visible) == 0 {
+		return []string{noVisibleKnowledgeID}, map[string]string{noVisibleKnowledgeID: ""}, nil
+	}
+	return visible, currentVersions, nil
 }
 
 // formatQueryResults formats query results into readable text

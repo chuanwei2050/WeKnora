@@ -95,3 +95,30 @@ func TestGraphTripleMarkWrittenKeepsPendingOnSkip(t *testing.T) {
 	require.NotNil(t, got.WrittenAt)
 	require.Error(t, repo.MarkWritten(ctx, 1, item.ID, "reviewer"))
 }
+
+func TestSupersedePendingByKnowledgeIDsOnlyTouchesSelectedDocuments(t *testing.T) {
+	db := openGraphTripleTestDB(t)
+	repo := NewGraphTripleReviewRepository(db)
+	ctx := context.Background()
+	for _, knowledgeID := range []string{"deleted-1", "deleted-2", "kept"} {
+		item := &types.GraphTripleCandidate{
+			TenantID: 1, KnowledgeBaseID: "kb", KnowledgeID: knowledgeID, ChunkID: "chunk-" + knowledgeID,
+			GraphData: types.GraphDataPayload{Relation: []*types.GraphRelation{{Node1: "A", Node2: "B", Type: "uses"}}},
+			Status:    types.GraphTriplePending, CreatedAt: time.Now().UTC(),
+		}
+		require.NoError(t, repo.Enqueue(ctx, item))
+	}
+
+	require.NoError(t, repo.SupersedePendingByKnowledgeIDs(ctx, 1, []string{"deleted-1", "deleted-2"}))
+	deleted, err := repo.List(ctx, 1, "kb", types.GraphTripleSuperseded)
+	require.NoError(t, err)
+	require.Len(t, deleted, 2)
+	for _, item := range deleted {
+		require.Contains(t, []string{"deleted-1", "deleted-2"}, item.KnowledgeID)
+		require.Equal(t, "document deleted", item.Comment)
+	}
+	pending, err := repo.List(ctx, 1, "kb", types.GraphTriplePending)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, "kept", pending[0].KnowledgeID)
+}

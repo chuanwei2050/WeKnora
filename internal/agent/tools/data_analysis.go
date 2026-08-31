@@ -191,6 +191,8 @@ type DataAnalysisTool struct {
 	knowledgeService     interfaces.KnowledgeService
 	fileService          interfaces.FileService
 	tenantService        interfaces.TenantService
+	searchTargets        types.SearchTargets
+	governanceRepo       interfaces.KnowledgeGovernanceRepository
 	db                   *sql.DB
 	sessionID            string
 	createdTables        []string // Track tables created in this session
@@ -205,12 +207,40 @@ func NewDataAnalysisTool(
 	db *sql.DB,
 	sessionID string,
 ) *DataAnalysisTool {
+	return newDataAnalysisTool(knowledgeBaseService, knowledgeService, tenantService, fileService, db, sessionID, nil, nil)
+}
+
+func NewDataAnalysisToolWithGovernance(
+	knowledgeBaseService interfaces.KnowledgeBaseService,
+	knowledgeService interfaces.KnowledgeService,
+	tenantService interfaces.TenantService,
+	fileService interfaces.FileService,
+	db *sql.DB,
+	sessionID string,
+	searchTargets types.SearchTargets,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
+) *DataAnalysisTool {
+	return newDataAnalysisTool(knowledgeBaseService, knowledgeService, tenantService, fileService, db, sessionID, searchTargets, governanceRepo)
+}
+
+func newDataAnalysisTool(
+	knowledgeBaseService interfaces.KnowledgeBaseService,
+	knowledgeService interfaces.KnowledgeService,
+	tenantService interfaces.TenantService,
+	fileService interfaces.FileService,
+	db *sql.DB,
+	sessionID string,
+	searchTargets types.SearchTargets,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
+) *DataAnalysisTool {
 	return &DataAnalysisTool{
 		BaseTool:             dataAnalysisTool,
 		knowledgeBaseService: knowledgeBaseService,
 		knowledgeService:     knowledgeService,
 		fileService:          fileService,
 		tenantService:        tenantService,
+		searchTargets:        searchTargets,
+		governanceRepo:       governanceRepo,
 		db:                   db,
 		sessionID:            sessionID,
 		loadedSchemas:        make(map[string]*TableSchema),
@@ -646,6 +676,9 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *typ
 	if knowledge == nil {
 		return nil, fmt.Errorf("knowledge cannot be nil")
 	}
+	if t.loadedSchemas == nil {
+		t.loadedSchemas = make(map[string]*TableSchema)
+	}
 	tableName := t.TableName(knowledge)
 
 	fileType := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(knowledge.FileType), "."))
@@ -679,7 +712,7 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *typ
 		return nil, fmt.Errorf("unsupported file type: %s (supported types: csv, xlsx, xls)", fileType)
 	}
 	if err == nil {
-		t.loadedSchemas[knowledge.ID] = schema
+		t.loadedSchemas[knowledgeSchemaCacheKey(knowledge)] = schema
 	}
 	return schema, err
 }
@@ -776,14 +809,26 @@ func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowled
 //   - *TableSchema: schema information of the created table
 //   - error: any error that occurred during the operation
 func (t *DataAnalysisTool) LoadFromKnowledgeID(ctx context.Context, knowledgeID string) (*TableSchema, error) {
-	if schema := t.loadedSchemas[knowledgeID]; schema != nil {
-		return schema, nil
+	// Unit-only callers may provide a preloaded schema without a knowledge
+	// service. Production constructors always provide the service, so cached
+	// production schemas still pass the visibility check below.
+	if t.knowledgeService == nil {
+		if schema := t.loadedSchemas[knowledgeID]; schema != nil {
+			return schema, nil
+		}
+		return nil, fmt.Errorf("knowledge service is not configured")
 	}
 	// Use GetKnowledgeByIDOnly to support cross-tenant shared KB
 	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to get knowledge by ID '%s': %v", knowledgeID, err)
 		return nil, fmt.Errorf("failed to get knowledge by ID: %w", err)
+	}
+	if !agentKnowledgeVisible(ctx, knowledge, t.searchTargets, t.governanceRepo) {
+		return nil, fmt.Errorf("knowledge is not available in the authorized search scope")
+	}
+	if schema := t.loadedSchemas[knowledgeSchemaCacheKey(knowledge)]; schema != nil {
+		return schema, nil
 	}
 
 	return t.LoadFromKnowledge(ctx, knowledge)
@@ -867,9 +912,21 @@ func (t *DataAnalysisTool) LoadFromTable(ctx context.Context, tableName string) 
 
 func (t *DataAnalysisTool) TableName(knowledge *types.Knowledge) string {
 	knowledgePart := sanitizeDuckDBIdentifierPart(knowledge.ID)
+	versionPart := ""
+	if versionID := strings.TrimSpace(knowledge.CurrentVersionID); versionID != "" {
+		versionDigest := sha256.Sum256([]byte(versionID))
+		versionPart = "_" + fmt.Sprintf("%x", versionDigest[:6])
+	}
 	sessionDigest := sha256.Sum256([]byte(t.sessionID))
 	sessionPart := fmt.Sprintf("%x", sessionDigest[:6])
-	return "k_" + knowledgePart + "_" + sessionPart
+	return "k_" + knowledgePart + versionPart + "_" + sessionPart
+}
+
+func knowledgeSchemaCacheKey(knowledge *types.Knowledge) string {
+	if knowledge == nil {
+		return ""
+	}
+	return knowledge.ID + "|" + strings.TrimSpace(knowledge.CurrentVersionID)
 }
 
 var nonDuckDBIdentifierPart = regexp.MustCompile(`[^a-zA-Z0-9_]+`)

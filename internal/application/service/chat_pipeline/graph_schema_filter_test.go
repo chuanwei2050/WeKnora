@@ -245,3 +245,32 @@ func TestParseGraphDropsMalformedItems(t *testing.T) {
 		t.Fatalf("invalid confidence must not pass extraction policy: %#v", graph.Relation)
 	}
 }
+
+func TestParseGraphRecoversJSONWrappedInModelProse(t *testing.T) {
+	f := NewFormater()
+	raw := "先给出结构化结果：\n<think>已识别实体和关系</think>\n{\"items\":[{\"entity\":\"Alpha\",\"entity_type\":\"tool\"},{\"entity\":\"Beta\",\"entity_type\":\"service\"},{\"entity1\":\"Alpha\",\"entity2\":\"Beta\",\"relation\":\"uses\",\"confidence\":0.9}]}\n以上为结果。"
+	graph, err := f.ParseGraph(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("ParseGraph: %v", err)
+	}
+	if len(graph.Node) != 2 || len(graph.Relation) != 1 {
+		t.Fatalf("expected wrapped JSON to be recovered, got %#v", graph)
+	}
+}
+
+func TestExtractCompleteJSONValueDoesNotRepairTruncatedJSON(t *testing.T) {
+	if _, ok := extractCompleteJSONValue(`{"items":[{"entity":"Alpha"}`); ok {
+		t.Fatal("truncated JSON must not be recovered as partial graph data")
+	}
+}
+
+func TestParseGraphRecoversJSONWithTrailingModelExplanation(t *testing.T) {
+	f := NewFormater()
+	graph, err := f.ParseGraph(context.Background(), `{"items":[{"entity":"Alpha","entity_type":"tool"}]}补充说明`)
+	if err != nil {
+		t.Fatalf("ParseGraph: %v", err)
+	}
+	if len(graph.Node) != 1 || graph.Node[0].Name != "Alpha" {
+		t.Fatalf("expected complete JSON value to be recovered, got %#v", graph)
+	}
+}

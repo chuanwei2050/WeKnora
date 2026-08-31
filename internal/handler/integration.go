@@ -33,21 +33,22 @@ import (
 )
 
 type IntegrationHandler struct {
-	service     *integrationauth.Service
-	kbs         interfaces.KnowledgeBaseService
-	knowledges  interfaces.KnowledgeService
-	sessions    interfaces.SessionService
-	messages    interfaces.MessageService
-	models      interfaces.ModelService
-	agents      interfaces.CustomAgentService
-	tenant      interfaces.TenantService
-	files       interfaces.FileService
-	duckdb      *sql.DB
-	streams     interfaces.StreamManager
-	attachments *session.AttachmentProcessor
-	limiter     *integrationRateLimiter
-	limits      integrationLimits
-	generations sync.Map
+	service        *integrationauth.Service
+	kbs            interfaces.KnowledgeBaseService
+	knowledges     interfaces.KnowledgeService
+	sessions       interfaces.SessionService
+	messages       interfaces.MessageService
+	models         interfaces.ModelService
+	agents         interfaces.CustomAgentService
+	tenant         interfaces.TenantService
+	files          interfaces.FileService
+	duckdb         *sql.DB
+	governanceRepo interfaces.KnowledgeGovernanceRepository
+	streams        interfaces.StreamManager
+	attachments    *session.AttachmentProcessor
+	limiter        *integrationRateLimiter
+	limits         integrationLimits
+	generations    sync.Map
 }
 
 // The embedded session is also used by the existing /api/v1 and /files routes.
@@ -55,9 +56,9 @@ type IntegrationHandler struct {
 // reverse-proxy deployments.
 const integrationBrowserCookiePath = "/"
 
-func NewIntegrationHandler(service *integrationauth.Service, kbs interfaces.KnowledgeBaseService, knowledges interfaces.KnowledgeService, sessions interfaces.SessionService, messages interfaces.MessageService, streams interfaces.StreamManager, files interfaces.FileService, models interfaces.ModelService, agents interfaces.CustomAgentService, tenant interfaces.TenantService, duckdb *sql.DB, documents interfaces.DocumentReader, imageResolver *docparser.ImageResolver) *IntegrationHandler {
+func NewIntegrationHandler(service *integrationauth.Service, kbs interfaces.KnowledgeBaseService, knowledges interfaces.KnowledgeService, sessions interfaces.SessionService, messages interfaces.MessageService, streams interfaces.StreamManager, files interfaces.FileService, models interfaces.ModelService, agents interfaces.CustomAgentService, tenant interfaces.TenantService, duckdb *sql.DB, documents interfaces.DocumentReader, imageResolver *docparser.ImageResolver, governanceRepo interfaces.KnowledgeGovernanceRepository) *IntegrationHandler {
 	return &IntegrationHandler{
-		service: service, kbs: kbs, knowledges: knowledges, sessions: sessions, messages: messages, models: models, agents: agents, tenant: tenant, files: files, duckdb: duckdb, streams: streams,
+		service: service, kbs: kbs, knowledges: knowledges, sessions: sessions, messages: messages, models: models, agents: agents, tenant: tenant, files: files, duckdb: duckdb, governanceRepo: governanceRepo, streams: streams,
 		attachments: session.NewAttachmentProcessor(files, documents, imageResolver, models),
 		limiter:     newIntegrationRateLimiter(), limits: loadIntegrationLimits(),
 	}
@@ -908,6 +909,22 @@ func (h *IntegrationHandler) AnalyzeKnowledgeTable(c *gin.Context) {
 	if knowledge == nil || knowledge.KnowledgeBaseID != req.KnowledgeBaseID || knowledge.TenantID != principal.TenantID {
 		integrationError(c, http.StatusNotFound, "knowledge_not_found", "knowledge was not found in the requested knowledge base")
 		return
+	}
+	kb, kbErr := h.kbs.GetKnowledgeBaseByID(c.Request.Context(), knowledge.KnowledgeBaseID)
+	if kbErr != nil || kb == nil {
+		integrationError(c, http.StatusNotFound, "knowledge_not_found", "knowledge was not found in the requested knowledge base")
+		return
+	}
+	if kb.Governance.Enabled {
+		if knowledge.CurrentVersionID == "" || knowledge.PendingVersionID != "" || h.governanceRepo == nil {
+			integrationError(c, http.StatusForbidden, "knowledge_not_retrievable", "knowledge is not currently retrievable")
+			return
+		}
+		version, versionErr := h.governanceRepo.GetVersion(c.Request.Context(), knowledge.TenantID, knowledge.CurrentVersionID)
+		if versionErr != nil || version == nil || !version.IsRetrievable(time.Now().UTC()) {
+			integrationError(c, http.StatusForbidden, "knowledge_not_retrievable", "knowledge is not currently retrievable")
+			return
+		}
 	}
 	fileType := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(knowledge.FileType), "."))
 	if fileType != "csv" && fileType != "xlsx" && fileType != "xls" {

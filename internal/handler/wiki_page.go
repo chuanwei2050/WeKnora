@@ -52,6 +52,9 @@ func (h *WikiPageHandler) validateWikiKB(c *gin.Context) (string, uint64, error)
 		logger.ErrorWithFields(ctx, err, nil)
 		return "", 0, errors.NewNotFoundError("Knowledge base not found")
 	}
+	if !types.CanReadKnowledgeBase(ctx, kb) {
+		return "", 0, errors.NewNotFoundError("Knowledge base not found")
+	}
 
 	if !kb.IsWikiEnabled() {
 		return "", 0, errors.NewBadRequestError("Wiki feature is not enabled for this knowledge base")

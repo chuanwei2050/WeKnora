@@ -211,7 +211,7 @@ const toggleAnswerPlayback = async () => {
         return;
     }
     await voiceConversation.playAnswerTTS(
-        String(props.session?.id || ''),
+        String(props.session?.assistant_message_id || props.session?.id || ''),
         ttsModelId.value,
         {
             language: props.voiceConfig?.voice_language,

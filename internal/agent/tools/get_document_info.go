@@ -55,6 +55,7 @@ type GetDocumentInfoTool struct {
 	knowledgeService interfaces.KnowledgeService
 	chunkService     interfaces.ChunkService
 	searchTargets    types.SearchTargets // Pre-computed unified search targets with KB-tenant mapping
+	governanceRepo   interfaces.KnowledgeGovernanceRepository
 }
 
 // NewGetDocumentInfoTool creates a new get document info tool
@@ -62,12 +63,18 @@ func NewGetDocumentInfoTool(
 	knowledgeService interfaces.KnowledgeService,
 	chunkService interfaces.ChunkService,
 	searchTargets types.SearchTargets,
+	governanceRepos ...interfaces.KnowledgeGovernanceRepository,
 ) *GetDocumentInfoTool {
+	var governanceRepo interfaces.KnowledgeGovernanceRepository
+	if len(governanceRepos) > 0 {
+		governanceRepo = governanceRepos[0]
+	}
 	return &GetDocumentInfoTool{
 		BaseTool:         getDocumentInfoTool,
 		knowledgeService: knowledgeService,
 		chunkService:     chunkService,
 		searchTargets:    searchTargets,
+		governanceRepo:   governanceRepo,
 	}
 }
 
@@ -119,8 +126,8 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 				return
 			}
 
-			// Verify the knowledge's KB is in searchTargets (permission check)
-			if !t.searchTargets.ContainsKB(knowledge.KnowledgeBaseID) {
+			// Verify the document and its current governed version are in scope.
+			if !agentKnowledgeVisible(ctx, knowledge, t.searchTargets, t.governanceRepo) {
 				mu.Lock()
 				results[id] = &docInfo{
 					err: fmt.Errorf("knowledge base %s is not accessible", knowledge.KnowledgeBaseID),
@@ -132,11 +139,10 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 			// Use knowledge's actual tenant_id for chunk query (supports cross-tenant shared KB).
 			// Keep chunk-type filter aligned with list_knowledge_chunks so the
 			// "chunk_count" reported here matches what that tool can page over.
-			_, total, err := t.chunkService.GetRepository().
-				ListPagedChunksByKnowledgeID(ctx, knowledge.TenantID, id, &types.Pagination{
-					Page:     1,
-					PageSize: 1,
-				}, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, "", "", "", "", "")
+			_, total, err := listAgentChunks(ctx, t.chunkService.GetRepository(), knowledge.TenantID, id, knowledge.CurrentVersionID, &types.Pagination{
+				Page:     1,
+				PageSize: 1,
+			}, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ})
 			if err != nil {
 				mu.Lock()
 				results[id] = &docInfo{
@@ -146,6 +152,7 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 				return
 			}
 			chunkCount := int(total)
+			knowledge = maskPendingKnowledge(knowledge)
 
 			mu.Lock()
 			results[id] = &docInfo{

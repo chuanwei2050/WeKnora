@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ErrWikiPageNotFound is returned when a wiki page is not found
@@ -17,6 +18,10 @@ var ErrWikiPageNotFound = errors.New("wiki page not found")
 
 // ErrWikiPageConflict is returned when an optimistic lock conflict is detected
 var ErrWikiPageConflict = errors.New("wiki page version conflict")
+
+// ErrWikiPageKnowledgeVersionConflict is returned when a generated page is
+// based on a version that is no longer current.
+var ErrWikiPageKnowledgeVersionConflict = errors.New("wiki page knowledge version conflict")
 
 // wikiPageRepository implements the WikiPageRepository interface
 type wikiPageRepository struct {
@@ -31,6 +36,15 @@ func NewWikiPageRepository(db *gorm.DB) interfaces.WikiPageRepository {
 // Create inserts a new wiki page record
 func (r *wikiPageRepository) Create(ctx context.Context, page *types.WikiPage) error {
 	return r.db.WithContext(ctx).Create(page).Error
+}
+
+func (r *wikiPageRepository) CreateIfKnowledgeVersionsCurrent(ctx context.Context, page *types.WikiPage, expected map[string]string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := ensureKnowledgeVersionsCurrent(tx, page.KnowledgeBaseID, expected); err != nil {
+			return err
+		}
+		return tx.Create(page).Error
+	})
 }
 
 // Update updates an existing wiki page record with optimistic locking.
@@ -55,6 +69,68 @@ func (r *wikiPageRepository) Update(ctx context.Context, page *types.WikiPage) e
 			return ErrWikiPageNotFound
 		}
 		return ErrWikiPageConflict
+	}
+	return nil
+}
+
+func (r *wikiPageRepository) UpdateIfKnowledgeVersionsCurrent(ctx context.Context, page *types.WikiPage, expected map[string]string, contentChanged bool) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := ensureKnowledgeVersionsCurrent(tx, page.KnowledgeBaseID, expected); err != nil {
+			return err
+		}
+		expectedVersion := page.Version
+		updates := map[string]interface{}{
+			"in_links":      page.InLinks,
+			"out_links":     page.OutLinks,
+			"status":        page.Status,
+			"source_refs":   page.SourceRefs,
+			"chunk_refs":    page.ChunkRefs,
+			"page_metadata": page.PageMetadata,
+			"updated_at":    page.UpdatedAt,
+		}
+		if contentChanged {
+			updates["title"] = page.Title
+			updates["content"] = page.Content
+			updates["summary"] = page.Summary
+			updates["page_type"] = page.PageType
+			updates["version"] = expectedVersion + 1
+		}
+		result := tx.Model(&types.WikiPage{}).Where("id = ? AND version = ?", page.ID, expectedVersion).Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			var count int64
+			if err := tx.Model(&types.WikiPage{}).Where("id = ?", page.ID).Count(&count).Error; err != nil {
+				return err
+			}
+			if count == 0 {
+				return ErrWikiPageNotFound
+			}
+			return ErrWikiPageConflict
+		}
+		if contentChanged {
+			page.Version = expectedVersion + 1
+		}
+		return nil
+	})
+}
+
+func ensureKnowledgeVersionsCurrent(tx *gorm.DB, knowledgeBaseID string, expected map[string]string) error {
+	for knowledgeID, versionID := range expected {
+		var row struct {
+			CurrentVersionID *string `gorm:"column:current_version_id"`
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Table("knowledges").Select("current_version_id").Where("knowledge_base_id = ? AND id = ? AND deleted_at IS NULL", knowledgeBaseID, knowledgeID).Take(&row).Error; err != nil {
+			return ErrWikiPageKnowledgeVersionConflict
+		}
+		currentVersionID := ""
+		if row.CurrentVersionID != nil {
+			currentVersionID = strings.TrimSpace(*row.CurrentVersionID)
+		}
+		if currentVersionID != strings.TrimSpace(versionID) {
+			return ErrWikiPageKnowledgeVersionConflict
+		}
 	}
 	return nil
 }
@@ -400,7 +476,7 @@ func (r *wikiPageRepository) ListIssues(ctx context.Context, kbID string, slug s
 	if status != "" {
 		query = query.Where("status = ?", status)
 	}
-	
+
 	var issues []*types.WikiPageIssue
 	if err := query.Order("created_at DESC").Find(&issues).Error; err != nil {
 		return nil, err

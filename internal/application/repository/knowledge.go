@@ -166,6 +166,51 @@ func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *ty
 	return err
 }
 
+// UpdateKnowledgeIfPendingVersion updates only processing fields while the
+// expected governed version is still pending. This prevents an older worker
+// from overwriting a newer pending version through a full-model Save.
+func (r *knowledgeRepository) UpdateKnowledgeIfPendingVersion(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID, versionID string,
+	values map[string]any,
+) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND id = ? AND pending_version_id = ?", tenantID, knowledgeID, versionID).
+		Updates(values)
+	return result.RowsAffected == 1, result.Error
+}
+
+// SetPendingVersionIfCurrent atomically installs a new pending version only
+// when the knowledge row still has the expected pending version. This keeps
+// concurrent manual submissions from replacing each other's draft pointer.
+func (r *knowledgeRepository) SetPendingVersionIfCurrent(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID, expectedPendingVersionID, pendingVersionID string,
+) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND id = ? AND (pending_version_id = ? OR (pending_version_id IS NULL AND ? = ''))",
+			tenantID, knowledgeID, expectedPendingVersionID, expectedPendingVersionID).
+		Update("pending_version_id", pendingVersionID)
+	return result.RowsAffected == 1, result.Error
+}
+
+// UpdateKnowledgeIfCurrentOrPendingVersion is used by post-processing, which
+// may be retried after the governed version has already become active.
+func (r *knowledgeRepository) UpdateKnowledgeIfCurrentOrPendingVersion(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID, versionID string,
+	values map[string]any,
+) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND id = ? AND (pending_version_id = ? OR (current_version_id = ? AND (pending_version_id = '' OR pending_version_id IS NULL)))",
+			tenantID, knowledgeID, versionID, versionID).
+		Updates(values)
+	return result.RowsAffected == 1, result.Error
+}
+
 // UpdateKnowledgeBatch updates knowledge items in batch
 func (r *knowledgeRepository) UpdateKnowledgeBatch(ctx context.Context, knowledgeList []*types.Knowledge) error {
 	if len(knowledgeList) == 0 {

@@ -204,9 +204,6 @@ type graphExtractConfigRequest struct {
 }
 
 func (r graphExtractConfigRequest) extractConfig() *types.ExtractConfig {
-	if !r.Enabled {
-		return &types.ExtractConfig{Enabled: false}
-	}
 	nodes := make([]*types.GraphNode, len(r.Nodes))
 	for i := range r.Nodes {
 		node := r.Nodes[i]
@@ -218,7 +215,7 @@ func (r graphExtractConfigRequest) extractConfig() *types.ExtractConfig {
 		relations[i] = &relation
 	}
 	return &types.ExtractConfig{
-		Enabled:             true,
+		Enabled:             r.Enabled,
 		Mode:                r.Mode,
 		TemplateKey:         r.TemplateKey,
 		ModelID:             r.ModelID,

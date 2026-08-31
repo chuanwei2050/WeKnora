@@ -258,7 +258,7 @@ func (p *PluginSearchEntity) filterGovernedGraphResult(ctx context.Context, chat
 			return false
 		}
 		if knowledge.CurrentVersionID == "" {
-			return true
+			return knowledge.PendingVersionID == "" && item.KnowledgeVersionID == ""
 		}
 		if item.KnowledgeVersionID != knowledge.CurrentVersionID {
 			return false
@@ -329,7 +329,7 @@ func governedChunkVisible(knowledge *types.Knowledge, chunk *types.Chunk) bool {
 		return false
 	}
 	if knowledge.CurrentVersionID == "" {
-		return true
+		return knowledge.PendingVersionID == "" && chunk.KnowledgeVersionID == ""
 	}
 	return chunk.KnowledgeVersionID == knowledge.CurrentVersionID
 }
@@ -548,27 +548,47 @@ func filterSeenChunk(ctx context.Context, graph *types.GraphData, searchResult [
 }
 
 // chunk2SearchResult converts a chunk to a search result
+func graphSearchKnowledgeMetadata(knowledge *types.Knowledge, chunk *types.Chunk) map[string]string {
+	metadata := knowledge.GetMetadata()
+	if strings.TrimSpace(knowledge.PendingVersionID) != "" && chunk.KnowledgeVersionID != strings.TrimSpace(knowledge.PendingVersionID) {
+		delete(metadata, "content")
+		delete(metadata, "status")
+		delete(metadata, "version")
+		delete(metadata, "updated_at")
+	}
+	return metadata
+}
+
+func graphSearchKnowledgeDisplay(knowledge *types.Knowledge, chunk *types.Chunk) (string, string, string, string) {
+	if strings.TrimSpace(knowledge.PendingVersionID) != "" && chunk.KnowledgeVersionID != strings.TrimSpace(knowledge.PendingVersionID) {
+		return "", "", "", ""
+	}
+	return knowledge.Title, knowledge.FileName, knowledge.Source, knowledge.Description
+}
+
 func chunk2SearchResult(chunk *types.Chunk, knowledge *types.Knowledge) *types.SearchResult {
+	title, filename, source, description := graphSearchKnowledgeDisplay(knowledge, chunk)
 	return &types.SearchResult{
-		ID:                 chunk.ID,
-		Content:            chunk.Content,
-		KnowledgeID:        chunk.KnowledgeID,
-		KnowledgeVersionID: chunk.KnowledgeVersionID,
-		ChunkIndex:         chunk.ChunkIndex,
-		KnowledgeTitle:     knowledge.Title,
-		StartAt:            chunk.StartAt,
-		EndAt:              chunk.EndAt,
-		Seq:                chunk.ChunkIndex,
-		Score:              1.0,
-		MatchType:          types.MatchTypeGraph,
-		Metadata:           knowledge.GetMetadata(),
-		ChunkType:          string(chunk.ChunkType),
-		ParentChunkID:      chunk.ParentChunkID,
-		ImageInfo:          chunk.ImageInfo,
-		KnowledgeFilename:  knowledge.FileName,
-		KnowledgeSource:    knowledge.Source,
-		KnowledgeChannel:   knowledge.Channel,
-		ChunkMetadata:      chunk.Metadata,
-		KnowledgeBaseID:    knowledge.KnowledgeBaseID,
+		ID:                   chunk.ID,
+		Content:              chunk.Content,
+		KnowledgeID:          chunk.KnowledgeID,
+		KnowledgeVersionID:   chunk.KnowledgeVersionID,
+		ChunkIndex:           chunk.ChunkIndex,
+		KnowledgeTitle:       title,
+		StartAt:              chunk.StartAt,
+		EndAt:                chunk.EndAt,
+		Seq:                  chunk.ChunkIndex,
+		Score:                1.0,
+		MatchType:            types.MatchTypeGraph,
+		Metadata:             graphSearchKnowledgeMetadata(knowledge, chunk),
+		ChunkType:            string(chunk.ChunkType),
+		ParentChunkID:        chunk.ParentChunkID,
+		ImageInfo:            chunk.ImageInfo,
+		KnowledgeFilename:    filename,
+		KnowledgeSource:      source,
+		KnowledgeChannel:     knowledge.Channel,
+		KnowledgeDescription: description,
+		ChunkMetadata:        chunk.Metadata,
+		KnowledgeBaseID:      knowledge.KnowledgeBaseID,
 	}
 }

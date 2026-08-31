@@ -1125,7 +1125,7 @@ func convertResultSet(resultSet []client.ResultSet) ([]*MilvusVectorEmbeddingWit
 			}
 		}
 		if field == fieldEmbedding {
-			vectorColumn, ok := columns.(*column.ColumnDoubleArray)
+			vectorColumn, ok := columns.(*column.ColumnFloatVector)
 			if !ok {
 				continue
 			}
@@ -1134,11 +1134,7 @@ func convertResultSet(resultSet []client.ResultSet) ([]*MilvusVectorEmbeddingWit
 				if err != nil {
 					return nil, nil, fmt.Errorf("get vector failed: %w", err)
 				}
-				embedding := make([]float32, len(val))
-				for j, v := range val {
-					embedding[j] = float32(v)
-				}
-				docs[i].Embedding = embedding
+				docs[i].Embedding = append([]float32(nil), val...)
 			}
 		}
 	}

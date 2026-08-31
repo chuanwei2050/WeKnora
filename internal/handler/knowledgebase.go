@@ -811,7 +811,9 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		return nil
 	}
 	if !config.Enabled {
-		*config = types.ExtractConfig{Enabled: false}
+		// Keep the configured schema while extraction is disabled so it can be
+		// restored when the user enables graph extraction again.
+		config.Enabled = false
 		return nil
 	}
 	hasStructuredSchema := len(config.EntitySchema) > 0 || len(config.RelationSchema) > 0

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -19,6 +20,14 @@ type KnowledgeGovernanceHandler struct {
 	repo           interfaces.KnowledgeGovernanceRepository
 	knowledge      interfaces.KnowledgeService
 	knowledgeBases interfaces.KnowledgeBaseService
+}
+
+type governedVersionStager interface {
+	CreateVersionAndSetPending(ctx context.Context, version *types.KnowledgeVersion, expectedPendingVersionID string, knowledgeUpdates map[string]any) (bool, error)
+}
+
+type pendingVersionSetter interface {
+	SetPendingVersionIfCurrent(ctx context.Context, tenantID uint64, knowledgeID, expectedPendingVersionID, pendingVersionID string) (bool, error)
 }
 
 func NewKnowledgeGovernanceHandler(
@@ -157,13 +166,34 @@ func (h *KnowledgeGovernanceHandler) CreateVersion(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("knowledge governance is not enabled for this knowledge base"))
 		return
 	}
-	if err := h.repo.CreateVersion(c.Request.Context(), version); err != nil {
-		c.Error(errors.NewInternalServerError(err.Error()))
-		return
+	previousPendingVersionID := knowledgeForVersion.PendingVersionID
+	updated := false
+	var stageErr error
+	versionCreated := false
+	if stager, ok := h.repo.(governedVersionStager); ok {
+		updated, stageErr = stager.CreateVersionAndSetPending(c.Request.Context(), version, previousPendingVersionID, nil)
+	} else if setter, ok := h.knowledge.GetRepository().(pendingVersionSetter); ok {
+		if stageErr = h.repo.CreateVersion(c.Request.Context(), version); stageErr == nil {
+			versionCreated = true
+			updated, stageErr = setter.SetPendingVersionIfCurrent(c.Request.Context(), tenantID, knowledgeForVersion.ID, previousPendingVersionID, version.ID)
+		}
+	} else {
+		if stageErr = h.repo.CreateVersion(c.Request.Context(), version); stageErr == nil {
+			versionCreated = true
+			knowledgeForVersion.PendingVersionID = version.ID
+			stageErr = h.knowledge.UpdateKnowledge(c.Request.Context(), knowledgeForVersion)
+			updated = stageErr == nil
+		}
 	}
-	knowledgeForVersion.PendingVersionID = version.ID
-	if err := h.knowledge.UpdateKnowledge(c.Request.Context(), knowledgeForVersion); err != nil {
-		c.Error(errors.NewInternalServerError("failed to stage governed version"))
+	if stageErr != nil || !updated {
+		if versionCreated {
+			_ = h.repo.DeleteDraftVersion(c.Request.Context(), tenantID, version.ID)
+		}
+		if stageErr != nil {
+			c.Error(errors.NewInternalServerError("failed to stage governed version"))
+		} else {
+			c.Error(errors.NewConflictError("knowledge content was updated by another request"))
+		}
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"success": true, "data": version})
@@ -241,6 +271,10 @@ func (h *KnowledgeGovernanceHandler) transition(c *gin.Context, next types.Knowl
 	}
 	if !canAct {
 		c.Error(errors.NewForbiddenError("knowledge governance permission denied"))
+		return
+	}
+	if strings.TrimSpace(knowledge.PendingVersionID) != strings.TrimSpace(version.ID) {
+		c.Error(errors.NewConflictError("knowledge version is no longer pending"))
 		return
 	}
 	if action == "submit" && version.Status == next {

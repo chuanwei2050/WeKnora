@@ -21,10 +21,12 @@ var wikiLinkRegex = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 
 // wikiPageService implements the WikiPageService interface
 type wikiPageService struct {
-	repo        interfaces.WikiPageRepository
-	chunkRepo   interfaces.ChunkRepository
-	kbService   interfaces.KnowledgeBaseService
-	redisClient *redis.Client
+	repo           interfaces.WikiPageRepository
+	chunkRepo      interfaces.ChunkRepository
+	kbService      interfaces.KnowledgeBaseService
+	knowledgeRepo  interfaces.KnowledgeRepository
+	governanceRepo interfaces.KnowledgeGovernanceRepository
+	redisClient    *redis.Client
 }
 
 // NewWikiPageService creates a new wiki page service
@@ -32,13 +34,17 @@ func NewWikiPageService(
 	repo interfaces.WikiPageRepository,
 	chunkRepo interfaces.ChunkRepository,
 	kbService interfaces.KnowledgeBaseService,
+	knowledgeRepo interfaces.KnowledgeRepository,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
 	redisClient *redis.Client,
 ) interfaces.WikiPageService {
 	return &wikiPageService{
-		repo:        repo,
-		chunkRepo:   chunkRepo,
-		kbService:   kbService,
-		redisClient: redisClient,
+		repo:           repo,
+		chunkRepo:      chunkRepo,
+		kbService:      kbService,
+		knowledgeRepo:  knowledgeRepo,
+		governanceRepo: governanceRepo,
+		redisClient:    redisClient,
 	}
 }
 
@@ -74,6 +80,42 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	// Update inbound links on target pages
 	s.updateInLinks(ctx, page.KnowledgeBaseID, page.Slug, page.OutLinks)
 
+	return page, nil
+}
+
+type knowledgeVersionGuardedWikiPageRepository interface {
+	CreateIfKnowledgeVersionsCurrent(ctx context.Context, page *types.WikiPage, expected map[string]string) error
+	UpdateIfKnowledgeVersionsCurrent(ctx context.Context, page *types.WikiPage, expected map[string]string, contentChanged bool) error
+}
+
+func (s *wikiPageService) CreatePageIfKnowledgeVersionsCurrent(ctx context.Context, page *types.WikiPage, expected map[string]string) (*types.WikiPage, error) {
+	guarded, ok := s.repo.(knowledgeVersionGuardedWikiPageRepository)
+	if !ok {
+		return s.CreatePage(ctx, page)
+	}
+	if page.ID == "" {
+		page.ID = uuid.New().String()
+	}
+	if page.Slug == "" {
+		return nil, errors.New("wiki page slug is required")
+	}
+	if page.KnowledgeBaseID == "" {
+		return nil, errors.New("knowledge_base_id is required")
+	}
+	if page.Status == "" {
+		page.Status = types.WikiPageStatusPublished
+	}
+	if page.Version == 0 {
+		page.Version = 1
+	}
+	page.OutLinks = s.parseOutLinks(page.Content)
+	now := time.Now()
+	page.CreatedAt = now
+	page.UpdatedAt = now
+	if err := guarded.CreateIfKnowledgeVersionsCurrent(ctx, page, expected); err != nil {
+		return nil, fmt.Errorf("create wiki page with version guard: %w", err)
+	}
+	s.updateInLinks(ctx, page.KnowledgeBaseID, page.Slug, page.OutLinks)
 	return page, nil
 }
 
@@ -138,6 +180,39 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	return existing, nil
 }
 
+func (s *wikiPageService) UpdatePageIfKnowledgeVersionsCurrent(ctx context.Context, page *types.WikiPage, expected map[string]string) (*types.WikiPage, error) {
+	guarded, ok := s.repo.(knowledgeVersionGuardedWikiPageRepository)
+	if !ok {
+		return s.UpdatePage(ctx, page)
+	}
+	existing, err := s.repo.GetBySlug(ctx, page.KnowledgeBaseID, page.Slug)
+	if err != nil {
+		return nil, fmt.Errorf("get existing page: %w", err)
+	}
+	oldOutLinks := existing.OutLinks
+	contentChanged := existing.Title != page.Title ||
+		existing.Content != page.Content ||
+		existing.Summary != page.Summary ||
+		existing.PageType != page.PageType ||
+		existing.Status != page.Status
+	existing.Title = page.Title
+	existing.Content = page.Content
+	existing.Summary = page.Summary
+	existing.PageType = page.PageType
+	existing.SourceRefs = page.SourceRefs
+	existing.ChunkRefs = page.ChunkRefs
+	existing.PageMetadata = page.PageMetadata
+	existing.Status = page.Status
+	existing.UpdatedAt = time.Now()
+	existing.OutLinks = s.parseOutLinks(existing.Content)
+	if err := guarded.UpdateIfKnowledgeVersionsCurrent(ctx, existing, expected, contentChanged); err != nil {
+		return nil, fmt.Errorf("update wiki page with version guard: %w", err)
+	}
+	s.removeInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, oldOutLinks)
+	s.updateInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, existing.OutLinks)
+	return existing, nil
+}
+
 // UpdatePageMeta updates only metadata (status, source_refs) without version bump or link re-parse.
 func (s *wikiPageService) UpdatePageMeta(ctx context.Context, page *types.WikiPage) error {
 	page.UpdatedAt = time.Now()
@@ -173,12 +248,34 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 
 // GetPageBySlug retrieves a wiki page by its slug
 func (s *wikiPageService) GetPageBySlug(ctx context.Context, kbID string, slug string) (*types.WikiPage, error) {
-	return s.repo.GetBySlug(ctx, kbID, slug)
+	page, err := s.repo.GetBySlug(ctx, kbID, slug)
+	if err != nil {
+		return nil, err
+	}
+	visible, err := s.isWikiPageVisible(ctx, page)
+	if err != nil {
+		return nil, err
+	}
+	if !visible {
+		return nil, repository.ErrWikiPageNotFound
+	}
+	return page, nil
 }
 
 // GetPageByID retrieves a wiki page by its ID
 func (s *wikiPageService) GetPageByID(ctx context.Context, id string) (*types.WikiPage, error) {
-	return s.repo.GetByID(ctx, id)
+	page, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	visible, err := s.isWikiPageVisible(ctx, page)
+	if err != nil {
+		return nil, err
+	}
+	if !visible {
+		return nil, repository.ErrWikiPageNotFound
+	}
+	return page, nil
 }
 
 // ListPages lists wiki pages with optional filtering and pagination
@@ -186,6 +283,15 @@ func (s *wikiPageService) ListPages(ctx context.Context, req *types.WikiPageList
 	pages, total, err := s.repo.List(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	loadedPageCount := len(pages)
+	pages, err = s.filterVisibleWikiPages(ctx, pages)
+	if err != nil {
+		return nil, err
+	}
+	total -= int64(loadedPageCount - len(pages))
+	if total < 0 {
+		total = 0
 	}
 
 	pageSize := req.PageSize
@@ -260,7 +366,7 @@ func (s *wikiPageService) GetLog(ctx context.Context, kbID string) (*types.WikiP
 
 // GetGraph returns the link graph data for visualization
 func (s *wikiPageService) GetGraph(ctx context.Context, kbID string) (*types.WikiGraphData, error) {
-	pages, err := s.repo.ListAll(ctx, kbID)
+	pages, err := s.ListAllPages(ctx, kbID)
 	if err != nil {
 		return nil, err
 	}
@@ -304,28 +410,20 @@ func (s *wikiPageService) GetGraph(ctx context.Context, kbID string) (*types.Wik
 
 // GetStats returns aggregate statistics about the wiki
 func (s *wikiPageService) GetStats(ctx context.Context, kbID string) (*types.WikiStats, error) {
-	counts, err := s.repo.CountByType(ctx, kbID)
+	pages, err := s.ListAllPages(ctx, kbID)
 	if err != nil {
 		return nil, err
 	}
-
+	counts := make(map[string]int64)
 	var total int64
-	for _, c := range counts {
-		total += c
-	}
-
-	orphans, err := s.repo.CountOrphans(ctx, kbID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Count total links
-	pages, err := s.repo.ListAll(ctx, kbID)
-	if err != nil {
-		return nil, err
-	}
+	var orphans int64
 	var totalLinks int64
 	for _, p := range pages {
+		counts[p.PageType]++
+		total++
+		if len(p.InLinks) == 0 {
+			orphans++
+		}
 		totalLinks += int64(len(p.OutLinks))
 	}
 
@@ -338,6 +436,10 @@ func (s *wikiPageService) GetStats(ctx context.Context, kbID string) (*types.Wik
 		SortOrder:       "desc",
 	}
 	recentPages, _, err := s.repo.List(ctx, listReq)
+	if err != nil {
+		return nil, err
+	}
+	recentPages, err = s.filterVisibleWikiPages(ctx, recentPages)
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +509,11 @@ func (s *wikiPageService) RebuildLinks(ctx context.Context, kbID string) error {
 
 // ListAllPages retrieves all wiki pages without pagination.
 func (s *wikiPageService) ListAllPages(ctx context.Context, kbID string) ([]*types.WikiPage, error) {
-	return s.repo.ListAll(ctx, kbID)
+	pages, err := s.repo.ListAll(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	return s.filterVisibleWikiPages(ctx, pages)
 }
 
 // ListPagesBySourceRef exposes the repository's source-ref lookup so higher
@@ -419,7 +525,71 @@ func (s *wikiPageService) ListPagesBySourceRef(ctx context.Context, kbID string,
 
 // SearchPages performs full-text search over wiki pages
 func (s *wikiPageService) SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error) {
-	return s.repo.Search(ctx, kbID, query, limit)
+	pages, err := s.repo.Search(ctx, kbID, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	return s.filterVisibleWikiPages(ctx, pages)
+}
+
+func (s *wikiPageService) filterVisibleWikiPages(ctx context.Context, pages []*types.WikiPage) ([]*types.WikiPage, error) {
+	if len(pages) == 0 || s.kbService == nil {
+		return pages, nil
+	}
+	visible := make([]*types.WikiPage, 0, len(pages))
+	for _, page := range pages {
+		ok, err := s.isWikiPageVisible(ctx, page)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			visible = append(visible, page)
+		}
+	}
+	return visible, nil
+}
+
+// isWikiPageVisible prevents a governed source page from remaining readable
+// after its source version is pending, expired, or otherwise unavailable.
+// Pages without source refs (index/log and user-authored wiki pages) do not
+// carry document content and remain visible.
+func (s *wikiPageService) isWikiPageVisible(ctx context.Context, page *types.WikiPage) (bool, error) {
+	if page == nil || len(page.SourceRefs) == 0 || s.kbService == nil {
+		return page != nil, nil
+	}
+	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, page.KnowledgeBaseID)
+	if err != nil {
+		return false, err
+	}
+	if kb == nil || !kb.Governance.Enabled {
+		return true, nil
+	}
+	if s.knowledgeRepo == nil || s.governanceRepo == nil {
+		return false, nil
+	}
+	for _, sourceRef := range page.SourceRefs {
+		knowledgeID := strings.TrimSpace(strings.SplitN(sourceRef, "|", 2)[0])
+		if knowledgeID == "" {
+			return false, nil
+		}
+		knowledge, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, knowledgeID)
+		if err != nil {
+			return false, err
+		}
+		if knowledge == nil || knowledge.KnowledgeBaseID != page.KnowledgeBaseID ||
+			strings.TrimSpace(knowledge.CurrentVersionID) == "" ||
+			strings.TrimSpace(knowledge.PendingVersionID) != "" {
+			return false, nil
+		}
+		version, err := s.governanceRepo.GetVersion(ctx, knowledge.TenantID, knowledge.CurrentVersionID)
+		if err != nil {
+			return false, err
+		}
+		if version == nil || !version.IsRetrievable(time.Now().UTC()) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // --- Internal helpers ---

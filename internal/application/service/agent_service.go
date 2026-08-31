@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
@@ -529,16 +530,16 @@ func (s *agentService) registerTools(
 				config.RerankTopK,
 			)
 		case tools.ToolGrepChunks:
-			toolToRegister = tools.NewGrepChunksTool(s.db, config.SearchTargets)
+			toolToRegister = tools.NewGrepChunksToolWithGovernance(s.db, config.SearchTargets, s.knowledgeService, s.governanceRepo)
 			logger.Infof(ctx, "Registered grep_chunks tool with searchTargets: %d targets", len(config.SearchTargets))
 		case tools.ToolListKnowledgeChunks:
-			toolToRegister = tools.NewListKnowledgeChunksTool(s.knowledgeService, s.chunkService, config.SearchTargets)
+			toolToRegister = tools.NewListKnowledgeChunksTool(s.knowledgeService, s.chunkService, config.SearchTargets, s.governanceRepo)
 		case tools.ToolQueryKnowledgeGraph:
 			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService, s.graphRepo, s.knowledgeService.GetRepository(), s.governanceRepo, config.SearchTargets)
 		case tools.ToolGetDocumentInfo:
-			toolToRegister = tools.NewGetDocumentInfoTool(s.knowledgeService, s.chunkService, config.SearchTargets)
+			toolToRegister = tools.NewGetDocumentInfoTool(s.knowledgeService, s.chunkService, config.SearchTargets, s.governanceRepo)
 		case tools.ToolDatabaseQuery:
-			toolToRegister = tools.NewDatabaseQueryTool(s.db, config.SearchTargets)
+			toolToRegister = tools.NewDatabaseQueryToolWithGovernance(s.db, config.SearchTargets, s.governanceRepo)
 		case tools.ToolWebSearch:
 			toolToRegister = tools.NewWebSearchTool(
 				s.webSearchService,
@@ -556,11 +557,11 @@ func (s *agentService) registerTools(
 			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
 
 		case tools.ToolDataAnalysis:
-			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID)
+			toolToRegister = tools.NewDataAnalysisToolWithGovernance(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, config.SearchTargets, s.governanceRepo)
 			logger.Infof(ctx, "Registered data_analysis tool for session: %s", sessionID)
 
 		case tools.ToolDataSchema:
-			toolToRegister = tools.NewDataSchemaTool(s.knowledgeService, s.chunkService.GetRepository())
+			toolToRegister = tools.NewDataSchemaToolWithGovernance(s.knowledgeService, s.chunkService.GetRepository(), config.SearchTargets, s.governanceRepo)
 			logger.Infof(ctx, "Registered data_schema tool")
 
 		case tools.ToolFinalAnswer:
@@ -573,7 +574,7 @@ func (s *agentService) registerTools(
 		case tools.ToolWikiSearch:
 			toolToRegister = tools.NewWikiSearchTool(s.wikiPageService, wikiScopes)
 		case tools.ToolWikiReadSourceDoc:
-			toolToRegister = tools.NewWikiReadSourceDocTool(s.knowledgeService, s.chunkService)
+			toolToRegister = tools.NewWikiReadSourceDocToolWithGovernance(s.knowledgeService, s.chunkService, config.SearchTargets, s.governanceRepo)
 		case tools.ToolWikiFlagIssue:
 			toolToRegister = tools.NewWikiFlagIssueTool(s.wikiPageService, wikiKBIDs)
 		case tools.ToolWikiReadIssue:
@@ -802,6 +803,10 @@ func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeID
 			logger.Warnf(ctx, "Selected knowledge %s not found", kid)
 			continue
 		}
+		if !s.selectedKnowledgeVisible(ctx, k) {
+			logger.Warnf(ctx, "Selected knowledge %s is not currently retrievable", kid)
+			continue
+		}
 
 		docInfo := &agent.SelectedDocumentInfo{
 			KnowledgeID:     k.ID,
@@ -816,4 +821,19 @@ func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeID
 
 	logger.Infof(ctx, "Loaded %d selected documents metadata for prompt", len(selectedDocs))
 	return selectedDocs, nil
+}
+
+func (s *agentService) selectedKnowledgeVisible(ctx context.Context, knowledge *types.Knowledge) bool {
+	if knowledge == nil || s.knowledgeBaseService == nil {
+		return false
+	}
+	kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+	if err != nil || kb == nil || !kb.Governance.Enabled {
+		return err == nil && kb != nil
+	}
+	if knowledge.CurrentVersionID == "" || knowledge.PendingVersionID != "" || s.governanceRepo == nil {
+		return false
+	}
+	version, err := s.governanceRepo.GetVersion(ctx, knowledge.TenantID, knowledge.CurrentVersionID)
+	return err == nil && version != nil && version.IsRetrievable(time.Now().UTC())
 }

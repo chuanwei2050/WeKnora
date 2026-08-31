@@ -20,11 +20,12 @@ type ChunkHandler struct {
 	kbService         interfaces.KnowledgeBaseService
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
+	governanceRepo    interfaces.KnowledgeGovernanceRepository
 }
 
 // NewChunkHandler creates a new chunk handler
-func NewChunkHandler(service interfaces.ChunkService, kgService interfaces.KnowledgeService, kbService interfaces.KnowledgeBaseService, kbShareService interfaces.KBShareService, agentShareService interfaces.AgentShareService) *ChunkHandler {
-	return &ChunkHandler{service: service, kgService: kgService, kbService: kbService, kbShareService: kbShareService, agentShareService: agentShareService}
+func NewChunkHandler(service interfaces.ChunkService, kgService interfaces.KnowledgeService, kbService interfaces.KnowledgeBaseService, kbShareService interfaces.KBShareService, agentShareService interfaces.AgentShareService, governanceRepo interfaces.KnowledgeGovernanceRepository) *ChunkHandler {
+	return &ChunkHandler{service: service, kgService: kgService, kbService: kbService, kbShareService: kbShareService, agentShareService: agentShareService, governanceRepo: governanceRepo}
 }
 
 // effectiveCtxForKnowledge resolves knowledge by ID, validates KB access (owner or shared with required role), and returns context with effectiveTenantID for downstream service calls.
@@ -45,6 +46,9 @@ func (h *ChunkHandler) effectiveCtxForKnowledge(c *gin.Context, knowledgeID stri
 		if err != nil {
 			return nil, errors.NewForbiddenError("Permission denied to access this knowledge")
 		}
+		if !isGovernedKnowledgeVisible(ctx, knowledge, kb, h.governanceRepo) {
+			return nil, errors.NewForbiddenError("Unpublished contribution is not visible")
+		}
 		if types.CanManageKnowledgeBase(ctx, kb) {
 			return context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
 		}
@@ -61,6 +65,10 @@ func (h *ChunkHandler) effectiveCtxForKnowledge(c *gin.Context, knowledgeID stri
 			if !permission.HasPermission(requiredPermission) {
 				return nil, errors.NewForbiddenError("Insufficient permission for this operation")
 			}
+			kb, kbErr := h.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+			if kbErr != nil || !isGovernedKnowledgeVisible(ctx, knowledge, kb, h.governanceRepo) {
+				return nil, errors.NewForbiddenError("Unpublished contribution is not visible")
+			}
 			return context.WithValue(ctx, types.TenantIDContextKey, knowledge.TenantID), nil
 		}
 	}
@@ -68,6 +76,10 @@ func (h *ChunkHandler) effectiveCtxForKnowledge(c *gin.Context, knowledgeID stri
 		kbRef := &types.KnowledgeBase{ID: knowledge.KnowledgeBaseID, TenantID: knowledge.TenantID}
 		can, err := h.agentShareService.UserCanAccessKBViaSomeSharedAgent(ctx, userID.(string), tenantID, kbRef)
 		if err == nil && can {
+			kb, kbErr := h.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+			if kbErr != nil || !isGovernedKnowledgeVisible(ctx, knowledge, kb, h.governanceRepo) {
+				return nil, errors.NewForbiddenError("Unpublished contribution is not visible")
+			}
 			return context.WithValue(ctx, types.TenantIDContextKey, knowledge.TenantID), nil
 		}
 	}

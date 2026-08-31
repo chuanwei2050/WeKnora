@@ -86,21 +86,33 @@ func (st SearchTargets) ContainsKB(kbID string) bool {
 // result means the KB is not in scope.
 func (st SearchTargets) KnowledgeIDsForKB(kbID string) []string {
 	found := false
+	wholeKB := false
+	explicitDocuments := false
 	var result []string
 	for _, target := range st {
 		if target == nil || target.KnowledgeBaseID != kbID {
 			continue
 		}
 		found = true
-		if target.Type == SearchTargetTypeKnowledge {
+		if target.Type == SearchTargetTypeKnowledgeBase {
+			wholeKB = true
+		} else if target.Type == SearchTargetTypeKnowledge {
+			explicitDocuments = true
+			if target.KnowledgeIDs == nil {
+				wholeKB = true
+				continue
+			}
 			result = append(result, target.KnowledgeIDs...)
 		}
 	}
 	if !found {
 		return []string{}
 	}
-	if len(result) == 0 {
+	if wholeKB {
 		return nil
+	}
+	if explicitDocuments {
+		return deduplicateStrings(result)
 	}
 	return deduplicateStrings(result)
 }

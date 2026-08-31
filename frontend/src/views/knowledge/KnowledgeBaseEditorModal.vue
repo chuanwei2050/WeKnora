@@ -403,6 +403,7 @@ const advancedSettingsRef = ref<InstanceType<typeof KBAdvancedSettings>>()
 
 // 表单数据
 const formData = ref<any>(null)
+const graphConfigDraft = ref<any>(null)
 const isFAQ = computed(() => formData.value?.type === 'faq')
 const tenantUsers = ref<AdminUser[]>([])
 const memberOptions = computed(() => tenantUsers.value.filter(user => user.is_active && user.role === 'member').map(user => ({ label: `${user.username}（${user.email}）`, value: user.id })))
@@ -606,6 +607,7 @@ const loadKBData = async () => {
       contributorIds: kb.contributor_ids || [],
       reviewerIds: kb.reviewer_ids || [],
     }
+    graphConfigDraft.value = JSON.parse(JSON.stringify(formData.value.nodeExtractConfig))
     await loadTenantUsers(Number(kb.tenant_id))
     initialIndexingStrategy.value = { ...formData.value.indexingStrategy }
     initialGraphFingerprint.value = graphFingerprint(kb.extract_config)
@@ -710,9 +712,31 @@ const handleQuestionGenerationUpdate = (config: any) => {
 
 const handleNodeExtractUpdate = (config: any) => {
   if (formData.value) {
-    formData.value.nodeExtractConfig = { ...config }
+    const preserved = graphConfigDraft.value || formData.value.nodeExtractConfig || {}
+    const nextConfig = {
+      ...preserved,
+      ...config,
+      enabled: config?.enabled ?? preserved.enabled ?? false,
+      mode: config?.mode || preserved.mode || 'general',
+      template_key: config?.template_key || preserved.template_key || '',
+      model_id: config?.model_id || preserved.model_id || '',
+      ingestion_mode: config?.ingestion_mode || preserved.ingestion_mode || 'all',
+      max_entities: config?.max_entities ?? preserved.max_entities ?? 12,
+      max_relations: config?.max_relations ?? preserved.max_relations ?? 15,
+      min_confidence: config?.min_confidence ?? preserved.min_confidence ?? 0.5,
+      tags: config?.tags ?? preserved.tags ?? [],
+      entity_types: config?.entity_types ?? preserved.entity_types ?? [],
+      entity_schema: config?.entity_schema ?? preserved.entity_schema ?? [],
+      relation_schema: config?.relation_schema ?? preserved.relation_schema ?? [],
+      nodes: config?.nodes ?? preserved.nodes ?? [],
+      relations: config?.relations ?? preserved.relations ?? [],
+    }
+    formData.value.nodeExtractConfig = nextConfig
+    if (nextConfig.enabled) {
+      graphConfigDraft.value = JSON.parse(JSON.stringify(nextConfig))
+    }
     // Keep indexing strategy in sync with GraphSettings enable switch
-    formData.value.indexingStrategy.graphEnabled = !!config?.enabled
+    formData.value.indexingStrategy.graphEnabled = nextConfig.enabled
   }
 }
 
@@ -835,10 +859,11 @@ const buildSubmitData = () => {
     }
   }
 
-  // Sync extract_config.enabled from indexingStrategy.graphEnabled
-  if (formData.value.indexingStrategy?.graphEnabled && formData.value.nodeExtractConfig?.enabled) {
+  // Keep the graph schema when the extraction switch is turned off so that
+  // disabling and re-enabling graph extraction does not discard the rules.
+  if (formData.value.nodeExtractConfig) {
     data.extract_config = {
-      enabled: true,
+      enabled: !!formData.value.indexingStrategy?.graphEnabled && !!formData.value.nodeExtractConfig.enabled,
       mode: formData.value.nodeExtractConfig.mode || 'general',
       template_key: formData.value.nodeExtractConfig.template_key || '',
       model_id: formData.value.nodeExtractConfig.model_id || '',
@@ -1046,6 +1071,7 @@ const resetState = () => {
   hasFiles.value = false
   initialIndexingStrategy.value = null
   initialGraphFingerprint.value = ''
+  graphConfigDraft.value = null
   saving.value = false
   loading.value = false
   chunkingDirty.value = false

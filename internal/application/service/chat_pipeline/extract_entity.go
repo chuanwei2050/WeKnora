@@ -529,6 +529,17 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 	var err error
 	if f.formatType == FormatTypeJSON {
 		err = json.Unmarshal([]byte(content), &parsed)
+		if err != nil {
+			// Some compatible chat endpoints ignore the response-format contract and
+			// wrap the JSON in prose or a thinking block. Recover only a complete
+			// top-level JSON value; never guess how to repair truncated JSON.
+			if candidate, ok := extractCompleteJSONValue(content); ok {
+				err = json.Unmarshal([]byte(candidate), &parsed)
+				if err == nil {
+					logger.Debugf(ctx, "recovered graph JSON from surrounding model output")
+				}
+			}
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse %s content: %s", strings.ToUpper(string(f.formatType)), err.Error())
@@ -559,6 +570,56 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 		}
 	}
 	return itemsList, nil
+}
+
+// extractCompleteJSONValue returns the first balanced JSON object or array
+// embedded in surrounding model output. It deliberately refuses to recover a
+// value that starts the response but is incomplete, because that would turn a
+// truncated extraction into partial graph data.
+func extractCompleteJSONValue(text string) (string, bool) {
+	start := strings.IndexAny(text, "{[")
+	if start < 0 {
+		return "", false
+	}
+	stack := make([]byte, 0, 4)
+	inString := false
+	escaped := false
+	for index := start; index < len(text); index++ {
+		character := text[index]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if character == '\\' {
+				escaped = true
+				continue
+			}
+			if character == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch character {
+		case '"':
+			inString = true
+		case '{', '[':
+			stack = append(stack, character)
+		case '}', ']':
+			if len(stack) == 0 {
+				return "", false
+			}
+			open := stack[len(stack)-1]
+			if (open == '{' && character != '}') || (open == '[' && character != ']') {
+				return "", false
+			}
+			stack = stack[:len(stack)-1]
+			if len(stack) == 0 {
+				return strings.TrimSpace(text[start : index+1]), true
+			}
+		}
+	}
+	return "", false
 }
 
 func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphData, error) {

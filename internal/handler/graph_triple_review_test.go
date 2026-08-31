@@ -58,6 +58,9 @@ func (m *memoryTripleRepo) List(_ context.Context, tenantID uint64, knowledgeBas
 func (m *memoryTripleRepo) SupersedePendingByKnowledgeBase(_ context.Context, tenantID uint64, knowledgeBaseID string) error {
 	return nil
 }
+func (m *memoryTripleRepo) SupersedePendingByKnowledgeIDs(_ context.Context, tenantID uint64, knowledgeIDs []string) error {
+	return nil
+}
 func (m *memoryTripleRepo) MarkSuperseded(_ context.Context, tenantID uint64, id string) error {
 	return nil
 }

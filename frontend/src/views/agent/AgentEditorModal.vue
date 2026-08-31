@@ -1707,7 +1707,7 @@ const defaultFormData = {
     // 基础设置
     agent_mode: 'smart-reasoning' as 'quick-answer' | 'smart-reasoning',
     system_prompt: '',
-    context_template: '{{query}}',
+    context_template: '问题：{{query}}\n\n参考资料：\n{{contexts}}',
     // 模型设置
     model_id: '',
     rerank_model_id: '',

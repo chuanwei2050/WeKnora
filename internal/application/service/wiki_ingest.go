@@ -123,6 +123,7 @@ const (
 type WikiPendingOp struct {
 	Op          string `json:"op"`
 	KnowledgeID string `json:"knowledge_id"`
+	VersionID   string `json:"version_id,omitempty"` // governed version being ingested
 	// Ingest fields
 	Language string `json:"language,omitempty"`
 	// Retract fields
@@ -186,8 +187,15 @@ func NewWikiIngestService(
 //	t=40s  random3 fires → drain [] → no-op return
 //
 // In Lite mode (no Redis), falls back to immediate per-document execution.
-func EnqueueWikiIngest(ctx context.Context, task interfaces.TaskEnqueuer, redisClient *redis.Client, tenantID uint64, kbID, knowledgeID string) {
+func EnqueueWikiIngest(ctx context.Context, task interfaces.TaskEnqueuer, redisClient *redis.Client, tenantID uint64, kbID, knowledgeID string, versionID ...string) error {
+	if task == nil {
+		return errors.New("wiki ingest task enqueuer is nil")
+	}
 	lang, _ := types.LanguageFromContext(ctx)
+	governedVersionID := ""
+	if len(versionID) > 0 {
+		governedVersionID = strings.TrimSpace(versionID[0])
+	}
 
 	payload := WikiIngestPayload{
 		TenantID:        tenantID,
@@ -201,22 +209,31 @@ func EnqueueWikiIngest(ctx context.Context, task interfaces.TaskEnqueuer, redisC
 		op := WikiPendingOp{
 			Op:          WikiOpIngest,
 			KnowledgeID: knowledgeID,
+			VersionID:   governedVersionID,
 			Language:    lang,
 		}
 		opBytes, _ := json.Marshal(op)
-		redisClient.RPush(ctx, pendingKey, string(opBytes))
-		redisClient.Expire(ctx, pendingKey, wikiPendingTTL)
+		if err := redisClient.RPush(ctx, pendingKey, string(opBytes)).Err(); err != nil {
+			return fmt.Errorf("push wiki ingest operation: %w", err)
+		}
+		if err := redisClient.Expire(ctx, pendingKey, wikiPendingTTL).Err(); err != nil {
+			return fmt.Errorf("expire wiki ingest operation list: %w", err)
+		}
 	} else {
 		// Fallback for Lite mode (no Redis)
 		payload.LiteOps = []WikiPendingOp{{
 			Op:          WikiOpIngest,
 			KnowledgeID: knowledgeID,
+			VersionID:   governedVersionID,
 			Language:    lang,
 		}}
 	}
 
 	langfuse.InjectTracing(ctx, &payload)
-	payloadBytes, _ := json.Marshal(payload)
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal wiki ingest payload: %w", err)
+	}
 
 	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
 		asynq.Queue("low"),
@@ -225,12 +242,16 @@ func EnqueueWikiIngest(ctx context.Context, task interfaces.TaskEnqueuer, redisC
 		asynq.ProcessIn(wikiIngestDelay),
 	)
 	if _, err := task.Enqueue(t); err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to enqueue task: %v", err)
+		return fmt.Errorf("enqueue wiki ingest task: %w", err)
 	}
+	return nil
 }
 
 // EnqueueWikiRetract enqueues an async wiki content retraction task
-func EnqueueWikiRetract(ctx context.Context, task interfaces.TaskEnqueuer, redisClient *redis.Client, payload WikiRetractPayload) {
+func EnqueueWikiRetract(ctx context.Context, task interfaces.TaskEnqueuer, redisClient *redis.Client, payload WikiRetractPayload) error {
+	if task == nil {
+		return errors.New("wiki retract task enqueuer is nil")
+	}
 	ingestPayload := WikiIngestPayload{
 		TenantID:        payload.TenantID,
 		KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -248,16 +269,26 @@ func EnqueueWikiRetract(ctx context.Context, task interfaces.TaskEnqueuer, redis
 
 	if redisClient != nil {
 		pendingKey := wikiPendingKeyPrefix + payload.KnowledgeBaseID
-		opBytes, _ := json.Marshal(op)
-		redisClient.RPush(ctx, pendingKey, string(opBytes))
-		redisClient.Expire(ctx, pendingKey, wikiPendingTTL)
+		opBytes, err := json.Marshal(op)
+		if err != nil {
+			return fmt.Errorf("marshal wiki retract operation: %w", err)
+		}
+		if err := redisClient.RPush(ctx, pendingKey, string(opBytes)).Err(); err != nil {
+			return fmt.Errorf("push wiki retract operation: %w", err)
+		}
+		if err := redisClient.Expire(ctx, pendingKey, wikiPendingTTL).Err(); err != nil {
+			return fmt.Errorf("expire wiki retract operation list: %w", err)
+		}
 	} else {
 		// Fallback for Lite mode (no Redis)
 		ingestPayload.LiteOps = []WikiPendingOp{op}
 	}
 
 	langfuse.InjectTracing(ctx, &ingestPayload)
-	payloadBytes, _ := json.Marshal(ingestPayload)
+	payloadBytes, err := json.Marshal(ingestPayload)
+	if err != nil {
+		return fmt.Errorf("marshal wiki retract payload: %w", err)
+	}
 	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
 		asynq.Queue("low"),
 		asynq.MaxRetry(10), // Increased from 3 to 10 to outlast the active lock TTL
@@ -266,7 +297,9 @@ func EnqueueWikiRetract(ctx context.Context, task interfaces.TaskEnqueuer, redis
 	)
 	if _, err := task.Enqueue(t); err != nil {
 		logger.Warnf(ctx, "wiki retract: failed to enqueue task: %v", err)
+		return fmt.Errorf("enqueue wiki retract task: %w", err)
 	}
+	return nil
 }
 
 // Handle implements interfaces.TaskHandler for asynq task processing.
@@ -417,6 +450,7 @@ type SlugUpdate struct {
 	Item              extractedItem // For entity/concept
 	DocTitle          string
 	KnowledgeID       string
+	VersionID         string // governed version that produced this update
 	SourceRef         string
 	Language          string
 	SummaryBody       string // For summary
@@ -1070,6 +1104,50 @@ func (s *wikiIngestService) filterLiveUpdates(ctx context.Context, kbID string, 
 	}
 	if dropped > 0 {
 		logger.Infof(ctx, "wiki ingest: reduce dropped %d updates for deleted knowledge(s)", dropped)
+	}
+	return filtered
+}
+
+// filterCurrentVersionUpdates drops additions produced by a governed version
+// that is no longer current. Map runs LLM calls before Reduce writes pages, so
+// the version must be checked again after that delay to avoid stale content
+// overwriting a newly published version.
+func (s *wikiIngestService) filterCurrentVersionUpdates(ctx context.Context, kbID string, updates []SlugUpdate) []SlugUpdate {
+	if len(updates) == 0 {
+		return updates
+	}
+	currentByKnowledgeID := make(map[string]string)
+	filtered := make([]SlugUpdate, 0, len(updates))
+	dropped := 0
+	for _, update := range updates {
+		if update.VersionID == "" || update.Type == "retract" || update.Type == "retractStale" {
+			filtered = append(filtered, update)
+			continue
+		}
+		currentVersionID, ok := currentByKnowledgeID[update.KnowledgeID]
+		if !ok {
+			var knowledge *types.Knowledge
+			var err error
+			if s.knowledgeSvc == nil {
+				err = fmt.Errorf("knowledge service is unavailable")
+			} else {
+				knowledge, err = s.knowledgeSvc.GetKnowledgeByIDOnly(ctx, update.KnowledgeID)
+			}
+			if err != nil || knowledge == nil || knowledge.KnowledgeBaseID != kbID {
+				currentVersionID = ""
+			} else {
+				currentVersionID = strings.TrimSpace(knowledge.CurrentVersionID)
+			}
+			currentByKnowledgeID[update.KnowledgeID] = currentVersionID
+		}
+		if currentVersionID != strings.TrimSpace(update.VersionID) {
+			dropped++
+			continue
+		}
+		filtered = append(filtered, update)
+	}
+	if dropped > 0 {
+		logger.Infof(ctx, "wiki ingest: reduce dropped %d stale governed update(s)", dropped)
 	}
 	return filtered
 }

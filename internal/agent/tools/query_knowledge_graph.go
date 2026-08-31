@@ -425,7 +425,7 @@ func (t *QueryKnowledgeGraphTool) executeTypedGraphQuery(ctx context.Context, in
 				}
 			}
 		}
-		currentVersions, versionErr := t.currentKnowledgeVersions(ctx, tenantID, kbID)
+		currentVersions, versionErr := t.currentKnowledgeVersions(ctx, kb.TenantID, kbID, kb.Governance.Enabled)
 		if versionErr != nil {
 			errorsFound = append(errorsFound, fmt.Sprintf("KB %s: failed to resolve current knowledge versions: %v", kbID, versionErr))
 			continue
@@ -469,8 +469,11 @@ func configuredGraphRelationTypes(kb *types.KnowledgeBase) []string {
 	return append([]string(nil), kb.ExtractConfig.Tags...)
 }
 
-func (t *QueryKnowledgeGraphTool) currentKnowledgeVersions(ctx context.Context, tenantID uint64, knowledgeBaseID string) (map[string]string, error) {
+func (t *QueryKnowledgeGraphTool) currentKnowledgeVersions(ctx context.Context, tenantID uint64, knowledgeBaseID string, governed bool) (map[string]string, error) {
 	if t.knowledgeRepo == nil {
+		if governed {
+			return nil, fmt.Errorf("knowledge repository is required for governed graph search")
+		}
 		return nil, nil
 	}
 	knowledges, err := t.knowledgeRepo.ListKnowledgeByKnowledgeBaseID(ctx, tenantID, knowledgeBaseID)
@@ -479,15 +482,20 @@ func (t *QueryKnowledgeGraphTool) currentKnowledgeVersions(ctx context.Context, 
 	}
 	versions := make(map[string]string)
 	for _, knowledge := range knowledges {
-		if knowledge == nil || knowledge.CurrentVersionID == "" {
+		if knowledge == nil {
 			continue
 		}
-		versionID := knowledge.CurrentVersionID
-		if t.governanceRepo != nil {
-			version, versionErr := t.governanceRepo.GetVersion(ctx, tenantID, versionID)
-			if versionErr != nil || version == nil || !version.IsRetrievable(time.Now().UTC()) {
-				versionID = "__not_retrievable__"
-			}
+		if !governed {
+			continue
+		}
+		versionID := strings.TrimSpace(knowledge.CurrentVersionID)
+		if versionID == "" || strings.TrimSpace(knowledge.PendingVersionID) != "" || t.governanceRepo == nil {
+			versions[knowledge.ID] = "__not_retrievable__"
+			continue
+		}
+		version, versionErr := t.governanceRepo.GetVersion(ctx, knowledge.TenantID, versionID)
+		if versionErr != nil || version == nil || !version.IsRetrievable(time.Now().UTC()) {
+			versionID = "__not_retrievable__"
 		}
 		versions[knowledge.ID] = versionID
 	}

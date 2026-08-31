@@ -128,3 +128,13 @@ func TestGovernanceRunsBeforeCandidateLimit(t *testing.T) {
 		t.Fatalf("invalid version evicted the valid candidate before governance: %+v", filtered)
 	}
 }
+
+func TestGovernedGraphEvidenceRejectsPendingOnlyVersion(t *testing.T) {
+	plugin := &PluginSearchEntity{}
+	result := types.GraphSearchResult{Citations: []types.GraphEvidence{{KnowledgeID: "pending-only", KnowledgeVersionID: "v1"}}}
+	plugin.knowledgeRepo = graphGovernanceKnowledgeFixture{items: []*types.Knowledge{{ID: "pending-only", KnowledgeBaseID: "kb", PendingVersionID: "v1"}}}
+	filtered := plugin.filterGovernedGraphResult(context.Background(), &types.ChatManage{PipelineRequest: types.PipelineRequest{TenantID: 7}}, &result)
+	if len(filtered.Citations) != 0 {
+		t.Fatalf("pending-only graph evidence was visible: %+v", filtered.Citations)
+	}
+}

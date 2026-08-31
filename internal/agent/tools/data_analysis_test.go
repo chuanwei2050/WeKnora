@@ -19,6 +19,15 @@ func TestTableNameIsIsolatedBySession(t *testing.T) {
 	}
 }
 
+func TestTableNameIsIsolatedByKnowledgeVersion(t *testing.T) {
+	first := &types.Knowledge{ID: "knowledge-1", CurrentVersionID: "version-a"}
+	second := &types.Knowledge{ID: "knowledge-1", CurrentVersionID: "version-b"}
+	tool := &DataAnalysisTool{sessionID: "session-a"}
+	if tool.TableName(first) == tool.TableName(second) {
+		t.Fatal("table names must be isolated by knowledge version")
+	}
+}
+
 func TestReconcileSQLTableUsesAuthorizedSessionTable(t *testing.T) {
 	schema := &TableSchema{TableName: "k_authorized_123"}
 	got := reconcileSQLTableWithSchema(`SELECT * FROM "k_hallucinated-123" JOIN other_table ON 1=1`, schema)

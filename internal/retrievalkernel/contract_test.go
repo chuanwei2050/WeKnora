@@ -36,6 +36,7 @@ func TestFilterGovernedProducesSameOutcomeForPipelineAndAgentCandidates(t *testi
 	loadKnowledge := func(_ context.Context, tenantID uint64, _ []string) ([]*types.Knowledge, error) {
 		return []*types.Knowledge{
 			{ID: "legacy", TenantID: tenantID, KnowledgeBaseID: "kb"},
+			{ID: "pending-only", TenantID: tenantID, KnowledgeBaseID: "kb", PendingVersionID: "v1"},
 			{ID: "current", TenantID: tenantID, KnowledgeBaseID: "kb", CurrentVersionID: "v2"},
 		}, nil
 	}
@@ -45,8 +46,9 @@ func TestFilterGovernedProducesSameOutcomeForPipelineAndAgentCandidates(t *testi
 	newCandidates := func() []GovernanceCandidate {
 		return []GovernanceCandidate{
 			{AccessTenantID: 7, ExpectedKnowledgeBaseID: "kb", Result: &types.SearchResult{ID: "c1", KnowledgeID: "legacy"}},
-			{AccessTenantID: 7, ExpectedKnowledgeBaseID: "kb", Result: &types.SearchResult{ID: "c2", KnowledgeID: "current", KnowledgeVersionID: "v1"}},
-			{AccessTenantID: 7, ExpectedKnowledgeBaseID: "kb", Result: &types.SearchResult{ID: "c3", KnowledgeID: "current", KnowledgeVersionID: "v2"}},
+			{AccessTenantID: 7, ExpectedKnowledgeBaseID: "kb", Result: &types.SearchResult{ID: "c2", KnowledgeID: "pending-only", KnowledgeVersionID: "v1"}},
+			{AccessTenantID: 7, ExpectedKnowledgeBaseID: "kb", Result: &types.SearchResult{ID: "c3", KnowledgeID: "current", KnowledgeVersionID: "v1"}},
+			{AccessTenantID: 7, ExpectedKnowledgeBaseID: "kb", Result: &types.SearchResult{ID: "c4", KnowledgeID: "current", KnowledgeVersionID: "v2"}},
 		}
 	}
 	pipeline := FilterGoverned(context.Background(), newCandidates(), loadKnowledge, loadVersion, now)
@@ -54,8 +56,8 @@ func TestFilterGovernedProducesSameOutcomeForPipelineAndAgentCandidates(t *testi
 	if !reflect.DeepEqual(pipeline, agent) {
 		t.Fatalf("governance outcomes differ: pipeline=%+v agent=%+v", pipeline, agent)
 	}
-	want := []bool{true, false, true}
-	if !reflect.DeepEqual(pipeline.Accepted, want) || pipeline.Rejected["version_mismatch"] != 1 {
+	want := []bool{true, false, false, true}
+	if !reflect.DeepEqual(pipeline.Accepted, want) || pipeline.Rejected["no_active_version"] != 1 || pipeline.Rejected["version_mismatch"] != 1 {
 		t.Fatalf("unexpected governance outcome: %+v", pipeline)
 	}
 }

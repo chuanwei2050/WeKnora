@@ -52,6 +52,18 @@ func TestRemainingTitleDeliveryWait(t *testing.T) {
 	}
 }
 
+func TestBuildStreamResponseCarriesAssistantMessageID(t *testing.T) {
+	response := buildStreamResponse(
+		interfaces.StreamEvent{Type: types.ResponseTypeAnswer, Content: "答案", Done: true},
+		"request-1",
+		"assistant-1",
+	)
+
+	if response.AssistantMessageID != "assistant-1" {
+		t.Fatalf("AssistantMessageID = %q, want %q", response.AssistantMessageID, "assistant-1")
+	}
+}
+
 func TestHandleAgentEventsDoesNotWaitWhenTitleArrivedBeforeComplete(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

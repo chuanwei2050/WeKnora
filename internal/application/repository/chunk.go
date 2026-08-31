@@ -193,6 +193,41 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	sortOrder string,
 	knowledgeType string,
 ) ([]*types.Chunk, int64, error) {
+	return r.listPagedChunksByKnowledgeID(ctx, tenantID, knowledgeID, "", page, chunkType, tagID, keyword, searchField, sortOrder, knowledgeType)
+}
+
+// ListPagedChunksByKnowledgeVersionID lists chunks from one governed version.
+// It is intentionally an extra concrete-repository method so existing
+// ChunkRepository fakes do not need a breaking interface change.
+func (r *chunkRepository) ListPagedChunksByKnowledgeVersionID(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+	versionID string,
+	page *types.Pagination,
+	chunkType []types.ChunkType,
+	tagID string,
+	keyword string,
+	searchField string,
+	sortOrder string,
+	knowledgeType string,
+) ([]*types.Chunk, int64, error) {
+	return r.listPagedChunksByKnowledgeID(ctx, tenantID, knowledgeID, versionID, page, chunkType, tagID, keyword, searchField, sortOrder, knowledgeType)
+}
+
+func (r *chunkRepository) listPagedChunksByKnowledgeID(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+	versionID string,
+	page *types.Pagination,
+	chunkType []types.ChunkType,
+	tagID string,
+	keyword string,
+	searchField string,
+	sortOrder string,
+	knowledgeType string,
+) ([]*types.Chunk, int64, error) {
 	var chunks []*types.Chunk
 	var total int64
 	keyword = strings.TrimSpace(keyword)
@@ -200,6 +235,9 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	baseFilter := func(db *gorm.DB) *gorm.DB {
 		db = db.Where("tenant_id = ? AND knowledge_id = ? AND chunk_type IN (?) AND status in (?)",
 			tenantID, knowledgeID, chunkType, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)})
+		if versionID != "" {
+			db = db.Where("knowledge_version_id = ?", versionID)
+		}
 		if tagID != "" {
 			db = db.Where("tag_id = ?", tagID)
 		}

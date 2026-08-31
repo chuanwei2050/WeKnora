@@ -35,12 +35,13 @@ type DocumentProcessPayload struct {
 	TenantID                 uint64   `json:"tenant_id"`
 	KnowledgeID              string   `json:"knowledge_id"`
 	KnowledgeBaseID          string   `json:"knowledge_base_id"`
-	FilePath                 string   `json:"file_path,omitempty"` // 文件路径（文件导入时使用）
-	FileName                 string   `json:"file_name,omitempty"` // 文件名（文件导入时使用）
-	FileType                 string   `json:"file_type,omitempty"` // 文件类型（文件导入时使用）
-	URL                      string   `json:"url,omitempty"`       // URL（URL导入时使用）
-	FileURL                  string   `json:"file_url,omitempty"`  // 文件资源链接（file_url导入时使用）
-	Passages                 []string `json:"passages,omitempty"`  // 文本段落（文本导入时使用）
+	VersionID                string   `json:"version_id,omitempty"` // governed version being processed
+	FilePath                 string   `json:"file_path,omitempty"`  // 文件路径（文件导入时使用）
+	FileName                 string   `json:"file_name,omitempty"`  // 文件名（文件导入时使用）
+	FileType                 string   `json:"file_type,omitempty"`  // 文件类型（文件导入时使用）
+	URL                      string   `json:"url,omitempty"`        // URL（URL导入时使用）
+	FileURL                  string   `json:"file_url,omitempty"`   // 文件资源链接（file_url导入时使用）
+	Passages                 []string `json:"passages,omitempty"`   // 文本段落（文本导入时使用）
 	EnableMultimodel         bool     `json:"enable_multimodel"`
 	EnableQuestionGeneration bool     `json:"enable_question_generation"` // 是否启用问题生成
 	QuestionCount            int      `json:"question_count,omitempty"`   // 每个chunk生成的问题数量
@@ -68,6 +69,7 @@ type QuestionGenerationPayload struct {
 	TenantID        uint64 `json:"tenant_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	KnowledgeID     string `json:"knowledge_id"`
+	VersionID       string `json:"version_id,omitempty"` // governed version being processed
 	QuestionCount   int    `json:"question_count"`
 	// Language is the request locale (e.g. zh-CN, en-US) when the task was enqueued, used for {{language}} / {{lang}} in templates.
 	Language string `json:"language,omitempty"`
@@ -79,6 +81,7 @@ type SummaryGenerationPayload struct {
 	TenantID        uint64 `json:"tenant_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	KnowledgeID     string `json:"knowledge_id"`
+	VersionID       string `json:"version_id,omitempty"` // governed version being processed
 	Language        string `json:"language,omitempty"`
 }
 
@@ -152,8 +155,9 @@ type ManualProcessPayload struct {
 	TenantID        uint64 `json:"tenant_id"`
 	KnowledgeID     string `json:"knowledge_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
-	Content         string `json:"content"`      // cleaned markdown content
-	NeedCleanup     bool   `json:"need_cleanup"` // true for update, false for create
+	VersionID       string `json:"version_id,omitempty"` // governed version being indexed
+	Content         string `json:"content"`              // cleaned markdown content
+	NeedCleanup     bool   `json:"need_cleanup"`         // true for update, false for create
 }
 
 // ImageMultimodalPayload represents the image multimodal processing task payload.
@@ -162,9 +166,10 @@ type ImageMultimodalPayload struct {
 	TenantID        uint64 `json:"tenant_id"`
 	KnowledgeID     string `json:"knowledge_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
-	ChunkID         string `json:"chunk_id"`         // parent text chunk
-	ImageURL        string `json:"image_url"`        // provider:// URL (e.g. local://..., minio://...)
-	ImageLocalPath  string `json:"image_local_path"` // deprecated: kept for backward compat with in-flight tasks
+	VersionID       string `json:"version_id,omitempty"` // governed version being indexed
+	ChunkID         string `json:"chunk_id"`             // parent text chunk
+	ImageURL        string `json:"image_url"`            // provider:// URL (e.g. local://..., minio://...)
+	ImageLocalPath  string `json:"image_local_path"`     // deprecated: kept for backward compat with in-flight tasks
 	EnableOCR       bool   `json:"enable_ocr"`
 	EnableCaption   bool   `json:"enable_caption"`
 	Language        string `json:"language,omitempty"`          // Request locale for {{language}} in prompt templates
@@ -177,7 +182,8 @@ type KnowledgePostProcessPayload struct {
 	TenantID        uint64 `json:"tenant_id"`
 	KnowledgeID     string `json:"knowledge_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
-	Language        string `json:"language,omitempty"` // Request locale for {{language}} in prompt templates
+	VersionID       string `json:"version_id,omitempty"` // governed version being processed
+	Language        string `json:"language,omitempty"`   // Request locale for {{language}} in prompt templates
 }
 
 type KnowledgePublishPayload struct {

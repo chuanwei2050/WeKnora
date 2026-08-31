@@ -16,9 +16,20 @@ type wikiReadSourceDocTool struct {
 	BaseTool
 	knowledgeService interfaces.KnowledgeService
 	chunkService     interfaces.ChunkService
+	searchTargets    types.SearchTargets
+	governanceRepo   interfaces.KnowledgeGovernanceRepository
 }
 
 func NewWikiReadSourceDocTool(knowledgeService interfaces.KnowledgeService, chunkService interfaces.ChunkService) types.Tool {
+	return NewWikiReadSourceDocToolWithGovernance(knowledgeService, chunkService, nil, nil)
+}
+
+func NewWikiReadSourceDocToolWithGovernance(
+	knowledgeService interfaces.KnowledgeService,
+	chunkService interfaces.ChunkService,
+	searchTargets types.SearchTargets,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
+) types.Tool {
 	return &wikiReadSourceDocTool{
 		BaseTool: NewBaseTool(
 			ToolWikiReadSourceDoc,
@@ -51,6 +62,8 @@ If neither query nor range is provided, it returns the beginning of the document
 		),
 		knowledgeService: knowledgeService,
 		chunkService:     chunkService,
+		searchTargets:    searchTargets,
+		governanceRepo:   governanceRepo,
 	}
 }
 
@@ -133,6 +146,9 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: fmt.Sprintf("Document not found: %v", err)}, nil
 	}
+	if !agentKnowledgeVisible(ctx, knowledge, t.searchTargets, t.governanceRepo) {
+		return &types.ToolResult{Success: false, Error: "document is not available in the authorized search scope"}, nil
+	}
 
 	var sb strings.Builder
 	sb.WriteString("<source_document>\n<metadata>\n")
@@ -163,7 +179,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 	pageSize := 100
 	page := 1
 	if hasRange {
-		page = (params.StartChunkIndex - 1) / pageSize + 1
+		page = (params.StartChunkIndex-1)/pageSize + 1
 	}
 
 	var chunksOutput strings.Builder
@@ -180,14 +196,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 			PageSize: pageSize,
 		}
 
-		chunks, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(
-			ctx,
-			knowledge.TenantID,
-			knowledgeID,
-			pagination,
-			[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ},
-			"", "", "", "", "",
-		)
+		chunks, total, err := listAgentChunks(ctx, t.chunkService.GetRepository(), knowledge.TenantID, knowledgeID, knowledge.CurrentVersionID, pagination, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ})
 		if err != nil {
 			return &types.ToolResult{Success: false, Error: fmt.Sprintf("Failed to list chunks: %v", err)}, nil
 		}
@@ -198,6 +207,14 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 
 		if len(chunks) == 0 {
 			break
+		}
+		chunks = filterAgentVisibleChunks(chunks, knowledge)
+		if len(chunks) == 0 {
+			if int64(page*pageSize) >= total {
+				break
+			}
+			page++
+			continue
 		}
 
 		// Lazily enrich ImageInfo from image_ocr / image_caption child chunks.
@@ -293,7 +310,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 	}
 
 	sb.WriteString(fmt.Sprintf("<total_chunks>%d</total_chunks>\n</metadata>\n", totalChunks))
-	
+
 	if matchCount > 0 {
 		sb.WriteString(fmt.Sprintf("<chunks count=\"%d\">\n", matchCount))
 		sb.WriteString(chunksOutput.String())

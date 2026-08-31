@@ -85,7 +85,14 @@ func FilterGoverned(
 			continue
 		}
 		if knowledge.CurrentVersionID == "" {
-			result.Accepted[index] = true
+			// A version-scoped result without an active version belongs to an
+			// unapproved initial contribution. Legacy unversioned results remain
+			// readable for non-governed knowledge.
+			if knowledge.PendingVersionID == "" && searchResult.KnowledgeVersionID == "" {
+				result.Accepted[index] = true
+			} else {
+				result.Rejected["no_active_version"]++
+			}
 			continue
 		}
 		if searchResult.KnowledgeVersionID != knowledge.CurrentVersionID {

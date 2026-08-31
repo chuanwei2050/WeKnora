@@ -169,10 +169,16 @@ func (p *AttachmentProcessor) processWithDocParser(
 	result, err := reader.Read(ctx, &types.ReadRequest{
 		FileContent: data,
 		FileName:    fileName,
-		FileType:    fileType,
+		FileType:    normalizeAttachmentFileType(fileType),
 	})
 	if err != nil {
 		return fmt.Errorf("SimpleFormatReader failed: %w", err)
+	}
+	if result.Error != "" {
+		return fmt.Errorf("SimpleFormatReader returned error: %s", result.Error)
+	}
+	if strings.TrimSpace(result.MarkdownContent) == "" {
+		return fmt.Errorf("SimpleFormatReader returned empty content")
 	}
 
 	// Resolve embedded image refs to storage URLs.
@@ -236,10 +242,16 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 	result, err := p.documentReader.Read(ctx, &types.ReadRequest{
 		FileContent: data,
 		FileName:    fileName,
-		FileType:    fileType,
+		FileType:    normalizeAttachmentFileType(fileType),
 	})
 	if err != nil {
 		return fmt.Errorf("DocumentReader failed: %w", err)
+	}
+	if result.Error != "" {
+		return fmt.Errorf("DocumentReader returned error: %s", result.Error)
+	}
+	if strings.TrimSpace(result.MarkdownContent) == "" {
+		return fmt.Errorf("DocumentReader returned empty content")
 	}
 
 	// Resolve embedded image refs to storage URLs.
@@ -254,6 +266,10 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 
 	p.applyLineTruncation(ctx, result.MarkdownContent, attachment)
 	return nil
+}
+
+func normalizeAttachmentFileType(fileType string) string {
+	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), ".")
 }
 
 // applyLineTruncation stores content into attachment, truncating at maxTextFileLines if needed.

@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -17,6 +19,21 @@ import (
 	"github.com/hibiken/asynq"
 	"golang.org/x/sync/errgroup"
 )
+
+type guardedWikiPageWriter interface {
+	CreatePageIfKnowledgeVersionsCurrent(ctx context.Context, page *types.WikiPage, expected map[string]string) (*types.WikiPage, error)
+	UpdatePageIfKnowledgeVersionsCurrent(ctx context.Context, page *types.WikiPage, expected map[string]string) (*types.WikiPage, error)
+}
+
+func wikiVersionExpectations(updates []SlugUpdate) map[string]string {
+	expected := make(map[string]string)
+	for _, update := range updates {
+		if update.KnowledgeID != "" && update.VersionID != "" && update.Type != "retract" && update.Type != "retractStale" {
+			expected[update.KnowledgeID] = update.VersionID
+		}
+	}
+	return expected
+}
 
 func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIngestPayload) bool {
 	if s.redisClient == nil {
@@ -341,10 +358,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	for slug, updates := range slugUpdates {
 		slug := slug
 		updates := updates
-		egReduce.Go(func() error {
+		 egReduce.Go(func() error {
 			changed, affectedType, err := s.reduceSlugUpdates(reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx)
 			if err != nil {
 				logger.Warnf(reduceCtx, "wiki ingest: reduce failed for slug %s: %v", slug, err)
+				return fmt.Errorf("reduce wiki slug %s: %w", slug, err)
 			}
 			if changed {
 				reduceMu.Lock()
@@ -359,7 +377,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			return nil
 		})
 	}
-	_ = egReduce.Wait()
+	if err := egReduce.Wait(); err != nil {
+		return fmt.Errorf("wiki ingest reduce phase: %w", err)
+	}
 
 	totalPagesAffected = len(allPagesAffected)
 
@@ -390,7 +410,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		logger.Infof(ctx, "wiki ingest: rebuilding index page")
 		if err := s.rebuildIndexPage(ctx, chatModel, payload, changeDesc.String(), lang); err != nil {
 			logger.Warnf(ctx, "wiki ingest: rebuild index failed: %v", err)
-			docPreview = append(docPreview, fmt.Sprintf("index_change=%s", previewText(changeDesc.String(), 160)))
+			return fmt.Errorf("rebuild wiki index: %w", err)
 		} else {
 			indexRebuildSucceeded = true
 			docPreview = append(docPreview, fmt.Sprintf("index_change=%s", previewText(changeDesc.String(), 160)))
@@ -446,12 +466,58 @@ func (s *wikiIngestService) mapOneDocument(
 		return nil, nil, nil
 	}
 
+	knowledge, err := s.knowledgeSvc.GetKnowledgeByIDOnly(ctx, knowledgeID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get knowledge: %w", err)
+	}
+	if knowledge == nil {
+		return nil, nil, fmt.Errorf("get knowledge: not found")
+	}
+	versionID := strings.TrimSpace(op.VersionID)
+	kb, kbErr := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+	if kbErr != nil || kb == nil {
+		if kbErr == nil {
+			kbErr = fmt.Errorf("knowledge base not found")
+		}
+		return nil, nil, fmt.Errorf("get knowledge base: %w", kbErr)
+	}
+	if kb.Governance.Enabled {
+		if versionID == "" {
+			versionID = strings.TrimSpace(knowledge.CurrentVersionID)
+			if versionID == "" && strings.TrimSpace(knowledge.PendingVersionID) != "" {
+				logger.Infof(ctx, "wiki ingest: knowledge %s has an unapproved pending version, skip", knowledgeID)
+				return nil, nil, nil
+			}
+		}
+		if versionID == strings.TrimSpace(knowledge.PendingVersionID) && versionID != "" && versionID != strings.TrimSpace(knowledge.CurrentVersionID) {
+			logger.Infof(ctx, "wiki ingest: version %s is not active yet, skip", versionID)
+			return nil, nil, nil
+		}
+		if versionID != "" && versionID != strings.TrimSpace(knowledge.CurrentVersionID) {
+			logger.Infof(ctx, "wiki ingest: version %s is stale for knowledge %s, skip", versionID, knowledgeID)
+			return nil, nil, nil
+		}
+	}
+
 	chunks, err := s.chunkRepo.ListChunksByKnowledgeID(ctx, payload.TenantID, knowledgeID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get chunks: %w", err)
 	}
 	if len(chunks) == 0 {
 		logger.Infof(ctx, "wiki ingest: document %s has no chunks, skip", knowledgeID)
+		return nil, nil, nil
+	}
+	if versionID != "" {
+		versionChunks := make([]*types.Chunk, 0, len(chunks))
+		for _, chunk := range chunks {
+			if chunk != nil && chunk.KnowledgeVersionID == versionID {
+				versionChunks = append(versionChunks, chunk)
+			}
+		}
+		chunks = versionChunks
+	}
+	if len(chunks) == 0 {
+		logger.Infof(ctx, "wiki ingest: knowledge %s has no chunks for version %s, skip", knowledgeID, versionID)
 		return nil, nil, nil
 	}
 
@@ -463,8 +529,8 @@ func (s *wikiIngestService) mapOneDocument(
 	logger.Infof(ctx, "wiki ingest: doc %s chunks=%d content_len(raw=%d,truncated=%d)", knowledgeID, len(chunks), rawRuneCount, len([]rune(content)))
 
 	docTitle := knowledgeID
-	if kn, err := s.knowledgeSvc.GetKnowledgeByIDOnly(ctx, knowledgeID); err == nil && kn != nil && kn.Title != "" {
-		docTitle = kn.Title
+	if knowledge.Title != "" {
+		docTitle = knowledge.Title
 	} else {
 		for _, ch := range chunks {
 			if ch.Content != "" {
@@ -619,6 +685,7 @@ func (s *wikiIngestService) mapOneDocument(
 			Type:        types.WikiPageTypeSummary,
 			DocTitle:    docTitle,
 			KnowledgeID: knowledgeID,
+			VersionID:   versionID,
 			SourceRef:   sourceRef,
 			Language:    lang,
 			SummaryLine: sumLine,
@@ -636,6 +703,7 @@ func (s *wikiIngestService) mapOneDocument(
 				Item:         item,
 				DocTitle:     docTitle,
 				KnowledgeID:  knowledgeID,
+				VersionID:    versionID,
 				SourceRef:    sourceRef,
 				Language:     lang,
 				SourceChunks: item.SourceChunks,
@@ -653,6 +721,7 @@ func (s *wikiIngestService) mapOneDocument(
 				Item:         item,
 				DocTitle:     docTitle,
 				KnowledgeID:  knowledgeID,
+				VersionID:    versionID,
 				SourceRef:    sourceRef,
 				Language:     lang,
 				SourceChunks: item.SourceChunks,
@@ -821,9 +890,11 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	// Retract updates are kept — they actively remove refs, which is what we
 	// want when the doc is gone.
 	updates = s.filterLiveUpdates(ctx, kbID, updates)
+	updates = s.filterCurrentVersionUpdates(ctx, kbID, updates)
 	if len(updates) == 0 {
 		return false, "", nil
 	}
+	expectedVersions := wikiVersionExpectations(updates)
 
 	page, err := s.wikiService.GetPageBySlug(ctx, kbID, slug)
 	exists := (err == nil && page != nil)
@@ -871,6 +942,9 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	}
 
 	if summaryUpdate != nil {
+		if len(s.filterCurrentVersionUpdates(ctx, kbID, updates)) != len(updates) {
+			return false, "", nil
+		}
 		page.Title = summaryUpdate.DocTitle + " - Summary"
 		page.Content = summaryUpdate.SummaryBody
 		page.Summary = summaryUpdate.SummaryLine
@@ -883,10 +957,19 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		page.ChunkRefs = types.StringArray{}
 		changed = true
 
-		if exists {
+		if guarded, ok := s.wikiService.(guardedWikiPageWriter); ok {
+			if exists {
+				_, err = guarded.UpdatePageIfKnowledgeVersionsCurrent(ctx, page, expectedVersions)
+			} else {
+				_, err = guarded.CreatePageIfKnowledgeVersionsCurrent(ctx, page, expectedVersions)
+			}
+		} else if exists {
 			_, err = s.wikiService.UpdatePage(ctx, page)
 		} else {
 			_, err = s.wikiService.CreatePage(ctx, page)
+		}
+		if errors.Is(err, repository.ErrWikiPageKnowledgeVersionConflict) {
+			return false, "", nil
 		}
 		return changed, affectedType, err
 	}
@@ -1066,15 +1149,27 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	}
 
 	if changed {
+		if len(s.filterCurrentVersionUpdates(ctx, kbID, updates)) != len(updates) {
+			return false, "", nil
+		}
 		// Refresh chunk refs in-place on the page so they persist alongside
 		// the rest of the row. Retract-only updates (no additions) preserve
 		// the existing refs; addition rounds append the newly-cited chunks
 		// on top of what was already there, deduplicated.
 		page.ChunkRefs = mergeChunkRefs(page.ChunkRefs, additions)
-		if exists {
+		if guarded, ok := s.wikiService.(guardedWikiPageWriter); ok {
+			if exists {
+				_, err = guarded.UpdatePageIfKnowledgeVersionsCurrent(ctx, page, expectedVersions)
+			} else {
+				_, err = guarded.CreatePageIfKnowledgeVersionsCurrent(ctx, page, expectedVersions)
+			}
+		} else if exists {
 			_, err = s.wikiService.UpdatePage(ctx, page)
 		} else {
 			_, err = s.wikiService.CreatePage(ctx, page)
+		}
+		if errors.Is(err, repository.ErrWikiPageKnowledgeVersionConflict) {
+			return false, "", nil
 		}
 		return true, affectedType, err
 	}

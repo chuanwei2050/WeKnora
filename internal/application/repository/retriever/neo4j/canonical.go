@@ -275,6 +275,53 @@ DETACH DELETE e`,
 	return nil
 }
 
+// DeleteCanonicalKnowledge removes all canonical graph facts contributed by a
+// document across its active and staging version namespaces. Shared canonical
+// entities and relations are retained while they still have another source.
+func (n *Neo4jRepository) DeleteCanonicalKnowledge(ctx context.Context, tenantID uint64, knowledgeBaseID, knowledgeID string) error {
+	if tenantID == 0 || strings.TrimSpace(knowledgeBaseID) == "" || strings.TrimSpace(knowledgeID) == "" {
+		return fmt.Errorf("tenant, knowledge base and knowledge are required")
+	}
+	if n.driver == nil {
+		// Match DelGraph's idempotent no-driver behavior. Deletion is also used
+		// when graph retrieval is disabled in Lite mode.
+		return nil
+	}
+	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer session.Close(ctx)
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		params := map[string]interface{}{
+			"tenant_id":         tenantID,
+			"knowledge_base_id": knowledgeBaseID,
+			"knowledge_id":      knowledgeID,
+		}
+		queries := []string{
+			`MATCH (e:GraphEvidence {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id, knowledge_id: $knowledge_id})
+DETACH DELETE e`,
+			`MATCH (i:DocumentEntityInstance {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id, knowledge_id: $knowledge_id})
+DETACH DELETE i`,
+			`MATCH (r:CanonicalRelation {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id})
+WHERE NOT (r)-[:EVIDENCED_BY]->()
+DETACH DELETE r`,
+			`MATCH (e:CanonicalEntity {tenant_id: $tenant_id, knowledge_base_id: $knowledge_base_id})
+WHERE NOT (e)<-[:INSTANCE_OF]-()
+  AND NOT (e)<-[:CONNECTS_FROM]-()
+  AND NOT (e)<-[:CONNECTS_TO]-()
+DETACH DELETE e`,
+		}
+		for _, query := range queries {
+			if _, err := tx.Run(ctx, query, params); err != nil {
+				return nil, fmt.Errorf("delete canonical knowledge: %w", err)
+			}
+		}
+		return nil, nil
+	})
+	if err != nil {
+		return fmt.Errorf("delete canonical knowledge %s: %w", knowledgeID, err)
+	}
+	return nil
+}
+
 func (n *Neo4jRepository) DeleteCanonicalKnowledgeBase(ctx context.Context, tenantID uint64, knowledgeBaseID string) error {
 	if n.driver == nil {
 		return fmt.Errorf("neo4j driver is unavailable")
@@ -568,6 +615,12 @@ WHERE node.namespace IN $namespaces AND (
    OR (seed.canonical_key = '' AND seed.normalized_name <> '' AND
       (node.normalized_name = seed.normalized_name OR seed.normalized_name IN coalesce(node.normalized_aliases, [])) AND
       (seed.entity_type = '' OR node.entity_type = seed.entity_type)))
+  AND (EXISTS {
+    MATCH (node)<-[:INSTANCE_OF]-(:DocumentEntityInstance)
+  } OR EXISTS {
+    MATCH (relation:CanonicalRelation)-[:CONNECTS_FROM|CONNECTS_TO]->(node)
+    MATCH (relation)-[:EVIDENCED_BY]->(:GraphEvidence)
+  })
 RETURN node`, map[string]interface{}{
 			"seeds": seeds, "tenant_id": scope.TenantID, "knowledge_base_id": scope.KnowledgeBaseID, "namespaces": namespaces,
 		})

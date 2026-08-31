@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -180,6 +181,13 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		})
 		return nil, err
 	}
+	searchableKnowledgeIDs, err := s.searchableKnowledgeIDs(ctx, visibleKBs, params.KnowledgeIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(searchableKnowledgeIDs) == 0 {
+		return nil, nil
+	}
 
 	// Preserve the legacy over-retrieval behavior when callers do not provide
 	// explicit per-channel budgets.
@@ -192,13 +200,15 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	// Build retrieval parameters for vector and keyword engines
 	var vectorKnowledgeIDs []string
 	if retrieveEngine.SupportRetriever(types.VectorRetrieverType) && !params.DisableVectorMatch && shouldUseVectorRetrieval(kb) {
-		vectorKnowledgeIDs, err = s.compatibleVectorKnowledgeIDs(ctx, kb, visibleKBs, params.KnowledgeIDs)
+		vectorKnowledgeIDs, err = s.compatibleVectorKnowledgeIDs(ctx, kb, visibleKBs, searchableKnowledgeIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Skipping vector retrieval because embedding compatibility could not be resolved: %v", err)
 		}
 	}
+	retrievalParams := params
+	retrievalParams.KnowledgeIDs = searchableKnowledgeIDs
 	retrieveParams, err := s.buildRetrievalParams(
-		ctx, retrieveEngine, kb, params, searchKBIDs, vectorKnowledgeIDs,
+		ctx, retrieveEngine, kb, retrievalParams, searchKBIDs, vectorKnowledgeIDs,
 		vectorMatchCount, keywordMatchCount,
 	)
 	if err != nil {
@@ -399,6 +409,55 @@ func (s *knowledgeBaseService) compatibleVectorKnowledgeIDs(
 		knowledges = append(knowledges, items...)
 	}
 	return compatibleKnowledgeIDs(activeModel, models, knowledges, requestedKnowledgeIDs), nil
+}
+
+func (s *knowledgeBaseService) searchableKnowledgeIDs(
+	ctx context.Context,
+	visibleKBs []*types.KnowledgeBase,
+	requested []string,
+) ([]string, error) {
+	requestedSet := make(map[string]struct{}, len(requested))
+	for _, id := range requested {
+		requestedSet[id] = struct{}{}
+	}
+	seen := make(map[string]struct{})
+	ids := make([]string, 0)
+	for _, kb := range visibleKBs {
+		if kb == nil {
+			continue
+		}
+		knowledges, err := s.kgRepo.ListKnowledgeByKnowledgeBaseID(ctx, kb.TenantID, kb.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, knowledge := range knowledges {
+			if knowledge == nil {
+				continue
+			}
+			if requested != nil {
+				if _, ok := requestedSet[knowledge.ID]; !ok {
+					continue
+				}
+			}
+			if kb.Governance.Enabled && !s.governedKnowledgeRetrievable(ctx, knowledge) {
+				continue
+			}
+			if _, ok := seen[knowledge.ID]; ok {
+				continue
+			}
+			seen[knowledge.ID] = struct{}{}
+			ids = append(ids, knowledge.ID)
+		}
+	}
+	return ids, nil
+}
+
+func (s *knowledgeBaseService) governedKnowledgeRetrievable(ctx context.Context, knowledge *types.Knowledge) bool {
+	if knowledge == nil || strings.TrimSpace(knowledge.CurrentVersionID) == "" || strings.TrimSpace(knowledge.PendingVersionID) != "" || s.governanceRepo == nil {
+		return false
+	}
+	version, err := s.governanceRepo.GetVersion(ctx, knowledge.TenantID, knowledge.CurrentVersionID)
+	return err == nil && version != nil && version.IsRetrievable(time.Now().UTC())
 }
 
 func compatibleKnowledgeIDs(

@@ -128,7 +128,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	// Replay existing events
 	logger.Debugf(ctx, "Replaying %d existing events", len(events))
 	for _, evt := range events {
-		response := buildStreamResponse(evt, message.RequestID)
+		response := buildStreamResponse(evt, message.RequestID, message.ID)
 		c.SSEvent("message", response)
 		c.Writer.Flush()
 	}
@@ -167,7 +167,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 					streamCompletedNow = true
 				}
 
-				response := buildStreamResponse(evt, message.RequestID)
+				response := buildStreamResponse(evt, message.RequestID, message.ID)
 				c.SSEvent("message", response)
 				c.Writer.Flush()
 			}
@@ -375,7 +375,7 @@ func (h *Handler) handleAgentEventsForSSE(
 				}
 
 				// Build StreamResponse from StreamEvent
-				response := buildStreamResponse(evt, requestID)
+				response := buildStreamResponse(evt, requestID, assistantMessageID)
 
 				// Check for completion event
 				if evt.Type == "complete" {
@@ -431,7 +431,7 @@ func (h *Handler) handleAgentEventsForSSE(
 							}
 							lastOffset = titleOffset
 							for _, titleEvent := range titleEvents {
-								response := buildStreamResponse(titleEvent, requestID)
+								response := buildStreamResponse(titleEvent, requestID, assistantMessageID)
 								c.SSEvent("message", response)
 								c.Writer.Flush()
 								if titleEvent.Type == types.ResponseTypeSessionTitle {

@@ -803,6 +803,7 @@ onChunk((data) => {
                 request_id: data.id,
                 role: 'assistant',
                 content: '',
+                assistant_message_id: data.assistant_message_id || '',
                 showThink: false,
                 thinkContent: '',
                 thinking: false,
@@ -913,6 +914,7 @@ const handleAgentChunk = (data) => {
             request_id: data.id,
             role: 'assistant',
             content: '',
+            assistant_message_id: data.assistant_message_id || '',
             isAgentMode: true,
             // Event stream: ordered list of all agent events (thinking, tool calls, etc)
             agentEventStream: [],
@@ -926,8 +928,11 @@ const handleAgentChunk = (data) => {
         // Don't return - continue to process the current event data
         message = newMsg;
     }
-    
+
     message.isAgentMode = true;
+    if (data.assistant_message_id) {
+        message.assistant_message_id = data.assistant_message_id;
+    }
     
     // 确保在继续流式传输时（刷新页面场景），一旦接收到实际内容就关闭 loading
     // 这是一个保护措施，防止任何边缘情况导致 loading 残留
@@ -1265,6 +1270,9 @@ const updateAssistantSession = (payload) => {
         return item.id === payload.id;
     });
     if (message) {
+        if (payload.assistant_message_id) {
+            message.assistant_message_id = payload.assistant_message_id;
+        }
         message.content = payload.content;
         message.thinking = payload.thinking;
         message.thinkContent = payload.thinkContent;

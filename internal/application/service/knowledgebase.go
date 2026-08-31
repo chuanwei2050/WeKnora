@@ -44,6 +44,7 @@ type knowledgeBaseService struct {
 	graphEngine    interfaces.RetrieveGraphRepository
 	asynqClient    interfaces.TaskEnqueuer
 	embeddingCache queryEmbeddingCache
+	governanceRepo interfaces.KnowledgeGovernanceRepository
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
@@ -59,6 +60,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
 	asynqClient interfaces.TaskEnqueuer,
 	redisClient *redis.Client,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
 ) interfaces.KnowledgeBaseService {
 	return &knowledgeBaseService{
 		repo:           repo,
@@ -73,6 +75,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		graphEngine:    graphEngine,
 		asynqClient:    asynqClient,
 		embeddingCache: redisClient,
+		governanceRepo: governanceRepo,
 	}
 }
 

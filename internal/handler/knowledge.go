@@ -65,12 +65,29 @@ func (h *KnowledgeHandler) canModifyOwnContribution(ctx context.Context, knowled
 	return err == nil && version != nil && (version.Status == types.KnowledgeVersionDraft || version.Status == types.KnowledgeVersionRejected)
 }
 
-func (h *KnowledgeHandler) canViewGovernedKnowledge(ctx context.Context, knowledge *types.Knowledge, kb *types.KnowledgeBase) bool {
-	if knowledge == nil || kb == nil || !kb.Governance.Enabled || knowledge.CurrentVersionID != "" {
+func isGovernedKnowledgeVisible(ctx context.Context, knowledge *types.Knowledge, kb *types.KnowledgeBase, governanceRepos ...interfaces.KnowledgeGovernanceRepository) bool {
+	if knowledge == nil || kb == nil || !kb.Governance.Enabled {
 		return true
 	}
 	userID, ok := types.UserIDFromContext(ctx)
-	return types.CanManageKnowledgeBase(ctx, kb) || types.CanReviewKnowledge(ctx, kb) || (ok && knowledge.CreatedBy == userID)
+	if types.CanManageKnowledgeBase(ctx, kb) || types.CanReviewKnowledge(ctx, kb) || (ok && knowledge.CreatedBy == userID) {
+		return true
+	}
+	// Manual governed updates currently share the knowledge metadata row with
+	// the published version. Hide a pending contribution from ordinary readers
+	// until its version is activated, preventing unapproved content disclosure.
+	if knowledge.CurrentVersionID == "" || strings.TrimSpace(knowledge.PendingVersionID) != "" {
+		return false
+	}
+	if len(governanceRepos) == 0 || governanceRepos[0] == nil {
+		return true
+	}
+	version, err := governanceRepos[0].GetVersion(ctx, knowledge.TenantID, knowledge.CurrentVersionID)
+	return err == nil && version != nil && version.IsRetrievable(time.Now().UTC())
+}
+
+func (h *KnowledgeHandler) canViewGovernedKnowledge(ctx context.Context, knowledge *types.Knowledge, kb *types.KnowledgeBase) bool {
+	return isGovernedKnowledgeVisible(ctx, knowledge, kb, h.governanceRepo)
 }
 
 // validateKnowledgeBaseAccess validates access permissions to a knowledge base
@@ -168,6 +185,10 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, k
 	if requiredPermission == types.OrgRoleViewer && userExists && h.kbShareService != nil {
 		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, knowledge.KnowledgeBaseID, userID.(string))
 		if permErr == nil && isShared && permission.HasPermission(requiredPermission) {
+			kb, kbErr := h.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+			if kbErr != nil || !h.canViewGovernedKnowledge(ctx, knowledge, kb) {
+				return nil, ctx, errors.NewForbiddenError("Unpublished contribution is not visible")
+			}
 			effectiveTenantID := knowledge.TenantID
 			return knowledge, context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID), nil
 		}
@@ -186,11 +207,19 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, k
 					return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
 				}
 				if mode == "all" {
+					kb, kbErr := h.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+					if kbErr != nil || !h.canViewGovernedKnowledge(ctx, knowledge, kb) {
+						return nil, ctx, errors.NewForbiddenError("Unpublished contribution is not visible")
+					}
 					return knowledge, context.WithValue(ctx, types.TenantIDContextKey, knowledge.TenantID), nil
 				}
 				if mode == "selected" {
 					for _, kbID := range agent.Config.KnowledgeBases {
 						if kbID == knowledge.KnowledgeBaseID {
+							kb, kbErr := h.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+							if kbErr != nil || !h.canViewGovernedKnowledge(ctx, knowledge, kb) {
+								return nil, ctx, errors.NewForbiddenError("Unpublished contribution is not visible")
+							}
 							return knowledge, context.WithValue(ctx, types.TenantIDContextKey, knowledge.TenantID), nil
 						}
 					}
@@ -201,6 +230,10 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, k
 			kbRef := &types.KnowledgeBase{ID: knowledge.KnowledgeBaseID, TenantID: knowledge.TenantID}
 			can, err := h.agentShareService.UserCanAccessKBViaSomeSharedAgent(ctx, userID.(string), tenantID, kbRef)
 			if err == nil && can {
+				kb, kbErr := h.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+				if kbErr != nil || !h.canViewGovernedKnowledge(ctx, knowledge, kb) {
+					return nil, ctx, errors.NewForbiddenError("Unpublished contribution is not visible")
+				}
 				return knowledge, context.WithValue(ctx, types.TenantIDContextKey, knowledge.TenantID), nil
 			}
 		}
@@ -1183,7 +1216,7 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 	if allowedKBSet != nil && len(knowledges) > 0 {
 		filtered := make([]*types.Knowledge, 0, len(knowledges))
 		for _, k := range knowledges {
-			if allowedKBSet[k.KnowledgeBaseID] {
+			if k != nil && allowedKBSet[k.KnowledgeBaseID] {
 				filtered = append(filtered, k)
 			}
 		}
@@ -1195,6 +1228,22 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		c.Error(errors.NewInternalServerError("Failed to retrieve knowledge list").WithDetails(err.Error()))
 		return
 	}
+
+	// Re-check every returned ID through the same owner/shared-KB and
+	// governance visibility path used by single-resource reads. The batch
+	// repository query is intentionally not treated as an authorization check.
+	filtered := make([]*types.Knowledge, 0, len(knowledges))
+	for _, knowledge := range knowledges {
+		if knowledge == nil || (allowedKBSet != nil && !allowedKBSet[knowledge.KnowledgeBaseID]) {
+			continue
+		}
+		resolved, _, resolveErr := h.resolveKnowledgeAndValidateKBAccess(c, knowledge.ID, types.OrgRoleViewer)
+		if resolveErr != nil || resolved == nil || resolved.KnowledgeBaseID != knowledge.KnowledgeBaseID {
+			continue
+		}
+		filtered = append(filtered, knowledge)
+	}
+	knowledges = filtered
 
 	logger.Infof(ctx, "Batch knowledge retrieval successful, requested count: %d, returned count: %d",
 		len(req.IDs), len(knowledges))

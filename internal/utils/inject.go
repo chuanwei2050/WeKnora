@@ -144,6 +144,11 @@ type sqlValidator struct {
 	enableSearchScopeFilter bool
 	searchScopeKBIDs        []string
 	searchScopeKnowledgeIDs []string
+
+	// Knowledge version filtering keeps chunk queries on the current visible
+	// version for each authorized document.
+	enableKnowledgeVersionFilter bool
+	searchScopeCurrentVersions   map[string]string
 }
 
 // ParseSQL parses a SQL statement using pg_query_go and extracts table names, select fields, and where fields
@@ -630,6 +635,19 @@ func WithSearchScopeFilter(kbIDs []string, knowledgeIDs []string) SQLValidationO
 	}
 }
 
+// WithKnowledgeVersionFilter restricts chunk rows to the supplied current
+// version per knowledge ID. An empty version means the document is legacy and
+// only unversioned chunks are eligible.
+func WithKnowledgeVersionFilter(currentVersions map[string]string) SQLValidationOption {
+	return func(v *sqlValidator) {
+		v.enableKnowledgeVersionFilter = true
+		v.searchScopeCurrentVersions = make(map[string]string, len(currentVersions))
+		for knowledgeID, versionID := range currentVersions {
+			v.searchScopeCurrentVersions[knowledgeID] = versionID
+		}
+	}
+}
+
 // WithSecurityDefaults applies a comprehensive set of security validations
 func WithSecurityDefaults(tenantID uint64) SQLValidationOption {
 	return func(v *sqlValidator) {
@@ -836,7 +854,7 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 	}
 
 	// If no SQL rewriting is enabled, return original SQL
-	if !validator.enableTenantInjection && !validator.enableSoftDeleteInjection && !validator.enableHiddenKBFilter && !validator.enableSearchScopeFilter {
+	if !validator.enableTenantInjection && !validator.enableSoftDeleteInjection && !validator.enableHiddenKBFilter && !validator.enableSearchScopeFilter && !validator.enableKnowledgeVersionFilter {
 		return sql, validationResult, nil
 	}
 
@@ -863,8 +881,41 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 	securedSQL = validator.injectHiddenKBFilter(securedSQL, tablesInQuery)
 	// Inject search scope filter (restrict to allowed KBs and knowledges)
 	securedSQL = validator.injectSearchScopeConditions(securedSQL, tablesInQuery)
+	// Inject current governed-version filter for chunk retrieval
+	securedSQL = validator.injectKnowledgeVersionConditions(securedSQL, tablesInQuery)
 
 	return securedSQL, validationResult, nil
+}
+
+func (v *sqlValidator) injectKnowledgeVersionConditions(sql string, tablesInQuery map[string]string) string {
+	if !v.enableKnowledgeVersionFilter {
+		return sql
+	}
+	alias, ok := tablesInQuery["chunks"]
+	if !ok {
+		return sql
+	}
+	conditions := make([]string, 0, len(v.searchScopeCurrentVersions))
+	legacyIDs := make([]string, 0)
+	for knowledgeID, versionID := range v.searchScopeCurrentVersions {
+		if strings.TrimSpace(versionID) == "" {
+			legacyIDs = append(legacyIDs, knowledgeID)
+			continue
+		}
+		conditions = append(conditions, fmt.Sprintf("(%s.knowledge_id = '%s' AND %s.knowledge_version_id = '%s')", alias, escapeSQLLiteral(knowledgeID), alias, escapeSQLLiteral(versionID)))
+	}
+	if len(legacyIDs) > 0 {
+		quotedIDs := quoteStringSlice(legacyIDs)
+		conditions = append(conditions, fmt.Sprintf("(%s.knowledge_id IN (%s) AND coalesce(%s.knowledge_version_id, '') = '')", alias, strings.Join(quotedIDs, ", "), alias))
+	}
+	if len(conditions) == 0 {
+		return InjectAndConditions(sql, "1 = 0")
+	}
+	return InjectAndConditions(sql, "("+strings.Join(conditions, " OR ")+")")
+}
+
+func escapeSQLLiteral(value string) string {
+	return strings.ReplaceAll(value, "'", "''")
 }
 
 // extractTableAliasMap walks the parse tree to build a table_name→alias map.

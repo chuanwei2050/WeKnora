@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -42,6 +43,26 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 		return nil, err
 	}
 	logger.Infof(ctx, "Chunk data fetched successfully, count: %d", len(allChunks))
+	visibleChunks := s.filterGovernedSearchChunks(ctx, allChunks, knowledgeMap)
+	visibleChunkIDs := make(map[string]struct{}, len(visibleChunks))
+	for _, chunk := range visibleChunks {
+		if chunk != nil {
+			visibleChunkIDs[chunk.ID] = struct{}{}
+		}
+	}
+	filteredInput := make([]*types.IndexWithScore, 0, len(chunks))
+	for _, chunk := range chunks {
+		if chunk != nil {
+			if _, ok := visibleChunkIDs[chunk.ChunkID]; ok {
+				filteredInput = append(filteredInput, chunk)
+			}
+		}
+	}
+	chunks = filteredInput
+	allChunks = visibleChunks
+	if len(chunks) == 0 {
+		return nil, nil
+	}
 
 	// Build chunk map and collect enrichment IDs (parent, related, nearby)
 	chunkMap := make(map[string]*types.Chunk, len(allChunks))
@@ -88,6 +109,49 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 
 	logger.Infof(ctx, "Search results processed, total: %d", len(searchResults))
 	return searchResults, nil
+}
+
+func (s *knowledgeBaseService) filterGovernedSearchChunks(
+	ctx context.Context,
+	chunks []*types.Chunk,
+	knowledgeMap map[string]*types.Knowledge,
+) []*types.Chunk {
+	visible := make([]*types.Chunk, 0, len(chunks))
+	for _, chunk := range chunks {
+		if chunk == nil {
+			continue
+		}
+		knowledge := knowledgeMap[chunk.KnowledgeID]
+		if knowledge == nil || !s.searchableKnowledgeVisible(ctx, knowledge) {
+			continue
+		}
+		currentVersionID := strings.TrimSpace(knowledge.CurrentVersionID)
+		if currentVersionID != "" {
+			if strings.TrimSpace(chunk.KnowledgeVersionID) != currentVersionID {
+				continue
+			}
+		} else if strings.TrimSpace(chunk.KnowledgeVersionID) != "" {
+			// Legacy documents have unversioned chunks. Never expose an
+			// orphaned versioned chunk when the governing pointer is absent.
+			continue
+		}
+		visible = append(visible, chunk)
+	}
+	return visible
+}
+
+func (s *knowledgeBaseService) searchableKnowledgeVisible(ctx context.Context, knowledge *types.Knowledge) bool {
+	if knowledge == nil {
+		return false
+	}
+	if strings.TrimSpace(knowledge.CurrentVersionID) == "" && strings.TrimSpace(knowledge.PendingVersionID) == "" {
+		if s.governanceRepo == nil {
+			return true
+		}
+		versions, err := s.governanceRepo.ListVersions(ctx, knowledge.TenantID, knowledge.ID)
+		return err == nil && len(versions) == 0
+	}
+	return s.governedKnowledgeRetrievable(ctx, knowledge)
 }
 
 // chunkIndex holds pre-computed lookup structures for processing search results.
@@ -309,32 +373,56 @@ func (s *knowledgeBaseService) collectRelatedChunkIDs(chunk *types.Chunk, proces
 }
 
 // buildSearchResult creates a search result from chunk and knowledge.
+func searchResultKnowledgeMetadata(knowledge *types.Knowledge, chunk *types.Chunk) map[string]string {
+	metadata := knowledge.GetMetadata()
+	if strings.TrimSpace(knowledge.PendingVersionID) != "" && chunk.KnowledgeVersionID != strings.TrimSpace(knowledge.PendingVersionID) {
+		// Manual governance updates temporarily share the knowledge metadata row
+		// with the published version. A result from the published chunk set must
+		// not expose the pending manual content through result metadata.
+		delete(metadata, "content")
+		delete(metadata, "status")
+		delete(metadata, "version")
+		delete(metadata, "updated_at")
+	}
+	return metadata
+}
+
+func searchResultKnowledgeDisplay(knowledge *types.Knowledge, chunk *types.Chunk) (string, string, string, string) {
+	if strings.TrimSpace(knowledge.PendingVersionID) != "" && chunk.KnowledgeVersionID != strings.TrimSpace(knowledge.PendingVersionID) {
+		// Version-specific display fields live on the shared Knowledge row. Do
+		// not combine those pending fields with chunks from the published version.
+		return "", "", "", ""
+	}
+	return knowledge.Title, knowledge.FileName, knowledge.Source, knowledge.Description
+}
+
 func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 	knowledge *types.Knowledge,
 	score float64,
 	matchType types.MatchType,
 	matchedContent string,
 ) *types.SearchResult {
+	title, filename, source, description := searchResultKnowledgeDisplay(knowledge, chunk)
 	return &types.SearchResult{
 		ID:                   chunk.ID,
 		Content:              chunk.Content,
 		KnowledgeID:          chunk.KnowledgeID,
 		KnowledgeVersionID:   chunk.KnowledgeVersionID,
 		ChunkIndex:           chunk.ChunkIndex,
-		KnowledgeTitle:       knowledge.Title,
+		KnowledgeTitle:       title,
 		StartAt:              chunk.StartAt,
 		EndAt:                chunk.EndAt,
 		Seq:                  chunk.ChunkIndex,
 		Score:                score,
 		MatchType:            matchType,
-		Metadata:             knowledge.GetMetadata(),
+		Metadata:             searchResultKnowledgeMetadata(knowledge, chunk),
 		ChunkType:            string(chunk.ChunkType),
 		ParentChunkID:        chunk.ParentChunkID,
 		ImageInfo:            chunk.ImageInfo,
-		KnowledgeFilename:    knowledge.FileName,
-		KnowledgeSource:      knowledge.Source,
+		KnowledgeFilename:    filename,
+		KnowledgeSource:      source,
 		KnowledgeChannel:     knowledge.Channel,
-		KnowledgeDescription: knowledge.Description,
+		KnowledgeDescription: description,
 		ChunkMetadata:        chunk.Metadata,
 		MatchedContent:       matchedContent,
 		KnowledgeBaseID:      knowledge.KnowledgeBaseID,

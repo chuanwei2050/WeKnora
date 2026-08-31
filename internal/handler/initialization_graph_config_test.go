@@ -89,6 +89,36 @@ func TestGraphExtractConfigRequestPreservesPolicyFields(t *testing.T) {
 	}
 }
 
+func TestGraphExtractConfigRequestPreservesSchemaWhenDisabled(t *testing.T) {
+	var req KBModelConfigRequest
+	payload := []byte(`{
+		"nodeExtract": {
+			"enabled": false,
+			"mode": "template",
+			"template_key": "software-testing",
+			"tags": ["uses"],
+			"entity_types": ["tool"],
+			"entity_schema": [{"type":"tool","base_type":"RESOURCE","description":"测试工具"}],
+			"relation_schema": [{"type":"uses","source_type":"tool","target_type":"tool","description":"工具使用工具"}],
+			"strict_schema": true,
+			"require_triple_review": true
+		}
+	}`)
+	if err := json.Unmarshal(payload, &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	config := req.NodeExtract.extractConfig()
+	if err := validateExtractConfig(config); err != nil {
+		t.Fatalf("disabled graph config should be valid: %v", err)
+	}
+	if config.Enabled || config.TemplateKey != "software-testing" || len(config.EntitySchema) != 1 || len(config.RelationSchema) != 1 {
+		t.Fatalf("disabled graph config lost its schema: %#v", config)
+	}
+	if !config.StrictSchema || !config.RequireTripleReview {
+		t.Fatalf("disabled graph config lost its policies: %#v", config)
+	}
+}
+
 func TestValidateExtractConfigRejectsInvalidStructuredRelationDirection(t *testing.T) {
 	config := &types.ExtractConfig{
 		Enabled: true,

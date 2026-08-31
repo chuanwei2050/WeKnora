@@ -59,6 +59,80 @@ func openKnowledgeGovernanceTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestUpdateKnowledgeIfPendingVersionRejectsStaleWorker(t *testing.T) {
+	db := openKnowledgeGovernanceTestDB(t)
+	repo := &knowledgeRepository{db: db}
+	ctx := context.Background()
+	if err := db.Exec(
+		"INSERT INTO knowledges (id, tenant_id, parse_status, pending_version_id) VALUES (?, ?, ?, ?)",
+		"knowledge-worker", 1, types.ParseStatusPending, "version-new",
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := repo.UpdateKnowledgeIfPendingVersion(ctx, 1, "knowledge-worker", "version-old", map[string]any{
+		"parse_status": types.ParseStatusProcessing,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated {
+		t.Fatal("stale worker unexpectedly updated knowledge")
+	}
+
+	updated, err = repo.UpdateKnowledgeIfPendingVersion(ctx, 1, "knowledge-worker", "version-new", map[string]any{
+		"parse_status": types.ParseStatusProcessing,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated {
+		t.Fatal("current worker failed to update knowledge")
+	}
+	var status string
+	if err := db.Table("knowledges").Where("id = ?", "knowledge-worker").Pluck("parse_status", &status).Error; err != nil {
+		t.Fatal(err)
+	}
+	if status != types.ParseStatusProcessing {
+		t.Fatalf("parse status = %q, want %q", status, types.ParseStatusProcessing)
+	}
+}
+
+func TestGovernedKnowledgeVersionUpdatesDoNotCrossConcurrentVersions(t *testing.T) {
+	db := openKnowledgeGovernanceTestDB(t)
+	repo := &knowledgeRepository{db: db}
+	ctx := context.Background()
+	if err := db.Exec(
+		"INSERT INTO knowledges (id, tenant_id, parse_status, current_version_id, pending_version_id) VALUES (?, ?, ?, ?, ?)",
+		"knowledge-cas", 1, types.ParseStatusProcessing, "version-current", "version-pending",
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := repo.SetPendingVersionIfCurrent(ctx, 1, "knowledge-cas", "version-old", "version-next")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated {
+		t.Fatal("stale pending-version setter unexpectedly updated knowledge")
+	}
+	updated, err = repo.SetPendingVersionIfCurrent(ctx, 1, "knowledge-cas", "version-pending", "version-next")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated {
+		t.Fatal("current pending-version setter failed to update knowledge")
+	}
+
+	if updated, err = repo.UpdateKnowledgeIfCurrentOrPendingVersion(ctx, 1, "knowledge-cas", "version-current", map[string]any{
+		"parse_status": types.ParseStatusCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	} else if updated {
+		t.Fatal("active old version updated while a newer pending version exists")
+	}
+}
+
 func TestPrepareManagedUploadAutoApprovesAndMarksKnowledgePending(t *testing.T) {
 	db := openKnowledgeGovernanceTestDB(t)
 	repo := NewKnowledgeGovernanceRepository(db, nil)
@@ -99,6 +173,43 @@ func TestPrepareManagedUploadAutoApprovesAndMarksKnowledgePending(t *testing.T) 
 	}
 	if len(reviews) != 1 || reviews[0].Action != "auto_approve" || reviews[0].ReviewerID != "admin" {
 		t.Fatalf("managed upload audit = %+v", reviews)
+	}
+}
+
+func TestCreateVersionAndSetPendingIsAtomic(t *testing.T) {
+	db := openKnowledgeGovernanceTestDB(t)
+	repo := NewKnowledgeGovernanceRepository(db, nil)
+	stager, ok := repo.(interface {
+		CreateVersionAndSetPending(context.Context, *types.KnowledgeVersion, string, map[string]any) (bool, error)
+	})
+	if !ok {
+		t.Fatal("governance repository does not support atomic version staging")
+	}
+	ctx := context.Background()
+	if err := db.Exec("INSERT INTO knowledges (id, tenant_id, parse_status, pending_version_id) VALUES (?, ?, ?, ?)", "knowledge-stage", 1, types.ParseStatusDraft, "").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	version := newGovernedTestVersion(1, "knowledge-stage", string(types.KnowledgeVersionDraft), nil, nil)
+	updated, err := stager.CreateVersionAndSetPending(ctx, version, "", map[string]any{"does_not_exist": "rollback"})
+	if err == nil || updated {
+		t.Fatalf("invalid atomic update = updated:%v err:%v, want rollback", updated, err)
+	}
+	if stored, getErr := repo.GetVersion(ctx, 1, version.ID); getErr != nil || stored != nil {
+		t.Fatalf("version should roll back with knowledge update: %#v, err=%v", stored, getErr)
+	}
+
+	version = newGovernedTestVersion(1, "knowledge-stage", string(types.KnowledgeVersionDraft), nil, nil)
+	updated, err = stager.CreateVersionAndSetPending(ctx, version, "", nil)
+	if err != nil || !updated {
+		t.Fatalf("atomic version staging failed: updated:%v err:%v", updated, err)
+	}
+	var pending string
+	if err := db.Table("knowledges").Where("id = ?", "knowledge-stage").Pluck("pending_version_id", &pending).Error; err != nil {
+		t.Fatal(err)
+	}
+	if pending != version.ID {
+		t.Fatalf("pending version = %q, want %q", pending, version.ID)
 	}
 }
 
@@ -238,7 +349,7 @@ func TestKnowledgeGovernanceActivationKeepsFutureVersionScheduled(t *testing.T) 
 	if err := repo.CreateVersion(ctx, candidate); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec("INSERT INTO knowledges (id, tenant_id, current_version_id) VALUES (?, ?, ?)", "knowledge-1", 1, current.ID).Error; err != nil {
+	if err := db.Exec("INSERT INTO knowledges (id, tenant_id, current_version_id, pending_version_id) VALUES (?, ?, ?, ?)", "knowledge-1", 1, current.ID, candidate.ID).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -285,6 +396,63 @@ func TestKnowledgeGovernanceActivationKeepsFutureVersionScheduled(t *testing.T) 
 	}
 }
 
+func TestKnowledgeGovernanceActivationRejectsVersionReplacedByNewerPending(t *testing.T) {
+	db := openKnowledgeGovernanceTestDB(t)
+	repo := NewKnowledgeGovernanceRepository(db, nil)
+	ctx := context.Background()
+	candidate := newGovernedTestVersion(1, "knowledge-stale", string(types.KnowledgeVersionIndexing), nil, nil)
+	if err := repo.CreateVersion(ctx, candidate); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(
+		"INSERT INTO knowledges (id, tenant_id, pending_version_id) VALUES (?, ?, ?)",
+		"knowledge-stale", 1, "version-newer",
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.ActivateVersion(ctx, 1, candidate.ID, time.Now().UTC()); err == nil {
+		t.Fatal("stale candidate was activated")
+	}
+	stored, err := repo.GetVersion(ctx, 1, candidate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != types.KnowledgeVersionIndexing {
+		t.Fatalf("stale candidate status = %s, want indexing", stored.Status)
+	}
+}
+
+func TestTransitionVersionWithReviewRejectsVersionReplacedByNewerPending(t *testing.T) {
+	db := openKnowledgeGovernanceTestDB(t)
+	repo := NewKnowledgeGovernanceRepository(db, nil)
+	ctx := context.Background()
+	candidate := newGovernedTestVersion(1, "knowledge-stale-review", string(types.KnowledgeVersionPendingReview), nil, nil)
+	if err := repo.CreateVersion(ctx, candidate); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(
+		"INSERT INTO knowledges (id, tenant_id, pending_version_id) VALUES (?, ?, ?)",
+		"knowledge-stale-review", 1, "version-newer",
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	err := repo.TransitionVersionWithReview(ctx, 1, candidate.ID, types.KnowledgeVersionApproved, &types.KnowledgeVersionReview{
+		ID: uuid.NewString(), VersionID: candidate.ID, ReviewerID: "reviewer", Action: "approve", CreatedAt: time.Now().UTC(),
+	})
+	if err == nil {
+		t.Fatal("stale review transition was accepted")
+	}
+	stored, err := repo.GetVersion(ctx, 1, candidate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != types.KnowledgeVersionPendingReview {
+		t.Fatalf("stale review version status = %s, want pending_review", stored.Status)
+	}
+}
+
 func TestKnowledgeGovernanceActivationSupportsRetryAndRollback(t *testing.T) {
 	db := openKnowledgeGovernanceTestDB(t)
 	repo := NewKnowledgeGovernanceRepository(db, nil)
@@ -298,7 +466,7 @@ func TestKnowledgeGovernanceActivationSupportsRetryAndRollback(t *testing.T) {
 	if err := repo.CreateVersion(ctx, failed); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec("INSERT INTO knowledges (id, tenant_id, current_version_id) VALUES (?, ?, ?)", "knowledge-2", 1, current.ID).Error; err != nil {
+	if err := db.Exec("INSERT INTO knowledges (id, tenant_id, current_version_id, pending_version_id) VALUES (?, ?, ?, ?)", "knowledge-2", 1, current.ID, failed.ID).Error; err != nil {
 		t.Fatal(err)
 	}
 

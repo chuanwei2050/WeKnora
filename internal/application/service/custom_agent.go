@@ -56,10 +56,10 @@ func clearPlatformManagedModelIDs(config *types.CustomAgentConfig) {
 
 // customAgentService implements the CustomAgentService interface
 type customAgentService struct {
-	repo         interfaces.CustomAgentRepository
-	chunkRepo    interfaces.ChunkRepository
-	kbService    interfaces.KnowledgeBaseService
-	wikiPageRepo interfaces.WikiPageRepository
+	repo            interfaces.CustomAgentRepository
+	chunkRepo       interfaces.ChunkRepository
+	kbService       interfaces.KnowledgeBaseService
+	wikiPageService interfaces.WikiPageService
 }
 
 // NewCustomAgentService creates a new custom agent service
@@ -67,13 +67,13 @@ func NewCustomAgentService(
 	repo interfaces.CustomAgentRepository,
 	chunkRepo interfaces.ChunkRepository,
 	kbService interfaces.KnowledgeBaseService,
-	wikiPageRepo interfaces.WikiPageRepository,
+	wikiPageService interfaces.WikiPageService,
 ) interfaces.CustomAgentService {
 	return &customAgentService{
-		repo:         repo,
-		chunkRepo:    chunkRepo,
-		kbService:    kbService,
-		wikiPageRepo: wikiPageRepo,
+		repo:            repo,
+		chunkRepo:       chunkRepo,
+		kbService:       kbService,
+		wikiPageService: wikiPageService,
 	}
 }
 
@@ -678,15 +678,25 @@ func (s *customAgentService) GetSuggestedQuestions(
 	// when the KB does not need an embedding model). knowledge_id filter is
 	// intentionally ignored here because wiki pages are authored at the KB level
 	// and are not 1:1 with source knowledge items.
-	if len(queryKBIDs) > 0 && s.wikiPageRepo != nil {
-		wikiPages, err := s.wikiPageRepo.ListRecentForSuggestions(ctx, tenantID, queryKBIDs, fetchLimit)
-		if err != nil {
-			logger.ErrorWithFields(ctx, err, map[string]interface{}{
-				"agent_id": agentID,
+	if len(queryKBIDs) > 0 && s.wikiPageService != nil {
+		locale, _ := types.LanguageFromContext(ctx)
+		for _, kbID := range queryKBIDs {
+			pageList, err := s.wikiPageService.ListPages(ctx, &types.WikiPageListRequest{
+				KnowledgeBaseID: kbID,
+				Status:          types.WikiPageStatusPublished,
+				Page:            1,
+				PageSize:        fetchLimit,
+				SortBy:          "updated_at",
+				SortOrder:       "desc",
 			})
-		} else {
-			locale, _ := types.LanguageFromContext(ctx)
-			for _, page := range wikiPages {
+			if err != nil {
+				logger.ErrorWithFields(ctx, err, map[string]interface{}{
+					"agent_id":          agentID,
+					"knowledge_base_id": kbID,
+				})
+				continue
+			}
+			for _, page := range pageList.Pages {
 				q := wikiSuggestionFromPage(page, locale)
 				if q == "" || seen[q] {
 					continue

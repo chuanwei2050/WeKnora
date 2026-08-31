@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
 )
 
@@ -77,8 +78,10 @@ type GrepChunksInput struct {
 // the snippet, mirroring the UX of wiki_search.
 type GrepChunksTool struct {
 	BaseTool
-	db            *gorm.DB
-	searchTargets types.SearchTargets
+	db               *gorm.DB
+	searchTargets    types.SearchTargets
+	knowledgeService interfaces.KnowledgeService
+	governanceRepo   interfaces.KnowledgeGovernanceRepository
 
 	mu         sync.Mutex
 	seenChunks map[string]bool
@@ -86,11 +89,22 @@ type GrepChunksTool struct {
 
 // NewGrepChunksTool creates a new grep chunks tool
 func NewGrepChunksTool(db *gorm.DB, searchTargets types.SearchTargets) *GrepChunksTool {
+	return NewGrepChunksToolWithGovernance(db, searchTargets, nil, nil)
+}
+
+func NewGrepChunksToolWithGovernance(
+	db *gorm.DB,
+	searchTargets types.SearchTargets,
+	knowledgeService interfaces.KnowledgeService,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
+) *GrepChunksTool {
 	return &GrepChunksTool{
-		BaseTool:      grepChunksTool,
-		db:            db,
-		searchTargets: searchTargets,
-		seenChunks:    make(map[string]bool),
+		BaseTool:         grepChunksTool,
+		db:               db,
+		searchTargets:    searchTargets,
+		knowledgeService: knowledgeService,
+		governanceRepo:   governanceRepo,
+		seenChunks:       make(map[string]bool),
 	}
 }
 
@@ -298,12 +312,13 @@ func (t *GrepChunksTool) searchChunks(
 
 	query := t.db.WithContext(ctx).Table("chunks").
 		Select("chunks.id, chunks.content, chunks.chunk_index, chunks.knowledge_id, "+
-			"chunks.knowledge_base_id, chunks.chunk_type, chunks.created_at, "+
+			"chunks.knowledge_base_id, chunks.knowledge_version_id, chunks.chunk_type, chunks.created_at, "+
 			"knowledges.title as knowledge_title").
 		Joins("JOIN knowledges ON chunks.knowledge_id = knowledges.id").
 		Where("chunks.is_enabled = ?", true).
 		Where("chunks.deleted_at IS NULL").
-		Where("knowledges.deleted_at IS NULL")
+		Where("knowledges.deleted_at IS NULL").
+		Where("((COALESCE(knowledges.current_version_id, '') = '' AND COALESCE(chunks.knowledge_version_id, '') = '') OR chunks.knowledge_version_id = knowledges.current_version_id)")
 
 	if len(knowledgeIDs) > 0 {
 		query = query.Where("chunks.knowledge_id IN ?", knowledgeIDs)
@@ -344,6 +359,7 @@ func (t *GrepChunksTool) searchChunks(
 		logger.Errorf(ctx, "[Tool][GrepChunks] Failed to fetch results: %v", err)
 		return nil, err
 	}
+	results = t.filterVisibleResults(ctx, results)
 
 	if len(results) > 0 {
 		knowledgeIDSet := make(map[string]struct{})
@@ -382,6 +398,25 @@ func (t *GrepChunksTool) searchChunks(
 	}
 
 	return results, nil
+}
+
+func (t *GrepChunksTool) filterVisibleResults(ctx context.Context, results []chunkWithTitle) []chunkWithTitle {
+	if len(results) == 0 || t.knowledgeService == nil {
+		return results
+	}
+	filtered := make([]chunkWithTitle, 0, len(results))
+	for _, result := range results {
+		knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, result.KnowledgeID)
+		if err != nil || !agentKnowledgeVisible(ctx, knowledge, t.searchTargets, t.governanceRepo) {
+			continue
+		}
+		if currentVersionID := strings.TrimSpace(knowledge.CurrentVersionID); currentVersionID != "" && strings.TrimSpace(result.KnowledgeVersionID) != currentVersionID {
+			continue
+		}
+		result.KnowledgeTitle = maskPendingKnowledge(knowledge).Title
+		filtered = append(filtered, result)
+	}
+	return filtered
 }
 
 // formatOutput emits per-chunk XML with <match_snippet> and <query_hit>

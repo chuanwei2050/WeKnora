@@ -25,9 +25,31 @@ type DataSchemaTool struct {
 	knowledgeService interfaces.KnowledgeService
 	chunkRepo        interfaces.ChunkRepository
 	targetChunkTypes []types.ChunkType
+	searchTargets    types.SearchTargets
+	governanceRepo   interfaces.KnowledgeGovernanceRepository
 }
 
 func NewDataSchemaTool(knowledgeService interfaces.KnowledgeService, chunkRepo interfaces.ChunkRepository, targetChunkTypes ...types.ChunkType) *DataSchemaTool {
+	return newDataSchemaTool(knowledgeService, chunkRepo, nil, nil, targetChunkTypes...)
+}
+
+func NewDataSchemaToolWithGovernance(
+	knowledgeService interfaces.KnowledgeService,
+	chunkRepo interfaces.ChunkRepository,
+	searchTargets types.SearchTargets,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
+	targetChunkTypes ...types.ChunkType,
+) *DataSchemaTool {
+	return newDataSchemaTool(knowledgeService, chunkRepo, searchTargets, governanceRepo, targetChunkTypes...)
+}
+
+func newDataSchemaTool(
+	knowledgeService interfaces.KnowledgeService,
+	chunkRepo interfaces.ChunkRepository,
+	searchTargets types.SearchTargets,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
+	targetChunkTypes ...types.ChunkType,
+) *DataSchemaTool {
 	if len(targetChunkTypes) == 0 {
 		targetChunkTypes = []types.ChunkType{types.ChunkTypeTableSummary, types.ChunkTypeTableColumn}
 	}
@@ -36,6 +58,8 @@ func NewDataSchemaTool(knowledgeService interfaces.KnowledgeService, chunkRepo i
 		knowledgeService: knowledgeService,
 		chunkRepo:        chunkRepo,
 		targetChunkTypes: targetChunkTypes,
+		searchTargets:    searchTargets,
+		governanceRepo:   governanceRepo,
 	}
 }
 
@@ -57,6 +81,9 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			Error:   fmt.Sprintf("Failed to get knowledge '%s': %v", input.KnowledgeID, err),
 		}, err
 	}
+	if !agentKnowledgeVisible(ctx, knowledge, t.searchTargets, t.governanceRepo) {
+		return &types.ToolResult{Success: false, Error: "knowledge is not available in the authorized search scope"}, fmt.Errorf("knowledge is not available in the authorized search scope")
+	}
 
 	// Get chunks for the knowledge ID using ChunkRepository
 	// We only need table summary and column chunks
@@ -66,24 +93,14 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		PageSize: 100, // Should be enough for schema chunks
 	}
 
-	chunks, _, err := t.chunkRepo.ListPagedChunksByKnowledgeID(
-		ctx,
-		knowledge.TenantID,
-		input.KnowledgeID,
-		page,
-		chunkTypes,
-		"", // tagID
-		"", // keyword
-		"", // searchField
-		"", // sortOrder
-		"", // knowledgeType
-	)
+	chunks, _, err := listAgentChunks(ctx, t.chunkRepo, knowledge.TenantID, input.KnowledgeID, knowledge.CurrentVersionID, page, chunkTypes)
 	if err != nil {
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to list chunks for knowledge ID '%s': %v", input.KnowledgeID, err),
 		}, err
 	}
+	chunks = filterAgentVisibleChunks(chunks, knowledge)
 
 	var summaryContent, columnContent string
 	for _, chunk := range chunks {

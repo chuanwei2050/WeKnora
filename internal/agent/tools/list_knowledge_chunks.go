@@ -77,6 +77,7 @@ type ListKnowledgeChunksTool struct {
 	chunkService     interfaces.ChunkService
 	knowledgeService interfaces.KnowledgeService
 	searchTargets    types.SearchTargets // Pre-computed unified search targets with KB-tenant mapping
+	governanceRepo   interfaces.KnowledgeGovernanceRepository
 }
 
 // NewListKnowledgeChunksTool creates a new tool instance.
@@ -84,12 +85,18 @@ func NewListKnowledgeChunksTool(
 	knowledgeService interfaces.KnowledgeService,
 	chunkService interfaces.ChunkService,
 	searchTargets types.SearchTargets,
+	governanceRepos ...interfaces.KnowledgeGovernanceRepository,
 ) *ListKnowledgeChunksTool {
+	var governanceRepo interfaces.KnowledgeGovernanceRepository
+	if len(governanceRepos) > 0 {
+		governanceRepo = governanceRepos[0]
+	}
 	return &ListKnowledgeChunksTool{
 		BaseTool:         listKnowledgeChunksTool,
 		chunkService:     chunkService,
 		knowledgeService: knowledgeService,
 		searchTargets:    searchTargets,
+		governanceRepo:   governanceRepo,
 	}
 }
 
@@ -124,7 +131,7 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 	}
 
 	// Verify the knowledge's KB is in searchTargets (permission check)
-	if !t.searchTargets.ContainsKB(knowledge.KnowledgeBaseID) {
+	if !agentKnowledgeVisible(ctx, knowledge, t.searchTargets, t.governanceRepo) {
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("Knowledge base %s is not accessible", knowledge.KnowledgeBaseID),
@@ -151,8 +158,7 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 		PageSize: chunkLimit,
 	}
 
-	chunks, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
-		effectiveTenantID, knowledgeID, pagination, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, "", "", "", "", "")
+	chunks, total, err := listAgentChunks(ctx, t.chunkService.GetRepository(), effectiveTenantID, knowledgeID, knowledge.CurrentVersionID, pagination, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ})
 	if err != nil {
 		return &types.ToolResult{
 			Success: false,
@@ -165,6 +171,7 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 			Error:   "chunk query returned no data",
 		}, fmt.Errorf("chunk query returned no data")
 	}
+	chunks = filterAgentVisibleChunks(chunks, knowledge)
 
 	totalChunks := total
 	fetched := len(chunks)
