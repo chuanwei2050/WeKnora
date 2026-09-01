@@ -952,6 +952,14 @@ const pendingKnowledgeId = ref<string | null>(
   (route.query.knowledge_id as string) || null
 );
 
+watch(() => route.query.knowledge_id, (newKnowledgeId, oldKnowledgeId) => {
+  if (newKnowledgeId === oldKnowledgeId) return;
+  pendingKnowledgeId.value = typeof newKnowledgeId === 'string' ? newKnowledgeId : null;
+  if (pendingKnowledgeId.value && cardList.value?.length) {
+    tryAutoOpenDocument();
+  }
+});
+
 const tryAutoOpenDocument = () => {
   if (!pendingKnowledgeId.value) return;
   const targetId = pendingKnowledgeId.value;
@@ -1099,6 +1107,11 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
 
 const closeDoc = () => {
   isCardDetails.value = false;
+  if (route.query.knowledge_id) {
+    const query = { ...route.query };
+    delete query.knowledge_id;
+    void router.replace({ query });
+  }
 };
 const openCardDetails = (item: KnowledgeCard) => {
   isCardDetails.value = true;
