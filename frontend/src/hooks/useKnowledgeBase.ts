@@ -33,6 +33,7 @@ export default function (knowledgeBaseId?: string) {
     source: "",
     channel: "",
     file_type: "",
+    tag_id: "",
     description: "",
     summary_status: "",
     chunkLoading: false,
@@ -171,6 +172,7 @@ export default function (knowledgeBaseId?: string) {
       source: "",
       channel: "",
       file_type: "",
+      tag_id: "",
       description: "",
       summary_status: "",
       chunkLoadError: "",
@@ -187,6 +189,7 @@ export default function (knowledgeBaseId?: string) {
             source: data.source || '',
             channel: data.channel || '',
             file_type: data.file_type || '',
+            tag_id: data.tag_id || '',
             description: data.description || '',
             summary_status: data.summary_status || '',
           });

@@ -892,6 +892,13 @@ watch(selectedTagId, (newVal, oldVal) => {
   }
 });
 
+// Keep the folder selection aligned with the document opened from a reference.
+watch([() => details.tag_id, tagList], ([documentTagId]) => {
+  const targetTagId = documentTagId ? String(documentTagId) : '';
+  if (!targetTagId || !tagMap.value[targetTagId] || selectedTagId.value === targetTagId) return;
+  handleTagFilterChange(targetTagId);
+});
+
 // 监听文档搜索关键词变化
 watch(docSearchKeyword, (newVal, oldVal) => {
   if (newVal === oldVal) return;
@@ -946,7 +953,7 @@ const pendingKnowledgeId = ref<string | null>(
 );
 
 const tryAutoOpenDocument = () => {
-  if (!pendingKnowledgeId.value || !cardList.value?.length) return;
+  if (!pendingKnowledgeId.value) return;
   const targetId = pendingKnowledgeId.value;
   pendingKnowledgeId.value = null;
   const card = cardList.value.find((c: KnowledgeCard) => c.id === targetId);
@@ -961,6 +968,7 @@ const tryAutoOpenDocument = () => {
 
 onMounted(() => {
   loadKnowledgeBaseInfo(kbId.value);
+  tryAutoOpenDocument();
   loadKnowledgeList();
   orgStore.fetchSharedKnowledgeBases();
 
