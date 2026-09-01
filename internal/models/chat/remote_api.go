@@ -305,7 +305,18 @@ func (c *RemoteAPIChat) BuildChatCompletionRequest(messages []Message, opts *Cha
 			req.ResponseFormat = &openai.ChatCompletionResponseFormat{
 				Type: openai.ChatCompletionResponseFormatTypeJSONObject,
 			}
-			req.Messages[len(req.Messages)-1].Content += fmt.Sprintf("\nUse this JSON schema: %s", opts.Format)
+			formatInstruction := fmt.Sprintf("\nUse this JSON schema: %s", opts.Format)
+			lastMessage := &req.Messages[len(req.Messages)-1]
+			if len(lastMessage.MultiContent) > 0 {
+				// Multimodal OpenAI messages must keep all text in MultiContent;
+				// setting Content as well makes go-openai reject the request.
+				lastMessage.MultiContent = append(lastMessage.MultiContent, openai.ChatMessagePart{
+					Type: openai.ChatMessagePartTypeText,
+					Text: formatInstruction,
+				})
+			} else {
+				lastMessage.Content += formatInstruction
+			}
 		}
 	}
 

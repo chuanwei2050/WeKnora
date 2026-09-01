@@ -437,7 +437,8 @@
                   v-for="entry in entries"
                   :key="entry.id"
                   class="faq-card"
-                  :class="{ 'selected': selectedRowKeys.includes(entry.id) }"
+                  :data-entry-id="entry.id"
+                  :class="{ 'selected': selectedRowKeys.includes(entry.id), 'referenced': referencedEntryId === entry.id }"
                   @click="handleCardSelect(entry.id, !selectedRowKeys.includes(entry.id))"
                 >
                   <!-- Card Header -->
@@ -1248,7 +1249,7 @@ import type { ComponentPublicInstance } from 'vue'
 import { MessagePlugin, DialogPlugin, Icon as TIcon } from 'tdesign-vue-next'
 import type { FormRules, FormInstanceFunctions } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useOrganizationStore } from '@/stores/organization'
 import {
@@ -1268,6 +1269,8 @@ import {
   getKnowledgeBaseById,
   listKnowledgeBases,
   getFAQImportProgress,
+  getFAQEntry,
+  getChunkByIdOnly,
   updateFAQImportResultDisplayStatus,
 } from '@/api/knowledge-base'
 import * as XLSX from 'xlsx'
@@ -1317,6 +1320,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const route = useRoute()
 const router = useRouter()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
@@ -1415,6 +1419,11 @@ const handleFaqAction = (data: { value: string }) => {
 const loading = ref(true)
 const loadingMore = ref(false)
 const entries = ref<FAQEntry[]>([])
+const routeChunkId = route.query.chunk_id
+const pendingReference = ref(
+  typeof routeChunkId === 'string' ? { kbId: props.kbId, chunkId: routeChunkId } : null,
+)
+const referencedEntryId = ref<number | null>(null)
 const entryStatusLoading = reactive<Record<number, boolean>>({})
 const entryRecommendedLoading = reactive<Record<number, boolean>>({})
 const selectedRowKeys = ref<number[]>([])
@@ -1988,6 +1997,15 @@ const editorRules: FormRules<FAQEntryPayload> = {
   ],
 }
 
+const decorateFAQEntry = (entry: FAQEntry): FAQEntry => ({
+  ...entry,
+  showMore: false,
+  similarCollapsed: true,
+  negativeCollapsed: true,
+  answersCollapsed: true,
+  is_enabled: entry.is_enabled !== false,
+})
+
 const loadEntries = async (append = false) => {
   if (!props.kbId) return
   if (append) {
@@ -2023,14 +2041,7 @@ const loadEntries = async (append = false) => {
       data: FAQEntry[]
       total: number
     }
-    const newEntries = (pageData.data || []).map(entry => ({
-      ...entry,
-      showMore: false,
-      similarCollapsed: true,  // 相似问默认折叠
-      negativeCollapsed: true,  // 反例默认折叠
-      answersCollapsed: true,   // 答案默认折叠
-      is_enabled: entry.is_enabled !== false,
-    }))
+    const newEntries = (pageData.data || []).map(decorateFAQEntry)
     
     if (append) {
       entries.value = [...entries.value, ...newEntries]
@@ -2055,6 +2066,44 @@ const loadEntries = async (append = false) => {
     setTimeout(() => {
       checkAndLoadMore()
     }, 350)
+  }
+}
+
+const openReferencedEntry = async () => {
+  const reference = pendingReference.value
+  if (!reference || reference.kbId !== props.kbId) return
+  pendingReference.value = null
+
+  try {
+    const chunkResult: any = await getChunkByIdOnly(reference.chunkId)
+    const entrySeqId = Number(chunkResult?.data?.seq_id)
+    if (!Number.isInteger(entrySeqId) || entrySeqId <= 0) {
+      throw new Error(t('knowledgeBase.detailLoadFailed'))
+    }
+
+    const entryResult: any = await getFAQEntry(reference.kbId, entrySeqId)
+    if (props.kbId !== reference.kbId) return
+    if (!entryResult?.success || !entryResult.data) {
+      throw new Error(t('knowledgeBase.detailLoadFailed'))
+    }
+
+    const entry = decorateFAQEntry(entryResult.data)
+    const existingIndex = entries.value.findIndex(item => item.chunk_id === entry.chunk_id)
+    if (existingIndex >= 0) {
+      entries.value[existingIndex] = entry
+    } else {
+      entries.value = [entry, ...entries.value]
+    }
+    referencedEntryId.value = entry.id
+    await nextTick()
+    arrangeCards()
+    await nextTick()
+    cardListRef.value
+      ?.querySelector<HTMLElement>(`[data-entry-id="${entry.id}"]`)
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  } catch (error: any) {
+    if (props.kbId !== reference.kbId) return
+    MessagePlugin.error(error?.message || t('knowledgeBase.detailLoadFailed'))
   }
 }
 
@@ -3029,13 +3078,21 @@ watch(
       return
     }
 
-    loadEntries()
-    loadTags(true)
+    await Promise.all([loadEntries(), loadTags(true)])
+    await openReferencedEntry()
     // 恢复导入任务状态（如果存在）
     await restoreImportTask()
   },
   { immediate: true },
 )
+
+watch([() => props.kbId, () => route.query.chunk_id], ([newKbId, newChunkId], [oldKbId, oldChunkId]) => {
+  const nextChunkId = typeof newChunkId === 'string' ? newChunkId : null
+  const previousChunkId = typeof oldChunkId === 'string' ? oldChunkId : null
+  if (newKbId === oldKbId && nextChunkId === previousChunkId) return
+  pendingReference.value = nextChunkId ? { kbId: newKbId, chunkId: nextChunkId } : null
+  if (newKbId === oldKbId && nextChunkId) void openReferencedEntry()
+})
 
 watch(selectedTagId, (newVal, oldVal) => {
   if (oldVal === undefined) return
@@ -4308,6 +4365,11 @@ watch(() => entries.value.map(e => ({
     border-color: var(--td-brand-color);
     background: var(--td-success-color-light);
     box-shadow: 0 2px 8px rgba(23, 74, 124, 0.15);
+  }
+
+  &.referenced {
+    border-color: var(--td-warning-color);
+    box-shadow: 0 0 0 2px var(--td-warning-color-light);
   }
 }
 

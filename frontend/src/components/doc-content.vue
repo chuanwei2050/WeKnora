@@ -889,6 +889,8 @@ const handleDetailsScroll = () => {
         </div>
       </div>
 
+      <div v-if="details.detailLoadError" class="no_content">{{ details.detailLoadError }}</div>
+
       <!-- 音频播放器（音频文件时固定显示在内容区顶部） -->
       <div v-if="isAudioFile(details.file_type)" class="audio-player-section">
         <div v-if="audioLoading" class="audio-loading">

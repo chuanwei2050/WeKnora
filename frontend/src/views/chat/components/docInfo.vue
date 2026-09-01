@@ -61,6 +61,8 @@
 import { defineProps, computed, ref, reactive } from "vue";
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
+import { MessagePlugin } from 'tdesign-vue-next';
+import { getKnowledgeDetails } from '@/api/knowledge-base';
 import { sanitizeHTML } from '@/utils/security';
 import { isCookieEmbeddedMode, notifyEmbeddedHost } from '@/utils/embedded-runtime';
 import ContentPopup from './tool-results/ContentPopup.vue';
@@ -117,6 +119,8 @@ const groupedKnowledgeRefs = computed(() => {
                 title: item.knowledge_title || item.knowledge_filename || key,
                 knowledgeId: item.knowledge_id,
                 knowledgeBaseId: item.knowledge_base_id,
+                chunkId: item.id || item.chunk_id,
+                chunkType: item.chunk_type,
                 chunks: [],
             });
         }
@@ -151,8 +155,20 @@ const truncateContent = (content, maxLen) => {
     return text.slice(0, maxLen) + '...';
 };
 
-const navigateToDocument = (group) => {
+const navigateToDocument = async (group) => {
     if (!group.knowledgeBaseId) return;
+    if (group.knowledgeId) {
+        try {
+            const result = await getKnowledgeDetails(group.knowledgeId);
+            if (!result?.success || !result.data) {
+                MessagePlugin.warning(t('chat.referenceDocumentUnavailable'));
+                return;
+            }
+        } catch {
+            MessagePlugin.warning(t('chat.referenceDocumentUnavailable'));
+            return;
+        }
+    }
     if (props.embeddedMode || isCookieEmbeddedMode()) {
         notifyEmbeddedHost('open-document', {
             knowledgeBaseId: group.knowledgeBaseId,
@@ -163,6 +179,9 @@ const navigateToDocument = (group) => {
     const query = {};
     if (group.knowledgeId) {
         query.knowledge_id = group.knowledgeId;
+    }
+    if (group.chunkType === 'faq' && group.chunkId) {
+        query.chunk_id = group.chunkId;
     }
     router.push({
         path: `/platform/knowledge-bases/${group.knowledgeBaseId}`,

@@ -34,6 +34,7 @@ type queryUnderstandOutput struct {
 	RewriteQuery        string                 `json:"rewrite_query"`
 	Intent              types.QueryIntent      `json:"intent"`
 	ImageDescription    string                 `json:"image_description"`
+	ImageDescriptions   []string               `json:"image_descriptions,omitempty"`
 	ComplexityLevel     types.ComplexityLevel  `json:"complexity_level"`
 	ReasoningSubtype    types.ReasoningSubtype `json:"reasoning_subtype"`
 	NeedsEntityRelation bool                   `json:"needs_entity_relation"`
@@ -331,10 +332,11 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 		chatManage.RoutingDecision.ClassificationMillis = time.Since(routingStart).Milliseconds()
 	}
 
-	// Persist image description asynchronously — this DB write does not affect
-	// the current pipeline result, so it can run in the background.
+	// Persist the image description before the next pipeline stage starts. The
+	// next turn may load history immediately after this stage, so an async write
+	// would leave a race where the previous image is still missing its caption.
 	if chatManage.ImageDescription != "" && chatManage.UserMessageID != "" {
-		go p.updateUserMessageImageCaption(context.WithoutCancel(ctx), chatManage)
+		p.updateUserMessageImageCaption(context.WithoutCancel(ctx), chatManage)
 	}
 
 	// --- Apply intent-specific system prompt override ---
@@ -388,7 +390,7 @@ func (p *PluginQueryUnderstand) updateUserMessageImageCaption(ctx context.Contex
 		return
 	}
 
-	msg.Images[0].Caption = chatManage.ImageDescription
+	msg.Images = updateImageCaptions(msg.Images, chatManage.ImageDescriptions, chatManage.ImageDescription)
 
 	if err := p.messageService.UpdateMessageImages(ctx, chatManage.SessionID, chatManage.UserMessageID, msg.Images); err != nil {
 		pipelineWarn(ctx, "QueryUnderstand", "update_image_caption", map[string]interface{}{
@@ -485,6 +487,9 @@ func (p *PluginQueryUnderstand) buildPrompts(chatManage *types.ChatManage, histo
 	queryContent := chatManage.Query
 	if len(chatManage.Images) > 0 {
 		queryContent += fmt.Sprintf("\n\n<images_uploaded count=\"%d\" />", len(chatManage.Images))
+		if len(chatManage.Images) > 1 {
+			systemPrompt += "\n当用户上传多张图片时，请额外返回 image_descriptions 数组，按图片出现顺序逐项描述；数组长度必须与图片数量一致。image_description 仍返回所有图片的合并说明。"
+		}
 	} else {
 		queryContent += "\n\n<no_image_attached />"
 	}
@@ -574,7 +579,11 @@ func applyQueryUnderstandOutput(chatManage *types.ChatManage, output queryUnders
 	if output.Intent != "" {
 		chatManage.Intent = output.Intent
 	}
+	chatManage.ImageDescriptions = normalizeImageDescriptions(output.ImageDescriptions)
 	chatManage.ImageDescription = strings.TrimSpace(output.ImageDescription)
+	if chatManage.ImageDescription == "" {
+		chatManage.ImageDescription = joinImageDescriptions(chatManage.ImageDescriptions)
+	}
 	if applyRouting {
 		decision := types.PlanRouting(types.QuestionComplexity{
 			Level: output.ComplexityLevel, Subtype: output.ReasoningSubtype,
@@ -645,9 +654,13 @@ func parseStrictRoutingOutput(raw string) (queryUnderstandOutput, error) {
 	if err != nil {
 		return queryUnderstandOutput{}, err
 	}
+	imageDescriptions := firstStringSliceField(fields, "image_descriptions", "image_captions", "captions")
 	desc := firstStringField(fields,
 		"image_description", "image_desc", "image_text", "image_ocr_text", "description")
 	ocr := firstStringField(fields, "ocr_text", "ocr", "full_ocr", "image_ocr", "ocr_content")
+	if desc == "" {
+		desc = joinImageDescriptions(imageDescriptions)
+	}
 	imageDescription, _ := mergeImageDescAndOCR(strings.TrimSpace(desc), strings.TrimSpace(ocr))
 
 	confidenceRaw, ok := fields["confidence"]
@@ -664,6 +677,7 @@ func parseStrictRoutingOutput(raw string) (queryUnderstandOutput, error) {
 		ComplexityLevel: types.ComplexityLevel(level), ReasoningSubtype: types.ReasoningSubtype(subtype),
 		NeedsEntityRelation: needsEntityRelation,
 		Confidence:          confidence, RationaleSummary: rationale, ImageDescription: imageDescription,
+		ImageDescriptions: imageDescriptions,
 	}
 	if err := (types.QuestionComplexity{
 		Level: output.ComplexityLevel, Subtype: output.ReasoningSubtype,
@@ -727,14 +741,19 @@ func parseStructuredQueryOutputJSON(content string) (queryUnderstandOutput, bool
 		out.Intent = types.QueryIntent(intentStr)
 	}
 
+	imageDescriptions := firstStringSliceField(obj, "image_descriptions", "image_captions", "captions")
 	desc := strings.TrimSpace(firstStringField(obj,
 		"image_description", "image_desc", "image_text", "image_ocr_text", "description"))
 	ocr := strings.TrimSpace(firstStringField(obj,
 		"ocr_text", "ocr", "full_ocr", "image_ocr", "ocr_content"))
+	if desc == "" {
+		desc = joinImageDescriptions(imageDescriptions)
+	}
 	combined, set := mergeImageDescAndOCR(desc, ocr)
 	if set {
 		out.ImageDescription = combined
 	}
+	out.ImageDescriptions = imageDescriptions
 
 	return out, true
 }
@@ -759,6 +778,65 @@ func firstStringField(obj map[string]json.RawMessage, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstStringSliceField(obj map[string]json.RawMessage, keys ...string) []string {
+	for _, key := range keys {
+		raw, ok := obj[key]
+		if !ok || len(raw) == 0 {
+			continue
+		}
+
+		var values []string
+		if err := json.Unmarshal(raw, &values); err == nil {
+			return normalizeImageDescriptions(values)
+		}
+	}
+	return nil
+}
+
+func normalizeImageDescriptions(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]string, len(values))
+	for i, value := range values {
+		result[i] = strings.TrimSpace(value)
+	}
+	return result
+}
+
+func joinImageDescriptions(values []string) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func updateImageCaptions(images types.MessageImages, descriptions []string, fallback string) types.MessageImages {
+	updated := append(types.MessageImages(nil), images...)
+	if len(updated) == 0 {
+		return updated
+	}
+	if len(descriptions) == len(updated) {
+		for i, description := range descriptions {
+			if description != "" {
+				updated[i].Caption = description
+			}
+		}
+		return updated
+	}
+
+	// Older model responses contain one combined image_description string.
+	// Keep that response usable without pretending it maps to one specific
+	// image; the new array form is required for per-image correspondence.
+	if strings.TrimSpace(fallback) != "" {
+		updated[0].Caption = strings.TrimSpace(fallback)
+	}
+	return updated
 }
 
 func mergeImageDescAndOCR(desc, ocr string) (string, bool) {

@@ -961,6 +961,7 @@ watch(() => route.query.knowledge_id, (newKnowledgeId, oldKnowledgeId) => {
 });
 
 const tryAutoOpenDocument = () => {
+  if (isFAQ.value) return;
   if (!pendingKnowledgeId.value) return;
   const targetId = pendingKnowledgeId.value;
   pendingKnowledgeId.value = null;

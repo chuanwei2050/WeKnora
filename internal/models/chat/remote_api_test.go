@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -143,6 +144,28 @@ func TestBuildChatCompletionRequest_ToolChoice(t *testing.T) {
 		req := chat.BuildChatCompletionRequest(messages, opts, false)
 		assert.NotNil(t, req.ToolChoice)
 	})
+}
+
+func TestBuildChatCompletionRequest_MultimodalFormatKeepsContentInMultiContent(t *testing.T) {
+	chat := newTestRemoteChat(t)
+	messages := []Message{{
+		Role:    "user",
+		Content: "这张截图是什么内容？",
+		Images:  []string{"minio://weknora/test.png"},
+	}}
+
+	req := chat.BuildChatCompletionRequest(messages, &ChatOptions{
+		Format: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}}}`),
+	}, false)
+
+	require.Empty(t, req.Messages[0].Content)
+	require.Len(t, req.Messages[0].MultiContent, 3)
+	assert.Equal(t, openai.ChatMessagePartTypeImageURL, req.Messages[0].MultiContent[0].Type)
+	assert.Equal(t, openai.ChatMessagePartTypeText, req.Messages[0].MultiContent[1].Type)
+	assert.Equal(t, "这张截图是什么内容？", req.Messages[0].MultiContent[1].Text)
+	assert.Contains(t, req.Messages[0].MultiContent[2].Text, "Use this JSON schema:")
+	_, err := json.Marshal(req)
+	require.NoError(t, err)
 }
 
 // TestRemoteAPIChat 综合测试 Remote API Chat 的所有功能

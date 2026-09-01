@@ -119,6 +119,41 @@ func TestRoutingPromptUsesPreviousConversationForFollowUp(t *testing.T) {
 	}
 }
 
+func TestParseStructuredQueryOutputPreservesImageDescriptionOrder(t *testing.T) {
+	output, ok := parseStructuredQueryOutputJSON(`{
+		"rewrite_query":"图片内容",
+		"image_descriptions":["第一张图片说明", "第二张图片说明"]
+	}`)
+	if !ok {
+		t.Fatal("expected structured output to parse")
+	}
+	if got, want := strings.Join(output.ImageDescriptions, "|"), "第一张图片说明|第二张图片说明"; got != want {
+		t.Fatalf("image descriptions order changed: got %q want %q", got, want)
+	}
+	if output.ImageDescription != "第一张图片说明\n第二张图片说明" {
+		t.Fatalf("combined image description mismatch: %q", output.ImageDescription)
+	}
+}
+
+func TestUpdateImageCaptionsUsesPerImageDescriptions(t *testing.T) {
+	images := types.MessageImages{
+		{URL: "image-1", Caption: "旧说明1"},
+		{URL: "image-2", Caption: "旧说明2"},
+	}
+	updated := updateImageCaptions(images, []string{"新说明1", "新说明2"}, "合并说明")
+	if updated[0].Caption != "新说明1" || updated[1].Caption != "新说明2" {
+		t.Fatalf("per-image captions were not persisted in order: %#v", updated)
+	}
+}
+
+func TestUpdateImageCaptionsKeepsLegacyCombinedDescription(t *testing.T) {
+	images := types.MessageImages{{URL: "image-1"}, {URL: "image-2"}}
+	updated := updateImageCaptions(images, nil, "旧模型返回的合并说明")
+	if updated[0].Caption != "旧模型返回的合并说明" || updated[1].Caption != "" {
+		t.Fatalf("legacy combined description fallback changed: %#v", updated)
+	}
+}
+
 func TestExplicitFactQueryUsesModelRouting(t *testing.T) {
 	model := &validationChatStub{content: `{"rewrite_query":"系统集成项目管理工程师证书","intent":"kb_search","image_description":"","complexity_level":"L1","reasoning_subtype":"explicit_fact","needs_entity_relation":false,"confidence":0.95,"rationale_summary":"单条件事实检索"}`}
 	plugin := &PluginQueryUnderstand{

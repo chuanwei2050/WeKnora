@@ -38,7 +38,10 @@ export default function (knowledgeBaseId?: string) {
     summary_status: "",
     chunkLoading: false,
     chunkLoadError: "",
+    detailLoadError: "",
   });
+  let detailRequestId = 0;
+  let activeDetailId = "";
   const getKnowled = (
     query: { page: number; page_size: number; tag_id?: string; keyword?: string; file_type?: string } = { page: 1, page_size: 35 },
     kbId?: string,
@@ -163,11 +166,14 @@ export default function (knowledgeBaseId?: string) {
       });
   };
   const getCardDetails = (item: any) => {
+    const requestId = ++detailRequestId;
+    activeDetailId = item.id;
     Object.assign(details, {
       title: "",
       time: "",
       md: [],
       id: "",
+      total: 0,
       type: "",
       source: "",
       channel: "",
@@ -176,9 +182,11 @@ export default function (knowledgeBaseId?: string) {
       description: "",
       summary_status: "",
       chunkLoadError: "",
+      detailLoadError: "",
     });
     getKnowledgeDetails(item.id)
       .then((result: any) => {
+        if (requestId !== detailRequestId) return;
         if (result.success && result.data) {
           const { data } = result;
           Object.assign(details, {
@@ -193,17 +201,25 @@ export default function (knowledgeBaseId?: string) {
             description: data.description || '',
             summary_status: data.summary_status || '',
           });
+        } else {
+          details.detailLoadError = t('knowledgeBase.detailLoadFailed');
         }
       })
-      .catch(() => {});
-    getfDetails(item.id, 1);
+      .catch(() => {
+        if (requestId === detailRequestId) {
+          details.detailLoadError = t('knowledgeBase.detailLoadFailed');
+        }
+      });
+    getfDetails(item.id, 1, requestId);
   };
   
-  const getfDetails = (id: string, page: number) => {
+  const getfDetails = (id: string, page: number, requestId = detailRequestId) => {
+    if (requestId !== detailRequestId || id !== activeDetailId) return;
     details.chunkLoading = true;
     details.chunkLoadError = "";
     getKnowledgeDetailsCon(id, page)
       .then((result: any) => {
+        if (requestId !== detailRequestId || id !== activeDetailId) return;
         if (result.success && result.data) {
           const { data, total: totalResult } = result;
           if (page === 1) {
@@ -212,10 +228,15 @@ export default function (knowledgeBaseId?: string) {
             details.md.push(...data);
           }
           details.total = totalResult;
+        } else {
+          details.chunkLoadError = t('knowledgeBase.detailLoadFailed');
+          details.detailLoadError = t('knowledgeBase.detailLoadFailed');
         }
       })
       .catch((err: any) => {
+        if (requestId !== detailRequestId || id !== activeDetailId) return;
         details.chunkLoadError = err?.message || t('knowledgeBase.chunkLoadFailed');
+        details.detailLoadError = t('knowledgeBase.detailLoadFailed');
         console.error("[ChunkLoad] failed", {
           knowledgeId: id,
           page,
@@ -223,7 +244,9 @@ export default function (knowledgeBaseId?: string) {
         });
       })
       .finally(() => {
-        details.chunkLoading = false;
+        if (requestId === detailRequestId && id === activeDetailId) {
+          details.chunkLoading = false;
+        }
       });
   };
   return {

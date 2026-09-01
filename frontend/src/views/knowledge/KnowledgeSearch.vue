@@ -304,6 +304,8 @@ interface FileGroup {
   kbId: string
   title: string
   kbName: string
+  chunkId: string
+  chunkType: string
   chunks: any[]
 }
 
@@ -317,6 +319,8 @@ const groupedResults = computed<FileGroup[]>(() => {
         kbId: item.knowledge_base_id || '',
         title: item.knowledge_title || item.knowledge_filename || kid,
         kbName: getKbName(item.knowledge_base_id),
+        chunkId: item.id || item.chunk_id || '',
+        chunkType: item.chunk_type || '',
         chunks: [],
       })
     }
@@ -434,9 +438,13 @@ const toggleChunkExpand = (gIdx: number, cIdx: number) => {
 
 const goToDetail = (group: FileGroup) => {
   if (!group.kbId) return
+  const query: Record<string, string> = { knowledge_id: group.knowledgeId }
+  if (group.chunkType === 'faq' && group.chunkId) {
+    query.chunk_id = group.chunkId
+  }
   router.push({
     path: `/platform/knowledge-bases/${group.kbId}`,
-    query: { knowledge_id: group.knowledgeId },
+    query,
   })
 }
 

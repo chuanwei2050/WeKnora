@@ -319,6 +319,7 @@ export default {
     allUploadFailed: 'Все файлы не удалось загрузить ({count})',
     deleteSuccess: 'Знание удалено!',
     chunkLoadFailed: 'Не удалось загрузить фрагменты',
+    detailLoadFailed: 'Не удалось получить сведения о знании',
     accessInfo: {
       myRole: 'Моя роль',
       roleOwner: 'Создатель',
@@ -2307,6 +2308,7 @@ export default {
     channelIm: 'IM',
     chunkLabel: 'Фрагмент {index}:',
     navigateToDocument: 'Просмотр документа',
+    referenceDocumentUnavailable: 'Документ удалён, устарел или недоступен',
     referenceIconAlt: 'Иконка ссылок на материалы',
     chunkIdLabel: 'ID фрагмента:',
     documentIdLabel: 'ID документа:',

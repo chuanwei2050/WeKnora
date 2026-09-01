@@ -353,6 +353,7 @@ export default {
     allUploadFailed: "모든 파일 업로드 실패 ({count}개)",
     deleteSuccess: "지식이 성공적으로 삭제되었습니다!",
     chunkLoadFailed: "청크 로드 실패",
+    detailLoadFailed: "지식 세부 정보 가져오기 실패",
   },
   chat: {
     title: "대화",
@@ -399,6 +400,7 @@ export default {
     channelIm: "IM",
     chunkLabel: "청크 {index}:",
     navigateToDocument: "문서 상세 보기",
+    referenceDocumentUnavailable: "문서가 삭제되었거나 만료되었거나 접근할 수 없습니다",
     referenceIconAlt: "참조 내용 아이콘",
     chunkIdLabel: "청크 ID:",
     documentIdLabel: "문서 ID:",

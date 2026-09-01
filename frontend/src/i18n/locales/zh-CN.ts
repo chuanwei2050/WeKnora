@@ -350,6 +350,7 @@ export default {
     allUploadFailed: "所有文件上传失败（{count}个）",
     deleteSuccess: "知识删除成功！",
     chunkLoadFailed: "分块加载失败",
+    detailLoadFailed: "获取知识详情失败",
   },
   chat: {
     title: "对话",
@@ -398,6 +399,7 @@ export default {
     channelIm: "IM",
     chunkLabel: "片段{index}:",
     navigateToDocument: "查看文档详情",
+    referenceDocumentUnavailable: "文档已删除、过期或无权访问",
     referenceIconAlt: "参考内容图标",
     chunkIdLabel: "片段ID:",
     documentIdLabel: "文档ID:",

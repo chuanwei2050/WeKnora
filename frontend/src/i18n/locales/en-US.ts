@@ -348,6 +348,7 @@ export default {
     allUploadFailed: 'All files failed to upload ({count} files)',
     deleteSuccess: 'Knowledge deleted successfully!',
     chunkLoadFailed: 'Failed to load chunks',
+    detailLoadFailed: 'Failed to fetch knowledge details',
   },
 
   agent: {
@@ -2159,6 +2160,7 @@ export default {
     channelIm: 'IM',
     chunkLabel: 'Chunk {index}:',
     navigateToDocument: 'View document details',
+    referenceDocumentUnavailable: 'This document was deleted, expired, or is no longer accessible',
     referenceIconAlt: 'Reference materials icon',
     chunkIdLabel: 'Chunk ID:',
     documentIdLabel: 'Document ID:',

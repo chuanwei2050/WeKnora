@@ -298,6 +298,10 @@ export function updateFAQEntry(kbId: string, entryId: number, data: any) {
   return put(`/api/v1/knowledge-bases/${kbId}/faq/entries/${entryId}`, data);
 }
 
+export function getFAQEntry(kbId: string, entryId: number) {
+  return get(`/api/v1/knowledge-bases/${kbId}/faq/entries/${entryId}`);
+}
+
 // Unified batch update API - supports is_enabled, is_recommended, tag_id
 // Supports two modes:
 // 1. By entry ID: use by_id field
