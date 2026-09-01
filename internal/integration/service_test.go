@@ -331,6 +331,11 @@ func TestKnowledgeWriteServiceTokenUsesBoundTenantAdministrator(t *testing.T) {
 	var session Session
 	require.NoError(t, svc.db.First(&session, "digest = ?", digest(token)).Error)
 	require.Equal(t, administrator.ID, session.UserID)
+	svc.tenants = staticTenantService{tenant: &types.Tenant{ID: 1, Status: string(types.TenantStatusActive)}}
+	principal, authenticatedUser, _, err := svc.Authenticate(ctx, token, "service")
+	require.NoError(t, err)
+	require.Equal(t, client.ID, principal.ClientID)
+	require.Equal(t, administrator.ID, authenticatedUser.ID)
 }
 
 func TestRevealClientSecretLikeModelAPIKey(t *testing.T) {

@@ -850,9 +850,15 @@ func (s *Service) Authenticate(ctx context.Context, token, kind string) (*Princi
 	var user *types.User
 	var err error
 	if session.UserID != "" {
-		var activeIdentities int64
-		if s.db.WithContext(ctx).Model(&ExternalIdentity{}).Where("user_id = ? AND active = ? AND (client_id = ? OR client_id = '')", session.UserID, true, session.ClientID).Count(&activeIdentities).Error != nil || activeIdentities == 0 {
-			return nil, nil, nil, ErrUnauthorized
+		// Browser sessions represent mapped external users and must retain an
+		// active identity. Service sessions can instead be bound directly to the
+		// tenant administrator for knowledge:write without creating an external
+		// identity for that administrator.
+		if session.Kind == "browser" {
+			var activeIdentities int64
+			if s.db.WithContext(ctx).Model(&ExternalIdentity{}).Where("user_id = ? AND active = ? AND (client_id = ? OR client_id = '')", session.UserID, true, session.ClientID).Count(&activeIdentities).Error != nil || activeIdentities == 0 {
+				return nil, nil, nil, ErrUnauthorized
+			}
 		}
 		user, err = s.users.GetUserByID(ctx, session.UserID)
 		if err != nil || user == nil || !user.IsActive {
