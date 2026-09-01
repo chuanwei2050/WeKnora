@@ -25,7 +25,7 @@
 ## POST `/knowledge-bases/:id/knowledge/file` - 从文件创建知识
 
 **表单参数**：
-- `file`: 上传的文件（必填）
+- `file`: 上传的文件（必填），默认最大 `2047 MB`；可通过 `MAX_FILE_SIZE_MB` 调整，但不会超过 2047 MB
 - `metadata`: JSON 格式的元数据（可选）
 - `enable_multimodel`: 是否启用多模态处理（可选，true/false）
 - `fileName`: 自定义文件名，用于文件夹上传时保留路径（可选）

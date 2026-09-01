@@ -40,7 +40,7 @@ COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
 # 设置默认环境变量（MB）
-ENV MAX_FILE_SIZE_MB=50
+ENV MAX_FILE_SIZE_MB=2047
 
 # 暴露端口
 EXPOSE 80

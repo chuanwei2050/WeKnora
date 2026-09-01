@@ -89,7 +89,7 @@ func loadIntegrationLimits() integrationLimits {
 		batchConcurrency:  positiveEnv("INTEGRATION_BATCH_SEARCH_CONCURRENCY", 8),
 		maxTopK:           positiveEnv("INTEGRATION_MAX_TOP_K", 50),
 		maxQueryBytes:     positiveEnv("INTEGRATION_MAX_QUERY_BYTES", 8192),
-		maxRequestBytes:   positiveEnv("INTEGRATION_MAX_REQUEST_BYTES", 25*1024*1024),
+		maxRequestBytes:   positiveEnv("INTEGRATION_MAX_REQUEST_BYTES", int(utils.GetMaxFileSize())),
 	}
 	return limits
 }

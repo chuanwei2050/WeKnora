@@ -13,7 +13,7 @@ docreader:
     - MINIO_ENDPOINT=minio:9000
     - MINIO_PUBLIC_ENDPOINT=http://localhost:${MINIO_PORT:-9000}
     - MINERU_ENDPOINT=${MINERU_ENDPOINT:-}
-    - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}
+    - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-2047}
 ```
 
 ### 环境变量说明
@@ -60,12 +60,12 @@ docreader:
 #### 4. MAX_FILE_SIZE_MB
 
 - **说明**: 允许上传的最大文件大小（单位：MB）
-- **默认值**: `50` MB
+- **默认值**: `2047` MB（约 2 GB；gRPC 安全上限）
 - **用途**: 限制 gRPC 服务接收的文件大小，防止过大的文件导致服务崩溃或性能问题
 - **配置示例**:
   ```bash
   # .env 文件
-  MAX_FILE_SIZE_MB=100  # 允许最大 100MB 的文件
+  MAX_FILE_SIZE_MB=2047  # 允许最大约 2GB 的文件
   ```
 
 ## 其他可配置的环境变量
@@ -156,7 +156,7 @@ docreader:
   environment:
     - MINIO_ENDPOINT=minio:9000
     - MINIO_PUBLIC_ENDPOINT=http://localhost:9000
-    - MAX_FILE_SIZE_MB=50
+    - MAX_FILE_SIZE_MB=2047
 ```
 
 ### 高级配置（启用 MinerU + 自定义 OCR）
@@ -167,7 +167,7 @@ docreader:
     - MINIO_ENDPOINT=minio:9000
     - MINIO_PUBLIC_ENDPOINT=http://192.168.1.100:9000
     - MINERU_ENDPOINT=http://mineru:8080
-    - MAX_FILE_SIZE_MB=100
+    - MAX_FILE_SIZE_MB=2047
     - OCR_BACKEND=paddle
     - VLM_MODEL_BASE_URL=http://ollama:11434
     - VLM_MODEL_NAME=llava
@@ -185,7 +185,7 @@ docreader:
     - COS_REGION=ap-guangzhou
     - COS_BUCKET_NAME=your-bucket
     - COS_APP_ID=your_app_id
-    - MAX_FILE_SIZE_MB=50
+    - MAX_FILE_SIZE_MB=2047
 ```
 
 ### 使用阿里云 OSS
@@ -199,7 +199,7 @@ docreader:
     - OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com
     - OSS_BUCKET_NAME=your-bucket
     - OSS_REGION=cn-hangzhou
-    - MAX_FILE_SIZE_MB=50
+    - MAX_FILE_SIZE_MB=2047
 ```
 
 ## 常见问题

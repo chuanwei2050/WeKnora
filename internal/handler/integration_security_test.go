@@ -18,6 +18,7 @@ import (
 	integrationauth "github.com/Tencent/WeKnora/internal/integration"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -227,6 +228,18 @@ func TestIntegrationRequestBodyLimit(t *testing.T) {
 	handler.limitRequestBody(context)
 	_, err := io.ReadAll(context.Request.Body)
 	require.Error(t, err)
+}
+
+func TestIntegrationRequestBodyLimitDefaultsToMaxFileSize(t *testing.T) {
+	t.Setenv("MAX_FILE_SIZE_MB", "")
+	t.Setenv("INTEGRATION_MAX_REQUEST_BYTES", "")
+
+	limits := loadIntegrationLimits()
+	require.Equal(t, int(utils.GetMaxFileSize()), limits.maxRequestBytes)
+
+	t.Setenv("MAX_FILE_SIZE_MB", "512")
+	limits = loadIntegrationLimits()
+	require.Equal(t, 512*1024*1024, limits.maxRequestBytes)
 }
 
 func TestIntegrationKnowledgeIDsAreBoundedAndValidated(t *testing.T) {
