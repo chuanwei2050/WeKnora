@@ -885,7 +885,12 @@ func (t *KnowledgeSearchTool) rerankResults(
 	for _, result := range rerankedCandidates {
 		baseScore := result.Score
 		// Apply composite score
-		result.Score = t.compositeScore(result, result.Score, baseScore)
+		result.Score = searchutil.CompositeSearchScore(
+			result.SearchResult,
+			result.Score,
+			baseScore,
+			result.StartAt >= 0 && result.EndAt > result.StartAt,
+		)
 	}
 
 	// Combine FAQ results (with original order) and reranked candidates
@@ -1621,45 +1626,6 @@ func (t *KnowledgeSearchTool) getEnrichedPassage(ctx context.Context, result *ty
 		len(result.Content), len(imageTexts))
 
 	return combinedText
-}
-
-// compositeScore calculates a composite score considering multiple factors
-func (t *KnowledgeSearchTool) compositeScore(
-	result *searchResultWithMeta,
-	modelScore, baseScore float64,
-) float64 {
-	// Source weight: web_search results get slightly lower weight
-	sourceWeight := 1.0
-	if strings.ToLower(result.KnowledgeSource) == "web_search" {
-		sourceWeight = 0.95
-	}
-
-	// Position prior: slightly favor chunks earlier in the document
-	positionPrior := 1.0
-	if result.StartAt >= 0 && result.EndAt > result.StartAt {
-		// Calculate position ratio and apply small boost for earlier positions
-		positionRatio := 1.0 - float64(result.StartAt)/float64(result.EndAt+1)
-		positionPrior += t.clampFloat(positionRatio, -0.05, 0.05)
-	}
-
-	// Composite formula: weighted combination of model score, base score, and source weight
-	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight
-	composite *= positionPrior
-
-	// Clamp to [0, 1]
-	if composite < 0 {
-		composite = 0
-	}
-	if composite > 1 {
-		composite = 1
-	}
-
-	return composite
-}
-
-// clampFloat clamps a float value to the specified range
-func (t *KnowledgeSearchTool) clampFloat(v, minV, maxV float64) float64 {
-	return searchutil.ClampFloat(v, minV, maxV)
 }
 
 // applyMMR applies Maximal Marginal Relevance algorithm to reduce redundancy

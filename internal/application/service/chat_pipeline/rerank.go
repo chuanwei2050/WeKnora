@@ -208,7 +208,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		base := sr.Score
 		sr.Metadata["base_score"] = fmt.Sprintf("%.4f", base)
 		modelScore := rr.RelevanceScore
-		sr.Score = compositeScore(sr, modelScore, base)
+		sr.Score = searchutil.CompositeSearchScore(sr, modelScore, base, sr.StartAt >= 0)
 
 		prior := sr.RankingSourcePrior
 		priorKind := sr.RankingSourcePriorKind
@@ -232,7 +232,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		sr.Metadata["base_score"] = fmt.Sprintf("%.4f", base)
 		// Assign high model score for direct load items
 		modelScore := 1.0
-		sr.Score = compositeScore(sr, modelScore, base)
+		sr.Score = searchutil.CompositeSearchScore(sr, modelScore, base, sr.StartAt >= 0)
 		reranked = append(reranked, sr)
 	}
 	final := applyMMR(ctx, reranked, chatManage, min(len(reranked), max(1, chatManage.RerankTopK)), 0.7)
@@ -614,30 +614,6 @@ func safeTopScore(results []rerank.RankResult) float64 {
 		return 0
 	}
 	return results[0].RelevanceScore
-}
-
-// compositeScore calculates the composite score for a search result
-func compositeScore(sr *types.SearchResult, modelScore, baseScore float64) float64 {
-	sourceWeight := 1.0
-	switch strings.ToLower(sr.KnowledgeSource) {
-	case "web_search":
-		sourceWeight = 0.95
-	default:
-		sourceWeight = 1.0
-	}
-	positionPrior := 1.0
-	if sr.StartAt >= 0 {
-		positionPrior += searchutil.ClampFloat(1.0-float64(sr.StartAt)/float64(sr.EndAt+1), -0.05, 0.05)
-	}
-	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight
-	composite *= positionPrior
-	if composite < 0 {
-		composite = 0
-	}
-	if composite > 1 {
-		composite = 1
-	}
-	return composite
 }
 
 // applyMMR applies the MMR algorithm to the search results with pre-computed token sets
