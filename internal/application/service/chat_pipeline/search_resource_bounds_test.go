@@ -58,6 +58,22 @@ func TestLimitRetrievalCandidatesCapsAndRanksRemainingResults(t *testing.T) {
 	}
 }
 
+func TestLimitRetrievalCandidatesOrdersTiesDeterministically(t *testing.T) {
+	first := []*types.SearchResult{
+		{ID: "chunk-b", KnowledgeBaseID: "kb", KnowledgeID: "doc", Score: 0.8},
+		{ID: "chunk-a", KnowledgeBaseID: "kb", KnowledgeID: "doc", Score: 0.8},
+	}
+	second := []*types.SearchResult{first[1], first[0]}
+
+	gotFirst := limitRetrievalCandidates(first, 2, nil)
+	gotSecond := limitRetrievalCandidates(second, 2, nil)
+	for i, want := range []string{"chunk-a", "chunk-b"} {
+		if gotFirst[i].ID != want || gotSecond[i].ID != want {
+			t.Fatalf("tie order changed with input order: first=%v second=%v", gotFirst, gotSecond)
+		}
+	}
+}
+
 func TestLimitRetrievalCandidatesKeepsHighestDuplicateAndEachExplicitScope(t *testing.T) {
 	targets := types.SearchTargets{{Type: types.SearchTargetTypeKnowledge, KnowledgeIDs: []string{"a", "b"}}}
 	results := []*types.SearchResult{

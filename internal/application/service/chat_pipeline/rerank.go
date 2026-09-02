@@ -235,6 +235,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		sr.Score = searchutil.CompositeSearchScore(sr, modelScore, base, sr.StartAt >= 0)
 		reranked = append(reranked, sr)
 	}
+	searchutil.SortSearchResults(reranked)
 	final := applyMMR(ctx, reranked, chatManage, min(len(reranked), max(1, chatManage.RerankTopK)), 0.7)
 	final = preserveStrongKeywordResults(final, chatManage.SearchResult, chatManage.RerankTopK)
 	chatManage.RerankResult = final

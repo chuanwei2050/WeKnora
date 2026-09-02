@@ -162,32 +162,34 @@ func (p *PluginMerge) injectHistoryResults(
 // groupAndMergeOverlapping groups chunks by KnowledgeID + ChunkType, then merges
 // overlapping ranges within each group using mergeOverlappingChunks.
 func (p *PluginMerge) groupAndMergeOverlapping(ctx context.Context, results []*types.SearchResult) []*types.SearchResult {
-	// Group by KnowledgeID → ChunkType
-	knowledgeGroup := make(map[string]map[string][]*types.SearchResult)
-	for _, chunk := range results {
-		if _, ok := knowledgeGroup[chunk.KnowledgeID]; !ok {
-			knowledgeGroup[chunk.KnowledgeID] = make(map[string][]*types.SearchResult)
-		}
-		knowledgeGroup[chunk.KnowledgeID][chunk.ChunkType] = append(
-			knowledgeGroup[chunk.KnowledgeID][chunk.ChunkType], chunk,
-		)
+	type mergeKey struct {
+		knowledgeID string
+		chunkType   string
 	}
-
-	pipelineInfo(ctx, "Merge", "group_summary", map[string]interface{}{
-		"knowledge_cnt": len(knowledgeGroup),
-	})
-
-	// Flatten into independent (knowledgeID, chunks) work units for parallel merge.
 	type mergeUnit struct {
 		knowledgeID string
 		chunks      []*types.SearchResult
 	}
-	var units []mergeUnit
-	for knowledgeID, chunkGroup := range knowledgeGroup {
-		for _, chunks := range chunkGroup {
-			units = append(units, mergeUnit{knowledgeID: knowledgeID, chunks: chunks})
+
+	// Preserve first-seen group order; map iteration would make request order unstable.
+	units := make([]mergeUnit, 0)
+	unitIndexes := make(map[mergeKey]int)
+	knowledgeIDs := make(map[string]struct{})
+	for _, chunk := range results {
+		key := mergeKey{knowledgeID: chunk.KnowledgeID, chunkType: chunk.ChunkType}
+		index, ok := unitIndexes[key]
+		if !ok {
+			index = len(units)
+			unitIndexes[key] = index
+			units = append(units, mergeUnit{knowledgeID: chunk.KnowledgeID})
 		}
+		units[index].chunks = append(units[index].chunks, chunk)
+		knowledgeIDs[chunk.KnowledgeID] = struct{}{}
 	}
+
+	pipelineInfo(ctx, "Merge", "group_summary", map[string]interface{}{
+		"knowledge_cnt": len(knowledgeIDs),
+	})
 
 	groupResults := ParallelMap(units, 0, func(_ int, u mergeUnit) []*types.SearchResult {
 		pipelineInfo(ctx, "Merge", "group_process", map[string]interface{}{

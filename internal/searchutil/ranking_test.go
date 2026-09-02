@@ -50,6 +50,22 @@ func TestCompositeSearchScoreMatchesLegacyCallers(t *testing.T) {
 	}
 }
 
+func TestSortSearchResultsUsesStableTieBreakers(t *testing.T) {
+	results := []*types.SearchResult{
+		{ID: "chunk-b", KnowledgeBaseID: "kb", KnowledgeID: "doc", Score: 0.8},
+		nil,
+		{ID: "chunk-low", KnowledgeBaseID: "kb", KnowledgeID: "doc", Score: 0.7},
+		{ID: "chunk-a", KnowledgeBaseID: "kb", KnowledgeID: "doc", Score: 0.8},
+	}
+
+	SortSearchResults(results)
+
+	require.Equal(t, []string{"chunk-a", "chunk-b", "chunk-low"}, []string{
+		results[0].ID, results[1].ID, results[2].ID,
+	})
+	require.Nil(t, results[3])
+}
+
 func legacyCompositeSearchScore(result *types.SearchResult, modelScore, baseScore float64, applyPositionPrior bool) float64 {
 	sourceWeight := 1.0
 	if strings.ToLower(result.KnowledgeSource) == "web_search" {

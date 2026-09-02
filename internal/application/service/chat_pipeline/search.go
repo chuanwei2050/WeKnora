@@ -680,6 +680,7 @@ func limitRetrievalCandidates(results []*types.SearchResult, configuredLimit int
 		return append(direct, regular...)
 	}
 	results = removeDuplicateResults(results)
+	searchutil.SortSearchResults(results)
 	explicitIDs := make([]string, 0)
 	seenExplicit := make(map[string]struct{})
 	for _, target := range targets {
@@ -726,7 +727,7 @@ func limitRetrievalCandidates(results []*types.SearchResult, configuredLimit int
 			remaining = append(remaining, result)
 		}
 	}
-	sort.SliceStable(remaining, func(i, j int) bool { return remaining[i].Score > remaining[j].Score })
+	searchutil.SortSearchResults(remaining)
 	remainingLimit := min(limit-len(selected), len(remaining))
 	return append(selected, remaining[:remainingLimit]...)
 }
