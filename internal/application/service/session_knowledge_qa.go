@@ -786,6 +786,7 @@ func (s *sessionService) searchKnowledge(ctx context.Context,
 		PipelineRequest: types.PipelineRequest{
 			Query:               query,
 			UserID:              userID,
+			TenantID:            tenantID,
 			KnowledgeBaseIDs:    knowledgeBaseIDs,
 			KnowledgeIDs:        knowledgeIDs,
 			SearchTargets:       searchTargets,
