@@ -546,7 +546,7 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
             })
         }
     }
-    if (!props.embeddedMode && !isStreaming.value && messagesList[messagesList.length - 1] && !messagesList[messagesList.length - 1].is_completed) {
+    if (!isStreaming.value && messagesList[messagesList.length - 1] && !messagesList[messagesList.length - 1].is_completed) {
         isReplying.value = true;
         // 保存正在 stream 的消息 ID，以便停止时使用
         const lastMessage = messagesList[messagesList.length - 1];

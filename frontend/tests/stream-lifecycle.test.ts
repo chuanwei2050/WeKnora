@@ -2,13 +2,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 
-const { fetchEventSource } = vi.hoisted(() => ({ fetchEventSource: vi.fn() }))
+const { fetchEventSource, runtimeMode } = vi.hoisted(() => ({
+  fetchEventSource: vi.fn(),
+  runtimeMode: { value: 'standalone' },
+}))
 
 vi.mock('@microsoft/fetch-event-source', () => ({ fetchEventSource }))
 vi.mock('../src/utils/embedded-runtime', () => ({
   getEmbeddedCSRFToken: () => '',
-  getEmbeddedSessionToken: () => '',
-  getRuntimeMode: () => 'standalone',
+  getEmbeddedSessionToken: () => 'integration-token',
+  getRuntimeMode: () => runtimeMode.value,
 }))
 
 import { useStream } from '../src/api/chat/streame'
@@ -34,6 +37,7 @@ function mountStream() {
 describe('stream lifecycle', () => {
   beforeEach(() => {
     fetchEventSource.mockReset()
+    runtimeMode.value = 'standalone'
     localStorage.clear()
     localStorage.setItem('weknora_token', 'test-token')
   })
@@ -93,6 +97,63 @@ describe('stream lifecycle', () => {
     activeOptions.onclose()
     finishRequest()
     await activeRequest
+    wrapper.unmount()
+  })
+
+  it('resumes an embedded answer from the message events endpoint', async () => {
+    runtimeMode.value = 'embedded-widget'
+    fetchEventSource.mockImplementation(async (_url, options) => {
+      options.onmessage({ data: JSON.stringify({
+        event: 'answer.completed',
+        message_id: 'message-1',
+        data: { answer: 'completed answer' },
+      }) })
+      options.onclose()
+    })
+    const { stream, wrapper } = mountStream()
+
+    await stream.startStream({ ...request, query: 'message-1', method: 'GET' })
+
+    expect(fetchEventSource).toHaveBeenCalledWith(
+      expect.stringContaining('/sessions/session-1/messages/message-1/events'),
+      expect.objectContaining({ method: 'GET', body: null }),
+    )
+    expect(stream.error.value).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('backs off when an embedded answer has no new events yet', async () => {
+    runtimeMode.value = 'embedded-widget'
+    let retryDelay: number | undefined
+    fetchEventSource.mockImplementation(async (_url, options) => {
+      try {
+        options.onclose()
+      } catch (error) {
+        retryDelay = options.onerror(error)
+      }
+    })
+    const { stream, wrapper } = mountStream()
+
+    await stream.startStream({ ...request, query: 'message-1', method: 'GET' })
+
+    expect(retryDelay).toBe(1_000)
+    expect(stream.error.value).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('stops resuming an embedded answer after ten minutes', async () => {
+    runtimeMode.value = 'embedded-widget'
+    const now = vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(10 * 60 * 1_000)
+    fetchEventSource.mockImplementation(async (_url, options) => {
+      options.onclose()
+    })
+    const { stream, wrapper } = mountStream()
+
+    await stream.startStream({ ...request, query: 'message-1', method: 'GET' })
+
+    expect(stream.error.value).toBeTruthy()
+    expect(stream.isStreaming.value).toBe(false)
+    now.mockRestore()
     wrapper.unmount()
   })
 })

@@ -56,4 +56,11 @@ describe('embedded widget capabilities', () => {
     expect(chatView).toContain('props.embeddedMode ? false : useSettingsStoreInstance.isAgentEnabled')
     expect(chatView).toContain('props.embeddedMode ? props.agentId :')
   })
+
+  it('resumes an unfinished answer after switching conversations', () => {
+    const chatView = source('../src/views/chat/index.vue')
+
+    expect(chatView).toContain("url: '/api/v1/sessions/continue-stream'")
+    expect(chatView).not.toContain('if (!props.embeddedMode && !isStreaming.value')
+  })
 })

@@ -20,6 +20,9 @@ interface StreamOptions {
   chunkInterval?: number
 }
 
+const INTEGRATION_RESUME_RETRY_MS = 1_000;
+const INTEGRATION_RESUME_TIMEOUT_MS = 10 * 60 * 1_000;
+
 export function useStream() {
   // 响应式状态
   const output = ref('')              // 显示内容
@@ -49,10 +52,13 @@ export function useStream() {
     
     // 获取JWT Token
     const isIntegrationWidget = getRuntimeMode() === 'embedded-widget';
+    const isIntegrationResume = isIntegrationWidget && params.method === 'GET';
     const idempotencyKey = createIdempotencyKey();
     const activeController = controller;
     let receivedTerminalEvent = false;
     let lastEventId = '';
+    const integrationResumeStartedAt = Date.now();
+    const integrationStreamPending = new Error('integration stream is still running');
     const seenEventIds = new Set<string>();
     const token = isIntegrationWidget ? getEmbeddedSessionToken() : localStorage.getItem('weknora_token');
     if (!token) {
@@ -86,7 +92,9 @@ export function useStream() {
 
     try {
       let url = isIntegrationWidget
-        ? `${apiUrl}/api/integration/v1/chat/sessions/${params.session_id}/messages`
+        ? isIntegrationResume
+          ? `${apiUrl}/api/integration/v1/chat/sessions/${params.session_id}/messages/${params.query}/events`
+          : `${apiUrl}/api/integration/v1/chat/sessions/${params.session_id}/messages`
         : params.method == "POST"
           ? `${apiUrl}${params.url}/${params.session_id}`
           : `${apiUrl}${params.url}/${params.session_id}?message_id=${params.query}`;
@@ -133,7 +141,7 @@ export function useStream() {
           params.method == "POST"
             ? JSON.stringify(postBody)
             : null,
-        signal: controller.signal,
+        signal: activeController.signal,
         openWhenHidden: true,
 
         onopen: async (res) => {
@@ -182,6 +190,9 @@ export function useStream() {
         },
 
         onerror: (err) => {
+          if (err === integrationStreamPending && !activeController.signal.aborted) {
+            return INTEGRATION_RESUME_RETRY_MS;
+          }
           if (isIntegrationWidget) {
             error.value = `${i18n.global.t('error.streamFailed')}: ${err}`;
             stopStream();
@@ -191,6 +202,14 @@ export function useStream() {
         },
 
         onclose: () => {
+          if (isIntegrationResume && !receivedTerminalEvent && !activeController.signal.aborted) {
+            if (Date.now() - integrationResumeStartedAt >= INTEGRATION_RESUME_TIMEOUT_MS) {
+              error.value = i18n.global.t('error.streamFailed');
+              stopStream();
+              return;
+            }
+            throw integrationStreamPending;
+          }
           if (shouldReportUnexpectedStreamClose(receivedTerminalEvent, activeController.signal.aborted)) {
             error.value = i18n.global.t('error.streamFailed');
           }
