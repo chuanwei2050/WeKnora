@@ -1,0 +1,20 @@
+# retrieval-source-prior Specification
+
+## Purpose
+TBD - created by archiving change calibrate-wiki-source-prior. Update Purpose after archive.
+## Requirements
+### Requirement: 来源先验必须有界并保留原始相关性
+系统 MUST 保留 Rerank 原始相关性分数，并 MUST 以有界方式计算来源先验后的排序分数。
+来源先验 MUST 来自内部类型化字段，不得信任知识内容元数据，并 MUST 拒绝 NaN 或无穷值。
+
+#### Scenario: Wiki 候选相关性明显较低
+- **WHEN** Wiki/FAQ 候选的原始相关性显著低于普通候选
+- **THEN** 来源先验不得仅凭来源将其提升到更相关候选之前
+
+### Requirement: 来源先验必须在多样性选择前应用并经评测启用
+系统 MUST 在 MMR 或等价多样性选择前应用来源先验，并 MUST 通过离线质量与来源置换指标确定默认参数。
+
+#### Scenario: 候选配置伤害无答案准确率
+- **WHEN** 来源先验使无答案准确率或相关性切片显著退化
+- **THEN** 该候选参数不得成为默认配置
+
