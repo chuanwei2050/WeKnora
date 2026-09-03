@@ -119,6 +119,8 @@ const groupedKnowledgeRefs = computed(() => {
                 title: item.knowledge_title || item.knowledge_filename || key,
                 knowledgeId: item.knowledge_id,
                 knowledgeBaseId: item.knowledge_base_id,
+                directoryId: item.directory_id,
+                tagId: item.tag_id,
                 chunkId: item.id || item.chunk_id,
                 chunkType: item.chunk_type,
                 chunks: [],
@@ -157,6 +159,8 @@ const truncateContent = (content, maxLen) => {
 
 const navigateToDocument = async (group) => {
     if (!group.knowledgeBaseId) return;
+    let directoryId = group.directoryId;
+    let tagId = group.tagId;
     if (group.knowledgeId) {
         try {
             const result = await getKnowledgeDetails(group.knowledgeId);
@@ -164,6 +168,9 @@ const navigateToDocument = async (group) => {
                 MessagePlugin.warning(t('chat.referenceDocumentUnavailable'));
                 return;
             }
+            directoryId = result.data.directory_id || directoryId;
+            tagId = result.data.tag_id || tagId;
+            group.knowledgeBaseId = result.data.knowledge_base_id || group.knowledgeBaseId;
         } catch {
             MessagePlugin.warning(t('chat.referenceDocumentUnavailable'));
             return;
@@ -173,6 +180,8 @@ const navigateToDocument = async (group) => {
         notifyEmbeddedHost('open-document', {
             knowledgeBaseId: group.knowledgeBaseId,
             knowledgeId: group.knowledgeId || undefined,
+            directoryId: directoryId || undefined,
+            tagId: tagId || undefined,
         });
         return;
     }
@@ -180,6 +189,8 @@ const navigateToDocument = async (group) => {
     if (group.knowledgeId) {
         query.knowledge_id = group.knowledgeId;
     }
+    if (directoryId) query.directory_id = directoryId;
+    if (tagId) query.tag_id = tagId;
     if (group.chunkType === 'faq' && group.chunkId) {
         query.chunk_id = group.chunkId;
     }

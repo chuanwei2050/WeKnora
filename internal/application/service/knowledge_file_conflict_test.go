@@ -12,11 +12,13 @@ func TestExistingFileConflict(t *testing.T) {
 		name        string
 		parseStatus string
 		wantCode    string
+		wantRefresh bool
 	}{
 		{
 			name:        "existing file",
 			parseStatus: types.ParseStatusCompleted,
 			wantCode:    "duplicate_file",
+			wantRefresh: true,
 		},
 		{
 			name:        "file being deleted",
@@ -29,9 +31,10 @@ func TestExistingFileConflict(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			knowledge := &types.Knowledge{FileName: "example.pdf", ParseStatus: tt.parseStatus}
 
-			err := existingFileConflict(knowledge)
+			err, refresh := existingFileConflict(knowledge)
 
 			require.Equal(t, tt.wantCode, err.Code)
+			require.Equal(t, tt.wantRefresh, refresh)
 		})
 	}
 }

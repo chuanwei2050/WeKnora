@@ -1,0 +1,12 @@
+PRAGMA foreign_keys = OFF;
+DROP TRIGGER IF EXISTS knowledges_directory_update_guard;
+DROP TRIGGER IF EXISTS knowledges_directory_insert_guard;
+DROP TABLE IF EXISTS knowledge_directory_delete_tokens;
+DROP TABLE IF EXISTS knowledge_directory_delete_batches;
+DROP TABLE IF EXISTS knowledge_directory_delete_tasks;
+DROP INDEX IF EXISTS idx_knowledges_deletion_task;
+DROP INDEX IF EXISTS idx_knowledges_directory;
+ALTER TABLE knowledges DROP COLUMN deletion_task_id;
+ALTER TABLE knowledges DROP COLUMN directory_id;
+DROP TABLE IF EXISTS knowledge_directories;
+PRAGMA foreign_keys = ON;

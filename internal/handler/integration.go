@@ -718,7 +718,7 @@ func (h *IntegrationHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		}
 	}
 	knowledge, err := h.knowledges.CreateKnowledgeFromFile(
-		c.Request.Context(), kbID, file, metadata, nil, customFileName, "", "integration",
+		c.Request.Context(), kbID, file, metadata, nil, customFileName, "", "integration", nil,
 	)
 	if err != nil {
 		fmt.Printf("integration knowledge upload failed for kb %s: %v\n", kbID, err)
@@ -1089,6 +1089,7 @@ func (h *IntegrationHandler) Search(c *gin.Context) {
 			"knowledge_base_id":    result.KnowledgeBaseID,
 			"knowledge_base_name":  knowledgeBaseNames[result.KnowledgeBaseID],
 			"knowledge_id":         result.KnowledgeID,
+			"directory_id":         result.DirectoryID,
 			"knowledge_version_id": result.KnowledgeVersionID,
 			"chunk_id":             result.ID,
 			"title":                result.KnowledgeTitle,
@@ -1272,7 +1273,8 @@ func integrationPublicSearchResults(results []*types.SearchResult, knowledgeBase
 		publicResults = append(publicResults, gin.H{
 			"knowledge_base_id": result.KnowledgeBaseID, "knowledge_base_name": knowledgeBaseNames[result.KnowledgeBaseID],
 			"knowledge_id": result.KnowledgeID, "knowledge_version_id": result.KnowledgeVersionID,
-			"chunk_id": result.ID, "title": result.KnowledgeTitle, "source": result.KnowledgeSource,
+			"directory_id": result.DirectoryID,
+			"chunk_id":     result.ID, "title": result.KnowledgeTitle, "source": result.KnowledgeSource,
 			"content": result.Content, "score": result.Score,
 		})
 	}

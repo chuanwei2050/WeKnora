@@ -23,6 +23,7 @@ type knowledgeTagService struct {
 	kbService      interfaces.KnowledgeBaseService
 	repo           interfaces.KnowledgeTagRepository
 	knowledgeRepo  interfaces.KnowledgeRepository
+	directoryRepo  interfaces.KnowledgeDirectoryRepository
 	chunkRepo      interfaces.ChunkRepository
 	retrieveEngine interfaces.RetrieveEngineRegistry
 	modelService   interfaces.ModelService
@@ -35,6 +36,7 @@ func NewKnowledgeTagService(
 	kbService interfaces.KnowledgeBaseService,
 	repo interfaces.KnowledgeTagRepository,
 	knowledgeRepo interfaces.KnowledgeRepository,
+	directoryRepo interfaces.KnowledgeDirectoryRepository,
 	chunkRepo interfaces.ChunkRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	modelService interfaces.ModelService,
@@ -45,6 +47,7 @@ func NewKnowledgeTagService(
 		kbService:      kbService,
 		repo:           repo,
 		knowledgeRepo:  knowledgeRepo,
+		directoryRepo:  directoryRepo,
 		chunkRepo:      chunkRepo,
 		retrieveEngine: retrieveEngine,
 		modelService:   modelService,
@@ -510,6 +513,11 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 	// If there are excludeIDs, we cannot delete the tag itself as it still has content
 	if len(excludeIDs) > 0 {
 		return nil
+	}
+	if s.directoryRepo != nil {
+		if err := s.directoryRepo.DeleteByTag(ctx, tenantID, tag.KnowledgeBaseID, tag.ID); err != nil {
+			return err
+		}
 	}
 	return s.repo.Delete(ctx, tenantID, id)
 }

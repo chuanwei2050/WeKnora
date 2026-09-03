@@ -20,6 +20,7 @@ interface Tag {
 
 interface KnowledgeItem {
   id: string;
+  kind?: 'document' | 'directory';
   file_name: string;
   file_type?: string;
   file_size?: number | string;
@@ -33,13 +34,19 @@ interface KnowledgeItem {
   created_by?: string;
   current_version_id?: string;
   pending_version_id?: string;
+  document_count?: number;
+  directory_breadcrumb?: Array<{ id: string; name: string }>;
 }
 
 type DocumentAction = 'edit' | 'reparse' | 'delete' | 'submit' | 'withdraw' | 'approve' | 'reject';
+type DirectoryAction = 'move' | 'download' | 'rename' | 'delete';
+type SortField = 'name' | 'updated_at' | 'size' | 'type' | 'status';
+type SortOrder = 'asc' | 'desc';
 
 const props = defineProps<{
   items: KnowledgeItem[];
   selectedIds: Set<string>;
+  selectedDirectoryIds: Set<string>;
   canEdit: boolean;
   canManage?: boolean;
   tagList: Tag[];
@@ -51,18 +58,26 @@ const props = defineProps<{
   canReview?: boolean;
   currentUserId?: string;
   governanceBusyId?: string;
+  sortBy: SortField;
+  sortOrder: SortOrder;
+  searchMode?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'open', item: KnowledgeItem): void;
   (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean, selectableIds: string[]): void;
-  (e: 'toggle-all', checked: boolean, selectableIds: string[]): void;
+  (e: 'toggle-directory', id: string, checked: boolean): void;
+  (e: 'toggle-all', checked: boolean, documentIds: string[], directoryIds: string[]): void;
   (e: 'action', action: DocumentAction, item: KnowledgeItem): void;
+  (e: 'directory-action', action: DirectoryAction, item: KnowledgeItem): void;
+  (e: 'move-directory', item: KnowledgeItem): void;
   (e: 'move-folder', item: KnowledgeItem, tagId: string): void;
+  (e: 'entry-dragstart', item: KnowledgeItem, event: DragEvent): void;
+  (e: 'entry-drop', directoryId: string, event: DragEvent): void;
+  (e: 'sort', field: SortField): void;
 }>();
 
 const { t } = useI18n();
-
 const tagMap = computed(() => {
   const map: Record<string, Tag> = {};
   for (const tag of props.tagList) map[String(tag.id)] = tag;
@@ -134,8 +149,13 @@ const statusByRow = computed(() => {
 });
 
 // Show the actions column whenever the user can manage documents or participate in governance.
-const showActions = computed(() => props.canEdit || props.canManage || props.canContribute || props.canReview);
+const showActions = computed(() => props.items.some(item => item.kind === 'directory') || props.canEdit || props.canManage || props.canContribute || props.canReview);
 const canManage = computed(() => Boolean(props.canManage));
+const directoryLocation = (item: KnowledgeItem) => {
+  if (!props.searchMode || item.directory_breadcrumb == null) return '';
+  const names = (item.directory_breadcrumb || []).map(node => node.name);
+  return [t('knowledgeBase.documentDirectoryRoot'), ...names].join(' / ');
+};
 const governanceContext = () => ({
   enabled: Boolean(props.governanceEnabled),
   canContribute: Boolean(props.canContribute),
@@ -148,13 +168,20 @@ const deleteOptions = () => ({
 });
 const governanceActions = (item: KnowledgeItem) => getGovernanceRowActions(item, governanceContext());
 const hasGovernanceAction = (item: KnowledgeItem, action: GovernanceRowAction) => governanceActions(item).includes(action);
-const canOperateItem = (item: KnowledgeItem) => props.canEdit || canOperateGovernanceRow(item, governanceContext());
+const canOperateItem = (item: KnowledgeItem) => item.kind !== 'directory' && (props.canEdit || canOperateGovernanceRow(item, governanceContext()));
 const selectableIds = computed(() => props.items.filter(canOperateItem).map(item => item.id));
+const selectableDirectoryIds = computed(() => props.canEdit
+  ? props.items.filter(item => item.kind === 'directory').map(item => item.id)
+  : []);
 const allSelected = computed(() => (
-  selectableIds.value.length > 0 && selectableIds.value.every(id => props.selectedIds.has(id))
+  selectableIds.value.length + selectableDirectoryIds.value.length > 0
+  && selectableIds.value.every(id => props.selectedIds.has(id))
+  && selectableDirectoryIds.value.every(id => props.selectedDirectoryIds.has(id))
 ));
 const someSelected = computed(() => (
-  selectableIds.value.some(id => props.selectedIds.has(id)) && !allSelected.value
+  (selectableIds.value.some(id => props.selectedIds.has(id))
+    || selectableDirectoryIds.value.some(id => props.selectedDirectoryIds.has(id)))
+  && !allSelected.value
 ));
 
 const MIN_NAME_COLUMN_WIDTH = 220;
@@ -223,11 +250,13 @@ onMounted(() => {
     );
   }
 });
-onBeforeUnmount(() => stopNameColumnResize?.());
+onBeforeUnmount(() => {
+  stopNameColumnResize?.();
+});
 
 const onHeaderToggle = (e: Event) => {
   const checked = (e.target as HTMLInputElement).checked;
-  emit('toggle-all', checked, selectableIds.value);
+  emit('toggle-all', checked, selectableIds.value, selectableDirectoryIds.value);
 };
 const onRowToggle = (item: KnowledgeItem, e: MouseEvent) => {
   if (!canOperateItem(item)) return;
@@ -238,6 +267,13 @@ const onRowToggle = (item: KnowledgeItem, e: MouseEvent) => {
 const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
   item.isMore = false;
   emit('action', action, item);
+};
+const sortIcon = (field: SortField) => props.sortBy === field
+  ? (props.sortOrder === 'asc' ? 'chevron-up' : 'chevron-down')
+  : 'chevron-down';
+const ariaSort = (field: SortField): 'ascending' | 'descending' | 'none' => {
+  if (props.sortBy !== field) return 'none';
+  return props.sortOrder === 'asc' ? 'ascending' : 'descending';
 };
 </script>
 
@@ -257,14 +293,17 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
             type="checkbox"
             :checked="allSelected"
             :indeterminate.prop="someSelected"
-            :disabled="!selectableIds.length"
+            :disabled="selectableIds.length + selectableDirectoryIds.length === 0"
             @change="onHeaderToggle"
             :aria-label="t('knowledgeBase.selectAll')"
           />
         </label>
       </div>
-      <div ref="nameColumnHeader" class="cell cell-name" role="columnheader">
-        {{ t('knowledgeBase.columnName') }}
+      <div ref="nameColumnHeader" class="cell cell-name" role="columnheader" :aria-sort="ariaSort('name')">
+        <button class="column-sort-button" type="button" @click="emit('sort', 'name')">
+          {{ t('knowledgeBase.columnName') }}
+          <t-icon v-if="sortIcon('name')" :name="sortIcon('name')" size="14px" />
+        </button>
         <span
           class="column-resize-handle"
           role="separator"
@@ -279,10 +318,18 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
         />
       </div>
       <div class="cell cell-tag" role="columnheader">{{ t('knowledgeBase.columnTag') }}</div>
-      <div class="cell cell-size" role="columnheader">{{ t('knowledgeBase.columnSize') }}</div>
-      <div class="cell cell-type" role="columnheader">{{ t('knowledgeBase.columnType') }}</div>
-      <div class="cell cell-status" role="columnheader">{{ t('knowledgeBase.columnStatus') }}</div>
-      <div class="cell cell-time" role="columnheader">{{ t('knowledgeBase.columnUpdatedAt') }}</div>
+      <div class="cell cell-size" role="columnheader" :aria-sort="ariaSort('size')">
+        <button class="column-sort-button" type="button" @click="emit('sort', 'size')">{{ t('knowledgeBase.columnSize') }}<t-icon v-if="sortIcon('size')" :name="sortIcon('size')" size="14px" /></button>
+      </div>
+      <div class="cell cell-type" role="columnheader" :aria-sort="ariaSort('type')">
+        <button class="column-sort-button" type="button" @click="emit('sort', 'type')">{{ t('knowledgeBase.columnType') }}<t-icon v-if="sortIcon('type')" :name="sortIcon('type')" size="14px" /></button>
+      </div>
+      <div class="cell cell-status" role="columnheader" :aria-sort="ariaSort('status')">
+        <button class="column-sort-button" type="button" @click="emit('sort', 'status')">{{ t('knowledgeBase.columnStatus') }}<t-icon v-if="sortIcon('status')" :name="sortIcon('status')" size="14px" /></button>
+      </div>
+      <div class="cell cell-time" role="columnheader" :aria-sort="ariaSort('updated_at')">
+        <button class="column-sort-button" type="button" @click="emit('sort', 'updated_at')">{{ t('knowledgeBase.columnUpdatedAt') }}<t-icon v-if="sortIcon('updated_at')" :name="sortIcon('updated_at')" size="14px" /></button>
+      </div>
       <div class="cell cell-actions" role="columnheader" v-if="showActions">{{ t('knowledgeBase.columnActions') }}</div>
     </div>
 
@@ -291,31 +338,42 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
         v-for="item in items"
         :key="item.id"
         class="doc-list-row"
-        :class="{ selected: selectedIds.has(item.id) }"
+        :class="{ selected: selectedIds.has(item.id) || selectedDirectoryIds.has(item.id) }"
         role="row"
+        tabindex="0"
+        :data-entry-id="item.id"
+        :draggable="canEdit"
         @click="emit('open', item)"
+        @dragstart="emit('entry-dragstart', item, $event)"
+        @dragover="canEdit && item.kind === 'directory' ? $event.preventDefault() : undefined"
+        @drop.stop="canEdit && item.kind === 'directory' ? emit('entry-drop', item.id, $event) : undefined"
       >
         <div class="cell cell-check" @click.stop>
           <label class="checkbox-wrap">
             <input
               type="checkbox"
-              :checked="selectedIds.has(item.id)"
-              :disabled="!canOperateItem(item)"
-              @click="onRowToggle(item, $event as unknown as MouseEvent)"
+              :checked="item.kind === 'directory' ? selectedDirectoryIds.has(item.id) : selectedIds.has(item.id)"
+              :disabled="item.kind === 'directory' ? !canEdit : !canOperateItem(item)"
+              @click="item.kind === 'directory' ? emit('toggle-directory', item.id, !selectedDirectoryIds.has(item.id)) : onRowToggle(item, $event as unknown as MouseEvent)"
               :aria-label="item.file_name"
             />
           </label>
         </div>
 
         <div class="cell cell-name">
-          <t-icon :name="getFileIcon(item)" class="row-file-icon" />
-          <span class="row-file-name" :title="item.file_name">{{ item.file_name }}</span>
+          <t-icon :name="item.kind === 'directory' ? 'folder-open' : getFileIcon(item)" :size="item.kind === 'directory' ? '20px' : undefined" :class="item.kind === 'directory' ? 'document-directory-icon' : 'row-file-icon'" />
+          <div class="row-file-name-group">
+            <span class="row-file-name" :title="item.file_name">{{ item.file_name }}</span>
+            <span v-if="directoryLocation(item)" class="document-directory-location" :title="directoryLocation(item)">
+              {{ directoryLocation(item) }}
+            </span>
+          </div>
         </div>
 
 
         <div class="cell cell-tag">
           <t-tag
-            v-if="getTagName(item.tag_id)"
+            v-if="item.kind !== 'directory' && getTagName(item.tag_id)"
             size="small"
             variant="light-outline"
             class="row-tag"
@@ -328,11 +386,11 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
         </div>
 
         <div class="cell cell-size">
-          <span class="row-mono">{{ formatFileSize(item.file_size) || '--' }}</span>
+          <span class="row-mono">{{ item.kind === 'directory' ? '--' : (formatFileSize(item.file_size) || '--') }}</span>
         </div>
 
         <div class="cell cell-type">
-          <span class="row-mono">{{ getTypeLabel(item) }}</span>
+          <span class="row-mono">{{ item.kind === 'directory' ? t('knowledgeBase.documentDirectory') : getTypeLabel(item) }}</span>
         </div>
 
         <div class="cell cell-status">
@@ -362,6 +420,21 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
 
         <div class="cell cell-actions" v-if="showActions" @click.stop>
           <div class="row-inline-actions">
+            <template v-if="item.kind === 'directory'">
+              <button v-if="canEdit" class="row-action-btn" type="button" @click="emit('directory-action', 'move', item)">
+                {{ t('knowledgeBase.rowMoveToDirectory') }}
+              </button>
+              <button class="row-action-btn" type="button" @click="emit('directory-action', 'download', item)">
+                {{ t('knowledgeBase.downloadDocumentDirectory') }}
+              </button>
+              <button v-if="canEdit" class="row-action-btn" type="button" @click="emit('directory-action', 'rename', item)">
+                {{ t('knowledgeBase.renameDocumentDirectory') }}
+              </button>
+              <button v-if="canManage" class="row-action-btn danger" type="button" @click="emit('directory-action', 'delete', item)">
+                {{ t('knowledgeBase.governanceDelete') }}
+              </button>
+            </template>
+            <template v-else>
             <button v-if="hasGovernanceAction(item, 'submit')" class="row-action-btn primary" type="button" :disabled="governanceBusyId === item.id" @click="handleAction('submit', item)">
               {{ t('knowledgeBase.governanceSubmit') }}
             </button>
@@ -383,13 +456,16 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
             <button v-if="canEdit && item.parse_status !== 'pending_review'" class="row-action-btn" type="button" @click="handleAction('reparse', item)">
               {{ t('knowledgeBase.rowRebuild') }}
             </button>
+            <button v-if="canEdit" class="row-action-btn" type="button" @click="emit('move-directory', item)">
+              {{ t('knowledgeBase.rowMoveToDirectory') }}
+            </button>
             <FolderMoveCascader
               v-if="canEdit && folderTargets.length"
               :options="folderTargets"
               @select="(folderId: string) => emit('move-folder', item, folderId)"
             >
               <button class="row-action-btn" type="button">
-                {{ t('knowledgeBase.rowMove') }}
+                {{ t('knowledgeBase.rowMoveToCategory') }}
               </button>
             </FolderMoveCascader>
             <button
@@ -401,6 +477,7 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
             >
               {{ t('knowledgeBase.governanceDelete') }}
             </button>
+            </template>
           </div>
         </div>
       </div>
@@ -504,6 +581,34 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
   font-weight: 500;
 }
 
+.column-sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 4px 0;
+  color: inherit;
+  font: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--td-text-color-primary);
+  }
+
+  &:focus-visible {
+    border-radius: 3px;
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
+  }
+}
+
+.document-directory-icon {
+  flex-shrink: 0;
+  color: #4d9bea;
+}
+
 .column-resize-handle {
   position: absolute;
   top: 0;
@@ -590,6 +695,23 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.row-file-name-group {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.document-directory-location {
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .row-tag {

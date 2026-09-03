@@ -240,6 +240,7 @@ type knowledgeService struct {
 	chunkRepo        interfaces.ChunkRepository
 	tagRepo          interfaces.KnowledgeTagRepository
 	tagService       interfaces.KnowledgeTagService
+	directoryRepo    interfaces.KnowledgeDirectoryRepository
 	fileSvc          interfaces.FileService
 	modelService     interfaces.ModelService
 	governanceRepo   interfaces.KnowledgeGovernanceRepository
@@ -275,6 +276,7 @@ func NewKnowledgeService(
 	chunkRepo interfaces.ChunkRepository,
 	tagRepo interfaces.KnowledgeTagRepository,
 	tagService interfaces.KnowledgeTagService,
+	directoryRepo interfaces.KnowledgeDirectoryRepository,
 	fileSvc interfaces.FileService,
 	modelService interfaces.ModelService,
 	governanceRepo interfaces.KnowledgeGovernanceRepository,
@@ -299,6 +301,7 @@ func NewKnowledgeService(
 		chunkRepo:        chunkRepo,
 		tagRepo:          tagRepo,
 		tagService:       tagService,
+		directoryRepo:    directoryRepo,
 		fileSvc:          fileSvc,
 		modelService:     modelService,
 		governanceRepo:   governanceRepo,
@@ -571,11 +574,11 @@ func platformStorageProvider(ctx context.Context) string {
 	return strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
 }
 
-func existingFileConflict(knowledge *types.Knowledge) *types.DuplicateKnowledgeError {
+func existingFileConflict(knowledge *types.Knowledge) (*types.DuplicateKnowledgeError, bool) {
 	if knowledge.ParseStatus == types.ParseStatusDeleting {
-		return types.NewDeletingFileError(knowledge)
+		return types.NewDeletingFileError(knowledge), false
 	}
-	return types.NewDuplicateFileError(knowledge)
+	return types.NewDuplicateFileError(knowledge), true
 }
 
 // checkStorageEngineConfigured verifies that the platform has a storage engine configured.
@@ -797,9 +800,17 @@ func (s *knowledgeService) resolveDocumentTagID(
 	return tag.ID, nil
 }
 
+func (s *knowledgeService) ResolveDocumentTagID(ctx context.Context, kbID, tagID string) (string, error) {
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		return "", err
+	}
+	return s.resolveDocumentTagID(ctx, kb, tagID)
+}
+
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
-	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagID string, channel string,
+	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagID string, channel string, directoryID *string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file")
 
@@ -931,12 +942,19 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	}
 	if exists {
 		logger.Infof(ctx, "File already exists: %s", fileName)
+		conflictErr, refreshCreatedAt := existingFileConflict(existingKnowledge)
+		if refreshCreatedAt {
+			if err := s.repo.UpdateKnowledgeColumn(ctx, existingKnowledge.ID, "created_at", time.Now()); err != nil {
+				logger.Errorf(ctx, "Failed to update existing knowledge: %v", err)
+				return nil, err
+			}
+		}
 		if existingKnowledge != nil && existingKnowledge.TagID != "" && s.tagRepo != nil {
 			if tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, existingKnowledge.TagID); tagErr == nil && tag != nil {
 				existingKnowledge.TagName = tag.Name
 			}
 		}
-		return existingKnowledge, existingFileConflict(existingKnowledge)
+		return existingKnowledge, conflictErr
 	}
 
 	// Check storage quota
@@ -976,6 +994,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		KnowledgeBaseID:  kbID,
 		CreatedBy:        currentUserID(ctx),
 		TagID:            tagID, // 设置分类ID，用于知识分类管理
+		DirectoryID:      directoryID,
 		Type:             "file",
 		Channel:          defaultChannel(channel),
 		Title:            safeFilename,
@@ -2492,10 +2511,35 @@ func (s *knowledgeService) cloneKnowledge(
 		return nil
 	}
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	targetTagID := s.getOrCreateTagInTarget(ctx, src.TenantID, targetKB.TenantID, targetKB.ID, src.TagID, make(map[string]string))
+	if targetTagID == "" {
+		return fmt.Errorf("failed to map source knowledge category")
+	}
+	var targetDirectoryID *string
+	if src.DirectoryID != nil {
+		breadcrumb, directoryErr := s.directoryRepo.Breadcrumb(ctx, src.TenantID, src.KnowledgeBaseID, *src.DirectoryID, src.TagID)
+		if directoryErr != nil {
+			return directoryErr
+		}
+		segments := make([]string, 0, len(breadcrumb))
+		for _, node := range breadcrumb {
+			segments = append(segments, node.Name)
+		}
+		targetDirectory, directoryErr := s.directoryRepo.EnsurePath(ctx, targetKB.TenantID, targetKB.ID, nil, segments, targetTagID)
+		if directoryErr != nil {
+			return directoryErr
+		}
+		if targetDirectory != nil {
+			id := targetDirectory.ID
+			targetDirectoryID = &id
+		}
+	}
 	dst := &types.Knowledge{
 		ID:               uuid.New().String(),
 		TenantID:         targetKB.TenantID,
 		KnowledgeBaseID:  targetKB.ID,
+		TagID:            targetTagID,
+		DirectoryID:      targetDirectoryID,
 		Type:             src.Type,
 		Channel:          src.Channel,
 		Title:            src.Title,
@@ -2541,6 +2585,159 @@ func (s *knowledgeService) cloneKnowledge(
 		return
 	}
 	return
+}
+
+type knowledgeDirectoryDepth struct {
+	directory *types.KnowledgeDirectory
+	depth     int
+}
+
+func (s *knowledgeService) listKnowledgeDirectoryTree(
+	ctx context.Context, kb *types.KnowledgeBase,
+) ([]knowledgeDirectoryDepth, error) {
+	type pendingParent struct {
+		id    *string
+		depth int
+	}
+	queue := []pendingParent{{}}
+	var result []knowledgeDirectoryDepth
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for offset := 0; ; offset += 200 {
+			children, total, err := s.directoryRepo.ListChildren(ctx, kb.TenantID, kb.ID, current.id, offset, 200, "name", "asc", types.KnowledgeVisibilityFilter{Privileged: true})
+			if err != nil {
+				return nil, err
+			}
+			for _, child := range children {
+				result = append(result, knowledgeDirectoryDepth{directory: child, depth: current.depth})
+				id := child.ID
+				queue = append(queue, pendingParent{id: &id, depth: current.depth + 1})
+			}
+			if offset+len(children) >= int(total) {
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
+func (s *knowledgeService) mirrorKnowledgeDirectoryTree(
+	ctx context.Context,
+	sourceKB, targetKB *types.KnowledgeBase,
+) (err error) {
+	targetBefore, err := s.listKnowledgeDirectoryTree(ctx, targetKB)
+	if err != nil {
+		return err
+	}
+	preexisting := make(map[string]struct{}, len(targetBefore))
+	for _, item := range targetBefore {
+		preexisting[item.directory.ID] = struct{}{}
+	}
+	defer func() {
+		if err == nil {
+			return
+		}
+		current, listErr := s.listKnowledgeDirectoryTree(ctx, targetKB)
+		if listErr != nil {
+			logger.GetLogger(ctx).WithField("error", listErr).Warn("failed to inspect directory cleanup after knowledge sync")
+			return
+		}
+		sort.Slice(current, func(i, j int) bool { return current[i].depth > current[j].depth })
+		for _, item := range current {
+			if _, existed := preexisting[item.directory.ID]; existed {
+				continue
+			}
+			// DeleteEmpty is intentionally best-effort: directories referenced by a
+			// successfully remapped document or another retained child must survive.
+			_ = s.directoryRepo.DeleteEmpty(ctx, targetKB.TenantID, targetKB.ID, item.directory.ID, item.directory.TagID)
+		}
+	}()
+	type pendingDirectory struct {
+		parentID *string
+		segments []string
+		tagID    string
+	}
+	queue := []pendingDirectory{{}}
+	tagIDMapping := make(map[string]string)
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for offset := 0; ; offset += 200 {
+			children, total, err := s.directoryRepo.ListChildren(ctx, sourceKB.TenantID, sourceKB.ID, current.parentID, offset, 200, "name", "asc", types.KnowledgeVisibilityFilter{Privileged: true}, current.tagID)
+			if err != nil {
+				return err
+			}
+			for _, child := range children {
+				targetTagID := child.TagID
+				if child.TagID != "" {
+					targetTagID = s.getOrCreateTagInTarget(ctx, sourceKB.TenantID, targetKB.TenantID, targetKB.ID, child.TagID, tagIDMapping)
+					if targetTagID == "" {
+						return fmt.Errorf("failed to map source directory category")
+					}
+				}
+				segments := append(append([]string(nil), current.segments...), child.Name)
+				if _, err := s.directoryRepo.EnsurePath(ctx, targetKB.TenantID, targetKB.ID, nil, segments, targetTagID); err != nil {
+					return err
+				}
+				id := child.ID
+				queue = append(queue, pendingDirectory{parentID: &id, segments: segments, tagID: child.TagID})
+			}
+			if offset+len(children) >= int(total) {
+				break
+			}
+		}
+	}
+
+	sourceKnowledge, err := s.repo.ListKnowledgeByKnowledgeBaseID(ctx, sourceKB.TenantID, sourceKB.ID)
+	if err != nil {
+		return err
+	}
+	targetKnowledge, err := s.repo.ListKnowledgeByKnowledgeBaseID(ctx, targetKB.TenantID, targetKB.ID)
+	if err != nil {
+		return err
+	}
+	sourceByHash := make(map[string]*types.Knowledge, len(sourceKnowledge))
+	for _, knowledge := range sourceKnowledge {
+		if knowledge.FileHash != "" {
+			sourceByHash[knowledge.FileHash] = knowledge
+		}
+	}
+	for _, target := range targetKnowledge {
+		source := sourceByHash[target.FileHash]
+		if source == nil {
+			continue
+		}
+		var directoryID *string
+		targetTagID := s.getOrCreateTagInTarget(ctx, sourceKB.TenantID, targetKB.TenantID, targetKB.ID, source.TagID, tagIDMapping)
+		if targetTagID == "" {
+			return fmt.Errorf("failed to map source knowledge category")
+		}
+		if source.DirectoryID != nil {
+			breadcrumb, err := s.directoryRepo.Breadcrumb(ctx, sourceKB.TenantID, sourceKB.ID, *source.DirectoryID, source.TagID)
+			if err != nil {
+				return err
+			}
+			segments := make([]string, 0, len(breadcrumb))
+			for _, node := range breadcrumb {
+				segments = append(segments, node.Name)
+			}
+			directory, err := s.directoryRepo.EnsurePath(ctx, targetKB.TenantID, targetKB.ID, nil, segments, targetTagID)
+			if err != nil {
+				return err
+			}
+			id := directory.ID
+			directoryID = &id
+		}
+		if target.TagID != targetTagID || (target.DirectoryID == nil) != (directoryID == nil) || (target.DirectoryID != nil && directoryID != nil && *target.DirectoryID != *directoryID) {
+			target.TagID = targetTagID
+			target.DirectoryID = directoryID
+			if err := s.repo.UpdateKnowledge(ctx, target); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // processDocumentFromPassage handles asynchronous processing of text passages
@@ -4581,7 +4778,17 @@ func (s *knowledgeService) GetKnowledgeBatch(ctx context.Context,
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	return s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
+	knowledges, err := s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
+	if err != nil {
+		return nil, err
+	}
+	active := knowledges[:0]
+	for _, knowledge := range knowledges {
+		if knowledge != nil && knowledge.ParseStatus != types.ParseStatusDeleting {
+			active = append(active, knowledge)
+		}
+	}
+	return active, nil
 }
 
 // MarkKnowledgeListDeleting marks knowledge entries as deleting so they disappear from
@@ -4620,6 +4827,13 @@ func (s *knowledgeService) GetKnowledgeBatchWithSharedAccess(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
+	activeOwn := ownList[:0]
+	for _, knowledge := range ownList {
+		if knowledge != nil && knowledge.ParseStatus != types.ParseStatusDeleting {
+			activeOwn = append(activeOwn, knowledge)
+		}
+	}
+	ownList = activeOwn
 	foundSet := make(map[string]bool)
 	for _, k := range ownList {
 		if k != nil {
@@ -4639,7 +4853,7 @@ func (s *knowledgeService) GetKnowledgeBatchWithSharedAccess(ctx context.Context
 			continue
 		}
 		k, err := s.repo.GetKnowledgeByIDOnly(ctx, id)
-		if err != nil || k == nil || k.KnowledgeBaseID == "" {
+		if err != nil || k == nil || k.KnowledgeBaseID == "" || k.ParseStatus == types.ParseStatusDeleting {
 			continue
 		}
 		hasPermission, err := s.kbShareService.HasKBPermission(ctx, k.KnowledgeBaseID, userID, types.OrgRoleViewer)
@@ -4684,6 +4898,9 @@ func (s *knowledgeService) CloneKnowledgeBase(ctx context.Context, srcID, dstID 
 	srcKB, dstKB, err := s.kbService.CopyKnowledgeBase(ctx, srcID, dstID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to copy knowledge base: %v", err)
+		return err
+	}
+	if err := s.mirrorKnowledgeDirectoryTree(ctx, srcKB, dstKB); err != nil {
 		return err
 	}
 
@@ -7013,6 +7230,7 @@ func (s *knowledgeService) UpdateKnowledgeTag(ctx context.Context, knowledgeID s
 	}
 
 	knowledge.TagID = resolvedTagID
+	knowledge.DirectoryID = nil
 	return s.repo.UpdateKnowledge(ctx, knowledge)
 }
 
@@ -7117,6 +7335,7 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 
 		if knowledge.TagID != resolvedTagID {
 			knowledge.TagID = resolvedTagID
+			knowledge.DirectoryID = nil
 			knowledgeToUpdate = append(knowledgeToUpdate, knowledge)
 		}
 	}
@@ -10297,6 +10516,10 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	if srcKB.Type == types.KnowledgeBaseTypeFAQ {
 		return s.cloneFAQKnowledgeBase(ctx, srcKB, dstKB, progress, handleError)
 	}
+	if err := s.mirrorKnowledgeDirectoryTree(ctx, srcKB, dstKB); err != nil {
+		handleError(progress, err, "Failed to mirror document directories")
+		return err
+	}
 
 	// Document type: use Knowledge-level diff based on file_hash
 	addKnowledge, err := s.repo.AminusB(ctx, srcKB.TenantID, srcKB.ID, dstKB.TenantID, dstKB.ID)
@@ -11265,11 +11488,42 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 	// Set context values
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+	if payload.DirectoryDeleteBatchID != "" {
+		if payload.DirectoryDeleteTaskID == "" || payload.KnowledgeBaseID == "" {
+			return fmt.Errorf("invalid directory delete payload scope")
+		}
+		if err := s.directoryRepo.ValidateDeleteBatch(ctx, &payload); err != nil {
+			logger.Errorf(ctx, "Rejected directory delete batch with invalid scope: %v", err)
+			return err
+		}
+		clean, err := s.directoryRepo.IsDeleteBatchClean(ctx, &payload)
+		if err != nil {
+			return err
+		}
+		if clean {
+			return s.directoryRepo.CompleteDeleteBatch(ctx, payload.DirectoryDeleteTaskID, payload.DirectoryDeleteBatchID, nil)
+		}
+		claimed, err := s.repo.ClaimDirectoryDeletionStorage(ctx, payload.TenantID, payload.DirectoryDeleteTaskID, payload.KnowledgeIDs)
+		if err != nil {
+			return err
+		}
+		if claimed > 0 && tenant.StorageUsed >= claimed {
+			tenant.StorageUsed -= claimed
+		}
+	}
 
 	// Delete knowledge list
 	if err := s.DeleteKnowledgeList(ctx, payload.KnowledgeIDs); err != nil {
+		if payload.DirectoryDeleteBatchID != "" {
+			_ = s.directoryRepo.CompleteDeleteBatch(ctx, payload.DirectoryDeleteTaskID, payload.DirectoryDeleteBatchID, err)
+		}
 		logger.Errorf(ctx, "Failed to delete knowledge list: %v", err)
 		return err
+	}
+	if payload.DirectoryDeleteBatchID != "" {
+		if err := s.directoryRepo.CompleteDeleteBatch(ctx, payload.DirectoryDeleteTaskID, payload.DirectoryDeleteBatchID, nil); err != nil {
+			return err
+		}
 	}
 
 	logger.Infof(ctx, "Successfully deleted %d knowledge items", len(payload.KnowledgeIDs))

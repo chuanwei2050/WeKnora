@@ -380,6 +380,19 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kb.GET("", handler.ListKnowledge)
 		// 清空知识库下的所有知识
 		kb.DELETE("", handler.ClearKnowledgeBaseContents)
+		kb.GET("/directories", handler.ListKnowledgeDirectories)
+		kb.POST("/directories", handler.CreateKnowledgeDirectory)
+		kb.PUT("/directories/:directory_id", handler.RenameKnowledgeDirectory)
+		kb.PUT("/directories/:directory_id/move", handler.MoveKnowledgeDirectory)
+		kb.DELETE("/directories/:directory_id", handler.DeleteKnowledgeDirectory)
+		kb.POST("/directories/:directory_id/delete-preview", handler.PreviewKnowledgeDirectoryDelete)
+		kb.POST("/directories/:directory_id/delete-confirm", handler.ConfirmKnowledgeDirectoryDelete)
+		kb.GET("/directory-delete-tasks/:task_id", handler.GetKnowledgeDirectoryDeleteTask)
+		kb.POST("/directory-delete-tasks/:task_id/retry", handler.RetryKnowledgeDirectoryDeleteTask)
+		kb.GET("/directories/:directory_id/breadcrumb", handler.GetKnowledgeDirectoryBreadcrumb)
+		kb.GET("/directories/:directory_id/download", handler.DownloadKnowledgeDirectory)
+		kb.PUT("/directory-documents", handler.MoveDocumentsToDirectory)
+		kb.PUT("/directory-entries", handler.MoveKnowledgeDirectoryEntries)
 	}
 
 	// 知识路由组

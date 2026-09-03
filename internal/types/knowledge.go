@@ -87,6 +87,10 @@ type Knowledge struct {
 	CreatedBy string `json:"created_by" gorm:"type:varchar(36);index"`
 	// Optional tag ID for categorization within a knowledge base
 	TagID string `json:"tag_id"             gorm:"type:varchar(36);index"`
+	// Optional right-hand document directory. This never participates in retrieval scope.
+	DirectoryID *string `json:"directory_id,omitempty" gorm:"type:varchar(36);index"`
+	// DeletionTaskID scopes asynchronous directory deletion CAS updates.
+	DeletionTaskID string `json:"deletion_task_id,omitempty" gorm:"type:varchar(36);index"`
 	// Type of the knowledge
 	Type string `json:"type"`
 	// Title of the knowledge
@@ -142,6 +146,15 @@ type Knowledge struct {
 	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-"`
 	// TagName is optional display metadata for responses such as duplicate-file locations.
 	TagName string `json:"tag_name,omitempty" gorm:"-"`
+	// DirectoryBreadcrumb is optional display metadata and is never a retrieval identity.
+	DirectoryBreadcrumb []PathNode `json:"directory_breadcrumb,omitempty" gorm:"-"`
+}
+
+type KnowledgeVisibilityFilter struct {
+	Governed   bool
+	Privileged bool
+	UserID     string
+	Now        time.Time
 }
 
 // GetMetadata returns the metadata as a map[string]string.

@@ -42,17 +42,37 @@ export default function (knowledgeBaseId?: string) {
   });
   let detailRequestId = 0;
   let activeDetailId = "";
+	let listGeneration = 0;
+	const inFlightPages = new Set<string>();
   const getKnowled = (
-    query: { page: number; page_size: number; tag_id?: string; keyword?: string; file_type?: string } = { page: 1, page_size: 35 },
+    query: { page: number; page_size: number; tag_id?: string; keyword?: string; file_type?: string; directory_id?: string; sort_by?: string; sort_order?: 'asc' | 'desc' } = { page: 1, page_size: 35 },
     kbId?: string,
-  ) => {
+  ): Promise<boolean> => {
     const targetKbId = kbId || knowledgeBaseId;
-    if (!targetKbId) return;
+    if (!targetKbId) return Promise.resolve(false);
+	if (query.page === 1) listGeneration += 1;
+	const generation = listGeneration;
+	const requestKey = `${generation}:${query.page}`;
+	if (inFlightPages.has(requestKey)) return Promise.resolve(false);
+	inFlightPages.add(requestKey);
     
-    listKnowledgeFiles(targetKbId, query)
+    return listKnowledgeFiles(targetKbId, query)
       .then((result: any) => {
+		if (generation !== listGeneration) return false;
         const { data, total: totalResult } = result;
-    const cardList_ = data.map((item: any) => {
+    const cardList_ = data.map((entry: any) => {
+      if (entry?.kind === 'directory' && entry.directory) {
+        return {
+          ...entry.directory,
+          kind: 'directory',
+          file_name: entry.directory.name,
+          display_name: entry.directory.name,
+          parse_status: '',
+          file_type: '',
+          isMore: false,
+        };
+      }
+      const item = entry?.kind === 'document' && entry.document ? entry.document : entry;
       const rawName = item.file_name || item.title || item.source || t('knowledgeBase.untitledDocument')
       const dotIndex = rawName.lastIndexOf('.')
       const displayName = dotIndex > 0 ? rawName.substring(0, dotIndex) : rawName
@@ -74,8 +94,10 @@ export default function (knowledgeBaseId?: string) {
           cardList.value.push(...cardList_);
         }
         total.value = totalResult;
+		return true;
       })
-      .catch(() => {});
+	  .catch(() => false)
+	  .finally(() => { inFlightPages.delete(requestKey); });
   };
   const delKnowledge = (index: number, item: any, onSuccess?: () => void) => {
     cardList.value[index].isMore = false;

@@ -306,6 +306,8 @@ interface FileGroup {
   kbName: string
   chunkId: string
   chunkType: string
+  directoryId?: string
+  tagId?: string
   chunks: any[]
 }
 
@@ -321,6 +323,8 @@ const groupedResults = computed<FileGroup[]>(() => {
         kbName: getKbName(item.knowledge_base_id),
         chunkId: item.id || item.chunk_id || '',
         chunkType: item.chunk_type || '',
+        directoryId: item.directory_id,
+        tagId: item.tag_id,
         chunks: [],
       })
     }
@@ -439,6 +443,8 @@ const toggleChunkExpand = (gIdx: number, cIdx: number) => {
 const goToDetail = (group: FileGroup) => {
   if (!group.kbId) return
   const query: Record<string, string> = { knowledge_id: group.knowledgeId }
+  if (group.directoryId) query.directory_id = group.directoryId
+  if (group.tagId) query.tag_id = group.tagId
   if (group.chunkType === 'faq' && group.chunkId) {
     query.chunk_id = group.chunkId
   }

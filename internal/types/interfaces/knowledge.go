@@ -23,7 +23,9 @@ type KnowledgeService interface {
 		customFileName string,
 		tagID string,
 		channel string,
+		directoryID *string,
 	) (*types.Knowledge, error)
+	ResolveDocumentTagID(ctx context.Context, kbID, tagID string) (string, error)
 	// CreateKnowledgeFromURL creates knowledge from a URL.
 	// When fileName or fileType is provided (or the URL path has a known file extension),
 	// the URL is treated as a direct file download instead of a web page crawl.
@@ -188,9 +190,13 @@ type KnowledgeRepository interface {
 	ListPagedKnowledgeByKnowledgeBaseID(ctx context.Context,
 		tenantID uint64, kbID string, page *types.Pagination, tagID string, keyword string, fileType string,
 	) ([]*types.Knowledge, int64, error)
+	ListPagedKnowledgeByDirectory(ctx context.Context, tenantID uint64, kbID string, directoryID *string,
+		offset, limit int, tagID, keyword, fileType, sortBy, sortOrder string, visibility types.KnowledgeVisibilityFilter,
+	) ([]*types.Knowledge, int64, error)
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
 	// UpdateKnowledgeBatch updates knowledge items in batch
 	UpdateKnowledgeBatch(ctx context.Context, knowledgeList []*types.Knowledge) error
+	ClaimDirectoryDeletionStorage(ctx context.Context, tenantID uint64, taskID string, ids []string) (int64, error)
 	DeleteKnowledge(ctx context.Context, tenantID uint64, id string) error
 	DeleteKnowledgeList(ctx context.Context, tenantID uint64, ids []string) error
 	GetKnowledgeBatch(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)

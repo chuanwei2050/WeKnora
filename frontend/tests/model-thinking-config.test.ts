@@ -13,7 +13,8 @@ describe('model thinking configuration', () => {
     const agentEditor = source('../src/views/agent/AgentEditorModal.vue')
     const agentApi = source('../src/api/agent/index.ts')
 
-    expect(editor).toContain('v-model="formData.thinking"')
+    expect(editor).toContain(':value="formData.thinking"')
+    expect(editor).toContain('@change="handleThinkingChange"')
     expect(editor).toContain('thinking: false')
     expect(settings).toContain('thinking: model.parameters.thinking || false')
     expect(settings).toContain('thinking: modelData.thinking ?? false')

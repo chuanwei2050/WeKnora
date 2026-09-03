@@ -389,7 +389,7 @@ import 'katex/dist/katex.min.css';
 import DOMPurify from 'dompurify';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import picturePreview from '@/components/picture-preview.vue';
-import { getChunkByIdOnly } from '@/api/knowledge-base';
+import { getChunkByIdOnly, getKnowledgeDetails } from '@/api/knowledge-base';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
@@ -1172,6 +1172,8 @@ type KbTooltipState = {
   loading: boolean;
   error?: string;
   html?: string;
+  knowledgeId?: string;
+  knowledgeBaseId?: string;
 };
 
 const kbChunkDetails = ref<Record<string, KbTooltipState>>({});
@@ -1235,9 +1237,11 @@ const loadChunkDetails = async (chunkId: string) => {
   try {
     const response = await getChunkByIdOnly(chunkId);
     const content = response.data?.content;
+    const knowledgeId = response.data?.knowledge_id;
+    const knowledgeBaseId = response.data?.knowledge_base_id;
     if (content) {
       const html = buildKbTooltipContent(content);
-      setKbCacheState(chunkId, { loading: false, html });
+      setKbCacheState(chunkId, { loading: false, html, knowledgeId, knowledgeBaseId });
       return;
     }
 
@@ -1247,6 +1251,37 @@ const loadChunkDetails = async (chunkId: string) => {
     const errorMsg = error?.message || t('agentStream.citation.loadFailed');
     setKbCacheState(chunkId, { loading: false, error: errorMsg });
   }
+};
+
+const navigateToKnowledgeFromCitation = async (kbIdHint: string, chunkId: string) => {
+  let knowledgeId = kbChunkDetails.value[chunkId]?.knowledgeId;
+  let knowledgeBaseId = kbChunkDetails.value[chunkId]?.knowledgeBaseId || kbIdHint;
+  let directoryId = '';
+  let tagId = '';
+  try {
+    if (!knowledgeId) {
+      const chunkResponse = await getChunkByIdOnly(chunkId);
+      knowledgeId = chunkResponse.data?.knowledge_id;
+      knowledgeBaseId = chunkResponse.data?.knowledge_base_id || knowledgeBaseId;
+    }
+    if (knowledgeId) {
+      const knowledgeResponse = await getKnowledgeDetails(knowledgeId);
+      const knowledge = knowledgeResponse.data;
+      if (knowledgeResponse.success && knowledge) {
+        knowledgeBaseId = knowledge.knowledge_base_id || knowledgeBaseId;
+        directoryId = knowledge.directory_id || '';
+        tagId = knowledge.tag_id || '';
+      }
+    }
+  } catch {
+    // The citation can still open the knowledge base when its document metadata is unavailable.
+  }
+  if (!knowledgeBaseId) return;
+  const query: Record<string, string> = {};
+  if (knowledgeId) query.knowledge_id = knowledgeId;
+  if (directoryId) query.directory_id = directoryId;
+  if (tagId) query.tag_id = tagId;
+  router.push({ path: `/platform/knowledge-bases/${knowledgeBaseId}`, query });
 };
 
 const updateKBCitationTooltip = (chunkId: string, state: KbTooltipState) => {
@@ -1416,7 +1451,7 @@ const onRootClick = (e: Event) => {
     if (kbId) {
       try {
         // Navigate to knowledge base detail page
-        router.push(`/platform/knowledge-bases/${kbId}`);
+        void navigateToKnowledgeFromCitation(kbId, kbEl.getAttribute('data-chunk-id') || '');
       } catch (error) {
         console.error('Failed to navigate to knowledge base:', error);
       }
@@ -1477,7 +1512,7 @@ const onRootKeydown = (e: KeyboardEvent) => {
       const kbId = kbEl.getAttribute('data-kb-id');
       if (kbId) {
         try {
-          router.push(`/platform/knowledge-bases/${kbId}`);
+          void navigateToKnowledgeFromCitation(kbId, kbEl.getAttribute('data-chunk-id') || '');
         } catch (error) {
           console.error('Failed to navigate to knowledge base:', error);
         }

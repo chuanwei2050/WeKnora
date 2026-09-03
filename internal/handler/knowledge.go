@@ -35,6 +35,7 @@ type KnowledgeHandler struct {
 	agentShareService interfaces.AgentShareService
 	asynqClient       interfaces.TaskEnqueuer
 	governanceRepo    interfaces.KnowledgeGovernanceRepository
+	directoryService  interfaces.KnowledgeDirectoryService
 }
 
 // NewKnowledgeHandler creates a new knowledge handler instance
@@ -45,6 +46,7 @@ func NewKnowledgeHandler(
 	agentShareService interfaces.AgentShareService,
 	asynqClient interfaces.TaskEnqueuer,
 	governanceRepo interfaces.KnowledgeGovernanceRepository,
+	directoryService interfaces.KnowledgeDirectoryService,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
 		kgService:         kgService,
@@ -53,6 +55,7 @@ func NewKnowledgeHandler(
 		agentShareService: agentShareService,
 		asynqClient:       asynqClient,
 		governanceRepo:    governanceRepo,
+		directoryService:  directoryService,
 	}
 }
 
@@ -88,6 +91,16 @@ func isGovernedKnowledgeVisible(ctx context.Context, knowledge *types.Knowledge,
 
 func (h *KnowledgeHandler) canViewGovernedKnowledge(ctx context.Context, knowledge *types.Knowledge, kb *types.KnowledgeBase) bool {
 	return isGovernedKnowledgeVisible(ctx, knowledge, kb, h.governanceRepo)
+}
+
+func knowledgeVisibilityFilter(ctx context.Context, kb *types.KnowledgeBase) types.KnowledgeVisibilityFilter {
+	userID, _ := types.UserIDFromContext(ctx)
+	return types.KnowledgeVisibilityFilter{
+		Governed:   kb != nil && kb.Governance.Enabled,
+		Privileged: kb != nil && (types.CanManageKnowledgeBase(ctx, kb) || types.CanReviewKnowledge(ctx, kb)),
+		UserID:     userID,
+		Now:        time.Now().UTC(),
+	}
 }
 
 // validateKnowledgeBaseAccess validates access permissions to a knowledge base
@@ -377,17 +390,57 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 
 	// 获取分类ID（如果提供），用于知识分类管理
 	tagID := c.PostForm("tag_id")
-	// 过滤特殊值，空字符串或 "__untagged__" 表示未分类
-	if tagID == "__untagged__" || tagID == "" {
-		tagID = ""
+	resolvedTagID, resolveTagErr := h.kgService.ResolveDocumentTagID(ctx, kbID, tagID)
+	if resolveTagErr != nil {
+		c.Error(errors.NewBadRequestError(resolveTagErr.Error()))
+		return
 	}
+	tagID = resolvedTagID
 
 	channel := c.PostForm("channel")
+	var directoryID *string
+	directDirectoryID := normalizeOptionalID(optionalFormValue(c, "directory_id"))
+	parentDirectoryID := normalizeOptionalID(optionalFormValue(c, "parent_directory_id"))
+	relativeDirectoryPath := c.PostForm("directory_path")
+	if directDirectoryID != nil && (parentDirectoryID != nil || relativeDirectoryPath != "") {
+		c.Error(errors.NewBadRequestError("directory_id cannot be combined with parent_directory_id or directory_path"))
+		return
+	}
+	if !permission.HasPermission(types.OrgRoleEditor) && (parentDirectoryID != nil || relativeDirectoryPath != "") {
+		c.Error(errors.NewForbiddenError("No permission to upload a folder"))
+		return
+	}
+	if directDirectoryID != nil {
+		directory, resolveErr := h.directoryService.EnsureUploadPath(ctx, effectiveTenantID, kbID, directDirectoryID, "", tagID)
+		if resolveErr != nil {
+			c.Error(directoryError(resolveErr))
+			return
+		}
+		directoryID = &directory.ID
+	} else if parentDirectoryID != nil || relativeDirectoryPath != "" {
+		directory, resolveErr := h.directoryService.EnsureUploadPath(ctx, effectiveTenantID, kbID, parentDirectoryID, relativeDirectoryPath, tagID)
+		if resolveErr != nil {
+			c.Error(directoryError(resolveErr))
+			return
+		}
+		if directory != nil {
+			directoryID = &directory.ID
+		}
+	}
 
 	// Create knowledge entry from the file
-	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagID, channel)
+	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagID, channel, directoryID)
 	// Check for duplicate knowledge error
 	if err != nil {
+		if knowledge != nil && !h.canViewGovernedKnowledge(ctx, knowledge, kb) {
+			knowledge = nil
+			if duplicateErr, ok := err.(*types.DuplicateKnowledgeError); ok {
+				err = &types.DuplicateKnowledgeError{Message: "File already exists", Code: duplicateErr.Code}
+			}
+		}
+		if knowledge != nil && knowledge.DirectoryID != nil {
+			knowledge.DirectoryBreadcrumb, _ = h.directoryService.Breadcrumb(ctx, effectiveTenantID, kbID, knowledge.TagID, *knowledge.DirectoryID)
+		}
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
 			return
 		}
@@ -410,6 +463,14 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		"success": true,
 		"data":    knowledge,
 	})
+}
+
+func optionalFormValue(c *gin.Context, key string) *string {
+	value := c.PostForm(key)
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return &value
 }
 
 // CreateKnowledgeFromURL godoc
@@ -597,6 +658,10 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	if knowledge.DirectoryID != nil && h.directoryService != nil {
+		effectiveTenantID := knowledge.TenantID
+		knowledge.DirectoryBreadcrumb, _ = h.directoryService.Breadcrumb(ctx, effectiveTenantID, knowledge.KnowledgeBaseID, knowledge.TagID, *knowledge.DirectoryID)
+	}
 
 	logger.Infof(ctx, "Knowledge retrieved successfully, ID: %s, title: %s",
 		secutils.SanitizeForLog(knowledge.ID), secutils.SanitizeForLog(knowledge.Title))
@@ -649,6 +714,66 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	tagID := c.Query("tag_id")
 	keyword := c.Query("keyword")
 	fileType := c.Query("file_type")
+	if rawDirectoryID, directoryMode := c.GetQuery("directory_id"); directoryMode {
+		if strings.TrimSpace(tagID) == "" {
+			c.Error(errors.NewBadRequestError("tag_id is required in directory mode"))
+			return
+		}
+		tagID, err = h.kgService.ResolveDocumentTagID(ctx, kbID, tagID)
+		if err != nil {
+			c.Error(errors.NewBadRequestError(err.Error()))
+			return
+		}
+		parentID := normalizeOptionalID(&rawDirectoryID)
+		directories := []*types.KnowledgeDirectory{}
+		var directoryTotal int64
+		if keyword == "" {
+			directories, directoryTotal, err = h.directoryService.List(ctx, effectiveTenantID, kbID, parentID, &pagination, c.Query("sort_by"), c.Query("sort_order"), knowledgeVisibilityFilter(ctx, kb), tagID)
+			if err != nil {
+				c.Error(directoryError(err))
+				return
+			}
+		}
+		remaining := pagination.GetPageSize() - len(directories)
+		documents := []*types.Knowledge{}
+		var documentTotal int64
+		if remaining > 0 {
+			documentOffset := pagination.Offset() - int(directoryTotal)
+			if documentOffset < 0 {
+				documentOffset = 0
+			}
+			documents, documentTotal, err = h.kgService.GetRepository().ListPagedKnowledgeByDirectory(ctx, effectiveTenantID, kbID, parentID, documentOffset, remaining, tagID, keyword, fileType, c.Query("sort_by"), c.Query("sort_order"), knowledgeVisibilityFilter(ctx, kb))
+			if err != nil {
+				c.Error(errors.NewInternalServerError(err.Error()))
+				return
+			}
+		} else {
+			_, documentTotal, err = h.kgService.GetRepository().ListPagedKnowledgeByDirectory(ctx, effectiveTenantID, kbID, parentID, 0, 0, tagID, keyword, fileType, c.Query("sort_by"), c.Query("sort_order"), knowledgeVisibilityFilter(ctx, kb))
+			if err != nil {
+				c.Error(errors.NewInternalServerError(err.Error()))
+				return
+			}
+		}
+		entries := make([]types.KnowledgeListEntry, 0, len(directories)+len(documents))
+		for _, directory := range directories {
+			entries = append(entries, types.KnowledgeListEntry{Kind: "directory", Directory: directory})
+		}
+		breadcrumbs := make(map[string][]types.PathNode)
+		for _, document := range documents {
+			if keyword != "" && document.DirectoryID != nil {
+				directoryID := *document.DirectoryID
+				if breadcrumb, ok := breadcrumbs[directoryID]; ok {
+					document.DirectoryBreadcrumb = breadcrumb
+				} else if breadcrumb, breadcrumbErr := h.directoryService.Breadcrumb(ctx, effectiveTenantID, kbID, document.TagID, directoryID); breadcrumbErr == nil {
+					breadcrumbs[directoryID] = breadcrumb
+					document.DirectoryBreadcrumb = breadcrumb
+				}
+			}
+			entries = append(entries, types.KnowledgeListEntry{Kind: "document", Document: document})
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": entries, "total": directoryTotal + documentTotal, "page": pagination.GetPage(), "page_size": pagination.GetPageSize()})
+		return
+	}
 
 	logger.Infof(
 		ctx,

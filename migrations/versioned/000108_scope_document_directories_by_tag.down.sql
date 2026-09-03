@@ -1,0 +1,14 @@
+ALTER TABLE knowledges DROP CONSTRAINT IF EXISTS fk_knowledges_directory;
+ALTER TABLE knowledge_directories DROP CONSTRAINT IF EXISTS fk_knowledge_directories_parent;
+ALTER TABLE knowledge_directories DROP CONSTRAINT IF EXISTS fk_knowledge_directories_tag;
+ALTER TABLE knowledge_directories DROP CONSTRAINT IF EXISTS uq_knowledge_directories_scope_id;
+ALTER TABLE knowledge_directories DROP CONSTRAINT IF EXISTS uq_knowledge_directories_sibling;
+DROP INDEX IF EXISTS idx_knowledge_directories_parent;
+DROP INDEX IF EXISTS idx_knowledges_directory;
+ALTER TABLE knowledge_directories ADD CONSTRAINT uq_knowledge_directories_scope_id UNIQUE (tenant_id, knowledge_base_id, id);
+ALTER TABLE knowledge_directories ADD CONSTRAINT uq_knowledge_directories_sibling UNIQUE (tenant_id, knowledge_base_id, parent_key, normalized_name);
+ALTER TABLE knowledge_directories ADD CONSTRAINT fk_knowledge_directories_parent FOREIGN KEY (tenant_id, knowledge_base_id, parent_id) REFERENCES knowledge_directories(tenant_id, knowledge_base_id, id) ON DELETE RESTRICT;
+ALTER TABLE knowledges ADD CONSTRAINT fk_knowledges_directory FOREIGN KEY (tenant_id, knowledge_base_id, directory_id) REFERENCES knowledge_directories(tenant_id, knowledge_base_id, id) ON DELETE RESTRICT;
+CREATE INDEX idx_knowledge_directories_parent ON knowledge_directories(tenant_id, knowledge_base_id, parent_key, status);
+CREATE INDEX idx_knowledges_directory ON knowledges(tenant_id, knowledge_base_id, directory_id);
+ALTER TABLE knowledge_directories DROP COLUMN tag_id;

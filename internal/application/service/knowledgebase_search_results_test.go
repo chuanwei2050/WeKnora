@@ -21,6 +21,18 @@ func TestBuildSearchResultPreservesKnowledgeVersionID(t *testing.T) {
 	}
 }
 
+func TestBuildSearchResultPreservesDocumentDirectoryID(t *testing.T) {
+	directoryID := "directory-1"
+	knowledge := &types.Knowledge{ID: "knowledge-1", KnowledgeBaseID: "kb-1", DirectoryID: &directoryID}
+	result := (&knowledgeBaseService{}).buildSearchResult(&types.Chunk{
+		ID: "chunk-1", KnowledgeID: knowledge.ID,
+	}, knowledge, 0.8, types.MatchTypeEmbedding, "")
+
+	if result.DirectoryID == nil || *result.DirectoryID != directoryID {
+		t.Fatalf("directory ID = %v, want %q", result.DirectoryID, directoryID)
+	}
+}
+
 func TestBuildSearchResultDoesNotExposePendingManualMetadataOnCurrentChunk(t *testing.T) {
 	knowledge := &types.Knowledge{
 		ID:               "knowledge-1",
@@ -58,5 +70,12 @@ func TestVectorRetrievalUsesPlatformEmbeddingWhenKnowledgeBaseModelIDIsEmpty(t *
 	kb.IndexingStrategy.VectorEnabled = false
 	if shouldUseVectorRetrieval(kb) {
 		t.Fatal("vector-disabled knowledge base must not use vector retrieval")
+	}
+}
+
+func TestSearchableKnowledgeVisibleRejectsDeletingDocument(t *testing.T) {
+	knowledge := &types.Knowledge{ParseStatus: types.ParseStatusDeleting}
+	if (&knowledgeBaseService{}).searchableKnowledgeVisible(t.Context(), knowledge) {
+		t.Fatal("deleting knowledge must not survive retrieval result enrichment")
 	}
 }

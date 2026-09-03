@@ -13,7 +13,7 @@ import (
 
 func TestHandleDuplicateKnowledgeErrorCodes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	knowledge := &types.Knowledge{FileName: "example.pdf"}
+	knowledge := &types.Knowledge{ID: "existing", FileName: "example.pdf", DirectoryBreadcrumb: []types.PathNode{{ID: "directory", Name: "现有目录"}}}
 
 	tests := []struct {
 		name string
@@ -43,10 +43,13 @@ func TestHandleDuplicateKnowledgeErrorCodes(t *testing.T) {
 			require.True(t, handled)
 			require.Equal(t, http.StatusConflict, response.Code)
 			var body struct {
-				Code string `json:"code"`
+				Code string           `json:"code"`
+				Data *types.Knowledge `json:"data"`
 			}
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 			require.Equal(t, tt.code, body.Code)
+			require.Equal(t, "existing", body.Data.ID)
+			require.Equal(t, "现有目录", body.Data.DirectoryBreadcrumb[0].Name)
 		})
 	}
 }

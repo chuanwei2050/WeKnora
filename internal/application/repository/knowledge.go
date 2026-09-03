@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
@@ -33,11 +35,62 @@ func knowledgeDisplayNameOrder(db *gorm.DB) []string {
 			knowledgeDisplayNameSQL + " ASC",
 		}
 	}
+	if db.Dialector.Name() == "mysql" {
+		return []string{
+			"CASE WHEN " + knowledgeDisplayNameSQL + " REGEXP '^[0-9]+' THEN 0 ELSE 1 END ASC",
+			"CASE WHEN " + knowledgeDisplayNameSQL + " REGEXP '^[0-9]+' THEN CAST(" + knowledgeDisplayNameSQL + " AS UNSIGNED) END ASC",
+			knowledgeDisplayNameSQL + " ASC",
+		}
+	}
 	return []string{
 		"CASE WHEN " + knowledgeDisplayNameSQL + " GLOB '[0-9]*' THEN 0 ELSE 1 END ASC",
 		"CASE WHEN " + knowledgeDisplayNameSQL + " GLOB '[0-9]*' THEN CAST(" + knowledgeDisplayNameSQL + " AS INTEGER) END ASC",
 		knowledgeDisplayNameSQL + " ASC",
 	}
+}
+
+func applyKnowledgeContentFilters(query *gorm.DB, keyword, fileType string) *gorm.DB {
+	if keyword != "" {
+		escaped := escapeLikeKeyword(keyword)
+		query = query.Where("(file_name LIKE ? OR title LIKE ?)", "%"+escaped+"%", "%"+escaped+"%")
+	}
+	if fileType != "" {
+		if fileType == "manual" || fileType == "url" {
+			query = query.Where("type = ?", fileType)
+		} else {
+			query = query.Where("file_type = ?", fileType)
+		}
+	}
+	return query
+}
+
+func applyKnowledgeFilters(query *gorm.DB, tenantID uint64, kbID, tagID, keyword, fileType string) *gorm.DB {
+	query = applyKnowledgeScope(query, tenantID, kbID)
+	if tagID != "" {
+		query = query.Where(descendantTagFilterSQL, tenantID, kbID, tagID, tenantID, kbID)
+	}
+	return applyKnowledgeContentFilters(query, keyword, fileType)
+}
+
+func applyKnowledgeScope(query *gorm.DB, tenantID uint64, kbID string) *gorm.DB {
+	return query.Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?", tenantID, kbID, types.ParseStatusDeleting)
+}
+
+func applyKnowledgeVisibility(query *gorm.DB, visibility types.KnowledgeVisibilityFilter) *gorm.DB {
+	if !visibility.Governed || visibility.Privileged {
+		return query
+	}
+	now := visibility.Now
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	published := `(current_version_id <> '' AND (pending_version_id IS NULL OR pending_version_id = '') AND EXISTS (
+		SELECT 1 FROM knowledge_versions kv WHERE kv.id = knowledges.current_version_id AND kv.tenant_id = knowledges.tenant_id
+		AND kv.status = ? AND (kv.effective_at IS NULL OR kv.effective_at <= ?) AND (kv.expires_at IS NULL OR kv.expires_at > ?)))`
+	if visibility.UserID != "" {
+		return query.Where("created_by = ? OR "+published, visibility.UserID, types.KnowledgeVersionActive, now, now)
+	}
+	return query.Where(published, types.KnowledgeVersionActive, now, now)
 }
 
 // escapeLikeKeyword escapes SQL LIKE wildcards (%, _) in a keyword
@@ -122,8 +175,7 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	var knowledges []*types.Knowledge
 	var total int64
 
-	query := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?", tenantID, kbID, types.ParseStatusDeleting)
+	query := applyKnowledgeScope(r.db.WithContext(ctx).Model(&types.Knowledge{}), tenantID, kbID)
 	if tagID != "" {
 		query = query.Where(descendantTagFilterSQL, tenantID, kbID, tagID, tenantID, kbID)
 	}
@@ -147,8 +199,7 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	}
 
 	// Then query paginated data
-	dataQuery := r.db.Debug().WithContext(ctx).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?", tenantID, kbID, types.ParseStatusDeleting)
+	dataQuery := applyKnowledgeScope(r.db.Debug().WithContext(ctx), tenantID, kbID)
 	if tagID != "" {
 		dataQuery = dataQuery.Where(descendantTagFilterSQL, tenantID, kbID, tagID, tenantID, kbID)
 	}
@@ -177,6 +228,63 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	}
 
 	return knowledges, total, nil
+}
+
+func (r *knowledgeRepository) ListPagedKnowledgeByDirectory(
+	ctx context.Context, tenantID uint64, kbID string, directoryID *string, offset, limit int,
+	tagID, keyword, fileType, sortBy, sortOrder string, visibility types.KnowledgeVisibilityFilter,
+) ([]*types.Knowledge, int64, error) {
+	base := applyKnowledgeScope(r.db.WithContext(ctx).Model(&types.Knowledge{}), tenantID, kbID)
+	if tagID != "" {
+		if keyword == "" {
+			base = base.Where("tag_id = ?", tagID)
+		} else {
+			base = base.Where(descendantTagFilterSQL, tenantID, kbID, tagID, tenantID, kbID)
+		}
+	}
+	base = applyKnowledgeContentFilters(base, keyword, fileType)
+	base = applyKnowledgeVisibility(base, visibility)
+	if keyword == "" {
+		if directoryID == nil {
+			base = base.Where("directory_id IS NULL")
+		} else {
+			base = base.Where("directory_id = ?", *directoryID)
+		}
+	} else if directoryID != nil {
+		base = base.Where(`directory_id IN (WITH RECURSIVE directory_tree(id) AS (
+			SELECT id FROM knowledge_directories WHERE tenant_id = ? AND knowledge_base_id = ? AND tag_id = ? AND id = ?
+			UNION ALL SELECT child.id FROM knowledge_directories child JOIN directory_tree parent ON child.parent_id = parent.id
+			WHERE child.tenant_id = ? AND child.knowledge_base_id = ? AND child.tag_id = ?) SELECT id FROM directory_tree)`, tenantID, kbID, tagID, *directoryID, tenantID, kbID, tagID)
+	}
+	var total int64
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if limit <= 0 {
+		return []*types.Knowledge{}, total, nil
+	}
+	query := base.Session(&gorm.Session{})
+	direction := "ASC"
+	if strings.EqualFold(sortOrder, "desc") {
+		direction = "DESC"
+	}
+	sortColumn := map[string]string{"updated_at": "updated_at", "size": "file_size", "type": "file_type", "status": "parse_status"}[sortBy]
+	if sortColumn != "" {
+		query = query.Order(sortColumn + " " + direction)
+	} else {
+		orders := knowledgeDisplayNameOrder(r.db)
+		if direction == "DESC" {
+			for i := range orders {
+				orders[i] = strings.ReplaceAll(orders[i], " ASC", " DESC")
+			}
+		}
+		for _, order := range orders {
+			query = query.Order(order)
+		}
+	}
+	var knowledges []*types.Knowledge
+	err := query.Order("id " + direction).Offset(offset).Limit(limit).Find(&knowledges).Error
+	return knowledges, total, err
 }
 
 // UpdateKnowledge updates knowledge
@@ -236,6 +344,27 @@ func (r *knowledgeRepository) UpdateKnowledgeBatch(ctx context.Context, knowledg
 		return nil
 	}
 	return r.db.Debug().WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledgeList).Error
+}
+
+func (r *knowledgeRepository) ClaimDirectoryDeletionStorage(ctx context.Context, tenantID uint64, taskID string, ids []string) (int64, error) {
+	var claimed int64
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var rows []*types.Knowledge
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("tenant_id = ? AND id IN ? AND deletion_task_id = ?", tenantID, ids, taskID).Find(&rows).Error; err != nil {
+			return err
+		}
+		for _, row := range rows {
+			claimed += row.StorageSize
+		}
+		if claimed == 0 {
+			return nil
+		}
+		if err := tx.Model(&types.Knowledge{}).Where("tenant_id = ? AND id IN ? AND deletion_task_id = ?", tenantID, ids, taskID).Update("storage_size", 0).Error; err != nil {
+			return err
+		}
+		return tx.Model(&types.Tenant{}).Where("id = ?", tenantID).Update("storage_used", gorm.Expr("CASE WHEN storage_used >= ? THEN storage_used - ? ELSE 0 END", claimed, claimed)).Error
+	})
+	return claimed, err
 }
 
 // DeleteKnowledge deletes knowledge
@@ -444,7 +573,8 @@ func (r *knowledgeRepository) SearchKnowledge(
 		Joins("JOIN knowledge_bases ON knowledge_bases.id = knowledges.knowledge_base_id").
 		Where("knowledges.tenant_id = ?", tenantID).
 		Where("knowledge_bases.type = ?", types.KnowledgeBaseTypeDocument).
-		Where("knowledges.deleted_at IS NULL")
+		Where("knowledges.deleted_at IS NULL").
+		Where("knowledges.parse_status <> ?", types.ParseStatusDeleting)
 
 	// If keyword is provided, filter by file_name or title
 	if keyword != "" {
@@ -564,7 +694,8 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 		Joins("JOIN knowledge_bases ON knowledge_bases.id = knowledges.knowledge_base_id AND knowledge_bases.tenant_id = knowledges.tenant_id").
 		Where(scopeCondition, args...).
 		Where("knowledge_bases.type = ?", types.KnowledgeBaseTypeDocument).
-		Where("knowledges.deleted_at IS NULL")
+		Where("knowledges.deleted_at IS NULL").
+		Where("knowledges.parse_status <> ?", types.ParseStatusDeleting)
 
 	if keyword != "" {
 		escaped := escapeLikeKeyword(keyword)

@@ -116,8 +116,11 @@ type KBDeletePayload struct {
 // KnowledgeListDeletePayload represents the batch knowledge delete task payload
 type KnowledgeListDeletePayload struct {
 	TracingContext
-	TenantID     uint64   `json:"tenant_id"`
-	KnowledgeIDs []string `json:"knowledge_ids"`
+	TenantID               uint64   `json:"tenant_id"`
+	KnowledgeBaseID        string   `json:"knowledge_base_id,omitempty"`
+	KnowledgeIDs           []string `json:"knowledge_ids"`
+	DirectoryDeleteTaskID  string   `json:"directory_delete_task_id,omitempty"`
+	DirectoryDeleteBatchID string   `json:"directory_delete_batch_id,omitempty"`
 }
 
 // KnowledgeMovePayload represents the knowledge move task payload

@@ -141,7 +141,7 @@ func (s *knowledgeBaseService) filterGovernedSearchChunks(
 }
 
 func (s *knowledgeBaseService) searchableKnowledgeVisible(ctx context.Context, knowledge *types.Knowledge) bool {
-	if knowledge == nil {
+	if knowledge == nil || knowledge.ParseStatus == types.ParseStatusDeleting {
 		return false
 	}
 	if strings.TrimSpace(knowledge.CurrentVersionID) == "" && strings.TrimSpace(knowledge.PendingVersionID) == "" {
@@ -426,6 +426,7 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 		ChunkMetadata:        chunk.Metadata,
 		MatchedContent:       matchedContent,
 		KnowledgeBaseID:      knowledge.KnowledgeBaseID,
+		DirectoryID:          knowledge.DirectoryID,
 	}
 }
 

@@ -140,6 +140,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewTenantRepository))
 	must(container.Provide(repository.NewKnowledgeBaseRepository))
 	must(container.Provide(repository.NewKnowledgeRepository))
+	must(container.Provide(repository.NewKnowledgeDirectoryRepository))
 	must(container.Provide(repository.NewChunkRepository))
 	must(container.Provide(repository.NewKnowledgeTagRepository))
 	must(container.Provide(repository.NewSessionRepository))
@@ -177,6 +178,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
 	must(container.Provide(service.NewAgentShareService))
 	must(container.Provide(service.NewKnowledgeService))
+	must(container.Provide(service.NewKnowledgeDirectoryService))
 	must(container.Provide(service.NewChunkService))
 	must(container.Provide(service.NewKnowledgeTagService))
 	must(container.Provide(embedding.NewBatchEmbedder))
@@ -245,6 +247,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		must(container.Provide(func() interfaces.TaskEnqueuer { return syncExec }))
 		must(container.Provide(func() *router.SyncTaskExecutor { return syncExec }))
 	}
+	must(container.Invoke(startDirectoryDeleteDispatcher))
 
 	// Chat pipeline components for processing chat requests
 	logger.Debugf(ctx, "[Container] Registering chat pipeline plugins...")
@@ -1626,6 +1629,27 @@ func startDataSourceScheduler(scheduler *datasource.Scheduler, cleaner interface
 		scheduler.Stop()
 		return nil
 	})
+}
+
+func startDirectoryDeleteDispatcher(directoryService interfaces.KnowledgeDirectoryService, cleaner interfaces.ResourceCleaner) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := directoryService.DispatchPendingDeletes(ctx); err != nil {
+					logger.Warnf(ctx, "[Container] directory delete dispatch failed: %v", err)
+				}
+			}
+		}
+	}()
+	cleaner.RegisterWithName("DirectoryDeleteDispatcher", func() error { cancel(); <-done; return nil })
 }
 
 func startVoiceTempCleaner(cfg *config.Config, cleaner interfaces.ResourceCleaner) error {

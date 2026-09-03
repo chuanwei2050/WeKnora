@@ -200,6 +200,9 @@ type SearchResult struct {
 
 	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+	// DirectoryID identifies the right-hand document directory for navigation.
+	// It is display metadata only and never changes retrieval scope.
+	DirectoryID *string `json:"directory_id,omitempty"`
 }
 
 // SearchParams represents the search parameters

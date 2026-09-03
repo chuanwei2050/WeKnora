@@ -61,10 +61,31 @@ CREATE TABLE knowledge_bases (
 CREATE INDEX idx_knowledge_bases_tenant_name ON knowledge_bases(tenant_id, name);
 CREATE INDEX idx_knowledge_bases_tenant_created_by ON knowledge_bases(tenant_id, created_by);
 
+CREATE TABLE knowledge_tags (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    name VARCHAR(128) NOT NULL,
+    color VARCHAR(32),
+    sort_order INT NOT NULL DEFAULT 0,
+    seq_id BIGINT NULL,
+    parent_id VARCHAR(36) NULL,
+    is_public BOOLEAN NOT NULL DEFAULT FALSE,
+    search_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    UNIQUE KEY uq_knowledge_tags_scope_id (tenant_id, knowledge_base_id, id),
+    UNIQUE KEY idx_knowledge_tags_kb_name (tenant_id, knowledge_base_id, name),
+    UNIQUE KEY idx_knowledge_tags_seq_id (seq_id),
+    CONSTRAINT fk_knowledge_tags_kb FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_bases(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE knowledges (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INT NOT NULL,
     knowledge_base_id VARCHAR(36) NOT NULL,
+    tag_id VARCHAR(36) NOT NULL,
     type VARCHAR(50) NOT NULL,
     title VARCHAR(255) NOT NULL,
     description TEXT,
@@ -87,6 +108,72 @@ CREATE TABLE knowledges (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_knowledges_tenant_id ON knowledges(tenant_id, knowledge_base_id);
+
+CREATE TABLE knowledge_directories (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    tag_id VARCHAR(36) NOT NULL,
+    parent_id VARCHAR(36) NULL,
+    parent_key VARCHAR(36) NOT NULL DEFAULT '',
+    name VARCHAR(255) NOT NULL,
+    normalized_name VARCHAR(255) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'active',
+    deletion_task_id VARCHAR(36) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_knowledge_directories_scope_id (tenant_id, knowledge_base_id, tag_id, id),
+    CONSTRAINT fk_knowledge_directories_parent FOREIGN KEY (tenant_id, knowledge_base_id, tag_id, parent_id) REFERENCES knowledge_directories(tenant_id, knowledge_base_id, tag_id, id) ON DELETE RESTRICT,
+    CONSTRAINT fk_knowledge_directories_tag FOREIGN KEY (tenant_id, knowledge_base_id, tag_id) REFERENCES knowledge_tags(tenant_id, knowledge_base_id, id) ON DELETE RESTRICT,
+    CONSTRAINT fk_knowledge_directories_kb FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_knowledge_directories_sibling (tenant_id, knowledge_base_id, tag_id, parent_key, normalized_name),
+    KEY idx_knowledge_directories_parent (tenant_id, knowledge_base_id, tag_id, parent_key, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE knowledges
+    ADD COLUMN directory_id VARCHAR(36) NULL,
+    ADD COLUMN deletion_task_id VARCHAR(36) NULL,
+    ADD CONSTRAINT fk_knowledges_directory FOREIGN KEY (tenant_id, knowledge_base_id, tag_id, directory_id) REFERENCES knowledge_directories(tenant_id, knowledge_base_id, tag_id, id) ON DELETE RESTRICT;
+CREATE INDEX idx_knowledges_directory ON knowledges(tenant_id, knowledge_base_id, tag_id, directory_id);
+CREATE INDEX idx_knowledges_deletion_task ON knowledges(tenant_id, deletion_task_id);
+
+CREATE TABLE knowledge_directory_delete_tasks (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    root_directory_id VARCHAR(36) NOT NULL,
+    requested_by VARCHAR(36) NOT NULL,
+    snapshot_digest VARCHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    failure_summary TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE knowledge_directory_delete_batches (
+    id VARCHAR(36) PRIMARY KEY,
+    delete_task_id VARCHAR(36) NOT NULL,
+    asynq_task_id VARCHAR(64) NOT NULL UNIQUE,
+    knowledge_ids JSON NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    failure_summary TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_directory_delete_batches_task FOREIGN KEY (delete_task_id) REFERENCES knowledge_directory_delete_tasks(id) ON DELETE CASCADE,
+    KEY idx_directory_delete_batches_pending (status, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE knowledge_directory_delete_tokens (
+    token_hash VARCHAR(64) PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    root_directory_id VARCHAR(36) NOT NULL,
+    requested_by VARCHAR(36) NOT NULL,
+    snapshot_digest VARCHAR(64) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    consumed_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE sessions (
     id VARCHAR(36) PRIMARY KEY,

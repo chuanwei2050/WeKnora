@@ -143,7 +143,7 @@ export function createManualKnowledge(kbId: string, data: { title: string; conte
 
 export function listKnowledgeFiles(
   kbId: string,
-  params: { page: number; page_size: number; tag_id?: string; keyword?: string; file_type?: string },
+  params: { page: number; page_size: number; tag_id?: string; keyword?: string; file_type?: string; directory_id?: string; sort_by?: string; sort_order?: 'asc' | 'desc' },
 ) {
   const query = new URLSearchParams();
   query.append('page', String(params.page));
@@ -157,6 +157,9 @@ export function listKnowledgeFiles(
   if (params.file_type) {
     query.append('file_type', params.file_type);
   }
+  if (params.directory_id !== undefined) query.append('directory_id', params.directory_id);
+  if (params.sort_by) query.append('sort_by', params.sort_by);
+  if (params.sort_order) query.append('sort_order', params.sort_order);
   const qs = query.toString();
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
 }
@@ -191,6 +194,83 @@ export function downKnowledgeDetails(id: string) {
 
 export function previewKnowledgeFile(id: string) {
   return getDown(`/api/v1/knowledge/${id}/preview`, { timeout: 0 });
+}
+
+export interface DocumentDirectory {
+  id: string;
+  tag_id: string;
+  parent_id?: string;
+  name: string;
+  status: 'active' | 'deleting';
+  document_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export function listDocumentDirectories(kbId: string, tagId: string, parentId?: string, page = 1, pageSize = 200) {
+  const query = new URLSearchParams({ page: String(page), page_size: String(pageSize), tag_id: tagId });
+  if (parentId) query.set('parent_id', parentId);
+  return get(`/api/v1/knowledge-bases/${kbId}/knowledge/directories?${query}`);
+}
+
+export function createDocumentDirectory(kbId: string, tagId: string, name: string, parentId?: string) {
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/directories`, { tag_id: tagId, name, parent_id: parentId || null });
+}
+
+export function renameDocumentDirectory(kbId: string, tagId: string, directoryId: string, name: string) {
+  return put(`/api/v1/knowledge-bases/${kbId}/knowledge/directories/${directoryId}?tag_id=${encodeURIComponent(tagId)}`, { tag_id: tagId, name });
+}
+
+export function moveDocumentDirectory(kbId: string, tagId: string, directoryId: string, parentId?: string) {
+  return put(`/api/v1/knowledge-bases/${kbId}/knowledge/directories/${directoryId}/move?tag_id=${encodeURIComponent(tagId)}`, { parent_id: parentId || null });
+}
+
+export function moveDocumentsToDirectory(kbId: string, tagId: string, ids: string[], directoryId?: string) {
+  return put(`/api/v1/knowledge-bases/${kbId}/knowledge/directory-documents?tag_id=${encodeURIComponent(tagId)}`, { ids, directory_id: directoryId || null });
+}
+
+export function moveDocumentDirectoryEntries(kbId: string, tagId: string, directoryIds: string[], knowledgeIds: string[], directoryId?: string) {
+  return put(`/api/v1/knowledge-bases/${kbId}/knowledge/directory-entries?tag_id=${encodeURIComponent(tagId)}`, {
+    directory_ids: directoryIds,
+    knowledge_ids: knowledgeIds,
+    directory_id: directoryId || null,
+  });
+}
+
+export function downloadDocumentDirectory(kbId: string, tagId: string, directoryId: string) {
+  return getDown(`/api/v1/knowledge-bases/${kbId}/knowledge/directories/${directoryId}/download?tag_id=${encodeURIComponent(tagId)}`);
+}
+
+export function deleteDocumentDirectory(kbId: string, tagId: string, directoryId: string) {
+  return del(`/api/v1/knowledge-bases/${kbId}/knowledge/directories/${directoryId}?tag_id=${encodeURIComponent(tagId)}`);
+}
+
+export interface DocumentDirectoryDeletePreview {
+  directory_count: number;
+  document_count: number;
+  total_storage_size: number;
+  confirmation_token: string;
+  expires_at: string;
+}
+
+export function previewDocumentDirectoryDelete(kbId: string, tagId: string, directoryId: string) {
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/directories/${directoryId}/delete-preview?tag_id=${encodeURIComponent(tagId)}`, {});
+}
+
+export function confirmDocumentDirectoryDelete(kbId: string, tagId: string, directoryId: string, confirmationToken: string) {
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/directories/${directoryId}/delete-confirm?tag_id=${encodeURIComponent(tagId)}`, { confirmation_token: confirmationToken });
+}
+
+export function getDocumentDirectoryDeleteTask(kbId: string, taskId: string) {
+  return get(`/api/v1/knowledge-bases/${kbId}/knowledge/directory-delete-tasks/${taskId}`);
+}
+
+export function retryDocumentDirectoryDeleteTask(kbId: string, taskId: string) {
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/directory-delete-tasks/${taskId}/retry`, {});
+}
+
+export function getDocumentDirectoryBreadcrumb(kbId: string, tagId: string, directoryId: string) {
+  return get(`/api/v1/knowledge-bases/${kbId}/knowledge/directories/${directoryId}/breadcrumb?tag_id=${encodeURIComponent(tagId)}`);
 }
 
 /** @param idsQueryString - query string with ids (e.g. ids=xxx&ids=yyy) */
