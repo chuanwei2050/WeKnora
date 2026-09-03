@@ -51,6 +51,8 @@ const props = defineProps<{
   canManage?: boolean;
   tagList: Tag[];
   folderTargets: FolderCascaderOption[];
+  directoryTargets: FolderCascaderOption[];
+  directoryTargetsLoading?: boolean;
   loading?: boolean;
   canGenerateSummary?: boolean;
   governanceEnabled?: boolean;
@@ -69,8 +71,8 @@ const emit = defineEmits<{
   (e: 'toggle-directory', id: string, checked: boolean): void;
   (e: 'toggle-all', checked: boolean, documentIds: string[], directoryIds: string[]): void;
   (e: 'action', action: DocumentAction, item: KnowledgeItem): void;
-  (e: 'directory-action', action: DirectoryAction, item: KnowledgeItem): void;
-  (e: 'move-directory', item: KnowledgeItem): void;
+  (e: 'directory-action', action: DirectoryAction, item: KnowledgeItem, directoryId?: string): void;
+  (e: 'move-directory', item: KnowledgeItem, directoryId: string): void;
   (e: 'move-folder', item: KnowledgeItem, tagId: string): void;
   (e: 'entry-dragstart', item: KnowledgeItem, event: DragEvent): void;
   (e: 'entry-drop', directoryId: string, event: DragEvent): void;
@@ -155,6 +157,18 @@ const directoryLocation = (item: KnowledgeItem) => {
   if (!props.searchMode || item.directory_breadcrumb == null) return '';
   const names = (item.directory_breadcrumb || []).map(node => node.name);
   return [t('knowledgeBase.documentDirectoryRoot'), ...names].join(' / ');
+};
+const directoryTargetsFor = (item: KnowledgeItem) => {
+  if (item.kind !== 'directory') return props.directoryTargets;
+  const disableBranch = (options: FolderCascaderOption[], blocked: boolean): FolderCascaderOption[] => options.map(option => {
+    const optionBlocked = blocked || option.value === item.id;
+    return {
+      ...option,
+      selectable: option.value === '__root__' ? option.selectable : !optionBlocked && option.selectable,
+      ...(option.children ? { children: disableBranch(option.children, optionBlocked) } : {}),
+    };
+  });
+  return disableBranch(props.directoryTargets, false);
 };
 const governanceContext = () => ({
   enabled: Boolean(props.governanceEnabled),
@@ -421,9 +435,17 @@ const ariaSort = (field: SortField): 'ascending' | 'descending' | 'none' => {
         <div class="cell cell-actions" v-if="showActions" @click.stop>
           <div class="row-inline-actions">
             <template v-if="item.kind === 'directory'">
-              <button v-if="canEdit" class="row-action-btn" type="button" @click="emit('directory-action', 'move', item)">
-                {{ t('knowledgeBase.rowMoveToDirectory') }}
-              </button>
+              <FolderMoveCascader
+                v-if="canEdit"
+                :options="directoryTargetsFor(item)"
+                :loading="directoryTargetsLoading"
+                placement="top-right"
+                @select="(directoryId: string) => emit('directory-action', 'move', item, directoryId)"
+              >
+                <button class="row-action-btn" type="button">
+                  {{ t('knowledgeBase.rowMoveToDirectory') }}
+                </button>
+              </FolderMoveCascader>
               <button class="row-action-btn" type="button" @click="emit('directory-action', 'download', item)">
                 {{ t('knowledgeBase.downloadDocumentDirectory') }}
               </button>
@@ -456,9 +478,17 @@ const ariaSort = (field: SortField): 'ascending' | 'descending' | 'none' => {
             <button v-if="canEdit && item.parse_status !== 'pending_review'" class="row-action-btn" type="button" @click="handleAction('reparse', item)">
               {{ t('knowledgeBase.rowRebuild') }}
             </button>
-            <button v-if="canEdit" class="row-action-btn" type="button" @click="emit('move-directory', item)">
-              {{ t('knowledgeBase.rowMoveToDirectory') }}
-            </button>
+            <FolderMoveCascader
+              v-if="canEdit"
+              :options="directoryTargetsFor(item)"
+              :loading="directoryTargetsLoading"
+              placement="top-right"
+              @select="(directoryId: string) => emit('move-directory', item, directoryId)"
+            >
+              <button class="row-action-btn" type="button">
+                {{ t('knowledgeBase.rowMoveToDirectory') }}
+              </button>
+            </FolderMoveCascader>
             <FolderMoveCascader
               v-if="canEdit && folderTargets.length"
               :options="folderTargets"

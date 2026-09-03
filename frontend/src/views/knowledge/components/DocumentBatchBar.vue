@@ -13,6 +13,8 @@ defineProps<{
   documentCount?: number;
   directoryCount?: number;
   movingDirectory?: boolean;
+  directoryTargets?: FolderCascaderOption[];
+  directoryTargetsLoading?: boolean;
   canEdit?: boolean;
   canManage?: boolean;
 }>();
@@ -21,7 +23,7 @@ const emit = defineEmits<{
   (e: 'clear'): void;
   (e: 'action', action: GovernanceRowAction): void;
   (e: 'move-folder', tagId: string): void;
-  (e: 'move-directory'): void;
+  (e: 'move-directory', directoryId: string): void;
   (e: 'rename-directory'): void;
   (e: 'download-directory'): void;
   (e: 'delete-directories'): void;
@@ -48,17 +50,24 @@ const actionLabelKeys: Record<GovernanceRowAction, string> = {
         </button>
       </div>
       <div class="batch-bar-actions">
-        <t-button
+        <FolderMoveCascader
           v-if="canEdit"
-          theme="primary"
-          variant="outline"
-          size="small"
-          :loading="movingDirectory"
+          :options="directoryTargets || []"
+          :loading="directoryTargetsLoading"
           :disabled="Boolean(loadingAction) || Boolean(movingFolder)"
-          @click="emit('move-directory')"
+          placement="top-right"
+          @select="(directoryId: string) => emit('move-directory', directoryId)"
         >
-          {{ t('knowledgeBase.moveToDocumentDirectory') }}（{{ count }}）
-        </t-button>
+          <t-button
+            theme="primary"
+            variant="outline"
+            size="small"
+            :loading="movingDirectory"
+            :disabled="Boolean(loadingAction) || Boolean(movingFolder)"
+          >
+            {{ t('knowledgeBase.moveToDocumentDirectory') }}（{{ count }}）
+          </t-button>
+        </FolderMoveCascader>
         <t-button v-if="directoryCount === 1 && documentCount === 0" variant="outline" size="small" @click="emit('download-directory')">
           {{ t('knowledgeBase.downloadDocumentDirectory') }}
         </t-button>

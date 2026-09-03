@@ -6,8 +6,12 @@ import type { FolderCascaderOption } from './document-folder-organization'
 const props = withDefaults(defineProps<{
   options: FolderCascaderOption[]
   placement?: 'top-right' | 'bottom-right'
+  loading?: boolean
+  disabled?: boolean
 }>(), {
   placement: 'bottom-right',
+  loading: false,
+  disabled: false,
 })
 
 const emit = defineEmits<{
@@ -46,6 +50,7 @@ const handleChange = (value: CascaderValue) => {
   <t-popup
     v-model="visible"
     trigger="click"
+    :disabled="disabled"
     :placement="placement"
     destroy-on-close
     overlay-class-name="folder-move-cascader-popup"
@@ -54,7 +59,9 @@ const handleChange = (value: CascaderValue) => {
   >
     <slot />
     <template #content>
+      <t-loading v-if="loading" size="small" />
       <t-cascader-panel
+        v-else
         :options="options"
         check-strictly
         trigger="hover"

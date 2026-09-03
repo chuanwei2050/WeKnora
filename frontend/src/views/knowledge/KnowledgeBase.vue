@@ -60,6 +60,7 @@ import {
   listDocumentDirectories,
   moveDocumentDirectoryEntries,
   downloadDocumentDirectory,
+  type DocumentDirectory,
 } from "@/api/knowledge-base/index";
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
@@ -73,6 +74,7 @@ import {
   ordinaryFolderChildOrders,
   placeFolder,
   resolveUploadTarget,
+  type FolderCascaderOption,
 } from './components/document-folder-organization';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import { getWikiStats } from '@/api/wiki';
@@ -300,11 +302,10 @@ type MoveEntry = {
 };
 const draggedEntries = ref<MoveEntry[]>([]);
 const moveDirectoryBusy = ref(false);
-const moveDirectoryDialogVisible = ref(false);
-const moveDirectoryTarget = ref('__root__');
-const moveDirectoryOptions = ref<Array<{ label: string; value: string }>>([]);
+const moveDirectoryOptions = ref<FolderCascaderOption[]>([]);
 const moveDirectoryOptionsLoading = ref(false);
-const moveDirectoryEntries = ref<MoveEntry[]>([]);
+const documentDirectories = ref<DocumentDirectory[]>([]);
+let directoryOptionsRequestId = 0;
 const fileTypeOptions = computed(() => [
   { content: t('knowledgeBase.allFileTypes'), value: '' },
   { content: 'PDF', value: 'pdf' },
@@ -524,6 +525,7 @@ const submitDirectoryDialog = async () => {
     page = 1;
     await refreshDirectoryBreadcrumb();
     loadKnowledgeFiles(kbId.value);
+    void loadMoveDirectoryOptions();
   } catch (error) {
     MessagePlugin.error(error instanceof Error ? error.message : t('common.operationFailed'));
   } finally {
@@ -550,6 +552,7 @@ const removeDocumentDirectory = async (item: KnowledgeCard) => {
           MessagePlugin.success(t('knowledgeBase.directoryDeleteAccepted'));
           page = 1;
           loadKnowledgeFiles(kbId.value);
+          void loadMoveDirectoryOptions();
           if (taskId) pollDirectoryDeleteTask(taskId);
         } catch (error) {
           MessagePlugin.error(error instanceof Error ? error.message : t('common.operationFailed'));
@@ -602,6 +605,7 @@ const deleteSelectedDirectories = async () => {
         clearSelection();
         page = 1;
         loadKnowledgeFiles(kbId.value);
+        void loadMoveDirectoryOptions();
       },
     });
   } catch (error) {
@@ -620,6 +624,7 @@ const pollDirectoryDeleteTask = (taskId: string) => {
         window.clearInterval(timer);
         page = 1;
         loadKnowledgeFiles(kbId.value);
+        void loadMoveDirectoryOptions();
         if (status === 'failed') {
           const retryDialog = DialogPlugin.confirm({
             header: t('knowledgeBase.directoryDeleteFailed'),
@@ -705,6 +710,7 @@ const moveEntriesTo = async (entries: MoveEntry[], targetDirectoryId?: string) =
     selectedDirectoryIds.value.clear();
     page = 1;
     loadKnowledgeFiles(kbId.value);
+    void loadMoveDirectoryOptions();
   } catch (error) {
     MessagePlugin.error(error instanceof Error ? error.message : t('common.operationFailed'));
   } finally {
@@ -713,50 +719,113 @@ const moveEntriesTo = async (entries: MoveEntry[], targetDirectoryId?: string) =
 };
 
 const loadMoveDirectoryOptions = async () => {
-  if (!kbId.value || !selectedTagId.value) return;
+  const requestId = ++directoryOptionsRequestId;
+  if (!kbId.value || !selectedTagId.value) {
+    documentDirectories.value = [];
+    moveDirectoryOptions.value = [];
+    moveDirectoryOptionsLoading.value = false;
+    return;
+  }
+  const targetKbId = kbId.value;
+  const targetTagId = selectedTagId.value;
   moveDirectoryOptionsLoading.value = true;
   try {
-    const options: Array<{ label: string; value: string }> = [{ label: t('knowledgeBase.documentDirectoryRoot'), value: '__root__' }];
-    const walk = async (parentId: string | undefined, depth: number) => {
+    const collected: DocumentDirectory[] = [];
+    const walk = async (parentId: string | undefined) => {
       const pageSize = 200;
       for (let currentPage = 1; ; currentPage += 1) {
-        const result = await listDocumentDirectories(kbId.value, selectedTagId.value, parentId, currentPage, pageSize);
-        const directories = result.data || [];
-        for (const directory of directories) {
-          if (moveDirectoryEntries.value.some(entry => entry.kind === 'directory' && entry.id === directory.id)) continue;
-          options.push({ label: `${'　'.repeat(depth)}${directory.name}`, value: directory.id });
-          await walk(directory.id, depth + 1);
+        const result = await listDocumentDirectories(targetKbId, targetTagId, parentId, currentPage, pageSize);
+        const childDirectories = (result.data || []) as DocumentDirectory[];
+        for (const directory of childDirectories) {
+          collected.push(directory);
+          await walk(directory.id);
         }
         if (currentPage * pageSize >= Number(result.total || 0)) break;
       }
     };
-    await walk(undefined, 0);
-    moveDirectoryOptions.value = options;
+    await walk(undefined);
+    if (requestId !== directoryOptionsRequestId || targetKbId !== kbId.value || targetTagId !== selectedTagId.value) return;
+    documentDirectories.value = collected;
+    const childrenByParent = new Map<string, DocumentDirectory[]>();
+    for (const directory of collected) {
+      const key = directory.parent_id || '__root__';
+      const children = childrenByParent.get(key) || [];
+      children.push(directory);
+      childrenByParent.set(key, children);
+    }
+    const buildOptions = (parentId: string): FolderCascaderOption[] => (childrenByParent.get(parentId) || []).map(directory => {
+      const children = buildOptions(directory.id);
+      return {
+        label: directory.name,
+        value: directory.id,
+        selectable: true,
+        ...(children.length ? { children } : {}),
+      };
+    });
+    moveDirectoryOptions.value = [{
+      label: t('knowledgeBase.documentDirectoryRoot'),
+      value: '__root__',
+      selectable: true,
+      children: buildOptions('__root__'),
+    }];
   } finally {
-    moveDirectoryOptionsLoading.value = false;
+    if (requestId === directoryOptionsRequestId) moveDirectoryOptionsLoading.value = false;
   }
 };
 
-const openMoveDirectoryDialog = async (entries: MoveEntry[] = selectedMoveEntries()) => {
-  if (!canEdit.value) return;
-  moveDirectoryEntries.value = entries;
-  moveDirectoryTarget.value = '__root__';
-  moveDirectoryDialogVisible.value = true;
-  await loadMoveDirectoryOptions();
+const directoryMoveOptionsFor = (entries: MoveEntry[]): FolderCascaderOption[] => {
+  const blocked = new Set(entries.filter(entry => entry.kind === 'directory').map(entry => entry.id));
+  if (blocked.size > 0) {
+    const childrenByParent = new Map<string, DocumentDirectory[]>();
+    for (const directory of documentDirectories.value) {
+      const key = directory.parent_id || '__root__';
+      const children = childrenByParent.get(key) || [];
+      children.push(directory);
+      childrenByParent.set(key, children);
+    }
+    const queue = [...blocked];
+    while (queue.length) {
+      const parentId = queue.shift() as string;
+      for (const child of childrenByParent.get(parentId) || []) {
+        if (blocked.has(child.id)) continue;
+        blocked.add(child.id);
+        queue.push(child.id);
+      }
+    }
+  }
+  const disableBlocked = (options: FolderCascaderOption[]): FolderCascaderOption[] => options.map(option => ({
+    ...option,
+    selectable: option.value === '__root__' ? option.selectable : !blocked.has(option.value) && option.selectable,
+    ...(option.children ? { children: disableBlocked(option.children) } : {}),
+  }));
+  return disableBlocked(moveDirectoryOptions.value);
 };
 
-const confirmMoveDirectory = async () => {
-  await moveEntriesTo(moveDirectoryEntries.value, moveDirectoryTarget.value === '__root__' ? undefined : moveDirectoryTarget.value);
-  moveDirectoryDialogVisible.value = false;
-  moveDirectoryEntries.value = [];
+watch([kbId, selectedTagId], ([nextKbId, nextTagId]) => {
+  if (!nextKbId || !nextTagId || isFAQ.value) {
+    directoryOptionsRequestId += 1;
+    documentDirectories.value = [];
+    moveDirectoryOptions.value = [];
+    moveDirectoryOptionsLoading.value = false;
+    return;
+  }
+  void loadMoveDirectoryOptions();
+}, { immediate: true });
+
+const moveEntriesFromCascader = (entries: MoveEntry[], targetDirectoryId: string) => {
+  if (!targetDirectoryId) return;
+  void moveEntriesTo(entries, targetDirectoryId === '__root__' ? undefined : targetDirectoryId);
 };
 
 type DirectoryItemAction = 'move' | 'download' | 'rename' | 'delete';
-const handleDirectoryItemAction = (action: DirectoryItemAction, item: KnowledgeCard) => {
-  if (action === 'move' && canEdit.value) void openMoveDirectoryDialog([toMoveEntry(item)]);
+const handleDirectoryItemAction = (action: DirectoryItemAction, item: KnowledgeCard, targetDirectoryId?: string) => {
+  if (action === 'move' && canEdit.value && targetDirectoryId) moveEntriesFromCascader([toMoveEntry(item)], targetDirectoryId);
   else if (action === 'download') void downloadDirectory(item);
   else if (action === 'rename' && canEdit.value) openRenameDirectory(item);
   else if (action === 'delete' && canManage.value) void removeDocumentDirectory(item);
+};
+const handleBatchMoveDirectory = (targetDirectoryId: string) => {
+  moveEntriesFromCascader(selectedMoveEntries(), targetDirectoryId);
 };
 const startEntryDrag = (item: KnowledgeCard, event: DragEvent) => {
 	if (!canEdit.value) {
@@ -3170,9 +3239,17 @@ async function createNewSession(value: string): Promise<void> {
                           </div>
                           <template #content>
                             <div class="card-menu">
-                              <div v-if="canEdit" class="card-menu-item" @click.stop="handleDirectoryItemAction('move', item)">
-                                <t-icon class="icon" name="move" /><span>{{ t('knowledgeBase.rowMove') }}</span>
-                              </div>
+                              <FolderMoveCascader
+                                v-if="canEdit"
+                                :options="directoryMoveOptionsFor([toMoveEntry(item)])"
+                                :loading="moveDirectoryOptionsLoading"
+                                placement="top-right"
+                                @select="(directoryId: string) => handleDirectoryItemAction('move', item, directoryId)"
+                              >
+                                <div class="card-menu-item" @click.stop>
+                                  <t-icon class="icon" name="move" /><span>{{ t('knowledgeBase.rowMoveToDirectory') }}</span>
+                                </div>
+                              </FolderMoveCascader>
                               <div class="card-menu-item" @click.stop="handleDirectoryItemAction('download', item)">
                                 <t-icon class="icon" name="download" /><span>{{ t('knowledgeBase.downloadDocumentDirectory') }}</span>
                               </div>
@@ -3476,6 +3553,8 @@ async function createNewSession(value: string): Promise<void> {
                   :selected-directory-ids="selectedDirectoryIds"
                   :tag-list="tagList"
                   :folder-targets="folderMoveOptions"
+                  :directory-targets="moveDirectoryOptions"
+                  :directory-targets-loading="moveDirectoryOptionsLoading"
                   :can-edit="canEdit"
                   :can-manage="canManage"
                   :governance-enabled="Boolean(kbInfo?.governance?.enabled)"
@@ -3491,8 +3570,8 @@ async function createNewSession(value: string): Promise<void> {
                   @toggle-directory="toggleSelectDirectory"
                   @toggle-all="toggleSelectAll"
                   @action="(action: any, item: any) => handleListAction(action, item)"
-                  @directory-action="handleDirectoryItemAction"
-                  @move-directory="(item: any) => handleDirectoryItemAction('move', item)"
+                  @directory-action="(action: any, item: any, directoryId?: string) => handleDirectoryItemAction(action, item, directoryId)"
+                  @move-directory="(item: any, directoryId: string) => handleDirectoryItemAction('move', item, directoryId)"
                   @move-folder="(item: any, tagId: string) => handleKnowledgeTagChange(item.id, tagId)"
                   @entry-dragstart="(item: any, event: DragEvent) => startEntryDrag(item, event)"
                   @entry-drop="(directoryId: string, event: DragEvent) => dropEntriesOn(directoryId, event)"
@@ -3513,12 +3592,14 @@ async function createNewSession(value: string): Promise<void> {
                 :document-count="selectedIds.size"
                 :directory-count="selectedDirectoryIds.size"
                 :moving-directory="moveDirectoryBusy"
+                :directory-targets="directoryMoveOptionsFor(selectedMoveEntries())"
+                :directory-targets-loading="moveDirectoryOptionsLoading"
                 :can-edit="canEdit"
                 :can-manage="canManage"
                 @clear="clearSelection"
                 @action="handleBatchAction"
                 @move-folder="handleBatchMoveToFolder"
-                @move-directory="openMoveDirectoryDialog"
+                @move-directory="handleBatchMoveDirectory"
                 @rename-directory="renameSelectedDirectory"
                 @download-directory="downloadSelectedDirectory"
                 @delete-directories="deleteSelectedDirectories"
@@ -3546,20 +3627,6 @@ async function createNewSession(value: string): Promise<void> {
                 {{ $t('knowledgeBase.locateExistingFile') }}
               </t-button>
             </div>
-          </t-dialog>
-          <t-dialog
-            v-model:visible="moveDirectoryDialogVisible"
-            :header="$t('knowledgeBase.moveToDocumentDirectory')"
-            :confirm-btn="{ content: $t('common.confirm'), loading: moveDirectoryBusy }"
-            :cancel-btn="$t('common.cancel')"
-            @confirm="confirmMoveDirectory"
-          >
-            <t-select
-              v-model="moveDirectoryTarget"
-              :options="moveDirectoryOptions"
-              :loading="moveDirectoryOptionsLoading"
-              filterable
-            />
           </t-dialog>
           <t-dialog
             v-model:visible="directoryDialogVisible"
