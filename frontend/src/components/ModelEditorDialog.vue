@@ -289,7 +289,8 @@
           <label class="form-label">{{ $t('model.editor.supportsVisionLabel') }}</label>
           <div style="display: flex; align-items: center; gap: 8px;">
             <t-switch :value="formData.supportsVision" :disabled="capabilityChecking" @change="handleVisionChange" />
-            <span class="form-desc">{{ $t('model.editor.supportsVisionDesc') }}</span>
+            <t-loading v-if="capabilityCheck === 'vision'" size="small" />
+            <span class="form-desc">{{ $t(capabilityCheck === 'vision' ? 'model.editor.validatingVision' : 'model.editor.supportsVisionDesc') }}</span>
           </div>
         </div>
 
@@ -297,7 +298,8 @@
           <label class="form-label">{{ $t('model.editor.thinkingLabel') }}</label>
           <div style="display: flex; align-items: center; gap: 8px;">
             <t-switch :value="formData.thinking" :disabled="capabilityChecking" @change="handleThinkingChange" />
-            <span class="form-desc">{{ $t('model.editor.thinkingDesc') }}</span>
+            <t-loading v-if="capabilityCheck === 'thinking'" size="small" />
+            <span class="form-desc">{{ $t(capabilityCheck === 'thinking' ? 'model.editor.validatingThinking' : 'model.editor.thinkingDesc') }}</span>
           </div>
         </div>
 
@@ -559,7 +561,8 @@ const modelChecked = ref(false)
 const modelAvailable = ref(false)
 const checking = ref(false)
 const remoteChecked = ref(false)
-const capabilityChecking = ref(false)
+const capabilityCheck = ref<'vision' | 'thinking' | null>(null)
+const capabilityChecking = computed(() => capabilityCheck.value !== null)
 const validatedCapabilityFingerprint = ref('')
 const remoteAvailable = ref(false)
 const remoteMessage = ref('')
@@ -1172,17 +1175,18 @@ const handleVisionChange = async (enabled: boolean) => {
     return
   }
   if (!validateCapabilityInput()) return
-  capabilityChecking.value = true
+  capabilityCheck.value = 'vision'
   try {
     const result = await checkVLMModel(capabilityPayload())
     formData.value.supportsVision = !!result.available
     if (result.available) validatedCapabilityFingerprint.value = capabilityFingerprint()
+    if (result.available) MessagePlugin.success(result.message || t('model.editor.visionValidationSuccess'))
     if (!result.available) MessagePlugin.error(result.message || '该模型不支持视觉/多模态输入')
   } catch (error: any) {
     formData.value.supportsVision = false
     MessagePlugin.error(error?.message || '视觉能力校验失败')
   } finally {
-    capabilityChecking.value = false
+    capabilityCheck.value = null
   }
 }
 
@@ -1192,17 +1196,18 @@ const handleThinkingChange = async (enabled: boolean) => {
     return
   }
   if (!validateCapabilityInput()) return
-  capabilityChecking.value = true
+  capabilityCheck.value = 'thinking'
   try {
     const result = await checkThinkingModel(capabilityPayload())
     formData.value.thinking = !!result.available
     if (result.available) validatedCapabilityFingerprint.value = capabilityFingerprint()
+    if (result.available) MessagePlugin.success(result.message || t('model.editor.thinkingValidationSuccess'))
     if (!result.available) MessagePlugin.error(result.message || '该模型不支持深度思考')
   } catch (error: any) {
     formData.value.thinking = false
     MessagePlugin.error(error?.message || '深度思考能力校验失败')
   } finally {
-    capabilityChecking.value = false
+    capabilityCheck.value = null
   }
 }
 

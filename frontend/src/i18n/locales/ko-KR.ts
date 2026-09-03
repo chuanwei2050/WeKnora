@@ -1843,8 +1843,12 @@ export default {
       remoteDimensionDetected: "감지된 벡터 차원: {value}",
       supportsVisionLabel: "비전/멀티모달 지원",
       supportsVisionDesc: "모델의 이미지 등 멀티모달 입력 지원 여부",
+      validatingVision: "비전 기능을 확인하는 중입니다…",
+      visionValidationSuccess: "비전 기능 확인에 성공했습니다",
       thinkingLabel: "심층 사고",
       thinkingDesc: "이 모델 호출 시 확장 사고 기능을 기본으로 활성화합니다(모델 지원 필요)",
+      validatingThinking: "심층 사고 기능을 확인하는 중입니다…",
+      thinkingValidationSuccess: "심층 사고 기능 확인에 성공했습니다",
       dimensionHint:
         '모델이 선택되었습니다. "차원 감지" 버튼을 클릭하여 벡터 차원을 자동으로 가져옵니다',
       loadModelListFailed: "모델 목록 로드 실패",
