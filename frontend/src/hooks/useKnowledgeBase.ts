@@ -108,6 +108,11 @@ export default function (knowledgeBaseId?: string) {
       moreIndex.value = -1;
     }
   };
+  const dispatchDuplicateFile = (kbId: string, error: unknown) => {
+    window.dispatchEvent(new CustomEvent('knowledgeFileDuplicate', {
+      detail: { kbId, error },
+    }));
+  };
   const requestMethod = (file: any, uploadInput: any, governanceEnabled = false) => {
     if (!(file instanceof File) || !uploadInput) {
       MessagePlugin.error(t('error.invalidFileType'));
@@ -155,21 +160,25 @@ export default function (knowledgeBaseId?: string) {
           }, currentKbId);
         } else {
           const errorMessage = result.error?.message || result.message || t('knowledgeBase.uploadFailed');
-          MessagePlugin.error(result.code === 'duplicate_file'
-            ? t('knowledgeBase.fileExists')
-            : result.code === 'file_deleting'
+          if (result.code === 'duplicate_file') {
+            dispatchDuplicateFile(currentKbId, result);
+          } else {
+            MessagePlugin.error(result.code === 'file_deleting'
               ? t('knowledgeBase.fileDeleting')
               : errorMessage);
+          }
         }
         uploadInput.value.value = "";
       })
       .catch((err: any) => {
         const errorMessage = err.error?.message || err.message || t('knowledgeBase.uploadFailed');
-        MessagePlugin.error(err.code === 'duplicate_file'
-          ? t('knowledgeBase.fileExists')
-          : err.code === 'file_deleting'
+        if (err.code === 'duplicate_file') {
+          dispatchDuplicateFile(currentKbId, err);
+        } else {
+          MessagePlugin.error(err.code === 'file_deleting'
             ? t('knowledgeBase.fileDeleting')
             : errorMessage);
+        }
         uploadInput.value.value = "";
       });
   };

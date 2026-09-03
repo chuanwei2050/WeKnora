@@ -937,6 +937,11 @@ const handleFileUploaded = (event: CustomEvent) => {
   }
 };
 
+const handleDuplicateFileUploaded = (event: CustomEvent) => {
+  if (event.detail?.kbId === kbId.value) {
+    openDuplicateDialog(event.detail.error);
+  }
+};
 
 // 监听从菜单触发的URL导入事件
 const handleOpenURLImportDialog = (event: CustomEvent) => {
@@ -986,11 +991,13 @@ onMounted(() => {
     .catch(() => { parserEngines.value = [] })
 
   window.addEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
+  window.addEventListener('knowledgeFileDuplicate', handleDuplicateFileUploaded as EventListener);
   window.addEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
 });
 
 onUnmounted(() => {
   window.removeEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
+  window.removeEventListener('knowledgeFileDuplicate', handleDuplicateFileUploaded as EventListener);
   window.removeEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
   stopMovePoll();
   if (timeout !== null) {
