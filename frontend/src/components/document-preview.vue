@@ -8,7 +8,6 @@ import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
 import { sanitizeHTML, safeMarkdownToHTML } from '@/utils/security';
-import { createSafeExcelPreviewSheet, EXCEL_PREVIEW_LIMITS } from '@/utils/excel-preview-range.js';
 
 
 const VueOfficePptx = defineAsyncComponent(() => import('@vue-office/pptx'));
@@ -36,6 +35,9 @@ const docxContainer = ref<HTMLElement | null>(null);
 const imageNaturalWidth = ref(0);
 const imageNaturalHeight = ref(0);
 let loadedForId = '';
+let excelPreviewWorker: Worker | null = null;
+let cancelExcelPreview: (() => void) | null = null;
+let previewLoadVersion = 0;
 
 const isFullscreen = ref(false);
 
@@ -135,63 +137,34 @@ async function renderDocx(blob: Blob) {
   }
 }
 
-function isValidUTF8(bytes: Uint8Array): boolean {
-  for (let i = 0; i < bytes.length;) {
-    const b = bytes[i];
-    let remaining = 0;
-    if (b <= 0x7F) { remaining = 0; }
-    else if ((b & 0xE0) === 0xC0) { remaining = 1; }
-    else if ((b & 0xF0) === 0xE0) { remaining = 2; }
-    else if ((b & 0xF8) === 0xF0) { remaining = 3; }
-    else { return false; }
-    if (i + remaining >= bytes.length) return false;
-    for (let j = 1; j <= remaining; j++) {
-      if ((bytes[i + j] & 0xC0) !== 0x80) return false;
-    }
-    i += 1 + remaining;
-  }
-  return true;
-}
-
-function decodeCSVBlob(arrayBuffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(arrayBuffer);
-  if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
-    return new TextDecoder('utf-8').decode(bytes);
-  }
-  if (isValidUTF8(bytes)) {
-    return new TextDecoder('utf-8').decode(bytes);
-  }
-  return new TextDecoder('gbk').decode(bytes);
-}
-
-async function renderExcel(blob: Blob, fileType?: string) {
-  const XLSX = await import('xlsx');
+async function renderExcel(blob: Blob, fileType: string | undefined, isCurrent: () => boolean) {
   const arrayBuffer = await blob.arrayBuffer();
-
-  let workbook;
-  if (fileType?.toLowerCase() === 'csv') {
-    const csvText = decodeCSVBlob(arrayBuffer);
-    workbook = XLSX.read(csvText, { type: 'string' });
-  } else {
-    workbook = XLSX.read(arrayBuffer, { type: 'array' });
-  }
-
-  let html = '';
-  const previewSheetNames = workbook.SheetNames.slice(0, EXCEL_PREVIEW_LIMITS.maxSheets);
-  excelPreviewTruncated.value = previewSheetNames.length < workbook.SheetNames.length;
-  previewSheetNames.forEach((name, sheetIdx) => {
-    const result = createSafeExcelPreviewSheet(workbook.Sheets[name], XLSX.utils);
-    if (!result.sheet) return;
-    if (result.truncated) excelPreviewTruncated.value = true;
-    const sheetHtml = XLSX.utils.sheet_to_html(result.sheet, { id: `sheet-${sheetIdx}` });
-    html += `<div class="excel-sheet">`;
-    if (workbook.SheetNames.length > 1) {
-      html += `<div class="excel-sheet-name">${name}</div>`;
-    }
-    html += sheetHtml;
-    html += `</div>`;
+  if (!isCurrent()) return null;
+  const worker = new Worker(new URL('../workers/excel-preview.worker.ts', import.meta.url), { type: 'module' });
+  excelPreviewWorker = worker;
+  let cancelled = false;
+  let cancelCurrentPreview = () => {};
+  const result = await new Promise<{ html: string; truncated: boolean }>((resolve, reject) => {
+    cancelCurrentPreview = () => {
+      cancelled = true;
+      reject(new Error('Excel preview cancelled'));
+    };
+    cancelExcelPreview = cancelCurrentPreview;
+    worker.onmessage = (event) => {
+      if (event.data?.ok) resolve(event.data);
+      else reject(new Error(event.data?.message || 'Excel preview failed'));
+    };
+    worker.onerror = (event) => reject(new Error(event.message || 'Excel preview failed'));
+    worker.postMessage({ buffer: arrayBuffer, fileType: fileType || '' }, [arrayBuffer]);
+  }).catch((error) => {
+    if (cancelled) return null;
+    throw error;
+  }).finally(() => {
+    worker.terminate();
+    if (excelPreviewWorker === worker) excelPreviewWorker = null;
+    if (cancelExcelPreview === cancelCurrentPreview) cancelExcelPreview = null;
   });
-  excelHtml.value = sanitizeHTML(html);
+  return result;
 }
 
 async function renderText(blob: Blob, fileType: string) {
@@ -260,6 +233,8 @@ async function loadPreview() {
   if (loadedForId === id) return;
 
   cleanup();
+  const loadVersion = previewLoadVersion;
+  const isCurrent = () => loadVersion === previewLoadVersion;
   loading.value = true;
   error.value = '';
   previewType.value = resolvePreviewType(ft);
@@ -271,11 +246,19 @@ async function loadPreview() {
 
   try {
     const rawBlob = await previewKnowledgeFile(id);
+    if (!isCurrent()) return;
     const blob = ensureBlobType(rawBlob, ft);
     loadedForId = id;
 
-    loading.value = false;
-    await nextTick();
+    // docx-preview needs its container mounted before rendering. Other formats,
+    // especially large spreadsheets, keep the loading state through parsing.
+    if (previewType.value === 'docx') {
+      loading.value = false;
+      await nextTick();
+      if (!isCurrent()) return;
+      await renderDocx(blob);
+      return;
+    }
 
     switch (previewType.value) {
       case 'pdf': {
@@ -286,12 +269,11 @@ async function loadPreview() {
         blobUrl.value = URL.createObjectURL(blob);
         break;
       }
-      case 'docx': {
-        await renderDocx(blob);
-        break;
-      }
       case 'excel': {
-        await renderExcel(blob, ft);
+        const result = await renderExcel(blob, ft, isCurrent);
+        if (!result || !isCurrent()) return;
+        excelPreviewTruncated.value = result.truncated;
+        excelHtml.value = sanitizeHTML(result.html);
         break;
       }
       case 'text': {
@@ -312,14 +294,22 @@ async function loadPreview() {
       }
     }
   } catch (err: any) {
+    if (!isCurrent()) return;
     console.error('Document preview failed:', err);
     error.value = err?.message || t('preview.loadFailed');
   } finally {
-    loading.value = false;
+    if (isCurrent()) loading.value = false;
   }
 }
 
 function cleanup() {
+  previewLoadVersion += 1;
+  cancelExcelPreview?.();
+  cancelExcelPreview = null;
+  if (excelPreviewWorker) {
+    excelPreviewWorker.terminate();
+    excelPreviewWorker = null;
+  }
   if (blobUrl.value) {
     URL.revokeObjectURL(blobUrl.value);
     blobUrl.value = '';

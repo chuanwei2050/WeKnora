@@ -190,7 +190,7 @@ export function downKnowledgeDetails(id: string) {
 }
 
 export function previewKnowledgeFile(id: string) {
-  return getDown(`/api/v1/knowledge/${id}/preview`);
+  return getDown(`/api/v1/knowledge/${id}/preview`, { timeout: 0 });
 }
 
 /** @param idsQueryString - query string with ids (e.g. ids=xxx&ids=yyy) */

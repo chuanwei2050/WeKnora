@@ -23,6 +23,23 @@ const descendantTagFilterSQL = `tag_id IN (
 	SELECT id FROM tag_tree
 )`
 
+const knowledgeDisplayNameSQL = "COALESCE(NULLIF(file_name, ''), NULLIF(title, ''), source)"
+
+func knowledgeDisplayNameOrder(db *gorm.DB) []string {
+	if db.Dialector.Name() == "postgres" {
+		return []string{
+			"CASE WHEN " + knowledgeDisplayNameSQL + " ~ '^[0-9]+' THEN 0 ELSE 1 END ASC",
+			"CASE WHEN " + knowledgeDisplayNameSQL + " ~ '^[0-9]+' THEN CAST(substring(" + knowledgeDisplayNameSQL + " FROM '^[0-9]+') AS NUMERIC) END ASC",
+			knowledgeDisplayNameSQL + " ASC",
+		}
+	}
+	return []string{
+		"CASE WHEN " + knowledgeDisplayNameSQL + " GLOB '[0-9]*' THEN 0 ELSE 1 END ASC",
+		"CASE WHEN " + knowledgeDisplayNameSQL + " GLOB '[0-9]*' THEN CAST(" + knowledgeDisplayNameSQL + " AS INTEGER) END ASC",
+		knowledgeDisplayNameSQL + " ASC",
+	}
+}
+
 // escapeLikeKeyword escapes SQL LIKE wildcards (%, _) in a keyword
 // so they are treated as literal characters.
 func escapeLikeKeyword(keyword string) string {
@@ -149,8 +166,10 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 		}
 	}
 
-	if err := dataQuery.
-		Order("created_at DESC").
+	for _, order := range knowledgeDisplayNameOrder(r.db) {
+		dataQuery = dataQuery.Order(order)
+	}
+	if err := dataQuery.Order("id ASC").
 		Offset(page.Offset()).
 		Limit(page.Limit()).
 		Find(&knowledges).Error; err != nil {

@@ -1,5 +1,5 @@
 // src/utils/request.js
-import axios, { type AxiosResponse } from "axios";
+import axios, { type AxiosRequestConfig, type AxiosResponse } from "axios";
 import { generateRandomString } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
@@ -252,8 +252,9 @@ export function get<T = any>(url: string): Promise<T> {
   return unwrapResponse(instance.get<T>(url));
 }
 
-export async function getDown<T = Blob>(url: string): Promise<T> {
+export async function getDown<T = Blob>(url: string, config?: AxiosRequestConfig): Promise<T> {
   return unwrapResponse(instance.get<T>(url, {
+    ...config,
     responseType: "blob",
   }));
 }
