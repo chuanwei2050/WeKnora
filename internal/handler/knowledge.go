@@ -249,11 +249,15 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 	if dupErr, ok := err.(*types.DuplicateKnowledgeError); ok {
 		ctx := c.Request.Context()
 		logger.Warnf(ctx, "Detected duplicate %s: %s", duplicateType, secutils.SanitizeForLog(dupErr.Error()))
+		code := dupErr.Code
+		if code == "" {
+			code = fmt.Sprintf("duplicate_%s", duplicateType)
+		}
 		c.JSON(http.StatusConflict, gin.H{
 			"success": false,
 			"message": dupErr.Error(),
 			"data":    knowledge, // knowledge contains the existing document
-			"code":    fmt.Sprintf("duplicate_%s", duplicateType),
+			"code":    code,
 		})
 		return true
 	}

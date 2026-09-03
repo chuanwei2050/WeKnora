@@ -112,6 +112,8 @@ export default {
     uploadSuccess: "文件上传成功！",
     uploadFailed: "文件上传失败！",
     fileExists: "文件已存在",
+    fileDeleting: "文件正在删除，请稍后重试",
+    deletingFilesSkipped: "有 {count} 个文件正在删除，请稍后重试",
     uploadingMultiple: "正在上传 {total} 个文件...",
     uploadAllSuccess: "成功上传 {count} 个文件！",
     uploadPartialSuccess: "上传完成：成功 {success} 个，失败 {fail} 个",

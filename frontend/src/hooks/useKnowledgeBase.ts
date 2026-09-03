@@ -155,13 +155,21 @@ export default function (knowledgeBaseId?: string) {
           }, currentKbId);
         } else {
           const errorMessage = result.error?.message || result.message || t('knowledgeBase.uploadFailed');
-          MessagePlugin.error(result.code === 'duplicate_file' ? t('knowledgeBase.fileExists') : errorMessage);
+          MessagePlugin.error(result.code === 'duplicate_file'
+            ? t('knowledgeBase.fileExists')
+            : result.code === 'file_deleting'
+              ? t('knowledgeBase.fileDeleting')
+              : errorMessage);
         }
         uploadInput.value.value = "";
       })
       .catch((err: any) => {
         const errorMessage = err.error?.message || err.message || t('knowledgeBase.uploadFailed');
-        MessagePlugin.error(err.code === 'duplicate_file' ? t('knowledgeBase.fileExists') : errorMessage);
+        MessagePlugin.error(err.code === 'duplicate_file'
+          ? t('knowledgeBase.fileExists')
+          : err.code === 'file_deleting'
+            ? t('knowledgeBase.fileDeleting')
+            : errorMessage);
         uploadInput.value.value = "";
       });
   };

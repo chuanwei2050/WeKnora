@@ -95,6 +95,8 @@ export default {
     uploadFailed: 'Ошибка загрузки файла!',
     docActionUnsupported: 'Этот тип базы знаний не поддерживает данную операцию',
     fileExists: 'Файл уже существует',
+    fileDeleting: 'Файл удаляется. Повторите попытку позже.',
+    deletingFilesSkipped: 'Удаляется файлов: {count}. Повторите попытку позже.',
     uploadingMultiple: 'Загрузка {total} файлов...',
     uploadAllSuccess: 'Успешно загружено {count} файлов!',
     uploadPartialSuccess: 'Загрузка завершена: успешно {success}, ошибка {fail}',

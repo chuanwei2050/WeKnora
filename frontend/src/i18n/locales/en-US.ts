@@ -113,6 +113,8 @@ export default {
     uploadFailed: 'File upload failed!',
     docActionUnsupported: 'This knowledge base type does not support this action',
     fileExists: 'File already exists',
+    fileDeleting: 'The file is being deleted. Please try again later.',
+    deletingFilesSkipped: '{count} files are being deleted. Please try again later.',
     uploadingMultiple: 'Uploading {total} files...',
     uploadAllSuccess: 'Successfully uploaded {count} files!',
     uploadPartialSuccess: 'Upload completed: {success} succeeded, {fail} failed',

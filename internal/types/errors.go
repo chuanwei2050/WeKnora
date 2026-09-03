@@ -23,6 +23,7 @@ func NewStorageQuotaExceededError() *StorageQuotaExceededError {
 type DuplicateKnowledgeError struct {
 	Message   string
 	Knowledge *Knowledge
+	Code      string
 }
 
 func (e *DuplicateKnowledgeError) Error() string {
@@ -34,6 +35,16 @@ func NewDuplicateFileError(knowledge *Knowledge) *DuplicateKnowledgeError {
 	return &DuplicateKnowledgeError{
 		Message:   fmt.Sprintf("File already exists: %s", knowledge.FileName),
 		Knowledge: knowledge,
+		Code:      "duplicate_file",
+	}
+}
+
+// NewDeletingFileError creates an error for a file that is still being deleted.
+func NewDeletingFileError(knowledge *Knowledge) *DuplicateKnowledgeError {
+	return &DuplicateKnowledgeError{
+		Message:   fmt.Sprintf("File is being deleted: %s", knowledge.FileName),
+		Knowledge: knowledge,
+		Code:      "file_deleting",
 	}
 }
 
@@ -42,5 +53,6 @@ func NewDuplicateURLError(knowledge *Knowledge) *DuplicateKnowledgeError {
 	return &DuplicateKnowledgeError{
 		Message:   fmt.Sprintf("URL already exists: %s", knowledge.Source),
 		Knowledge: knowledge,
+		Code:      "duplicate_url",
 	}
 }

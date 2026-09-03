@@ -1356,11 +1356,17 @@ const resetUploadInput = () => {
 const isDuplicateFileError = (error: any) =>
   error?.code === 'duplicate_file' ||
   error?.error?.code === 'duplicate_file' ||
-  error?.status === 409;
+  (error?.status === 409 && error?.code !== 'file_deleting' && error?.error?.code !== 'file_deleting');
 
-const showBatchUploadResult = (successCount: number, failCount: number, duplicateCount: number) => {
+const isFileDeletingError = (error: any) =>
+  error?.code === 'file_deleting' || error?.error?.code === 'file_deleting';
+
+const showBatchUploadResult = (successCount: number, failCount: number, duplicateCount: number, deletingCount: number) => {
   if (duplicateCount > 0) {
     MessagePlugin.info(t('knowledgeBase.duplicateFilesSkipped', { count: duplicateCount }));
+  }
+  if (deletingCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.deletingFilesSkipped', { count: deletingCount }));
   }
   if (failCount === 0) {
     if (successCount > 0) {
@@ -1452,6 +1458,7 @@ const handleDocumentUpload = async (event: Event) => {
   let successCount = 0;
   let failCount = 0;
   let duplicateCount = 0;
+  let deletingCount = 0;
   const totalCount = validFiles.length;
 
   const tagIdToUpload = uploadTargetTagId.value;
@@ -1467,6 +1474,12 @@ const handleDocumentUpload = async (event: Event) => {
       const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
       if (isSuccess) {
         successCount++;
+      } else if (isFileDeletingError(responseData)) {
+        failCount++;
+        deletingCount++;
+        if (totalCount === 1) {
+          MessagePlugin.warning(t('knowledgeBase.fileDeleting'));
+        }
       } else if (isDuplicateFileError(responseData)) {
         duplicateCount++;
         if (totalCount === 1) {
@@ -1485,7 +1498,13 @@ const handleDocumentUpload = async (event: Event) => {
         }
       }
     } catch (error: any) {
-      if (isDuplicateFileError(error)) {
+      if (isFileDeletingError(error)) {
+        failCount++;
+        deletingCount++;
+        if (totalCount === 1) {
+          MessagePlugin.warning(t('knowledgeBase.fileDeleting'));
+        }
+      } else if (isDuplicateFileError(error)) {
         duplicateCount++;
         if (totalCount === 1) {
           MessagePlugin.warning(t('knowledgeBase.fileExists'));
@@ -1512,7 +1531,7 @@ const handleDocumentUpload = async (event: Event) => {
       MessagePlugin.success(t('knowledgeBase.uploadSuccess'));
     }
   } else {
-    showBatchUploadResult(successCount, failCount, duplicateCount);
+    showBatchUploadResult(successCount, failCount, duplicateCount, deletingCount);
   }
 
   resetUploadInput();
@@ -1599,6 +1618,7 @@ const handleFolderUpload = async (event: Event) => {
   let successCount = 0;
   let failCount = 0;
   let duplicateCount = 0;
+  let deletingCount = 0;
   const tagIdToUpload = uploadTargetTagId.value;
 
   for (const file of validFiles) {
@@ -1613,7 +1633,10 @@ const handleFolderUpload = async (event: Event) => {
       await uploadKnowledgeFile(kbId.value, { file, fileName, tag_id: tagIdToUpload, metadata });
       successCount++;
     } catch (error: any) {
-      if (isDuplicateFileError(error)) {
+      if (isFileDeletingError(error)) {
+        failCount++;
+        deletingCount++;
+      } else if (isDuplicateFileError(error)) {
         duplicateCount++;
       } else {
         failCount++;
@@ -1627,7 +1650,7 @@ const handleFolderUpload = async (event: Event) => {
     }));
   }
 
-  showBatchUploadResult(successCount, failCount, duplicateCount);
+  showBatchUploadResult(successCount, failCount, duplicateCount, deletingCount);
 
   if (input) input.value = '';
 };
