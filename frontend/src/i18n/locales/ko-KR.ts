@@ -112,6 +112,8 @@ export default {
     uploadSuccess: "파일 업로드 성공!",
     uploadFailed: "파일 업로드 실패!",
     fileExists: "파일이 이미 존재합니다",
+    fileExistsInFolder: "이 파일은 이미 '{folder}' 폴더에 있습니다.",
+    locateExistingFile: "기존 파일 찾기",
     fileDeleting: "파일을 삭제하는 중입니다. 잠시 후 다시 시도해 주세요.",
     deletingFilesSkipped: "{count}개 파일을 삭제하는 중입니다. 잠시 후 다시 시도해 주세요.",
     uploadingMultiple: "{total}개 파일 업로드 중...",

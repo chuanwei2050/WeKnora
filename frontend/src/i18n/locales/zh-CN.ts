@@ -112,6 +112,8 @@ export default {
     uploadSuccess: "文件上传成功！",
     uploadFailed: "文件上传失败！",
     fileExists: "文件已存在",
+    fileExistsInFolder: "该文件已存在于『{folder}』文件夹",
+    locateExistingFile: "定位已有文件",
     fileDeleting: "文件正在删除，请稍后重试",
     deletingFilesSkipped: "有 {count} 个文件正在删除，请稍后重试",
     uploadingMultiple: "正在上传 {total} 个文件...",

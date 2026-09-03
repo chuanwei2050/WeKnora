@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick, h, type ComponentPublicInstance } from "vue";
-import { MessagePlugin, Icon as TIcon } from "tdesign-vue-next";
+import { MessagePlugin, DialogPlugin, Icon as TIcon } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { useRoute, useRouter } from 'vue-router';
@@ -1361,6 +1361,37 @@ const isDuplicateFileError = (error: any) =>
 const isFileDeletingError = (error: any) =>
   error?.code === 'file_deleting' || error?.error?.code === 'file_deleting';
 
+type DuplicateKnowledge = KnowledgeCard & { tag_name?: string };
+const duplicateDialogVisible = ref(false);
+const duplicateKnowledge = ref<DuplicateKnowledge | null>(null);
+
+const duplicateFolderName = computed(() => {
+  const existing = duplicateKnowledge.value;
+  return existing ? (existing.tag_name || getTagName(existing.tag_id) || t('knowledgeBase.untagged')) : '';
+});
+
+const duplicateData = (value: any): DuplicateKnowledge | null => {
+  const data = value?.data || value?.error?.data;
+  return data?.id ? data as DuplicateKnowledge : null;
+};
+
+const openDuplicateDialog = (value: any) => {
+  const existing = duplicateData(value);
+  if (!existing) {
+    MessagePlugin.warning(t('knowledgeBase.fileExists'));
+    return;
+  }
+  duplicateKnowledge.value = existing;
+  duplicateDialogVisible.value = true;
+};
+
+const locateDuplicateKnowledge = () => {
+  const existing = duplicateKnowledge.value;
+  if (!existing?.tag_id) return;
+  duplicateDialogVisible.value = false;
+  handleTagFilterChange(existing.tag_id);
+};
+
 const showBatchUploadResult = (successCount: number, failCount: number, duplicateCount: number, deletingCount: number) => {
   if (duplicateCount > 0) {
     MessagePlugin.info(t('knowledgeBase.duplicateFilesSkipped', { count: duplicateCount }));
@@ -1483,7 +1514,7 @@ const handleDocumentUpload = async (event: Event) => {
       } else if (isDuplicateFileError(responseData)) {
         duplicateCount++;
         if (totalCount === 1) {
-          MessagePlugin.warning(t('knowledgeBase.fileExists'));
+          openDuplicateDialog(responseData);
         }
       } else {
         failCount++;
@@ -1507,7 +1538,7 @@ const handleDocumentUpload = async (event: Event) => {
       } else if (isDuplicateFileError(error)) {
         duplicateCount++;
         if (totalCount === 1) {
-          MessagePlugin.warning(t('knowledgeBase.fileExists'));
+          openDuplicateDialog(error);
         }
       } else {
         failCount++;
@@ -2950,6 +2981,25 @@ async function createNewSession(value: string): Promise<void> {
               />
             </div>
           </div>
+          <t-dialog
+            v-model:visible="duplicateDialogVisible"
+            :header="$t('knowledgeBase.fileExists')"
+            :footer="false"
+            width="440px"
+            @close="duplicateKnowledge = null"
+          >
+            <p class="duplicate-file-message">
+              {{ $t('knowledgeBase.fileExistsInFolder', { folder: duplicateFolderName }) }}
+            </p>
+            <div class="duplicate-file-actions">
+              <t-button theme="default" variant="outline" @click="duplicateDialogVisible = false">
+                {{ $t('common.cancel') }}
+              </t-button>
+              <t-button theme="primary" @click="locateDuplicateKnowledge">
+                {{ $t('knowledgeBase.locateExistingFile') }}
+              </t-button>
+            </div>
+          </t-dialog>
           <t-dialog
             v-model:visible="delDialog"
             dialogClassName="del-knowledge"
@@ -5235,5 +5285,18 @@ async function createNewSession(value: string): Promise<void> {
 
 .del-card {
   vertical-align: middle;
+}
+
+.duplicate-file-message {
+  margin: 0;
+  color: var(--td-text-color-primary);
+  font-size: 14px;
+}
+
+.duplicate-file-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 24px;
 }
 </style>

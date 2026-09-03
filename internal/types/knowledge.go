@@ -140,6 +140,8 @@ type Knowledge struct {
 	DeletedAt gorm.DeletedAt `json:"deleted_at"         gorm:"index"`
 	// Knowledge base name (not stored in database, populated on query)
 	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-"`
+	// TagName is optional display metadata for responses such as duplicate-file locations.
+	TagName string `json:"tag_name,omitempty" gorm:"-"`
 }
 
 // GetMetadata returns the metadata as a map[string]string.

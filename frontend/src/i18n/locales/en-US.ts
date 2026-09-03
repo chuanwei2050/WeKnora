@@ -113,6 +113,8 @@ export default {
     uploadFailed: 'File upload failed!',
     docActionUnsupported: 'This knowledge base type does not support this action',
     fileExists: 'File already exists',
+    fileExistsInFolder: 'This file already exists in the “{folder}” folder.',
+    locateExistingFile: 'Locate existing file',
     fileDeleting: 'The file is being deleted. Please try again later.',
     deletingFilesSkipped: '{count} files are being deleted. Please try again later.',
     uploadingMultiple: 'Uploading {total} files...',

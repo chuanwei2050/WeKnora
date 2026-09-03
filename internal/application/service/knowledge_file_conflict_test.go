@@ -9,22 +9,19 @@ import (
 
 func TestExistingFileConflict(t *testing.T) {
 	tests := []struct {
-		name             string
-		parseStatus      string
-		wantCode         string
-		refreshCreatedAt bool
+		name        string
+		parseStatus string
+		wantCode    string
 	}{
 		{
-			name:             "existing file",
-			parseStatus:      types.ParseStatusCompleted,
-			wantCode:         "duplicate_file",
-			refreshCreatedAt: true,
+			name:        "existing file",
+			parseStatus: types.ParseStatusCompleted,
+			wantCode:    "duplicate_file",
 		},
 		{
-			name:             "file being deleted",
-			parseStatus:      types.ParseStatusDeleting,
-			wantCode:         "file_deleting",
-			refreshCreatedAt: false,
+			name:        "file being deleted",
+			parseStatus: types.ParseStatusDeleting,
+			wantCode:    "file_deleting",
 		},
 	}
 
@@ -32,10 +29,9 @@ func TestExistingFileConflict(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			knowledge := &types.Knowledge{FileName: "example.pdf", ParseStatus: tt.parseStatus}
 
-			err, refreshCreatedAt := existingFileConflict(knowledge)
+			err := existingFileConflict(knowledge)
 
 			require.Equal(t, tt.wantCode, err.Code)
-			require.Equal(t, tt.refreshCreatedAt, refreshCreatedAt)
 		})
 	}
 }

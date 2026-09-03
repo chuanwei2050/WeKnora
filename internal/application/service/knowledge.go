@@ -571,11 +571,11 @@ func platformStorageProvider(ctx context.Context) string {
 	return strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
 }
 
-func existingFileConflict(knowledge *types.Knowledge) (*types.DuplicateKnowledgeError, bool) {
+func existingFileConflict(knowledge *types.Knowledge) *types.DuplicateKnowledgeError {
 	if knowledge.ParseStatus == types.ParseStatusDeleting {
-		return types.NewDeletingFileError(knowledge), false
+		return types.NewDeletingFileError(knowledge)
 	}
-	return types.NewDuplicateFileError(knowledge), true
+	return types.NewDuplicateFileError(knowledge)
 }
 
 // checkStorageEngineConfigured verifies that the platform has a storage engine configured.
@@ -931,15 +931,12 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	}
 	if exists {
 		logger.Infof(ctx, "File already exists: %s", fileName)
-		conflictErr, refreshCreatedAt := existingFileConflict(existingKnowledge)
-		if refreshCreatedAt {
-			// Update creation time for existing knowledge
-			if err := s.repo.UpdateKnowledgeColumn(ctx, existingKnowledge.ID, "created_at", time.Now()); err != nil {
-				logger.Errorf(ctx, "Failed to update existing knowledge: %v", err)
-				return nil, err
+		if existingKnowledge != nil && existingKnowledge.TagID != "" && s.tagRepo != nil {
+			if tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, existingKnowledge.TagID); tagErr == nil && tag != nil {
+				existingKnowledge.TagName = tag.Name
 			}
 		}
-		return existingKnowledge, conflictErr
+		return existingKnowledge, existingFileConflict(existingKnowledge)
 	}
 
 	// Check storage quota
