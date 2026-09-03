@@ -151,18 +151,20 @@ func (s *knowledgeBaseService) applyPlatformModelDefaults(ctx context.Context, k
 		kb.EmbeddingModelID = embeddingModel.ID
 	}
 	if kb.VLMConfig.Enabled {
-		vlmModel, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm")
+		_, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm")
 		if err != nil {
 			return fmt.Errorf("resolve platform vision model: %w", err)
 		}
-		kb.VLMConfig.ModelID = vlmModel.ID
+		// VLM is platform-managed. Keep only the feature switch on the KB so
+		// later changes to the default model take effect without rewriting KBs.
+		kb.VLMConfig.ModelID = ""
 	}
 	if kb.ASRConfig.Enabled {
-		asrModel, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeASR, "asr")
+		_, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeASR, "asr")
 		if err != nil {
 			return fmt.Errorf("resolve platform ASR model: %w", err)
 		}
-		kb.ASRConfig.ModelID = asrModel.ID
+		kb.ASRConfig.ModelID = ""
 	}
 	return nil
 }

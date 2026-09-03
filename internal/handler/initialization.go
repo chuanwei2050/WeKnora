@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,6 +25,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/tts"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -298,13 +300,12 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	// 处理多模态模型配置
 	kb.VLMConfig = types.VLMConfig{}
 	if req.Multimodal.Enabled {
-		vllmModel, err := h.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm")
+		_, err := h.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm")
 		if err != nil {
 			c.Error(errors.NewBadRequestError("平台默认视觉模型未配置"))
 			return
 		}
 		kb.VLMConfig.Enabled = true
-		kb.VLMConfig.ModelID = vllmModel.ID
 	}
 	if !kb.VLMConfig.Enabled {
 		kb.VLMConfig.ModelID = ""
@@ -313,13 +314,12 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	// 处理ASR语音识别配置
 	kb.ASRConfig = types.ASRConfig{}
 	if req.ASRConfig != nil && req.ASRConfig.Enabled {
-		asrModel, err := h.modelService.GetDefaultModel(ctx, types.ModelTypeASR, "asr")
+		_, err := h.modelService.GetDefaultModel(ctx, types.ModelTypeASR, "asr")
 		if err != nil {
 			c.Error(errors.NewBadRequestError("平台默认ASR模型未配置"))
 			return
 		}
 		kb.ASRConfig.Enabled = true
-		kb.ASRConfig.ModelID = asrModel.ID
 		kb.ASRConfig.Language = req.ASRConfig.Language
 	}
 
@@ -740,7 +740,7 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 	req *InitializationRequest,
 	processedModels []*types.Model,
 ) {
-	embeddingModelID, llmModelID, vlmModelID := extractModelIDs(processedModels)
+	embeddingModelID, llmModelID, _ := extractModelIDs(processedModels)
 
 	kb.SummaryModelID = llmModelID
 	kb.EmbeddingModelID = embeddingModelID
@@ -754,7 +754,6 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 	if req.Multimodal.Enabled {
 		kb.VLMConfig = types.VLMConfig{
 			Enabled: req.Multimodal.Enabled,
-			ModelID: vlmModelID,
 		}
 	} else {
 		kb.VLMConfig = types.VLMConfig{}
@@ -1532,6 +1531,131 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 			"message":   message,
 		},
 	})
+}
+
+// CheckVLMModel verifies both connectivity and actual image-input support.
+func (h *InitializationHandler) CheckVLMModel(c *gin.Context) {
+	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
+
+	var req ModelTestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	if req.ModelName == "" || (req.Source != string(types.ModelSourceLocal) && req.BaseURL == "") {
+		c.Error(errors.NewBadRequestError("模型名称和Base URL不能为空"))
+		return
+	}
+	if req.BaseURL != "" {
+		if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+			return
+		}
+	}
+
+	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
+	if !ok {
+		c.Error(errors.NewBadRequestError("租户信息未找到"))
+		return
+	}
+	model := h.buildTestModel(&req, types.ModelTypeVLLM, types.ModelSourceRemote)
+	instance, err := vlm.NewVLM(vlm.ConfigFromModel(model, appID, appSecret), h.ollamaService)
+	if err == nil {
+		var image []byte
+		image, err = base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+		if err == nil {
+			var output string
+			output, err = instance.Predict(ctx, [][]byte{image}, "请用一个词描述这张图片。")
+			if err == nil && strings.TrimSpace(output) == "" {
+				err = fmt.Errorf("视觉模型返回了空内容")
+			}
+		}
+	}
+
+	available := err == nil
+	message := "视觉能力测试成功，模型支持图片输入"
+	if err != nil {
+		message = fmt.Sprintf("视觉能力测试失败: %v", err)
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"available": available,
+		"message":   message,
+	}})
+}
+
+// CheckThinkingModel verifies that enabling thinking produces an observable
+// reasoning stream; merely accepting an unknown request field is not enough.
+func (h *InitializationHandler) CheckThinkingModel(c *gin.Context) {
+	ctx := c.Request.Context()
+	if !requirePlatformAdminForInitialization(c) {
+		return
+	}
+
+	var req ModelTestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	if req.ModelName == "" || (req.Source != string(types.ModelSourceLocal) && req.BaseURL == "") {
+		c.Error(errors.NewBadRequestError("模型名称和Base URL不能为空"))
+		return
+	}
+	if req.BaseURL != "" {
+		if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+			return
+		}
+	}
+
+	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
+	if !ok {
+		c.Error(errors.NewBadRequestError("租户信息未找到"))
+		return
+	}
+	model := h.buildTestModel(&req, types.ModelTypeKnowledgeQA, types.ModelSourceRemote)
+	instance, err := chat.NewChat(chat.ConfigFromModel(model, appID, appSecret), h.ollamaService)
+	observedThinking := false
+	if err == nil {
+		enabled := true
+		var stream <-chan types.StreamResponse
+		stream, err = instance.ChatStream(ctx, []chat.Message{{
+			Role: "user", Content: "请先进行简短推理，再回答：1+1等于几？",
+		}}, &chat.ChatOptions{MaxTokens: 128, Thinking: &enabled})
+		for err == nil && stream != nil {
+			select {
+			case <-ctx.Done():
+				err = ctx.Err()
+				stream = nil
+			case response, open := <-stream:
+				if !open {
+					stream = nil
+					break
+				}
+				if response.ResponseType == types.ResponseTypeThinking && strings.TrimSpace(response.Content) != "" {
+					observedThinking = true
+				}
+				if response.Done {
+					stream = nil
+				}
+			}
+		}
+	}
+	if err == nil && !observedThinking {
+		err = fmt.Errorf("模型未返回可识别的思考内容")
+	}
+
+	available := err == nil
+	message := "深度思考能力测试成功"
+	if err != nil {
+		message = fmt.Sprintf("深度思考能力测试失败: %v", err)
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"available": available,
+		"message":   message,
+	}})
 }
 
 // TestEmbeddingModel godoc

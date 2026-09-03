@@ -632,6 +632,8 @@ func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.Initializ
 
 	// 远程API相关接口
 	r.POST("/initialization/remote/check", handler.CheckRemoteModel)
+	r.POST("/initialization/vlm/check", handler.CheckVLMModel)
+	r.POST("/initialization/thinking/check", handler.CheckThinkingModel)
 	r.POST("/initialization/embedding/test", handler.TestEmbeddingModel)
 	r.POST("/initialization/rerank/check", handler.CheckRerankModel)
 	r.POST("/initialization/asr/check", handler.CheckASRModel)

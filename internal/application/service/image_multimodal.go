@@ -160,6 +160,10 @@ func (s *ImageMultimodalService) cleanupStaleImageSource(ctx context.Context, pa
 
 // Handle implements asynq handler for TypeImageMultimodal.
 func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) error {
+	retryCount, retryCountOK := asynq.GetRetryCount(ctx)
+	maxRetry, maxRetryOK := asynq.GetMaxRetry(ctx)
+	isLastRetry := retryCountOK && maxRetryOK && retryCount >= maxRetry
+
 	var payload types.ImageMultimodalPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return fmt.Errorf("unmarshal image multimodal payload: %w", err)
@@ -253,8 +257,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 		if ocrErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
-			return fmt.Errorf("OCR failed for %s: %w", payload.ImageURL, ocrErr)
+			return s.handleVLMFailure(ctx, payload, "OCR", ocrErr, isLastRetry)
 		} else {
 			ocrText = sanitizeOCRText(ocrText)
 			if ocrText != "" {
@@ -268,8 +271,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	if payload.EnableCaption {
 		caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
 		if capErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
-			return fmt.Errorf("caption failed for %s: %w", payload.ImageURL, capErr)
+			return s.handleVLMFailure(ctx, payload, "caption", capErr, isLastRetry)
 		} else if caption != "" {
 			imageInfo.Caption = caption
 		}
@@ -379,6 +381,22 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// have real textual content (caption/OCR), we can generate questions.
 	// Note: for documents with multiple images (e.g. PDFs), we also wait until
 	// all images are processed before triggering summary/question generation.
+	return s.checkAndFinalizeAllImages(ctx, payload)
+}
+
+func (s *ImageMultimodalService) handleVLMFailure(
+	ctx context.Context,
+	payload types.ImageMultimodalPayload,
+	operation string,
+	cause error,
+	isLastRetry bool,
+) error {
+	if !isLastRetry {
+		logger.Warnf(ctx, "[ImageMultimodal] %s failed for %s, retrying: %v", operation, payload.ImageURL, cause)
+		return fmt.Errorf("%s failed for %s: %w", operation, payload.ImageURL, cause)
+	}
+
+	logger.Errorf(ctx, "[ImageMultimodal] %s permanently failed for %s; finalizing document without this image enrichment: %v", operation, payload.ImageURL, cause)
 	return s.checkAndFinalizeAllImages(ctx, payload)
 }
 

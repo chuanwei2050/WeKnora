@@ -288,7 +288,7 @@
         <div v-if="modelType === 'chat'" class="form-item">
           <label class="form-label">{{ $t('model.editor.supportsVisionLabel') }}</label>
           <div style="display: flex; align-items: center; gap: 8px;">
-            <t-switch v-model="formData.supportsVision" />
+            <t-switch :value="formData.supportsVision" :disabled="capabilityChecking" @change="handleVisionChange" />
             <span class="form-desc">{{ $t('model.editor.supportsVisionDesc') }}</span>
           </div>
         </div>
@@ -296,7 +296,7 @@
         <div v-if="modelType === 'chat'" class="form-item">
           <label class="form-label">{{ $t('model.editor.thinkingLabel') }}</label>
           <div style="display: flex; align-items: center; gap: 8px;">
-            <t-switch v-model="formData.thinking" />
+            <t-switch :value="formData.thinking" :disabled="capabilityChecking" @change="handleThinkingChange" />
             <span class="form-desc">{{ $t('model.editor.thinkingDesc') }}</span>
           </div>
         </div>
@@ -342,7 +342,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, onUnmounted, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, checkTTSModel, listTTSVoices, listOllamaModels, downloadOllamaModel, getDownloadProgress, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
+import { checkOllamaModels, checkRemoteModel, checkVLMModel, checkThinkingModel, testEmbeddingModel, checkRerankModel, checkASRModel, checkTTSModel, listTTSVoices, listOllamaModels, downloadOllamaModel, getDownloadProgress, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
 import { getWeKnoraCloudStatus } from '@/api/model'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
@@ -559,6 +559,8 @@ const modelChecked = ref(false)
 const modelAvailable = ref(false)
 const checking = ref(false)
 const remoteChecked = ref(false)
+const capabilityChecking = ref(false)
+const validatedCapabilityFingerprint = ref('')
 const remoteAvailable = ref(false)
 const remoteMessage = ref('')
 const dimensionChecked = ref(false)
@@ -623,6 +625,16 @@ const formData = ref<ModelFormData>({
   customHeaders: [],
   defaultVoice: getInitialDefaultVoice()
 })
+
+const capabilityFingerprint = () => JSON.stringify([
+  formData.value.source,
+  formData.value.provider,
+  formData.value.modelName,
+  formData.value.baseUrl,
+  formData.value.apiKey,
+  formData.value.interfaceType,
+  formData.value.customHeaders
+])
 
 const rules = computed(() => ({
   modelName: [
@@ -737,6 +749,7 @@ watch(() => props.visible, (val) => {
     if (props.modelType === 'tts') {
       loadTTSVoiceOptions()
     }
+    validatedCapabilityFingerprint.value = capabilityFingerprint()
   } else {
     // 恢复背景滚动
     document.body.style.overflow = ''
@@ -766,6 +779,7 @@ const resetForm = () => {
   remoteChecked.value = false
   remoteAvailable.value = false
   remoteMessage.value = ''
+  validatedCapabilityFingerprint.value = ''
   dimensionChecked.value = false
   dimensionSuccess.value = false
   dimensionMessage.value = ''
@@ -1059,9 +1073,8 @@ const checkRemoteAPI = async () => {
         break
         
       case 'vllm':
-        // VLLM 模型（多模态）
-        // VLLM 使用 checkRemoteModel 进行基础连接测试
-        result = await checkRemoteModel({
+        // VLLM 必须发送真实图片，避免文本模型被误判为可用。
+        result = await checkVLMModel({
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
@@ -1124,6 +1137,72 @@ const checkRemoteAPI = async () => {
     MessagePlugin.error(remoteMessage.value)
   } finally {
     checking.value = false
+  }
+}
+
+const capabilityPayload = () => {
+  const customHeaders: Record<string, string> = {}
+  for (const item of formData.value.customHeaders || []) {
+    const key = (item?.key || '').trim()
+    const value = (item?.value || '').trim()
+    if (key && value) customHeaders[key] = value
+  }
+  return {
+    source: formData.value.source,
+    modelName: formData.value.modelName.trim(),
+    baseUrl: formData.value.baseUrl?.trim() || '',
+    apiKey: formData.value.apiKey || '',
+    provider: formData.value.provider || '',
+    interfaceType: formData.value.interfaceType,
+    ...(Object.keys(customHeaders).length > 0 ? { customHeaders } : {})
+  }
+}
+
+const validateCapabilityInput = () => {
+  if (!formData.value.modelName?.trim() || (formData.value.source !== 'local' && !formData.value.baseUrl?.trim() && formData.value.provider !== 'weknoracloud')) {
+    MessagePlugin.warning(t('model.editor.fillModelAndUrl'))
+    return false
+  }
+  return true
+}
+
+const handleVisionChange = async (enabled: boolean) => {
+  if (!enabled) {
+    formData.value.supportsVision = false
+    return
+  }
+  if (!validateCapabilityInput()) return
+  capabilityChecking.value = true
+  try {
+    const result = await checkVLMModel(capabilityPayload())
+    formData.value.supportsVision = !!result.available
+    if (result.available) validatedCapabilityFingerprint.value = capabilityFingerprint()
+    if (!result.available) MessagePlugin.error(result.message || '该模型不支持视觉/多模态输入')
+  } catch (error: any) {
+    formData.value.supportsVision = false
+    MessagePlugin.error(error?.message || '视觉能力校验失败')
+  } finally {
+    capabilityChecking.value = false
+  }
+}
+
+const handleThinkingChange = async (enabled: boolean) => {
+  if (!enabled) {
+    formData.value.thinking = false
+    return
+  }
+  if (!validateCapabilityInput()) return
+  capabilityChecking.value = true
+  try {
+    const result = await checkThinkingModel(capabilityPayload())
+    formData.value.thinking = !!result.available
+    if (result.available) validatedCapabilityFingerprint.value = capabilityFingerprint()
+    if (!result.available) MessagePlugin.error(result.message || '该模型不支持深度思考')
+  } catch (error: any) {
+    formData.value.thinking = false
+    MessagePlugin.error(error?.message || '深度思考能力校验失败')
+  } finally {
+    capabilityChecking.value = false
   }
 }
 
@@ -1308,6 +1387,22 @@ watch([() => formData.value.baseUrl, () => formData.value.provider], () => {
     loadTTSVoiceOptions()
   }
 })
+
+watch([
+  () => formData.value.source,
+  () => formData.value.provider,
+  () => formData.value.modelName,
+  () => formData.value.baseUrl,
+  () => formData.value.apiKey,
+  () => formData.value.interfaceType,
+  () => formData.value.customHeaders
+], () => {
+  if (validatedCapabilityFingerprint.value && validatedCapabilityFingerprint.value !== capabilityFingerprint()) {
+    formData.value.supportsVision = false
+    formData.value.thinking = false
+    validatedCapabilityFingerprint.value = ''
+  }
+}, { deep: true })
 
 // 取消
 const handleCancel = () => {

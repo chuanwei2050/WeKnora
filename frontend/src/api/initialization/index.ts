@@ -300,6 +300,35 @@ export function checkRemoteModel(modelConfig: {
     });
 }
 
+// 检查 VLM 是否真正支持图片输入，而不只是验证文本 Chat 端点可达。
+export function checkVLMModel(modelConfig: {
+    source?: 'local' | 'remote';
+    modelName: string;
+    baseUrl: string;
+    apiKey?: string;
+    provider?: string;
+} & BaseModelTestPayload): Promise<{ available: boolean; message?: string }> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/vlm/check', modelConfig)
+            .then((response: any) => resolve(response.data || {}))
+            .catch(reject);
+    });
+}
+
+export function checkThinkingModel(modelConfig: {
+    source?: 'local' | 'remote';
+    modelName: string;
+    baseUrl: string;
+    apiKey?: string;
+    provider?: string;
+} & BaseModelTestPayload): Promise<{ available: boolean; message?: string }> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/thinking/check', modelConfig)
+            .then((response: any) => resolve(response.data || {}))
+            .catch(reject);
+    });
+}
+
 // 测试 Embedding 模型（本地/远程）是否可用
 export function testEmbeddingModel(modelConfig: {
     source: 'local' | 'remote';

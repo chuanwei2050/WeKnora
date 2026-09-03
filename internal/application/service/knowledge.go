@@ -8864,13 +8864,10 @@ func (s *knowledgeService) getVLMConfig(ctx context.Context, kb *types.Knowledge
 		return nil, nil
 	}
 
-	var model *types.Model
-	var err error
-	if kb.VLMConfig.ModelID == "" {
-		model, err = s.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm")
-	} else {
-		model, err = s.modelService.GetModelByID(ctx, kb.VLMConfig.ModelID)
-	}
+	// Platform-managed VLM configuration is resolved at use time. ModelID is
+	// intentionally ignored here because older KB rows may contain a stale
+	// snapshot of a model that has since been replaced or deleted.
+	model, err := s.modelService.GetDefaultModel(ctx, types.ModelTypeVLLM, "vlm")
 	if err != nil {
 		return nil, err
 	}
@@ -9787,7 +9784,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			continue
 		}
 
-		task := asynq.NewTask(types.TypeImageMultimodal, payloadBytes)
+		task := asynq.NewTask(types.TypeImageMultimodal, payloadBytes, asynq.MaxRetry(3))
 		if _, err := s.task.Enqueue(task); err != nil {
 			logger.Warnf(ctx, "Failed to enqueue image multimodal task for %s: %v", img.ServingURL, err)
 		} else {
