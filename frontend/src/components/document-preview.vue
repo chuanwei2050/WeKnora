@@ -6,6 +6,7 @@ import 'highlight.js/styles/github.css';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
 import { sanitizeHTML } from '@/utils/security';
+import { getCachedPreview, setCachedPreview, type PreviewType } from '@/utils/documentPreviewCache';
 
 
 const VueOfficePptx = defineAsyncComponent(() => import('@vue-office/pptx'));
@@ -24,7 +25,7 @@ const MAX_TEXT_PREVIEW_BYTES = 2 * 1024 * 1024;
 
 const loading = ref(false);
 const error = ref('');
-const previewType = ref<'pdf' | 'docx' | 'image' | 'excel' | 'text' | 'markdown' | 'pptx' | 'audio' | 'unsupported'>('unsupported');
+const previewType = ref<PreviewType>('unsupported');
 const blobUrl = ref('');
 const highlightedCode = ref('');
 const markdownHtml = ref('');
@@ -231,6 +232,7 @@ async function loadPreview() {
   loading.value = true;
   error.value = '';
   previewType.value = resolvePreviewType(ft);
+  const cacheKey = `${id}:${ft.toLowerCase()}`;
 
   if (previewType.value === 'unsupported') {
     loading.value = false;
@@ -238,6 +240,31 @@ async function loadPreview() {
   }
 
   try {
+    const cached = getCachedPreview(cacheKey);
+    if (cached) {
+      previewType.value = cached.previewType;
+      highlightedCode.value = cached.highlightedCode || '';
+      markdownHtml.value = cached.markdownHtml || '';
+      plainTextContent.value = cached.plainTextContent || '';
+      excelHtml.value = cached.excelHtml || '';
+      excelPreviewTruncated.value = Boolean(cached.excelPreviewTruncated);
+      textPreviewTruncated.value = Boolean(cached.textPreviewTruncated);
+      largeFileBlocked.value = Boolean(cached.largeFileBlocked);
+      pptxData.value = cached.pptxData || null;
+      loadedForId = id;
+
+      if (cached.blob) {
+        if (cached.previewType === 'docx') {
+          loading.value = false;
+          await nextTick();
+          if (isCurrent()) await renderDocx(cached.blob);
+          return;
+        }
+        blobUrl.value = URL.createObjectURL(cached.blob);
+      }
+      return;
+    }
+
     const rawBlob = await previewKnowledgeFile(id);
     if (!isCurrent()) return;
     const blob = ensureBlobType(rawBlob, ft);
@@ -248,6 +275,7 @@ async function loadPreview() {
       if (!isCurrent()) return;
       if (!safe) {
         largeFileBlocked.value = true;
+        setCachedPreview(cacheKey, { previewType: previewType.value, largeFileBlocked: true, size: 1 });
         return;
       }
     }
@@ -259,16 +287,19 @@ async function loadPreview() {
       await nextTick();
       if (!isCurrent()) return;
       await renderDocx(blob);
+      if (isCurrent()) setCachedPreview(cacheKey, { previewType: previewType.value, blob, size: blob.size });
       return;
     }
 
     switch (previewType.value) {
       case 'pdf': {
         blobUrl.value = URL.createObjectURL(blob);
+        setCachedPreview(cacheKey, { previewType: previewType.value, blob, size: blob.size });
         break;
       }
       case 'image': {
         blobUrl.value = URL.createObjectURL(blob);
+        setCachedPreview(cacheKey, { previewType: previewType.value, blob, size: blob.size });
         break;
       }
       case 'excel': {
@@ -276,6 +307,12 @@ async function loadPreview() {
         if (!result || !isCurrent()) return;
         excelPreviewTruncated.value = result.truncated;
         excelHtml.value = sanitizeHTML(result.html);
+        setCachedPreview(cacheKey, {
+          previewType: previewType.value,
+          excelHtml: excelHtml.value,
+          excelPreviewTruncated: result.truncated,
+          size: excelHtml.value.length * 2,
+        });
         break;
       }
       case 'text': {
@@ -284,6 +321,13 @@ async function loadPreview() {
         if (result.format === 'html') highlightedCode.value = result.content;
         else plainTextContent.value = result.content;
         textPreviewTruncated.value = result.truncated;
+        setCachedPreview(cacheKey, {
+          previewType: previewType.value,
+          highlightedCode: highlightedCode.value,
+          plainTextContent: plainTextContent.value,
+          textPreviewTruncated: result.truncated,
+          size: result.content.length * 2,
+        });
         break;
       }
       case 'markdown': {
@@ -292,16 +336,25 @@ async function loadPreview() {
         if (result.format === 'html') markdownHtml.value = sanitizeHTML(result.content);
         else plainTextContent.value = result.content;
         textPreviewTruncated.value = result.truncated;
+        setCachedPreview(cacheKey, {
+          previewType: previewType.value,
+          markdownHtml: markdownHtml.value,
+          plainTextContent: plainTextContent.value,
+          textPreviewTruncated: result.truncated,
+          size: (markdownHtml.value.length + plainTextContent.value.length) * 2,
+        });
         break;
       }
       case 'pptx': {
         const data = await blob.arrayBuffer();
         if (!isCurrent()) return;
         pptxData.value = data;
+        setCachedPreview(cacheKey, { previewType: previewType.value, pptxData: data, size: data.byteLength });
         break;
       }
       case 'audio': {
         blobUrl.value = URL.createObjectURL(blob);
+        setCachedPreview(cacheKey, { previewType: previewType.value, blob, size: blob.size });
         break;
       }
     }
