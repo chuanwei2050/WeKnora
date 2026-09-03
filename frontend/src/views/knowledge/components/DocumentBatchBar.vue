@@ -68,7 +68,7 @@ const actionLabelKeys: Record<GovernanceRowAction, string> = {
             {{ t('knowledgeBase.moveToDocumentDirectory') }}（{{ count }}）
           </t-button>
         </FolderMoveCascader>
-        <t-button v-if="directoryCount === 1 && documentCount === 0" variant="outline" size="small" @click="emit('download-directory')">
+        <t-button v-if="(directoryCount || 0) > 0 && documentCount === 0" variant="outline" size="small" @click="emit('download-directory')">
           {{ t('knowledgeBase.downloadDocumentDirectory') }}
         </t-button>
         <t-button v-if="canEdit && directoryCount === 1 && documentCount === 0" variant="outline" size="small" @click="emit('rename-directory')">
@@ -90,7 +90,7 @@ const actionLabelKeys: Record<GovernanceRowAction, string> = {
           {{ t(actionLabelKeys[item.action]) }}（{{ item.count }}）
         </t-button>
         <FolderMoveCascader
-          v-if="documentCount === count && folderTargets?.length"
+          v-if="folderTargets?.length && (documentCount === count || directoryCount === count)"
           :options="folderTargets"
           placement="top-right"
           @select="(folderId: string) => emit('move-folder', folderId)"

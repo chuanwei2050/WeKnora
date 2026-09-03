@@ -325,6 +325,123 @@ func (r *knowledgeDirectoryRepository) MoveEntries(ctx context.Context, tenantID
 	})
 }
 
+func (r *knowledgeDirectoryRepository) MoveSubtreesToTag(ctx context.Context, tenantID uint64, kbID, sourceTagID, targetTagID string, directoryIDs []string) ([]string, error) {
+	knowledgeIDs := make([]string, 0)
+	if sourceTagID == targetTagID {
+		return knowledgeIDs, fmt.Errorf("source and target categories must differ")
+	}
+	err := directoryTransaction(ctx, r.db, tenantID, kbID, func(tx *gorm.DB) error {
+		var sources []*types.KnowledgeDirectory
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
+			"tenant_id = ? AND knowledge_base_id = ? AND tag_id = ? AND id IN ? AND status = ?",
+			tenantID, kbID, sourceTagID, directoryIDs, types.DirectoryStatusActive,
+		).Order("id ASC").Find(&sources).Error; err != nil {
+			return err
+		}
+		if len(sources) != len(directoryIDs) {
+			return fmt.Errorf("one or more directories are invalid")
+		}
+		sourceByID := make(map[string]*types.KnowledgeDirectory, len(sources))
+		for _, source := range sources {
+			sourceByID[source.ID] = source
+		}
+		collapsed := make([]*types.KnowledgeDirectory, 0, len(sources))
+		for _, source := range sources {
+			ancestorID := source.ParentID
+			nested := false
+			for ancestorID != nil {
+				if _, selected := sourceByID[*ancestorID]; selected {
+					nested = true
+					break
+				}
+				var ancestor types.KnowledgeDirectory
+				if err := tx.Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id = ? AND id = ? AND status = ?", tenantID, kbID, sourceTagID, *ancestorID, types.DirectoryStatusActive).First(&ancestor).Error; err != nil {
+					return err
+				}
+				ancestorID = ancestor.ParentID
+			}
+			if !nested {
+				collapsed = append(collapsed, source)
+			}
+		}
+		if len(collapsed) == 0 {
+			return fmt.Errorf("one or more directories are invalid")
+		}
+
+		allDirectoryIDs := make([]string, 0)
+		seenDirectoryIDs := make(map[string]struct{})
+		rootNames := make(map[string]struct{}, len(collapsed))
+		for _, root := range collapsed {
+			if _, duplicate := rootNames[root.NormalizedName]; duplicate {
+				return fmt.Errorf("duplicate directory name at destination")
+			}
+			rootNames[root.NormalizedName] = struct{}{}
+			var count int64
+			if err := tx.Model(&types.KnowledgeDirectory{}).Where(
+				"tenant_id = ? AND knowledge_base_id = ? AND tag_id = ? AND parent_key = ? AND normalized_name = ?",
+				tenantID, kbID, targetTagID, "", root.NormalizedName,
+			).Count(&count).Error; err != nil {
+				return err
+			}
+			if count > 0 {
+				return fmt.Errorf("duplicate directory name at destination")
+			}
+			directories, knowledges, err := listDirectorySubtree(tx, tenantID, kbID, root.ID, sourceTagID)
+			if err != nil {
+				return err
+			}
+			for _, directory := range directories {
+				if directory.Status != types.DirectoryStatusActive {
+					return fmt.Errorf("one or more directories are deleting")
+				}
+			}
+			for _, directory := range directories {
+				if _, seen := seenDirectoryIDs[directory.ID]; !seen {
+					seenDirectoryIDs[directory.ID] = struct{}{}
+					allDirectoryIDs = append(allDirectoryIDs, directory.ID)
+				}
+			}
+			for _, knowledge := range knowledges {
+				if knowledge.ParseStatus == types.ParseStatusDeleting {
+					return fmt.Errorf("one or more documents are deleting")
+				}
+				knowledgeIDs = append(knowledgeIDs, knowledge.ID)
+			}
+		}
+		if err := tx.Model(&types.KnowledgeDirectory{}).Where(
+			"tenant_id = ? AND knowledge_base_id = ? AND id IN ? AND tag_id = ? AND status = ?",
+			tenantID, kbID, allDirectoryIDs, sourceTagID, types.DirectoryStatusActive,
+		).Update("tag_id", targetTagID).Error; err != nil {
+			return err
+		}
+		for _, root := range collapsed {
+			if err := tx.Model(&types.KnowledgeDirectory{}).Where("tenant_id = ? AND knowledge_base_id = ? AND id = ? AND status = ?", tenantID, kbID, root.ID, types.DirectoryStatusActive).Updates(map[string]any{"parent_id": nil, "parent_key": ""}).Error; err != nil {
+				return err
+			}
+		}
+		if len(knowledgeIDs) > 0 {
+			if err := tx.Model(&types.Knowledge{}).Where(
+				"tenant_id = ? AND knowledge_base_id = ? AND id IN ? AND tag_id = ? AND parse_status <> ?",
+				tenantID, kbID, knowledgeIDs, sourceTagID, types.ParseStatusDeleting,
+			).Update("tag_id", targetTagID).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&types.Chunk{}).Where(
+				"tenant_id = ? AND knowledge_base_id = ? AND knowledge_id IN ?",
+				tenantID, kbID, knowledgeIDs,
+			).Update("tag_id", targetTagID).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(knowledgeIDs)
+	return knowledgeIDs, nil
+}
+
 func (r *knowledgeDirectoryRepository) DeleteEmpty(ctx context.Context, tenantID uint64, kbID, id string, tagIDs ...string) error {
 	tagID := directoryTagID(tagIDs)
 	return directoryTransaction(ctx, r.db, tenantID, kbID, func(tx *gorm.DB) error {

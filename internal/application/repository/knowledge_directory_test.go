@@ -262,6 +262,66 @@ func TestKnowledgeDirectoryMoveEntriesIsAtomicAndCollapsesDescendants(t *testing
 	require.Equal(t, target.ID, *movedDocument.DirectoryID)
 }
 
+func TestKnowledgeDirectoryMoveSubtreesToTagPreservesHierarchyAndDocuments(t *testing.T) {
+	repo := newDirectoryTestRepository(t)
+	ctx := t.Context()
+	root, err := repo.EnsurePath(ctx, 1, "kb", nil, []string{"source"}, "category-a")
+	require.NoError(t, err)
+	child, err := repo.EnsurePath(ctx, 1, "kb", &root.ID, []string{"child"}, "category-a")
+	require.NoError(t, err)
+	document := &types.Knowledge{ID: "cross-category-document", TenantID: 1, KnowledgeBaseID: "kb", TagID: "category-a", DirectoryID: &child.ID, FileName: "a.txt", ParseStatus: types.ParseStatusCompleted}
+	chunk := &types.Chunk{ID: "cross-category-chunk", TenantID: 1, KnowledgeBaseID: "kb", KnowledgeID: document.ID, TagID: "category-a", Content: "content"}
+	require.NoError(t, repo.db.Create(document).Error)
+	require.NoError(t, repo.db.Create(chunk).Error)
+
+	ids, err := repo.MoveSubtreesToTag(ctx, 1, "kb", "category-a", "category-b", []string{root.ID})
+	require.NoError(t, err)
+	require.Equal(t, []string{document.ID}, ids)
+	movedRoot, err := repo.Get(ctx, 1, "kb", root.ID, "category-b")
+	require.NoError(t, err)
+	require.Nil(t, movedRoot.ParentID)
+	movedChild, err := repo.Get(ctx, 1, "kb", child.ID, "category-b")
+	require.NoError(t, err)
+	require.Equal(t, root.ID, *movedChild.ParentID)
+	var movedDocument types.Knowledge
+	require.NoError(t, repo.db.First(&movedDocument, "id = ?", document.ID).Error)
+	require.Equal(t, "category-b", movedDocument.TagID)
+	require.Equal(t, child.ID, *movedDocument.DirectoryID)
+	var movedChunk types.Chunk
+	require.NoError(t, repo.db.First(&movedChunk, "id = ?", chunk.ID).Error)
+	require.Equal(t, "category-b", movedChunk.TagID)
+}
+
+func TestKnowledgeDirectoryMoveSubtreesToTagRejectsDestinationConflictAtomically(t *testing.T) {
+	repo := newDirectoryTestRepository(t)
+	ctx := t.Context()
+	source, err := repo.EnsurePath(ctx, 1, "kb", nil, []string{"same-name"}, "category-a")
+	require.NoError(t, err)
+	_, err = repo.EnsurePath(ctx, 1, "kb", nil, []string{"same-name"}, "category-b")
+	require.NoError(t, err)
+	_, err = repo.MoveSubtreesToTag(ctx, 1, "kb", "category-a", "category-b", []string{source.ID})
+	require.Error(t, err)
+	stored, err := repo.Get(ctx, 1, "kb", source.ID, "category-a")
+	require.NoError(t, err)
+	require.Equal(t, "category-a", stored.TagID)
+}
+
+func TestKnowledgeDirectoryMoveSubtreesToTagRejectsDeletingDescendantAtomically(t *testing.T) {
+	repo := newDirectoryTestRepository(t)
+	ctx := t.Context()
+	root, err := repo.EnsurePath(ctx, 1, "kb", nil, []string{"source"}, "category-a")
+	require.NoError(t, err)
+	child, err := repo.EnsurePath(ctx, 1, "kb", &root.ID, []string{"child"}, "category-a")
+	require.NoError(t, err)
+	require.NoError(t, repo.db.Model(&types.KnowledgeDirectory{}).Where("id = ?", child.ID).Update("status", types.DirectoryStatusDeleting).Error)
+
+	_, err = repo.MoveSubtreesToTag(ctx, 1, "kb", "category-a", "category-b", []string{root.ID})
+	require.Error(t, err)
+	storedRoot, err := repo.Get(ctx, 1, "kb", root.ID, "category-a")
+	require.NoError(t, err)
+	require.Equal(t, "category-a", storedRoot.TagID)
+}
+
 func TestDirectoryCountsAndPaginationApplyGovernanceBeforeQuery(t *testing.T) {
 	repo := newDirectoryTestRepository(t)
 	ctx := context.Background()

@@ -382,6 +382,8 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kb.DELETE("", handler.ClearKnowledgeBaseContents)
 		kb.GET("/directories", handler.ListKnowledgeDirectories)
 		kb.POST("/directories", handler.CreateKnowledgeDirectory)
+		kb.PUT("/directories/move-to-category", handler.MoveKnowledgeDirectoriesToTag)
+		kb.GET("/directories/download", handler.DownloadKnowledgeDirectories)
 		kb.PUT("/directories/:directory_id", handler.RenameKnowledgeDirectory)
 		kb.PUT("/directories/:directory_id/move", handler.MoveKnowledgeDirectory)
 		kb.DELETE("/directories/:directory_id", handler.DeleteKnowledgeDirectory)

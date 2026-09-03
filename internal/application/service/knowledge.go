@@ -7370,6 +7370,75 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 	return nil
 }
 
+// MoveSubtreesToTag moves directory trees and their documents to another tag
+// without clearing directory associations, then keeps chunk tags and indexes in sync.
+func (s *knowledgeService) MoveSubtreesToTag(ctx context.Context, kbID, sourceTagID, targetTagID string, directoryIDs []string) (int, error) {
+	tenantIDVal := ctx.Value(types.TenantIDContextKey)
+	tenantID, ok := tenantIDVal.(uint64)
+	if !ok {
+		return 0, werrors.NewUnauthorizedError("invalid tenant ID in context")
+	}
+	if strings.TrimSpace(kbID) == "" || strings.TrimSpace(sourceTagID) == "" || strings.TrimSpace(targetTagID) == "" {
+		return 0, werrors.NewBadRequestError("knowledge base and tag IDs are required")
+	}
+	targetTag, err := s.tagRepo.GetByID(ctx, tenantID, targetTagID)
+	if err != nil {
+		return 0, err
+	}
+	if targetTag.KnowledgeBaseID != kbID {
+		return 0, werrors.NewBadRequestError("目标分类不属于当前知识库")
+	}
+	knowledgeIDs, err := s.directoryRepo.MoveSubtreesToTag(ctx, tenantID, kbID, sourceTagID, targetTag.ID, directoryIDs)
+	if err != nil {
+		return 0, err
+	}
+	if len(knowledgeIDs) == 0 {
+		return 0, nil
+	}
+	chunkTagUpdates := make(map[string]string)
+	for _, knowledgeID := range knowledgeIDs {
+		chunks, chunkErr := s.chunkRepo.ListChunksByKnowledgeID(ctx, tenantID, knowledgeID)
+		if chunkErr != nil {
+			return 0, chunkErr
+		}
+		for _, chunk := range chunks {
+			chunkTagUpdates[chunk.ID] = targetTag.ID
+		}
+	}
+	if len(chunkTagUpdates) > 0 {
+		tenantInfo, ok := types.TenantInfoFromContext(ctx)
+		if !ok {
+			logger.Errorf(ctx, "directory move committed but tenant info is unavailable; index reconciliation required for %d chunks", len(chunkTagUpdates))
+			return len(knowledgeIDs), nil
+		}
+		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
+		if err != nil {
+			logger.Errorf(ctx, "directory move committed but retriever initialization failed; index reconciliation required for %d chunks: %v", len(chunkTagUpdates), err)
+			return len(knowledgeIDs), nil
+		}
+		var syncErr error
+		for attempt := 0; attempt < 3; attempt++ {
+			syncErr = retrieveEngine.BatchUpdateChunkTagID(ctx, chunkTagUpdates)
+			if syncErr == nil {
+				break
+			}
+			if attempt < 2 {
+				timer := time.NewTimer(time.Duration(1<<attempt) * 100 * time.Millisecond)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					attempt = 3
+				case <-timer.C:
+				}
+			}
+		}
+		if syncErr != nil {
+			logger.Errorf(ctx, "directory move committed but retriever tag sync failed after retries; index reconciliation required for %d chunks: %v", len(chunkTagUpdates), syncErr)
+		}
+	}
+	return len(knowledgeIDs), nil
+}
+
 // UpdateFAQEntryTag updates the tag assigned to an FAQ entry.
 func (s *knowledgeService) UpdateFAQEntryTag(ctx context.Context, kbID string, entryID string, tagID *string) error {
 	kb, err := s.validateFAQKnowledgeBase(ctx, kbID)

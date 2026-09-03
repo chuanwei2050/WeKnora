@@ -237,8 +237,21 @@ export function moveDocumentDirectoryEntries(kbId: string, tagId: string, direct
   });
 }
 
+export function moveDocumentDirectoriesToCategory(kbId: string, tagId: string, targetTagId: string, directoryIds: string[]) {
+  return put(`/api/v1/knowledge-bases/${kbId}/knowledge/directories/move-to-category?tag_id=${encodeURIComponent(tagId)}`, {
+    directory_ids: directoryIds,
+    target_tag_id: targetTagId,
+  });
+}
+
 export function downloadDocumentDirectory(kbId: string, tagId: string, directoryId: string) {
   return getDown(`/api/v1/knowledge-bases/${kbId}/knowledge/directories/${directoryId}/download?tag_id=${encodeURIComponent(tagId)}`);
+}
+
+export function downloadDocumentDirectories(kbId: string, tagId: string, directoryIds: string[]) {
+  const query = new URLSearchParams({ tag_id: tagId });
+  directoryIds.forEach(directoryId => query.append('directory_id', directoryId));
+  return getDown(`/api/v1/knowledge-bases/${kbId}/knowledge/directories/download?${query.toString()}`);
 }
 
 export function deleteDocumentDirectory(kbId: string, tagId: string, directoryId: string) {

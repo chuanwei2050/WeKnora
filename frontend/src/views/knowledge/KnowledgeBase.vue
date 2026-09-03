@@ -59,7 +59,9 @@ import {
   getDocumentDirectoryBreadcrumb,
   listDocumentDirectories,
   moveDocumentDirectoryEntries,
+  moveDocumentDirectoriesToCategory,
   downloadDocumentDirectory,
+  downloadDocumentDirectories,
   type DocumentDirectory,
 } from "@/api/knowledge-base/index";
 import FAQEntryManager from './components/FAQEntryManager.vue';
@@ -343,6 +345,15 @@ const folderMoveOptions = computed(() => folderCascaderOptions(
   tagList.value,
   t('knowledgeBase.publicFilesFolder'),
 ));
+const categoryTargetsFor = (item: KnowledgeCard) => {
+  const currentTagID = String(item.tag_id ?? selectedTagId.value ?? '');
+  const disableCurrent = (options: FolderCascaderOption[]): FolderCascaderOption[] => options.map(option => ({
+    ...option,
+    selectable: option.value === '__root__' ? option.selectable : option.value !== currentTagID && option.selectable,
+    ...(option.children ? { children: disableCurrent(option.children) } : {}),
+  }));
+  return disableCurrent(folderMoveOptions.value);
+};
 const untaggedTag = computed(() => tagList.value.find(tag => tag.name === UNTAGGED_TAG_NAME));
 const ordinaryTags = computed(() => tagList.value.filter(tag => tag.name !== UNTAGGED_TAG_NAME));
 const ordinaryBranches = computed(() => ordinaryFolderBranches(ordinaryTags.value));
@@ -573,9 +584,20 @@ const renameSelectedDirectory = () => {
   if (directory) openRenameDirectory(directory);
 };
 
-const downloadSelectedDirectory = () => {
-  const [directory] = selectedDirectoryItems.value;
-  if (directory) void downloadDirectory(directory);
+const downloadSelectedDirectory = async () => {
+  const directories = selectedDirectoryItems.value;
+  if (!kbId.value || directories.length === 0) return;
+  try {
+    const blob = await downloadDocumentDirectories(kbId.value, selectedTagId.value, directories.map(directory => directory.id));
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${directories.length === 1 ? directories[0].file_name : '文档目录'}.zip`;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    MessagePlugin.error(error instanceof Error ? error.message : t('file.downloadFailed'));
+  }
 };
 
 const deleteSelectedDirectories = async () => {
@@ -1213,7 +1235,22 @@ const confirmTagDelete = async () => {
   }
 };
 
-const handleKnowledgeTagChange = async (knowledgeId: string, tagValue: string) => {
+const handleKnowledgeTagChange = async (knowledgeId: string, tagValue: string, item?: KnowledgeCard) => {
+  if (item?.kind === 'directory') {
+    if (!canEdit.value || !kbId.value || !tagValue || String(item.tag_id || '') === tagValue) return;
+    try {
+      await moveDocumentDirectoriesToCategory(kbId.value, selectedTagId.value, tagValue, [item.id]);
+      selectedDirectoryIds.value.delete(item.id);
+      MessagePlugin.success(t('knowledgeBase.tagUpdateSuccess'));
+      page = 1;
+      loadKnowledgeFiles(kbId.value);
+      await loadTags(kbId.value);
+      void loadMoveDirectoryOptions();
+    } catch (error: any) {
+      MessagePlugin.error(error?.message || t('common.operationFailed'));
+    }
+    return;
+  }
   try {
     // Pass the tag value directly (empty string means no tag)
     const tagIdToUpdate = tagValue || null;
@@ -2404,13 +2441,37 @@ const selectedKnowledgeItems = computed(() => (
 ));
 
 const batchFolderTargets = computed(() => {
-  if (!canEdit.value || selectedIds.value.size === 0) return [];
+  if (!canEdit.value || (selectedIds.value.size === 0 && selectedDirectoryIds.value.size === 0)) return [];
   return folderMoveOptions.value;
 });
 
 const handleBatchMoveToFolder = async (targetTagId: string) => {
   if (!canEdit.value || batchMovingFolder.value) return;
   const target = tagMap.value[targetTagId];
+  if (selectedDirectoryIds.value.size > 0) {
+    if (selectedIds.value.size > 0 || !target || targetTagId === selectedTagId.value || !kbId.value) return;
+    batchMovingFolder.value = true;
+    try {
+      await moveDocumentDirectoriesToCategory(
+        kbId.value,
+        selectedTagId.value,
+        targetTagId,
+        Array.from(selectedDirectoryIds.value),
+      );
+      const count = selectedDirectoryIds.value.size;
+      clearSelection();
+      MessagePlugin.success(t('knowledgeBase.batchMoveFolderSuccess', { count, name: target.name }));
+      page = 1;
+      loadKnowledgeFiles(kbId.value);
+      await loadTags(kbId.value, true);
+      void loadMoveDirectoryOptions();
+    } catch (error: any) {
+      MessagePlugin.error(error?.message || t('knowledgeBase.batchMoveFolderFailed'));
+    } finally {
+      batchMovingFolder.value = false;
+    }
+    return;
+  }
   const items = selectedKnowledgeItems.value;
   if (!target || items.length === 0 || items.every(item => String(item.tag_id) === targetTagId)) return;
 
@@ -3227,7 +3288,7 @@ async function createNewSession(value: string): Promise<void> {
                           </span>
                         </div>
                         <t-popup
-                          v-if="item.kind === 'directory'"
+                          v-if="item.kind === 'directory' && canEdit"
                           v-model="item.isMore"
                           overlayClassName="card-more"
                           trigger="click"
@@ -3250,7 +3311,17 @@ async function createNewSession(value: string): Promise<void> {
                                   <t-icon class="icon" name="move" /><span>{{ t('knowledgeBase.rowMoveToDirectory') }}</span>
                                 </div>
                               </FolderMoveCascader>
-                              <div class="card-menu-item" @click.stop="handleDirectoryItemAction('download', item)">
+                              <FolderMoveCascader
+                                v-if="canEdit && categoryTargetsFor(item).length"
+                                :options="categoryTargetsFor(item)"
+                                placement="top-right"
+                                @select="(tagId: string) => handleKnowledgeTagChange(item.id, tagId, item)"
+                              >
+                                <div class="card-menu-item" @click.stop>
+                                  <t-icon class="icon" name="move" /><span>{{ t('knowledgeBase.rowMoveToCategory') }}</span>
+                                </div>
+                              </FolderMoveCascader>
+                              <div v-if="canEdit" class="card-menu-item" @click.stop="handleDirectoryItemAction('download', item)">
                                 <t-icon class="icon" name="download" /><span>{{ t('knowledgeBase.downloadDocumentDirectory') }}</span>
                               </div>
                               <div v-if="canEdit" class="card-menu-item" @click.stop="handleDirectoryItemAction('rename', item)">
@@ -3477,7 +3548,7 @@ async function createNewSession(value: string): Promise<void> {
                     <div class="card-bottom">
                       <span class="card-time">{{ formatDocTime(item.updated_at) }}</span>
                       <div class="card-bottom-right">
-                        <div v-if="tagList.length" class="card-tag-selector" @click.stop>
+                        <div v-if="item.kind !== 'directory' && tagList.length" class="card-tag-selector" @click.stop>
                           <FolderMoveCascader
                             v-if="canEdit"
                             :options="folderMoveOptions"
@@ -3572,7 +3643,7 @@ async function createNewSession(value: string): Promise<void> {
                   @action="(action: any, item: any) => handleListAction(action, item)"
                   @directory-action="(action: any, item: any, directoryId?: string) => handleDirectoryItemAction(action, item, directoryId)"
                   @move-directory="(item: any, directoryId: string) => handleDirectoryItemAction('move', item, directoryId)"
-                  @move-folder="(item: any, tagId: string) => handleKnowledgeTagChange(item.id, tagId)"
+                  @move-folder="(item: any, tagId: string) => handleKnowledgeTagChange(item.id, tagId, item)"
                   @entry-dragstart="(item: any, event: DragEvent) => startEntryDrag(item, event)"
                   @entry-drop="(directoryId: string, event: DragEvent) => dropEntriesOn(directoryId, event)"
                   @sort="changeListSort"

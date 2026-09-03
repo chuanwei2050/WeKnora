@@ -170,6 +170,16 @@ const directoryTargetsFor = (item: KnowledgeItem) => {
   });
   return disableBranch(props.directoryTargets, false);
 };
+const categoryTargetsFor = (item: KnowledgeItem) => {
+  if (item.kind !== 'directory') return props.folderTargets;
+  const currentTagID = String(item.tag_id ?? '');
+  const disableCurrent = (options: FolderCascaderOption[]): FolderCascaderOption[] => options.map(option => ({
+    ...option,
+    selectable: option.value === '__root__' ? option.selectable : option.value !== currentTagID && option.selectable,
+    ...(option.children ? { children: disableCurrent(option.children) } : {}),
+  }));
+  return disableCurrent(props.folderTargets);
+};
 const governanceContext = () => ({
   enabled: Boolean(props.governanceEnabled),
   canContribute: Boolean(props.canContribute),
@@ -446,7 +456,17 @@ const ariaSort = (field: SortField): 'ascending' | 'descending' | 'none' => {
                   {{ t('knowledgeBase.rowMoveToDirectory') }}
                 </button>
               </FolderMoveCascader>
-              <button class="row-action-btn" type="button" @click="emit('directory-action', 'download', item)">
+              <FolderMoveCascader
+                v-if="canEdit && folderTargets.length"
+                :options="categoryTargetsFor(item)"
+                placement="top-right"
+                @select="(folderId: string) => emit('move-folder', item, folderId)"
+              >
+                <button class="row-action-btn" type="button">
+                  {{ t('knowledgeBase.rowMoveToCategory') }}
+                </button>
+              </FolderMoveCascader>
+              <button v-if="canEdit" class="row-action-btn" type="button" @click="emit('directory-action', 'download', item)">
                 {{ t('knowledgeBase.downloadDocumentDirectory') }}
               </button>
               <button v-if="canEdit" class="row-action-btn" type="button" @click="emit('directory-action', 'rename', item)">

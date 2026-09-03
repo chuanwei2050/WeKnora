@@ -10,6 +10,8 @@ describe('document directory category scope', () => {
     expect(api).toContain("page_size: String(pageSize), tag_id: tagId")
     expect(api).toContain("{ tag_id: tagId, name, parent_id: parentId || null }")
     expect(api).toContain('directory-entries?tag_id=${encodeURIComponent(tagId)}')
+    expect(api).toContain('directories/move-to-category?tag_id=${encodeURIComponent(tagId)}')
+    expect(api).toContain("directoryIds.forEach(directoryId => query.append('directory_id', directoryId))")
   })
 
   it('keeps directory selection and movement aligned with paged list state', () => {
@@ -39,6 +41,8 @@ describe('document directory category scope', () => {
     expect(view).not.toContain('pasteCutEntries')
     expect(batch).toContain("emit('move-directory', directoryId)")
     expect(batch).toContain("documentCount === count")
+    expect(batch).toContain("(directoryCount || 0) > 0 && documentCount === 0")
+    expect(batch).toContain("directoryCount === count")
     expect(batch).toContain("knowledgeBase.adjustKnowledgeCategory")
   })
 
@@ -48,11 +52,14 @@ describe('document directory category scope', () => {
     expect(list).toContain("type DirectoryAction = 'move' | 'download' | 'rename' | 'delete'")
     expect(list).toContain("emit('directory-action', 'move', item, directoryId)")
     expect(list).toContain("emit('directory-action', 'download', item)")
+    expect(list).toContain('button v-if="canEdit" class="row-action-btn" type="button" @click="emit(\'directory-action\', \'download\', item)"')
     expect(list).toContain("emit('directory-action', 'rename', item)")
     expect(list).toContain("emit('directory-action', 'delete', item)")
+    expect(list).toContain("emit('move-folder', item, folderId)")
     expect(list).toContain("emit('toggle-all', checked, selectableIds.value, selectableDirectoryIds.value)")
     expect(view).toContain('@directory-action="(action: any, item: any, directoryId?: string) => handleDirectoryItemAction(action, item, directoryId)"')
     expect(view).toContain('for (const id of selectableDirectoryIds) selectedDirectoryIds.value.add(id)')
+    expect(view).toContain("v-if=\"item.kind === 'directory' && canEdit\"")
   })
 
   it('moves one document into a directory without reusing category movement', () => {
@@ -74,6 +81,18 @@ describe('document directory category scope', () => {
     expect(view).toContain('directory_id: currentDirectoryId.value')
     expect(view).toContain('parent_directory_id: currentDirectoryId.value')
     expect(view).toContain('directory_path: directoryPath')
+  })
+
+  it('moves directory trees across categories and downloads selected directories as one archive', () => {
+    const view = source('../src/views/knowledge/KnowledgeBase.vue')
+    const api = source('../src/api/knowledge-base/index.ts')
+    expect(view).toContain('moveDocumentDirectoriesToCategory(kbId.value, selectedTagId.value, tagValue, [item.id])')
+    expect(view).toContain('Array.from(selectedDirectoryIds.value)')
+    expect(view).toContain('downloadDocumentDirectories(kbId.value, selectedTagId.value, directories.map(directory => directory.id))')
+    expect(view).toContain('const categoryTargetsFor = (item: KnowledgeCard)')
+    expect(view).toContain(':options="categoryTargetsFor(item)"')
+    expect(api).toContain('export function moveDocumentDirectoriesToCategory')
+    expect(api).toContain('export function downloadDocumentDirectories')
   })
 
   it('renders new directory as the leading primary text action', () => {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -53,6 +54,11 @@ type moveDirectoryEntriesRequest struct {
 	DirectoryIDs []string `json:"directory_ids" binding:"max=200"`
 	KnowledgeIDs []string `json:"knowledge_ids" binding:"max=200"`
 	DirectoryID  *string  `json:"directory_id"`
+}
+
+type moveDirectoriesToTagRequest struct {
+	DirectoryIDs []string `json:"directory_ids" binding:"required,max=200"`
+	TargetTagID  string   `json:"target_tag_id" binding:"required"`
 }
 
 type confirmDirectoryDeleteRequest struct {
@@ -456,6 +462,45 @@ func (h *KnowledgeHandler) MoveKnowledgeDirectoryEntries(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"moved_count": len(directories) + len(documents)}})
 }
 
+func (h *KnowledgeHandler) MoveKnowledgeDirectoriesToTag(c *gin.Context) {
+	ctx, kbID, _, err := h.directoryContext(c, true)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	var req moveDirectoriesToTagRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	directories := uniqueNonEmptyIDs(req.DirectoryIDs)
+	if len(directories) == 0 || len(directories) > 200 {
+		c.Error(errors.NewBadRequestError("directory_ids must contain 1 to 200 directories"))
+		return
+	}
+	sourceTagID, tagErr := h.resolveDirectoryTagID(ctx, c, kbID, "")
+	if tagErr != nil {
+		c.Error(tagErr)
+		return
+	}
+	targetTagID := strings.TrimSpace(req.TargetTagID)
+	resolvedTargetTagID, tagErr := h.kgService.ResolveDocumentTagID(ctx, kbID, targetTagID)
+	if tagErr != nil || resolvedTargetTagID != targetTagID {
+		c.Error(errors.NewBadRequestError("target_tag_id does not belong to the knowledge base"))
+		return
+	}
+	if sourceTagID == targetTagID {
+		c.Error(errors.NewBadRequestError("target category must differ from the current category"))
+		return
+	}
+	movedCount, moveErr := h.kgService.MoveSubtreesToTag(ctx, kbID, sourceTagID, targetTagID, directories)
+	if moveErr != nil {
+		c.Error(directoryError(moveErr))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"moved_count": movedCount}})
+}
+
 func uniqueNonEmptyIDs(values []string) []string {
 	result := make([]string, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
@@ -536,29 +581,140 @@ func preflightDirectoryDownload(ctx context.Context, knowledges []*types.Knowled
 }
 
 func (h *KnowledgeHandler) DownloadKnowledgeDirectory(c *gin.Context) {
-	ctx, kbID, tenantID, err := h.directoryContext(c, false)
+	h.downloadKnowledgeDirectories(c, []string{c.Param("directory_id")})
+}
+
+func (h *KnowledgeHandler) DownloadKnowledgeDirectories(c *gin.Context) {
+	rootIDs := uniqueNonEmptyIDs(c.QueryArray("directory_id"))
+	if len(rootIDs) == 0 || len(rootIDs) > 200 {
+		c.Error(errors.NewBadRequestError("directory_id must contain 1 to 200 directories"))
+		return
+	}
+	h.downloadKnowledgeDirectories(c, rootIDs)
+}
+
+func (h *KnowledgeHandler) downloadKnowledgeDirectories(c *gin.Context, requestedRootIDs []string) {
+	ctx, kbID, tenantID, err := h.directoryContext(c, true)
 	if err != nil {
 		c.Error(err)
 		return
 	}
-	rootID := c.Param("directory_id")
 	tagID, tagErr := h.resolveDirectoryTagID(ctx, c, kbID, "")
 	if tagErr != nil {
 		c.Error(tagErr)
 		return
 	}
-	directories, knowledges, err := h.directoryService.ListSubtree(ctx, tenantID, kbID, tagID, rootID)
-	if err != nil {
-		c.Error(directoryError(err))
+
+	rootSet := make(map[string]struct{}, len(requestedRootIDs))
+	type downloadRoot struct {
+		id   string
+		name string
+	}
+	roots := make([]downloadRoot, 0, len(requestedRootIDs))
+	for _, rootID := range requestedRootIDs {
+		if _, duplicate := rootSet[rootID]; duplicate {
+			continue
+		}
+		breadcrumb, pathErr := h.directoryService.Breadcrumb(ctx, tenantID, kbID, tagID, rootID)
+		if pathErr != nil {
+			c.Error(directoryError(pathErr))
+			return
+		}
+		rootSet[rootID] = struct{}{}
+		if len(breadcrumb) == 0 {
+			c.Error(errors.NewNotFoundError("Document directory not found"))
+			return
+		}
+		roots = append(roots, downloadRoot{id: rootID, name: breadcrumb[len(breadcrumb)-1].Name})
+	}
+	if len(roots) == 0 {
+		c.Error(errors.NewBadRequestError("directory_id must contain 1 to 200 directories"))
 		return
 	}
+
+	// Selecting a parent and one of its children downloads the parent once.
+	keptRoots := make([]downloadRoot, 0, len(roots))
+	for _, root := range roots {
+		breadcrumb, pathErr := h.directoryService.Breadcrumb(ctx, tenantID, kbID, tagID, root.id)
+		if pathErr != nil {
+			c.Error(directoryError(pathErr))
+			return
+		}
+		nested := false
+		for _, node := range breadcrumb[:len(breadcrumb)-1] {
+			if _, selected := rootSet[node.ID]; selected {
+				nested = true
+				break
+			}
+		}
+		if !nested {
+			keptRoots = append(keptRoots, root)
+		}
+	}
+
+	archiveRootNames := make(map[string]string, len(keptRoots))
+	usedRootNames := make(map[string]int, len(keptRoots))
+	usedArchiveNames := make(map[string]struct{}, len(keptRoots))
+	for _, root := range keptRoots {
+		archiveName := ""
+		for suffix := usedRootNames[root.name] + 1; ; suffix++ {
+			candidate := root.name
+			if suffix > 1 {
+				candidate = fmt.Sprintf("%s (%d)", root.name, suffix)
+			}
+			if _, alreadyUsed := usedArchiveNames[candidate]; alreadyUsed {
+				continue
+			}
+			archiveName = candidate
+			usedRootNames[root.name] = suffix
+			break
+		}
+		usedArchiveNames[archiveName] = struct{}{}
+		archiveRootNames[root.id] = archiveName
+	}
+
+	directoryByID := make(map[string]*types.KnowledgeDirectory)
+	knowledgeByID := make(map[string]*types.Knowledge)
+	paths := make(map[string]string)
+	for _, root := range keptRoots {
+		directories, knowledges, subtreeErr := h.directoryService.ListSubtree(ctx, tenantID, kbID, tagID, root.id)
+		if subtreeErr != nil {
+			c.Error(directoryError(subtreeErr))
+			return
+		}
+		for _, directory := range directories {
+			directoryByID[directory.ID] = directory
+			breadcrumb, pathErr := h.directoryService.Breadcrumb(ctx, tenantID, kbID, tagID, directory.ID)
+			if pathErr != nil {
+				c.Error(directoryError(pathErr))
+				return
+			}
+			start := 0
+			for start < len(breadcrumb) && breadcrumb[start].ID != root.id {
+				start++
+			}
+			if start == len(breadcrumb) {
+				c.Error(errors.NewBadRequestError("Document directory path is invalid"))
+				return
+			}
+			parts := []string{archiveRootNames[root.id]}
+			for _, node := range breadcrumb[start+1:] {
+				parts = append(parts, node.Name)
+			}
+			paths[directory.ID] = strings.Join(parts, "/")
+		}
+		for _, knowledge := range knowledges {
+			knowledgeByID[knowledge.ID] = knowledge
+		}
+	}
+
 	kb, kbErr := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if kbErr != nil {
 		c.Error(errors.NewInternalServerError(kbErr.Error()))
 		return
 	}
-	visible := make([]*types.Knowledge, 0, len(knowledges))
-	for _, knowledge := range knowledges {
+	visible := make([]*types.Knowledge, 0, len(knowledgeByID))
+	for _, knowledge := range knowledgeByID {
 		if h.canViewGovernedKnowledge(ctx, knowledge, kb) {
 			visible = append(visible, knowledge)
 		}
@@ -572,47 +728,34 @@ func (h *KnowledgeHandler) DownloadKnowledgeDirectory(c *gin.Context) {
 		}
 		return
 	}
-	paths := make(map[string]string, len(directories))
-	var root *types.KnowledgeDirectory
-	for _, directory := range directories {
-		if directory.ID == rootID {
-			root = directory
-			break
-		}
+
+	directories := make([]*types.KnowledgeDirectory, 0, len(directoryByID))
+	for _, directory := range directoryByID {
+		directories = append(directories, directory)
 	}
-	if root == nil {
-		c.Error(errors.NewNotFoundError("Document directory not found"))
-		return
+	knowledges := make([]*types.Knowledge, 0, len(visible))
+	for _, knowledge := range visible {
+		knowledges = append(knowledges, knowledge)
 	}
-	for _, directory := range directories {
-		breadcrumb, pathErr := h.directoryService.Breadcrumb(ctx, tenantID, kbID, tagID, directory.ID)
-		if pathErr != nil {
-			c.Error(directoryError(pathErr))
-			return
-		}
-		start := 0
-		for start < len(breadcrumb) && breadcrumb[start].ID != rootID {
-			start++
-		}
-		parts := make([]string, 0, len(breadcrumb)-start)
-		for _, node := range breadcrumb[start:] {
-			parts = append(parts, node.Name)
-		}
-		paths[directory.ID] = strings.Join(parts, "/")
-	}
-	directoryEntries, documentEntries, planErr := planDirectoryZipEntries(directories, visible, paths)
+	sort.Slice(directories, func(i, j int) bool { return paths[directories[i].ID] < paths[directories[j].ID] })
+	sort.Slice(knowledges, func(i, j int) bool { return knowledges[i].ID < knowledges[j].ID })
+	directoryEntries, documentEntries, planErr := planDirectoryZipEntries(directories, knowledges, paths)
 	if planErr != nil {
 		c.Error(errors.NewBadRequestError("Document directory contains an invalid archive path"))
 		return
 	}
+	archiveName := "文档目录"
+	if len(keptRoots) == 1 {
+		archiveName = keptRoots[0].name
+	}
 	c.Header("Content-Type", "application/zip")
-	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": root.Name + ".zip"}))
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": archiveName + ".zip"}))
 	writer := zip.NewWriter(c.Writer)
 	defer writer.Close()
 	for _, directory := range directories {
 		_, _ = writer.Create(directoryEntries[directory.ID])
 	}
-	for _, knowledge := range visible {
+	for _, knowledge := range knowledges {
 		fresh, loadErr := h.kgService.GetKnowledgeByID(ctx, knowledge.ID)
 		if loadErr != nil || fresh.KnowledgeBaseID != kbID || fresh.TagID != tagID || fresh.DirectoryID == nil {
 			return
