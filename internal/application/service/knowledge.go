@@ -3486,7 +3486,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	})
 
 	// Initialize chat model for summary
-	chatModel, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
+	chatModel, err := s.modelService.GetChatModel(ctx, "")
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get chat model: %v", err)
 		markSummaryFailed()
@@ -3739,7 +3739,7 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 	})
 
 	// Initialize chat model
-	chatModel, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
+	chatModel, err := s.modelService.GetChatModel(ctx, "")
 	if err != nil {
 		exitStatus = "get_chat_model_failed"
 		logger.Errorf(ctx, "Failed to get chat model: %v", err)

@@ -500,7 +500,9 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 	}
 
 	// 获取聊天模型（用于生成摘要）
-	chatModel, err := s.modelService.GetChatModel(ctx, payload.SummaryModel)
+	// Chat models are platform-managed. SummaryModel remains in the payload only
+	// so tasks queued by older versions can still be decoded safely.
+	chatModel, err := s.modelService.GetChatModel(ctx, "")
 	if err != nil {
 		logger.Errorf(ctx, "failed to get chat model: %v", err)
 		return nil, err
