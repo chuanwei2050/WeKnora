@@ -314,7 +314,14 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
 
 
         <div class="cell cell-tag">
-          <t-tag v-if="getTagName(item.tag_id)" size="small" variant="light-outline" class="row-tag">
+          <t-tag
+            v-if="getTagName(item.tag_id)"
+            size="small"
+            variant="light-outline"
+            class="row-tag"
+            max-width="100%"
+            :title="getTagName(item.tag_id)"
+          >
             {{ getTagName(item.tag_id) }}
           </t-tag>
           <span v-else class="row-muted">--</span>
@@ -586,13 +593,9 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
 }
 
 .row-tag {
+  min-width: 0;
   max-width: 100%;
-  :deep(.t-tag__text) {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 120px;
-    display: inline-block;
-  }
+  overflow: hidden;
 }
 
 .row-muted {
