@@ -2495,9 +2495,6 @@ async function createNewSession(value: string): Promise<void> {
                       </template>
                     </t-popup>
                   </div>
-                  <span v-if="canEdit" class="folder-drag-handle" :class="{ disabled: !canReorderFolders }" aria-hidden="true">
-                    <t-icon name="move" size="14px" />
-                  </span>
                 </div>
               </div>
               <div
@@ -3744,34 +3741,11 @@ async function createNewSession(value: string): Promise<void> {
     }
   }
 
-  .folder-drag-handle,
   .ordinary-folder-toggle,
   .ordinary-folder-toggle-placeholder {
     width: 18px;
     height: 22px;
     flex: 0 0 18px;
-  }
-
-  .folder-drag-handle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--td-text-color-secondary, #5e5e5e);
-    opacity: 0.5;
-    cursor: grab;
-
-    .knowledge-tree-row:hover & {
-      opacity: 0.85;
-    }
-
-    &:active {
-      cursor: grabbing;
-    }
-
-    &.disabled {
-      cursor: not-allowed;
-      opacity: 0.35;
-    }
   }
 
   .folder-drag-placeholder {

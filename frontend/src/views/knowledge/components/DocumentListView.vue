@@ -426,11 +426,11 @@ const handleAction = (action: DocumentAction, item: KnowledgeItem) => {
   grid-template-columns:
     44px                       // checkbox
     minmax(var(--doc-list-name-width), 2.4fr) // name
-    minmax(100px, 0.9fr)       // tag
+    minmax(160px, 1.1fr)       // tag
     96px                       // size
     72px                       // type
     minmax(96px, 0.7fr)        // status
-    140px                      // updated_at
+    120px                      // updated_at
     var(--doc-list-actions-width); // actions
   align-items: center;
   column-gap: 0;
