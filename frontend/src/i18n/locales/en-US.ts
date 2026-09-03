@@ -3467,6 +3467,9 @@ export default {
     audioLoading: 'Loading audio…',
     audioNotSupported: 'Your browser does not support audio playback',
     excelTruncated: 'This spreadsheet is large. Only part of it is shown to keep the page responsive; download the file to view all data.',
+    textTruncated: 'This text file is large. Only part of it is shown to keep the page responsive; download it to view all content.',
+    largeFileBlocked: 'Full online rendering was skipped because this document is large',
+    largeFileHint: 'To keep the page responsive, view the parsed chunks or download the original file.',
   },
   knowledgeSearch: {
     title: 'Search',

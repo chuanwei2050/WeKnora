@@ -3449,6 +3449,9 @@ export default {
     audioLoading: '오디오 로딩 중…',
     audioNotSupported: '브라우저가 오디오 재생을 지원하지 않습니다',
     excelTruncated: '스프레드시트가 커서 페이지 응답성을 위해 일부 데이터만 표시합니다. 전체 내용은 파일을 다운로드하여 확인하세요.',
+    textTruncated: '텍스트 파일이 커서 페이지 응답성을 위해 일부 내용만 표시합니다. 전체 내용은 파일을 다운로드하여 확인하세요.',
+    largeFileBlocked: '문서가 커서 전체 온라인 렌더링을 건너뛰었습니다',
+    largeFileHint: '페이지가 멈추지 않도록 파싱된 청크를 보거나 원본 파일을 다운로드하세요.',
   },
   knowledgeSearch: {
     title: '검색',

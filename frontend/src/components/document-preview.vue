@@ -2,12 +2,10 @@
 <script setup lang="ts">
 import { ref, shallowRef, watch, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
 import { previewKnowledgeFile } from '@/api/knowledge-base/index';
-import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
-import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
-import { sanitizeHTML, safeMarkdownToHTML } from '@/utils/security';
+import { sanitizeHTML } from '@/utils/security';
 
 
 const VueOfficePptx = defineAsyncComponent(() => import('@vue-office/pptx'));
@@ -20,16 +18,21 @@ const props = defineProps<{
   fileName: string;
   active: boolean;
 }>();
+const emit = defineEmits<{ switchToChunks: [] }>();
+
+const MAX_TEXT_PREVIEW_BYTES = 2 * 1024 * 1024;
 
 const loading = ref(false);
 const error = ref('');
 const previewType = ref<'pdf' | 'docx' | 'image' | 'excel' | 'text' | 'markdown' | 'pptx' | 'audio' | 'unsupported'>('unsupported');
 const blobUrl = ref('');
-const textContent = ref('');
 const highlightedCode = ref('');
 const markdownHtml = ref('');
+const plainTextContent = ref('');
 const excelHtml = ref('');
 const excelPreviewTruncated = ref(false);
+const textPreviewTruncated = ref(false);
+const largeFileBlocked = ref(false);
 const pptxData = shallowRef<ArrayBuffer | null>(null);
 const docxContainer = ref<HTMLElement | null>(null);
 const imageNaturalWidth = ref(0);
@@ -37,6 +40,10 @@ const imageNaturalHeight = ref(0);
 let loadedForId = '';
 let excelPreviewWorker: Worker | null = null;
 let cancelExcelPreview: (() => void) | null = null;
+let textPreviewWorker: Worker | null = null;
+let cancelTextPreview: (() => void) | null = null;
+let officeSafetyWorker: Worker | null = null;
+let cancelOfficeSafetyCheck: (() => void) | null = null;
 let previewLoadVersion = 0;
 
 const isFullscreen = ref(false);
@@ -94,29 +101,9 @@ function ensureBlobType(blob: Blob, ft: string): Blob {
   return new Blob([blob], { type: expected });
 }
 
-const langMap: Record<string, string> = {
-  js: 'javascript', ts: 'typescript', py: 'python', rb: 'ruby',
-  sh: 'bash', yml: 'yaml', md: 'markdown', rs: 'rust',
-  kt: 'kotlin', pl: 'perl', conf: 'ini', log: 'plaintext',
-};
-
 function resolvePreviewType(ft: string): typeof previewType.value {
   return fileTypeMap[ft?.toLowerCase()] || 'unsupported';
 }
-
-function getHighlightLang(ft: string): string {
-  const lower = ft?.toLowerCase() || '';
-  return langMap[lower] || lower;
-}
-
-const preprocessMathDelimiters = (rawText: string): string => {
-  if (!rawText || typeof rawText !== 'string') {
-    return '';
-  }
-  return rawText
-    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
-    .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
-};
 
 async function renderDocx(blob: Blob) {
   const { renderAsync } = await import('docx-preview');
@@ -167,57 +154,63 @@ async function renderExcel(blob: Blob, fileType: string | undefined, isCurrent: 
   return result;
 }
 
-async function renderText(blob: Blob, fileType: string) {
-  const text = await blob.text();
-  textContent.value = text;
-
-  const lang = getHighlightLang(fileType);
-  if (lang && hljs.getLanguage(lang)) {
-    try {
-      highlightedCode.value = hljs.highlight(text, { language: lang }).value;
-      return;
-    } catch { /* fallthrough */ }
-  }
-  const auto = hljs.highlightAuto(text);
-  highlightedCode.value = auto.value;
+async function renderTextPreview(blob: Blob, fileType: string, mode: 'text' | 'markdown', isCurrent: () => boolean) {
+  const truncated = blob.size > MAX_TEXT_PREVIEW_BYTES;
+  const buffer = await blob.slice(0, MAX_TEXT_PREVIEW_BYTES).arrayBuffer();
+  if (!isCurrent()) return null;
+  const worker = new Worker(new URL('../workers/text-preview.worker.ts', import.meta.url), { type: 'module' });
+  textPreviewWorker = worker;
+  let cancelled = false;
+  let cancelCurrentPreview = () => {};
+  const result = await new Promise<{ content: string; format: 'html' | 'text'; truncated: boolean }>((resolve, reject) => {
+    cancelCurrentPreview = () => {
+      cancelled = true;
+      reject(new Error('Text preview cancelled'));
+    };
+    cancelTextPreview = cancelCurrentPreview;
+    worker.onmessage = (event) => {
+      if (event.data?.ok) resolve(event.data);
+      else reject(new Error(event.data?.message || 'Text preview failed'));
+    };
+    worker.onerror = (event) => reject(new Error(event.message || 'Text preview failed'));
+    worker.postMessage({ buffer, fileType, mode }, [buffer]);
+  }).catch((error) => {
+    if (cancelled) return null;
+    throw error;
+  }).finally(() => {
+    worker.terminate();
+    if (textPreviewWorker === worker) textPreviewWorker = null;
+    if (cancelTextPreview === cancelCurrentPreview) cancelTextPreview = null;
+  });
+  return result ? { ...result, truncated: truncated || result.truncated } : null;
 }
 
-async function renderMarkdown(blob: Blob) {
-  const { marked } = await import('marked');
-  const text = await blob.text();
-
-  // 校验文本内容是否有效
-  if (!text || typeof text !== 'string') {
-    markdownHtml.value = '<p style="color: var(--td-text-color-disabled); text-align: center; padding: 20px;">文档内容为空</p>';
-    return;
-  }
-
-  marked.use({
-    breaks: true,
-    gfm: true,
+async function isOfficePreviewSafe(blob: Blob, isCurrent: () => boolean) {
+  const worker = new Worker(new URL('../workers/office-preview-safety.worker.ts', import.meta.url), { type: 'module' });
+  officeSafetyWorker = worker;
+  let cancelled = false;
+  let cancelCurrentCheck = () => {};
+  const result = await new Promise<{ safe: boolean }>((resolve, reject) => {
+    cancelCurrentCheck = () => {
+      cancelled = true;
+      reject(new Error('Office safety check cancelled'));
+    };
+    cancelOfficeSafetyCheck = cancelCurrentCheck;
+    worker.onmessage = (event) => {
+      if (event.data?.ok) resolve(event.data);
+      else reject(new Error(event.data?.message || 'Office safety check failed'));
+    };
+    worker.onerror = (event) => reject(new Error(event.message || 'Office safety check failed'));
+    worker.postMessage({ blob });
+  }).catch((error) => {
+    if (cancelled) return null;
+    throw error;
+  }).finally(() => {
+    worker.terminate();
+    if (officeSafetyWorker === worker) officeSafetyWorker = null;
+    if (cancelOfficeSafetyCheck === cancelCurrentCheck) cancelOfficeSafetyCheck = null;
   });
-  marked.use(markedKatex({ throwOnError: false }));
-  const renderer = new marked.Renderer();
-  renderer.code = function ({text, lang}) {
-    // 空值校验：防止 text 为 undefined 或 null
-    if (!text || typeof text !== 'string') {
-      text = '';
-    }
-
-    let highlighted = '';
-    if (lang && hljs.getLanguage(lang)) {
-      try { highlighted = hljs.highlight(text, { language: lang }).value; }
-      catch { highlighted = hljs.highlightAuto(text).value; }
-    } else {
-      highlighted = hljs.highlightAuto(text).value;
-    }
-    return `<pre><code class="hljs">${highlighted}</code></pre>`;
-  };
-  marked.use({ renderer });
-  const mathSafeText = preprocessMathDelimiters(text);
-  const safeText = safeMarkdownToHTML(mathSafeText);
-  const rawHtml = marked.parse(safeText) as string;
-  markdownHtml.value = sanitizeHTML(rawHtml);
+  return result && isCurrent() ? result.safe : false;
 }
 
 function onImageLoad(e: Event) {
@@ -250,6 +243,15 @@ async function loadPreview() {
     const blob = ensureBlobType(rawBlob, ft);
     loadedForId = id;
 
+    if (previewType.value === 'docx' || previewType.value === 'pptx') {
+      const safe = await isOfficePreviewSafe(blob, isCurrent);
+      if (!isCurrent()) return;
+      if (!safe) {
+        largeFileBlocked.value = true;
+        return;
+      }
+    }
+
     // docx-preview needs its container mounted before rendering. Other formats,
     // especially large spreadsheets, keep the loading state through parsing.
     if (previewType.value === 'docx') {
@@ -277,15 +279,25 @@ async function loadPreview() {
         break;
       }
       case 'text': {
-        await renderText(blob, ft);
+        const result = await renderTextPreview(blob, ft, 'text', isCurrent);
+        if (!result || !isCurrent()) return;
+        if (result.format === 'html') highlightedCode.value = result.content;
+        else plainTextContent.value = result.content;
+        textPreviewTruncated.value = result.truncated;
         break;
       }
       case 'markdown': {
-        await renderMarkdown(blob);
+        const result = await renderTextPreview(blob, ft, 'markdown', isCurrent);
+        if (!result || !isCurrent()) return;
+        if (result.format === 'html') markdownHtml.value = sanitizeHTML(result.content);
+        else plainTextContent.value = result.content;
+        textPreviewTruncated.value = result.truncated;
         break;
       }
       case 'pptx': {
-        pptxData.value = await blob.arrayBuffer();
+        const data = await blob.arrayBuffer();
+        if (!isCurrent()) return;
+        pptxData.value = data;
         break;
       }
       case 'audio': {
@@ -304,6 +316,14 @@ async function loadPreview() {
 
 function cleanup() {
   previewLoadVersion += 1;
+  cancelOfficeSafetyCheck?.();
+  cancelOfficeSafetyCheck = null;
+  officeSafetyWorker?.terminate();
+  officeSafetyWorker = null;
+  cancelTextPreview?.();
+  cancelTextPreview = null;
+  textPreviewWorker?.terminate();
+  textPreviewWorker = null;
   cancelExcelPreview?.();
   cancelExcelPreview = null;
   if (excelPreviewWorker) {
@@ -314,11 +334,13 @@ function cleanup() {
     URL.revokeObjectURL(blobUrl.value);
     blobUrl.value = '';
   }
-  textContent.value = '';
   highlightedCode.value = '';
   markdownHtml.value = '';
+  plainTextContent.value = '';
   excelHtml.value = '';
   excelPreviewTruncated.value = false;
+  textPreviewTruncated.value = false;
+  largeFileBlocked.value = false;
   pptxData.value = null;
   imageNaturalWidth.value = 0;
   imageNaturalHeight.value = 0;
@@ -372,6 +394,15 @@ onUnmounted(() => {
       </t-button>
     </div>
 
+    <div v-else-if="largeFileBlocked" class="preview-unsupported">
+      <t-icon name="info-circle" size="48px" />
+      <p>{{ $t('preview.largeFileBlocked') }}</p>
+      <p class="unsupported-hint">{{ $t('preview.largeFileHint') }}</p>
+      <t-button theme="primary" size="small" @click="emit('switchToChunks')">
+        {{ $t('knowledgeBase.viewChunks') }}
+      </t-button>
+    </div>
+
     <!-- Unsupported -->
     <div v-else-if="previewType === 'unsupported'" class="preview-unsupported">
       <t-icon name="file-unknown" size="48px" />
@@ -414,13 +445,16 @@ onUnmounted(() => {
     </div>
 
     <!-- Markdown -->
-    <div v-else-if="previewType === 'markdown' && markdownHtml" class="preview-markdown">
-      <div class="markdown-body" v-html="markdownHtml" />
+    <div v-else-if="previewType === 'markdown' && (markdownHtml || plainTextContent)" class="preview-markdown">
+      <div v-if="textPreviewTruncated" class="excel-preview-notice">{{ $t('preview.textTruncated') }}</div>
+      <pre v-if="plainTextContent" class="code-preview"><code>{{ plainTextContent }}</code></pre>
+      <div v-else class="markdown-body" v-html="markdownHtml" />
     </div>
 
     <!-- Text / Code -->
-    <div v-else-if="previewType === 'text' && highlightedCode" class="preview-text">
-      <pre class="code-preview"><code class="hljs" v-html="highlightedCode"></code></pre>
+    <div v-else-if="previewType === 'text' && (highlightedCode || plainTextContent)" class="preview-text">
+      <div v-if="textPreviewTruncated" class="excel-preview-notice">{{ $t('preview.textTruncated') }}</div>
+      <pre class="code-preview"><code v-if="plainTextContent">{{ plainTextContent }}</code><code v-else class="hljs" v-html="highlightedCode"></code></pre>
     </div>
 
     <!-- Audio -->

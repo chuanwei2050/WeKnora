@@ -3473,6 +3473,9 @@ export default {
     audioLoading: "加载音频中…",
     audioNotSupported: "您的浏览器不支持音频播放",
     excelTruncated: "表格内容较大，为保证页面流畅仅展示部分数据，请下载文件查看完整内容。",
+    textTruncated: "文本内容较大，为保证页面流畅仅展示部分内容，请下载文件查看完整内容。",
+    largeFileBlocked: "该文档体积较大，已停止完整在线渲染",
+    largeFileHint: "为避免页面无响应，请查看已解析的分块内容，或下载原文件查看。",
   },
   knowledgeSearch: {
     title: "搜索",
