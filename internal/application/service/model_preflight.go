@@ -389,6 +389,6 @@ func (s *modelService) probeChatRole(ctx context.Context, model *types.Model) (s
 }
 
 func preflightPNG() []byte {
-	data, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+	data, _ := base64.StdEncoding.DecodeString(assets.VisionTestPNGBase64)
 	return data
 }

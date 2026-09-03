@@ -3,6 +3,7 @@ package vlm
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -126,7 +127,7 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 
 	resp, err := v.client.CreateChatCompletion(ctx, req)
 	if err != nil {
-		return "", fmt.Errorf("OpenAI VLM request: %w", err)
+		return "", formatOpenAIError(err)
 	}
 	if len(resp.Choices) == 0 {
 		return "", fmt.Errorf("OpenAI VLM returned no choices")
@@ -135,6 +136,23 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 	content := resp.Choices[0].Message.Content
 	logger.Infof(ctx, "[VLM] OpenAI response received, len=%d", len(content))
 	return content, nil
+}
+
+func formatOpenAIError(err error) error {
+	var requestErr *openai.RequestError
+	if !errors.As(err, &requestErr) {
+		return fmt.Errorf("OpenAI VLM request: %w", err)
+	}
+
+	message := ""
+	if requestErr.Err != nil {
+		message = requestErr.Err.Error()
+	}
+	body := strings.TrimSpace(string(requestErr.Body))
+	if message == "" {
+		return fmt.Errorf("OpenAI VLM request: status code: %d, status: %s, body: %s", requestErr.HTTPStatusCode, requestErr.HTTPStatus, body)
+	}
+	return fmt.Errorf("OpenAI VLM request: status code: %d, status: %s, message: %s, body: %s", requestErr.HTTPStatusCode, requestErr.HTTPStatus, message, body)
 }
 
 func (v *RemoteAPIVLM) GetModelName() string { return v.modelName }

@@ -1565,7 +1565,7 @@ func (h *InitializationHandler) CheckVLMModel(c *gin.Context) {
 	instance, err := vlm.NewVLM(vlm.ConfigFromModel(model, appID, appSecret), h.ollamaService)
 	if err == nil {
 		var image []byte
-		image, err = base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+		image, err = base64.StdEncoding.DecodeString(assets.VisionTestPNGBase64)
 		if err == nil {
 			var output string
 			output, err = instance.Predict(ctx, [][]byte{image}, "请用一个词描述这张图片。")
@@ -1578,12 +1578,19 @@ func (h *InitializationHandler) CheckVLMModel(c *gin.Context) {
 	available := err == nil
 	message := "视觉能力测试成功，模型支持图片输入"
 	if err != nil {
-		message = fmt.Sprintf("视觉能力测试失败: %v", err)
+		message = visionCapabilityTestMessage(err)
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
 		"available": available,
 		"message":   message,
 	}})
+}
+
+func visionCapabilityTestMessage(err error) string {
+	if strings.Contains(strings.ToLower(err.Error()), "not a vlm") {
+		return "该模型不支持视觉/多模态输入"
+	}
+	return fmt.Sprintf("视觉能力测试失败: %v", err)
 }
 
 // CheckThinkingModel verifies that enabling thinking produces an observable
