@@ -1,10 +1,10 @@
-# FinOpsSys Helm Chart
+# KnowledgeMesh Helm Chart
 
-Helm chart for deploying FinOpsSys, an AI-powered knowledge RAG platform.
+Helm chart for deploying KnowledgeMesh, an AI-powered knowledge RAG platform.
 
 ## Overview
 
-FinOpsSys is an intelligent knowledge base platform that combines:
+KnowledgeMesh is an intelligent knowledge base platform that combines:
 - Document parsing and understanding
 - Vector search with BM25 hybrid retrieval
 - LLM integration for conversational AI

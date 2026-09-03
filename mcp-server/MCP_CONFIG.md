@@ -1,4 +1,4 @@
-# 使用 uv 运行 FinOpsSys MCP 服务器
+# 使用 uv 运行 KnowledgeMesh MCP 服务器
 
 > 更推荐使用`uv`来运行基于python的MCP服务。
 
@@ -27,7 +27,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
     "weknora": {
       "args": [
         "--directory",
-        "/path/FinOpsSys/mcp-server",
+        "/path/KnowledgeMesh/mcp-server",
         "run",
         "run_server.py"
       ],
@@ -52,7 +52,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
       "command": "uv",
       "args": [
         "--directory",
-        "/path/FinOpsSys/mcp-server",
+        "/path/KnowledgeMesh/mcp-server",
         "run",
         "run_server.py"
       ],
@@ -76,7 +76,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
       "command": "uv",
       "args": [
         "--directory",
-        "/path/FinOpsSys/mcp-server",
+        "/path/KnowledgeMesh/mcp-server",
         "run",
         "run_server.py"
       ],
@@ -100,7 +100,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
       "command": "uv",
       "args": [
         "--directory",
-        "/path/FinOpsSys/mcp-server",
+        "/path/KnowledgeMesh/mcp-server",
         "run",
         "run_server.py"
       ],

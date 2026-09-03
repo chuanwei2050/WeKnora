@@ -181,7 +181,7 @@ docker compose restart app
 
 ## 9. 如何开启和查看 Langfuse 可观测性追踪？
 
-FinOpsSys 支持通过 Langfuse 对 Agent 的 ReAct 循环、大模型 Token 消耗、工具调用以及异步任务流水线进行全链路追踪。
+KnowledgeMesh 支持通过 Langfuse 对 Agent 的 ReAct 循环、大模型 Token 消耗、工具调用以及异步任务流水线进行全链路追踪。
 
 **开启步骤**：
 1. 准备一个可用的 Langfuse 实例（支持云端版或私有部署版）。

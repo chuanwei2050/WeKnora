@@ -1,14 +1,14 @@
 # 生产环境 Docker Compose 部署指南
 
-本文面向将 FinOpsSys 标准版部署到远程 Linux 服务器的场景。快速本地体验请直接参考项目根目录的 [README](../README.md#快速开始)；Kubernetes 和严格离线环境分别参考 [Helm Chart](../helm/README.md) 与[严格离线运行](./airgap-operations.md)。
+本文面向将 KnowledgeMesh 标准版部署到远程 Linux 服务器的场景。快速本地体验请直接参考项目根目录的 [README](../README.md#快速开始)；Kubernetes 和严格离线环境分别参考 [Helm Chart](../helm/README.md) 与[严格离线运行](./airgap-operations.md)。
 
 ## 1. 部署结果
 
-本文使用 `/opt/weknora` 作为安装目录，从当前源码构建 FinOpsSys 镜像，并由 Docker Compose 管理服务和持久化卷。
+本文使用 `/opt/weknora` 作为安装目录，从当前源码构建 KnowledgeMesh 镜像，并由 Docker Compose 管理服务和持久化卷。
 
 `COMPOSE_PROFILES=full` 会启动：
 
-- FinOpsSys App、Web UI、DocReader
+- KnowledgeMesh App、Web UI、DocReader
 - PostgreSQL、Redis、Elasticsearch、Milvus
 - MinIO、Qdrant、Neo4j、Jaeger、Dex
 - Langfuse Web/Worker、ClickHouse 和 Langfuse 专用 MinIO
@@ -111,7 +111,7 @@ openssl rand -base64 32
 
 如果启用自建 Langfuse，还应设置 `LANGFUSE_SALT`、`LANGFUSE_ENCRYPTION_KEY`、`LANGFUSE_NEXTAUTH_SECRET`、ClickHouse 和 Langfuse MinIO 密码。不要提交真实 `.env`，也不要在工单、聊天或构建日志中输出其内容。
 
-服务容器启动并不代表 FinOpsSys 已选择该后端。以下变量决定实际使用的存储和检索引擎：
+服务容器启动并不代表 KnowledgeMesh 已选择该后端。以下变量决定实际使用的存储和检索引擎：
 
 ```env
 STORAGE_TYPE=minio

@@ -1015,7 +1015,7 @@ def prepare_container_images(
                 "python:3.11-slim-bookworm",
                 [
                     "wechatopenai/weknora-app:latest",
-                    "finopssys-backend:latest",
+                    "knowledgemesh-backend:latest",
                 ],
             )
         else:

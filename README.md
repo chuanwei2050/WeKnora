@@ -1,6 +1,6 @@
-# FinOpsSys
+# KnowledgeMesh
 
-FinOpsSys 将 **RAG 快速问答、ReAct Agent 推理和自动 Wiki** 统一在一套知识工作流中。导入 PDF、Word、图片、网页或外部知识库后，系统可完成解析、索引、检索和回答，并通过 MCP 工具与网络搜索处理多步任务。
+KnowledgeMesh 将 **RAG 快速问答、ReAct Agent 推理和自动 Wiki** 统一在一套知识工作流中。导入 PDF、Word、图片、网页或外部知识库后，系统可完成解析、索引、检索和回答，并通过 MCP 工具与网络搜索处理多步任务。
 
 模型、向量数据库、对象存储和部署方式均可替换，支持本地及私有云部署。
 

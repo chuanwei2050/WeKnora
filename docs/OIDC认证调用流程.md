@@ -1,6 +1,6 @@
-# FinOpsSys OIDC 认证调用流程
+# KnowledgeMesh OIDC 认证调用流程
 
-本文档说明 FinOpsSys 当前 OIDC 登录能力的实际调用过程，覆盖：
+本文档说明 KnowledgeMesh 当前 OIDC 登录能力的实际调用过程，覆盖：
 
 - 前端如何判断是否展示 OIDC 登录入口
 - 用户点击 OIDC 登录后的前后端调用链路
@@ -25,20 +25,20 @@
 
 本项目的 OIDC 登录采用的是 **后端发起授权参数生成、后端接收回调并完成 code 换 token、前端通过 URL hash 接收最终登录结果** 的模式。
 
-和常见的纯前端 OIDC SDK 不同，FinOpsSys 的特点是：
+和常见的纯前端 OIDC SDK 不同，KnowledgeMesh 的特点是：
 
 1. **前端只负责发起跳转**，不直接和 OIDC Provider 交换 token。
 2. **后端负责用授权码 `code` 向 OIDC Provider 换取 token**。
 3. 后端拿到 OIDC 用户信息后，会：
    - 查找本地用户；
    - 若用户不存在，则自动创建本地账号和默认租户；
-   - 最终签发 FinOpsSys 自己的本地 JWT（`token` / `refresh_token`）。
+   - 最终签发 KnowledgeMesh 自己的本地 JWT（`token` / `refresh_token`）。
 4. 后端不会直接把登录结果放在 query string 中，而是：
    - 将登录结果 JSON（ `success`、`token`、`refresh_token` 等字段）序列化后再做 base64url 编码；
    - 以 `#oidc_result=...` 的形式重定向回前端；
    - 前端在 `App.vue` 中统一解析 hash，再调用 `/api/v1/auth/me` 补全用户和租户信息。
 
-因此，**OIDC Provider 的 token 只用于后端换取用户身份，本项目真正的业务访问凭证仍然是 FinOpsSys 自己签发的 JWT**。
+因此，**OIDC Provider 的 token 只用于后端换取用户身份，本项目真正的业务访问凭证仍然是 KnowledgeMesh 自己签发的 JWT**。
 
 ---
 
@@ -71,7 +71,7 @@ sequenceDiagram
     autonumber
     participant U as 用户浏览器
     participant FE as 前端(Login/App)
-    participant BE as FinOpsSys 后端
+    participant BE as KnowledgeMesh 后端
     participant OP as OIDC Provider
 
     FE->>BE: GET /api/v1/auth/oidc/config
@@ -120,7 +120,7 @@ flowchart TD
     L --> M{本地用户是否存在}
     M -- 否 --> N[自动注册新用户并创建默认租户]
     M -- 是 --> O[使用现有用户]
-    N --> P[签发 FinOpsSys JWT]
+    N --> P[签发 KnowledgeMesh JWT]
     O --> P
     P --> Q[编码最小必要登录结果为 oidc_result]
     Q --> R[302 重定向到前端首页 hash]
@@ -188,7 +188,7 @@ GET /api/v1/auth/oidc/url?redirect_uri=...
 window.location.href = authorizationURL
 ```
 
-浏览器随后离开 FinOpsSys 页面，跳转到 OIDC Provider 的授权页。
+浏览器随后离开 KnowledgeMesh 页面，跳转到 OIDC Provider 的授权页。
 
 ---
 
@@ -397,7 +397,7 @@ userRepo.GetUserByEmail(ctx, userInfo.Email)
 4. 调用现有 `Register()` 流程创建用户；
 5. `Register()` 内部还会自动创建默认租户。
 
-因此，**首次使用 OIDC 登录的用户，不需要提前在 FinOpsSys 中手工建号**。
+因此，**首次使用 OIDC 登录的用户，不需要提前在 KnowledgeMesh 中手工建号**。
 
 ### 8.3 用户禁用处理
 
@@ -409,7 +409,7 @@ Account is disabled
 
 ---
 
-## 9. 生成 FinOpsSys 本地登录态
+## 9. 生成 KnowledgeMesh 本地登录态
 
 OIDC 登录成功后，后端不会直接把 OIDC token 交给前端使用，而是继续执行：
 
@@ -434,7 +434,7 @@ GenerateTokens(ctx, user)
 
 这一步意味着：
 
-> OIDC 只负责“确认你是谁”，FinOpsSys 自己负责“签发系统内可用的业务令牌”。
+> OIDC 只负责“确认你是谁”，KnowledgeMesh 自己负责“签发系统内可用的业务令牌”。
 
 ---
 
@@ -564,7 +564,7 @@ staticClients:
     redirectURIs:
       - 'http://127.0.0.1:5173/api/v1/auth/oidc/callback'
       - 'http://127.0.0.1/api/v1/auth/oidc/callback'
-    name: 'FinOpsSys'
+    name: 'KnowledgeMesh'
     # secret: <YOUR_SECRET_HERE>
 ```
 
@@ -601,7 +601,7 @@ Provider 必须提前把这些地址加入白名单。
 
 ### 阶段三：后端完成身份兑换
 
-Provider 回调后端 `/auth/oidc/callback`，后端用 `code` 换 token、拉取用户信息、关联或创建本地用户，并签发 FinOpsSys JWT。
+Provider 回调后端 `/auth/oidc/callback`，后端用 `code` 换 token、拉取用户信息、关联或创建本地用户，并签发 KnowledgeMesh JWT。
 
 ### 阶段四：前端接收最终结果
 
@@ -618,7 +618,7 @@ Provider 回调后端 `/auth/oidc/callback`，后端用 `code` 换 token、拉�
 3. **邮箱是本地账号关联主键**。
    - 若 Provider 没返回 email，将无法完成登录。
 4. **首次 OIDC 登录会自动创建用户和默认租户**。
-5. **真正用于访问 FinOpsSys API 的仍是本地 JWT**，不是 OIDC access token。
+5. **真正用于访问 KnowledgeMesh API 的仍是本地 JWT**，不是 OIDC access token。
 6. 当前实现对 `state` 做了编码封装，但 **没有服务端持久化 state/nonce 校验**；它主要用于传递上下文和基本防错，而不是完整的防重放机制。
 
 ---

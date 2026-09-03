@@ -1,6 +1,6 @@
 # Langfuse 集成
 
-FinOpsSys 内置了对 [Langfuse](https://langfuse.com) 的轻量级集成，用于统计 token 消耗、追踪 LLM 调用链路，并为每个对话生成可在 Langfuse 控制台查看的 trace。
+KnowledgeMesh 内置了对 [Langfuse](https://langfuse.com) 的轻量级集成，用于统计 token 消耗、追踪 LLM 调用链路，并为每个对话生成可在 Langfuse 控制台查看的 trace。
 
 ## 1. 特性
 
@@ -52,14 +52,14 @@ docker compose logs -f app | grep Langfuse
 
 `docker-compose.yml` 内置了一个可选的 `langfuse` profile，用一条命令就能拉起 Langfuse v3。
 
-**设计上已尽可能复用 FinOpsSys 已有容器，避免资源浪费**：
+**设计上已尽可能复用 KnowledgeMesh 已有容器，避免资源浪费**：
 
 | 组件 | 来源 | 备注 |
 | --- | --- | --- |
 | PostgreSQL | 复用 `WeKnora-postgres` | 通过一次性的 `langfuse-db-init` 容器，在同一 pg 实例里创建独立的 `langfuse` 数据库。库级隔离，互不影响。 |
-| Redis | 复用 `WeKnora-redis` | 使用独立的 Redis DB 号（默认 DB 1，FinOpsSys 用 DB 0）。`REDIS_CONNECTION_STRING` 指定 DB 后缀。 |
-| ClickHouse | 新增 `langfuse-clickhouse` | Langfuse 专有（OLAP 事件存储），FinOpsSys 不用，必须独立。 |
-| MinIO | 新增 `langfuse-minio` | 故意和 FinOpsSys 的 `minio` 分开（后者是可选 profile，未必激活；Langfuse S3 要专属 bucket）。 |
+| Redis | 复用 `WeKnora-redis` | 使用独立的 Redis DB 号（默认 DB 1，KnowledgeMesh 用 DB 0）。`REDIS_CONNECTION_STRING` 指定 DB 后缀。 |
+| ClickHouse | 新增 `langfuse-clickhouse` | Langfuse 专有（OLAP 事件存储），KnowledgeMesh 不用，必须独立。 |
+| MinIO | 新增 `langfuse-minio` | 故意和 KnowledgeMesh 的 `minio` 分开（后者是可选 profile，未必激活；Langfuse S3 要专属 bucket）。 |
 | Web / Worker | 新增 `langfuse-web` + `langfuse-worker` | Langfuse 应用本体。 |
 
 最终 `--profile langfuse` 只新增 **4 个常驻容器 + 1 个一次性 init**，内存开销由原先的 ~1.5–2.5 GB 降到约 **1.0–1.5 GB**。
@@ -109,7 +109,7 @@ docker compose up -d app
 | （复用）WeKnora-redis | – | +30–80 MB | 共用实例的 DB 1 |
 | **新增合计** | | **≈ 1.0–1.5 GB** | 推荐 3 GB+ 可用内存 |
 
-> 和"完全隔离各建一套 pg/redis"方案相比，这里节省了约 **400–500 MB** 内存。代价是 FinOpsSys 的 pg/redis 容量规划需要为 Langfuse 预留一点余量；Langfuse 写入量并不大（只是元数据 + 任务队列，事件主体走 ClickHouse），实际影响很小。
+> 和"完全隔离各建一套 pg/redis"方案相比，这里节省了约 **400–500 MB** 内存。代价是 KnowledgeMesh 的 pg/redis 容量规划需要为 Langfuse 预留一点余量；Langfuse 写入量并不大（只是元数据 + 任务队列，事件主体走 ClickHouse），实际影响很小。
 
 对单机部署而言，若只想使用 Langfuse Cloud 方案（A-1），**完全不需要**这些容器；原有服务 CPU/内存占用不变。
 
@@ -119,7 +119,7 @@ docker compose up -d app
 - **备份**：`pg_dump -d langfuse` 可独立备份 Langfuse 的元数据；事件数据在 ClickHouse 卷（`langfuse_clickhouse_data`）中。
 - **想彻底隔离**（跨机部署、强运维隔离）：可以直接把 `langfuse-web` / `langfuse-worker` 的 `DATABASE_URL` 和 `REDIS_CONNECTION_STRING` 指向任意外部 pg/redis（例如 RDS + ElastiCache）；`langfuse-db-init` 容器可以选择不启动，手动在目标 pg 上 `CREATE DATABASE langfuse` 即可。
 
-#### （B）FinOpsSys Lite（单机）
+#### （B）KnowledgeMesh Lite（单机）
 
 在 `.env.lite`（或启动脚本导出的环境变量）里加：
 
@@ -196,7 +196,7 @@ export LANGFUSE_SECRET_KEY=sk-lf-xxxxxxxx
 go run ./cmd/server
 ```
 
-Dev 相关容器都带 `-dev` 后缀、用独立网络 `FinOpsSys-network-dev`，和生产 compose **不冲突**。
+Dev 相关容器都带 `-dev` 后缀、用独立网络 `WeKnora-network-dev`，和生产 compose **不冲突**。
 
 ### 2.3 验证
 
@@ -221,11 +221,11 @@ Dev 相关容器都带 `-dev` 后缀、用独立网络 `FinOpsSys-network-dev`�
 | `LANGFUSE_QUEUE_SIZE` | `2048` | 内存队列容量。队列满时新事件会被静默丢弃（避免拖慢业务）。 |
 | `LANGFUSE_REQUEST_TIMEOUT` | `10s` | 单次 HTTP ingest 请求超时。 |
 | `LANGFUSE_SAMPLE_RATE` | `1.0` | 采样率 (0..1)。`0` 视为 `1.0`。高流量环境可下调。 |
-| `LANGFUSE_DEBUG` | `false` | 打开后会在 FinOpsSys 日志里打印上报失败的详细原因，排障期间临时开启。 |
+| `LANGFUSE_DEBUG` | `false` | 打开后会在 KnowledgeMesh 日志里打印上报失败的详细原因，排障期间临时开启。 |
 
 ## 4. 观测数据说明
 
-| Langfuse 概念 | FinOpsSys 对应 | 备注 |
+| Langfuse 概念 | KnowledgeMesh 对应 | 备注 |
 | --- | --- | --- |
 | Trace | 一次 HTTP 请求（含其触发的所有 asynq 任务） | 对于 `knowledge-chat`、`agent-chat`、`knowledge-search`、`generate_title`、`evaluation`、模型连通性测试等在线请求；以及文件上传/URL 入库/manual/reparse/move/copy、FAQ 导入、知识修改、wiki auto-fix、数据源手工触发等入库请求，HTTP 层都会开启 trace，并把 `trace_id` / `parent_observation_id` 注入 asynq payload。 |
 | Span（type=SPAN） | 每个 asynq 任务的执行窗口 / 每次 Agent 执行及其每一轮 / 每次工具调用 | 由 `internal/tracing/langfuse/AsynqMiddleware` 在 `mux.Use` 注册；对每个 handler 自动创建 `asynq.<task_type>` 的 SPAN，并记录 `task_id` / `queue` / `retry` / `payload_bytes`。定时任务（无上游 trace）会退化为 `asynq.<task_type>` 独立 trace。**Agent 相关**：`AgentEngine.Execute` 会开 `agent.execute` 顶层 SPAN，其下每一轮 ReAct 循环开 `agent.round.N` SPAN，每次工具调用开 `agent.tool.<tool_name>` SPAN（参数、输出、耗时、成败、错误都会写入）。 |
@@ -272,7 +272,7 @@ Dev 相关容器都带 `-dev` 后缀、用独立网络 `FinOpsSys-network-dev`�
 - **调高 `LANGFUSE_FLUSH_AT`** 到 50–100，降低 ingest HTTP 调用频率。
 - **采样**：把 `LANGFUSE_SAMPLE_RATE=0.1` 只采样 10% 的对话，生产成本与信噪比通常能得到较好的平衡。
 - **扩大 `LANGFUSE_QUEUE_SIZE`** 至 8192，防止短时峰值触发事件丢弃。
-- 将 Langfuse 实例部署在离 FinOpsSys 同机房（例如自建 Langfuse + 内网地址），可以显著降低上报延迟。
+- 将 Langfuse 实例部署在离 KnowledgeMesh 同机房（例如自建 Langfuse + 内网地址），可以显著降低上报延迟。
 - 打开 `LANGFUSE_DEBUG=true` 几分钟即可确认链路，生产环境常态下关闭，避免日志噪音。
 
 ## 6. 禁用
