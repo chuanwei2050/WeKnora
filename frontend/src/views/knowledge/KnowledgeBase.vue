@@ -3300,6 +3300,12 @@ async function createNewSession(value: string): Promise<void> {
                           </div>
                           <template #content>
                             <div class="card-menu">
+                              <div v-if="canEdit" class="card-menu-item" @click.stop="handleDirectoryItemAction('download', item)">
+                                <t-icon class="icon" name="download" /><span>{{ t('knowledgeBase.downloadDocumentDirectory') }}</span>
+                              </div>
+                              <div v-if="canEdit" class="card-menu-item" @click.stop="handleDirectoryItemAction('rename', item)">
+                                <t-icon class="icon" name="edit" /><span>{{ t('knowledgeBase.renameDocumentDirectory') }}</span>
+                              </div>
                               <FolderMoveCascader
                                 v-if="canEdit"
                                 :options="directoryMoveOptionsFor([toMoveEntry(item)])"
@@ -3321,12 +3327,6 @@ async function createNewSession(value: string): Promise<void> {
                                   <t-icon class="icon" name="move" /><span>{{ t('knowledgeBase.rowMoveToCategory') }}</span>
                                 </div>
                               </FolderMoveCascader>
-                              <div v-if="canEdit" class="card-menu-item" @click.stop="handleDirectoryItemAction('download', item)">
-                                <t-icon class="icon" name="download" /><span>{{ t('knowledgeBase.downloadDocumentDirectory') }}</span>
-                              </div>
-                              <div v-if="canEdit" class="card-menu-item" @click.stop="handleDirectoryItemAction('rename', item)">
-                                <t-icon class="icon" name="edit" /><span>{{ t('knowledgeBase.renameDocumentDirectory') }}</span>
-                              </div>
                               <div v-if="canManage" class="card-menu-item danger" @click.stop="handleDirectoryItemAction('delete', item)">
                                 <t-icon class="icon" name="delete" /><span>{{ t('knowledgeBase.governanceDelete') }}</span>
                               </div>

@@ -19,19 +19,21 @@ export function getFileIcon(input: string | { type?: string; file_type?: string;
   let type: string | undefined;
   let ext: string | undefined;
   if (typeof input === 'string') {
-    ext = input.split('.').pop()?.toLowerCase();
+    ext = input.split('.').pop()?.trim().toLowerCase();
   } else {
     type = input.type;
     if (type === 'manual') return 'edit';
     if (type === 'url') return 'link';
-    ext = (input.file_type || input.file_name?.split('.').pop() || '').toLowerCase();
+    ext = (input.file_type || input.file_name?.split('.').pop() || '').trim().toLowerCase();
   }
+  ext = ext?.replace(/^\./, '');
   if (!ext) return 'file';
   if (['pdf'].includes(ext)) return 'file-pdf';
   if (['doc', 'docx'].includes(ext)) return 'file-word';
   if (['xls', 'xlsx', 'csv'].includes(ext)) return 'file-excel';
   if (['ppt', 'pptx'].includes(ext)) return 'file-powerpoint';
-  if (['txt', 'md', 'markdown'].includes(ext)) return 'file-text';
+  if (ext === 'txt') return 'file-txt';
+  if (['md', 'markdown'].includes(ext)) return 'file-markdown';
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(ext)) return 'image';
   if (['mp3', 'wav', 'm4a', 'flac', 'ogg', 'aac'].includes(ext)) return 'sound';
   return 'file';

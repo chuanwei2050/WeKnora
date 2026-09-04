@@ -62,6 +62,14 @@ describe('document directory category scope', () => {
     expect(view).toContain("v-if=\"item.kind === 'directory' && canEdit\"")
   })
 
+  it('orders directory actions like document actions', () => {
+    const list = source('../src/views/knowledge/components/DocumentListView.vue')
+    const directoryBlock = list.slice(list.indexOf('<template v-if="item.kind === \'directory\'">'), list.indexOf('</template>', list.indexOf('<template v-if="item.kind === \'directory\'">')))
+    expect(directoryBlock.indexOf("directory-action', 'download")).toBeLessThan(directoryBlock.indexOf("directory-action', 'rename"))
+    expect(directoryBlock.indexOf("directory-action', 'rename")).toBeLessThan(directoryBlock.indexOf('rowMoveToDirectory'))
+    expect(directoryBlock.indexOf('rowMoveToDirectory')).toBeLessThan(directoryBlock.indexOf('rowMoveToCategory'))
+  })
+
   it('moves one document into a directory without reusing category movement', () => {
     const view = source('../src/views/knowledge/KnowledgeBase.vue')
     const list = source('../src/views/knowledge/components/DocumentListView.vue')

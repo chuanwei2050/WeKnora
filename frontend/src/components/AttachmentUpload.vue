@@ -116,7 +116,8 @@ const getFileIcon = (fileName: string): string => {
   if (['doc', 'docx'].includes(ext || '')) return 'file-word';
   if (['xls', 'xlsx'].includes(ext || '')) return 'file-excel';
   if (['ppt', 'pptx'].includes(ext || '')) return 'file-powerpoint';
-  if (['txt', 'md'].includes(ext || '')) return 'file-text';
+  if (ext === 'txt') return 'file-txt';
+  if (ext === 'md') return 'file-markdown';
   if (['mp3', 'wav', 'm4a', 'flac', 'ogg', 'aac'].includes(ext || '')) return 'sound';
   return 'file';
 };

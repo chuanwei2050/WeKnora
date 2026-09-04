@@ -445,6 +445,12 @@ const ariaSort = (field: SortField): 'ascending' | 'descending' | 'none' => {
         <div class="cell cell-actions" v-if="showActions" @click.stop>
           <div class="row-inline-actions">
             <template v-if="item.kind === 'directory'">
+              <button v-if="canEdit" class="row-action-btn" type="button" @click="emit('directory-action', 'download', item)">
+                {{ t('knowledgeBase.downloadDocumentDirectory') }}
+              </button>
+              <button v-if="canEdit" class="row-action-btn" type="button" @click="emit('directory-action', 'rename', item)">
+                {{ t('knowledgeBase.renameDocumentDirectory') }}
+              </button>
               <FolderMoveCascader
                 v-if="canEdit"
                 :options="directoryTargetsFor(item)"
@@ -466,12 +472,6 @@ const ariaSort = (field: SortField): 'ascending' | 'descending' | 'none' => {
                   {{ t('knowledgeBase.rowMoveToCategory') }}
                 </button>
               </FolderMoveCascader>
-              <button v-if="canEdit" class="row-action-btn" type="button" @click="emit('directory-action', 'download', item)">
-                {{ t('knowledgeBase.downloadDocumentDirectory') }}
-              </button>
-              <button v-if="canEdit" class="row-action-btn" type="button" @click="emit('directory-action', 'rename', item)">
-                {{ t('knowledgeBase.renameDocumentDirectory') }}
-              </button>
               <button v-if="canManage" class="row-action-btn danger" type="button" @click="emit('directory-action', 'delete', item)">
                 {{ t('knowledgeBase.governanceDelete') }}
               </button>
