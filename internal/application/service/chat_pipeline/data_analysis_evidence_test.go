@@ -16,6 +16,11 @@ func TestDataAnalysisEvidenceInstructionBalancesSQLAndRetrieval(t *testing.T) {
 			t.Fatalf("missing evidence fusion instruction %q", required)
 		}
 	}
+	for _, forbiddenDetail := range []string{"SQL", "内部表名", "字段别名", "会话标识"} {
+		if !strings.Contains(dataAnalysisEvidenceInstruction, forbiddenDetail) {
+			t.Fatalf("missing user-facing disclosure constraint %q", forbiddenDetail)
+		}
+	}
 }
 
 func TestDataAnalysisEvidenceIncludesAllRetrievedChunksForSelectedTable(t *testing.T) {
