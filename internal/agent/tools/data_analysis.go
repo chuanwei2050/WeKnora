@@ -375,7 +375,7 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}, err
 	}
 
-	queryOutput := t.formatQueryResults(results)
+	queryOutput := t.formatQueryResults(results, executionSQL)
 	logger.Infof(ctx, "[Tool][DataAnalysis] Completed execution query, total %d rows for session %s", len(results), t.sessionID)
 	return &types.ToolResult{
 		Success: true,
@@ -466,10 +466,11 @@ func (t *DataAnalysisTool) executeSingleQuery(ctx context.Context, sqlQuery stri
 }
 
 // formatQueryResults formats query results into JSONL format (one JSON object per line)
-func (t *DataAnalysisTool) formatQueryResults(results []map[string]string) string {
+func (t *DataAnalysisTool) formatQueryResults(results []map[string]string, query string) string {
 	var output strings.Builder
 
-	output.WriteString("=== Structured Query Results ===\n\n")
+	output.WriteString("=== DuckDB Query Results ===\n\n")
+	output.WriteString(fmt.Sprintf("Executed SQL: %s\n\n", query))
 	output.WriteString(fmt.Sprintf("Returned %d rows\n\n", len(results)))
 
 	if len(results) == 0 {

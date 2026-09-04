@@ -403,6 +403,7 @@ import {
   buildManualMarkdown,
   copyTextToClipboard,
   formatManualTitle,
+  redactSqlFromAnswer,
   replaceIncompleteImageWithPlaceholder,
 } from '@/utils/chatMessageShared';
 import {
@@ -1597,7 +1598,7 @@ const preprocessMarkdown = (contentStr: string): string => {
 
   // Replace incomplete streaming image markdown with an in-place loading placeholder.
   // This avoids showing a half-baked provider:// URL while keeping layout stable.
-  contentStr = replaceIncompleteImageWithPlaceholder(contentStr);
+  contentStr = redactSqlFromAnswer(replaceIncompleteImageWithPlaceholder(contentStr));
 
   // Preprocess custom citation tags
   return contentStr

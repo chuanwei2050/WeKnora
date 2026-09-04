@@ -23,6 +23,14 @@ export const replaceIncompleteImageWithPlaceholder = (content: string): string =
   return content;
 };
 
+export const redactSqlFromAnswer = (content: string): string => {
+  if (!content) return '';
+
+  return content
+    .replace(/```(?:sql)?\s*(?:SELECT|WITH)\b[\s\S]*?```/gi, '`结构化查询`')
+    .replace(/`(?:SELECT|WITH)\b[^`\r\n]*`/gi, '`结构化查询`');
+};
+
 export const formatManualTitle = (question?: string): string => {
   if (!question) {
     return i18n.global.t('chat.sessionExcerpt');

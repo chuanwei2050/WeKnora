@@ -110,6 +110,7 @@ import {
     buildManualMarkdown,
     copyTextToClipboard,
     formatManualTitle,
+    redactSqlFromAnswer,
     replaceIncompleteImageWithPlaceholder
 } from '@/utils/chatMessageShared';
 import {
@@ -258,7 +259,7 @@ const mentionedItems = computed(() => {
 
 // 单次渲染整个 Markdown 内容（替代 token-by-token，修复 KaTeX 公式在 streaming 时闪烁消失的问题）
 const renderedHTML = computed(() => {
-    const text = props.content || props.session?.content || '';
+    const text = redactSqlFromAnswer(props.content || props.session?.content || '');
     if (!text || typeof text !== 'string') return '';
     const processed = replaceIncompleteImageWithPlaceholder(text);
     const safeText = preprocessMathDelimiters(processed);
@@ -275,7 +276,7 @@ const hasActualContent = computed(() => {
 
 // 获取实际内容
 const getActualContent = () => {
-    return (props.content || props.session?.content || '').trim();
+    return redactSqlFromAnswer(props.content || props.session?.content || '').trim();
 };
 
 // 复制回答内容

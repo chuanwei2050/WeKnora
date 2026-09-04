@@ -51,18 +51,6 @@ func TestValidateDataAnalysisSQLBlocksDuckDBExternalIO(t *testing.T) {
 	}
 }
 
-func TestFormatQueryResultsKeepsResultsWithoutSQL(t *testing.T) {
-	tool := &DataAnalysisTool{}
-	output := tool.formatQueryResults([]map[string]string{{"master_count": "41"}})
-
-	if strings.Contains(output, "SELECT") || strings.Contains(output, "DuckDB") || strings.Contains(output, "internal_query") {
-		t.Fatalf("answer evidence must not expose query implementation details: %q", output)
-	}
-	if !strings.Contains(output, "Returned 1 rows") || !strings.Contains(output, `"master_count":"41"`) {
-		t.Fatalf("answer evidence must retain query results: %q", output)
-	}
-}
-
 func TestTableNameFitsSQLParserIdentifierLimit(t *testing.T) {
 	tool := &DataAnalysisTool{sessionID: "40bc6638-0128-4952-a36f-a670e94a7902"}
 	knowledge := &types.Knowledge{

@@ -214,7 +214,7 @@ func (p *PluginDataAnalysis) OnEvent(
 	}
 	analysisResult := &types.SearchResult{
 		ID:                   "analysis_" + knowledge.ID,
-		Content:              buildDataAnalysisEvidence(chatManage.Query, toolResult.Output),
+		Content:              dataAnalysisEvidenceInstruction + "\n\n" + toolResult.Output,
 		Score:                1.0,
 		MatchType:            types.MatchTypeDataAnalysis,
 		KnowledgeID:          knowledge.ID,
@@ -228,11 +228,7 @@ func (p *PluginDataAnalysis) OnEvent(
 	return next()
 }
 
-const dataAnalysisEvidenceInstruction = "结构化查询结果：这是针对下述查询目标对原始完整表格执行计算得到的证据。查询目标与用户问题一致时，统计、聚合、排序和计算结果应作为确定结果；ES、向量检索及 rerank 后的片段仅用于交叉核对和补充。若证据冲突，请指出冲突及采用结论的理由。面向用户回答时，请用自然语言说明查询口径，不要复述 SQL、内部表名、字段别名或会话标识。"
-
-func buildDataAnalysisEvidence(query, output string) string {
-	return dataAnalysisEvidenceInstruction + "\n查询目标：" + query + "\n\n" + output
-}
+const dataAnalysisEvidenceInstruction = "结构化查询结果：这是对原始表格执行 SQL 得到的一条候选证据。请将其与 ES、向量检索及 rerank 后的证据共同判断，不要机械地优先采用任一来源。判断时核对每条证据的查询条件、语义匹配程度和数据覆盖范围；若证据冲突，请指出冲突及采用结论的理由。"
 
 const dataAnalysisFailureInstruction = "结构化全表分析失败：%s。不得根据检索片段推算或给出确定的统计总数；必须明确告知用户本次未能完成全表统计。"
 
@@ -288,13 +284,7 @@ Return your response in the specified JSON format.`, query, knowledgeID, quotedM
 func bindDataAnalysisInput(content, knowledgeID string) (json.RawMessage, error) {
 	var input tools.DataAnalysisInput
 	if err := json.Unmarshal([]byte(content), &input); err != nil {
-		candidate, ok := extractCompleteJSONValue(content)
-		if !ok {
-			return nil, err
-		}
-		if recoveryErr := json.Unmarshal([]byte(candidate), &input); recoveryErr != nil {
-			return nil, recoveryErr
-		}
+		return nil, err
 	}
 	input.KnowledgeID = knowledgeID
 	input.MaxRows = dataAnalysisMaxRows
