@@ -23,7 +23,6 @@ const (
 
 const (
 	ModelProfileRoleQueryUnderstand = "query_understand"
-	ModelProfileRoleDataAnalysis    = "data_analysis"
 )
 
 func ParseModelProfile(value string) (ModelProfile, bool) {

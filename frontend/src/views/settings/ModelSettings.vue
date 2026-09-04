@@ -66,7 +66,7 @@
       <div class="section-subheader">
         <div class="subheader-text">
           <h3>辅助模型</h3>
-          <p class="section-desc">用于问题理解和 Text2SQL，最终回答仍使用对话模型</p>
+          <p class="section-desc">用于问题理解，最终回答仍使用对话模型</p>
         </div>
       </div>
       <div class="verifier-role-list">
@@ -407,7 +407,7 @@ import { isVLLMSettingsModel } from '@/utils/model-profile'
 const { t } = useI18n()
 
 type VerifierRole = 'verifier_1' | 'verifier_2' | 'evaluation_judge'
-type AuxiliaryRole = 'query_understand' | 'data_analysis'
+type AuxiliaryRole = 'query_understand'
 type StructuredModelRole = VerifierRole | AuxiliaryRole
 
 const showDialog = ref(false)
@@ -446,7 +446,6 @@ const verifierRoles: Array<{ value: VerifierRole; label: string; description: st
 
 const auxiliaryRoles: Array<{ value: AuxiliaryRole; label: string; description: string }> = [
   { value: 'query_understand', label: '问题理解', description: '意图识别、问题改写和复杂度路由' },
-  { value: 'data_analysis', label: 'Text2SQL', description: '根据表结构生成只读 SQL' },
 ]
 
 const verifierRoleOptions = verifierRoles.map(role => ({

@@ -22,7 +22,6 @@ var bootstrapRoles = map[string]bootstrapRole{
 	"chat":             {modelType: types.ModelTypeKnowledgeQA, modelRole: types.ModelRoleChat, use: "chat"},
 	"verifier_1":       {modelType: types.ModelTypeVerifier, modelRole: types.ModelRoleVerifier, use: "verifier"},
 	"query_understand": {modelType: types.ModelTypeVerifier, modelRole: types.ModelRoleVerifier, use: "verifier"},
-	"data_analysis":    {modelType: types.ModelTypeVerifier, modelRole: types.ModelRoleVerifier, use: "verifier"},
 	"verifier_2":       {modelType: types.ModelTypeVerifier, modelRole: types.ModelRoleVerifier, use: "verifier"},
 	"evaluation_judge": {modelType: types.ModelTypeJudge, modelRole: types.ModelRoleEvaluationJudge, use: "judge"},
 	"embedding":        {modelType: types.ModelTypeEmbedding, modelRole: types.ModelRoleEmbedding, use: "embedding"},
@@ -294,7 +293,7 @@ func Bootstrap(
 }
 
 func isAuxiliaryChatRole(role string) bool {
-	return role == types.ModelProfileRoleQueryUnderstand || role == types.ModelProfileRoleDataAnalysis
+	return role == types.ModelProfileRoleQueryUnderstand
 }
 
 func hasProfileRole(models []*types.Model, profile types.ModelProfile, role string) bool {

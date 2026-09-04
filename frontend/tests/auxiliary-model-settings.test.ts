@@ -5,11 +5,11 @@ import { describe, expect, it } from 'vitest'
 const source = () => readFileSync(resolve(__dirname, '../src/views/settings/ModelSettings.vue'), 'utf8')
 
 describe('auxiliary model settings', () => {
-  it('shows independently editable query-understanding and Text2SQL roles', () => {
+  it('shows an independently editable query-understanding role', () => {
     const settings = source()
 
     expect(settings).toContain("value: 'query_understand'")
-    expect(settings).toContain("value: 'data_analysis'")
+    expect(settings).not.toContain("value: 'data_analysis'")
     expect(settings).toContain('最终回答仍使用对话模型')
     expect(settings).toContain('openAddStructuredModelDialog(role.value)')
   })

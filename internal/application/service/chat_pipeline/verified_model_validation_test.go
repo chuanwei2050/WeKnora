@@ -73,7 +73,7 @@ func TestGetAuxiliaryChatModelUsesPersistedRoleAndFallsBack(t *testing.T) {
 	if err != nil || !selected || got != specialized {
 		t.Fatalf("specialized selection = %#v, %v, %v", got, selected, err)
 	}
-	got, selected, err = getAuxiliaryChatModel(context.Background(), service, types.ModelProfileRoleDataAnalysis, "main-model")
+	got, selected, err = getAuxiliaryChatModel(context.Background(), service, "unconfigured-role", "main-model")
 	if err != nil || selected || got != fallback {
 		t.Fatalf("fallback selection = %#v, %v, %v", got, selected, err)
 	}

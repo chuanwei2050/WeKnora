@@ -124,14 +124,14 @@ func (p *PluginDataAnalysis) OnEvent(
 	}
 
 	// Ask LLM to generate SQL for data analysis
-	chatModel, specializedModel, err := getAuxiliaryChatModel(ctx, p.modelService, types.ModelProfileRoleDataAnalysis, chatManage.ChatModelID)
+	chatModel, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
 	if err != nil {
 		finishStage()
 		return ErrGetChatModel.WithError(err)
 	}
 	pipelineInfo(ctx, "DataAnalysis", "model_selected", map[string]interface{}{
-		"session_id":  chatManage.SessionID,
-		"specialized": specializedModel,
+		"session_id": chatManage.SessionID,
+		"model_role": "chat",
 	})
 
 	// Use utils.GenerateSchema to generate format schema for DataAnalysisInput
@@ -180,8 +180,8 @@ func (p *PluginDataAnalysis) OnEvent(
 				lastErr = fmt.Errorf("model returned SQL while requesting to skip table analysis")
 				continue
 			}
-			if analysisAttempted {
-				lastErr = fmt.Errorf("model cannot skip table analysis after an execution attempt failed")
+			if !canSkipDataAnalysis(analysisAttempted) {
+				lastErr = fmt.Errorf("model cannot skip table analysis after an execution attempt")
 				continue
 			}
 			emitPipelineStageResult(ctx, chatManage, stageID, "data_analysis", "无需表格分析", stageStarted, true, map[string]interface{}{"status": "skipped"})
@@ -282,6 +282,10 @@ Return your response in the specified JSON format.`, query, knowledgeID, quotedM
 }
 
 func bindDataAnalysisInput(content, knowledgeID string) (json.RawMessage, error) {
+	content, err := unwrapDataAnalysisJSONFence(content)
+	if err != nil {
+		return nil, err
+	}
 	var input tools.DataAnalysisInput
 	if err := json.Unmarshal([]byte(content), &input); err != nil {
 		return nil, err
@@ -289,6 +293,35 @@ func bindDataAnalysisInput(content, knowledgeID string) (json.RawMessage, error)
 	input.KnowledgeID = knowledgeID
 	input.MaxRows = dataAnalysisMaxRows
 	return json.Marshal(input)
+}
+
+func unwrapDataAnalysisJSONFence(content string) (string, error) {
+	trimmed := strings.TrimSpace(content)
+	if !strings.HasPrefix(trimmed, "```") {
+		return trimmed, nil
+	}
+
+	firstLineEnd := strings.IndexByte(trimmed, '\n')
+	if firstLineEnd < 0 {
+		return "", fmt.Errorf("invalid fenced JSON response")
+	}
+	language := strings.TrimSpace(strings.TrimSuffix(trimmed[3:firstLineEnd], "\r"))
+	if language != "" && !strings.EqualFold(language, "json") {
+		return "", fmt.Errorf("unsupported fenced response language %q", language)
+	}
+	closingFence := strings.LastIndex(trimmed, "\n```")
+	if closingFence <= firstLineEnd || strings.TrimSpace(trimmed[closingFence+1:]) != "```" {
+		return "", fmt.Errorf("invalid fenced JSON response")
+	}
+	body := strings.TrimSpace(trimmed[firstLineEnd+1 : closingFence])
+	if body == "" || strings.Contains(body, "```") {
+		return "", fmt.Errorf("invalid fenced JSON response")
+	}
+	return body, nil
+}
+
+func canSkipDataAnalysis(analysisAttempted bool) bool {
+	return !analysisAttempted
 }
 
 func dataAnalysisEvidence(results []*types.SearchResult, knowledgeID string, maxChars int) string {

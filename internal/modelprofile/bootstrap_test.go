@@ -13,13 +13,12 @@ func TestBootstrapPlanBuildsExplicitOfflineRoleModels(t *testing.T) {
 	setBootstrapTestEnv(t)
 
 	models := BootstrapPlan(types.ModelProfileOffline)
-	if len(models) != 8 {
-		t.Fatalf("expected 8 registrations, got %d: %+v", len(models), models)
+	if len(models) != 7 {
+		t.Fatalf("expected 7 registrations, got %d: %+v", len(models), models)
 	}
 	assertBootstrapModel(t, models, "Qwen3.8-27B-FP8", types.ModelTypeKnowledgeQA, "http://114.242.58.129:30000/v1")
 	assertBootstrapModel(t, models, "Qwen3.8-27B-FP8", types.ModelTypeVerifier, "http://114.242.58.129:30000/v1")
 	assertProfileRole(t, models, types.ModelProfileOffline, types.ModelProfileRoleQueryUnderstand, "qwen3.5-9b")
-	assertProfileRole(t, models, types.ModelProfileOffline, types.ModelProfileRoleDataAnalysis, "qwen3.5-9b")
 	assertBootstrapModel(t, models, "qwen3.5-9b", types.ModelTypeVerifier, "http://192.168.10.232:8003/v1")
 	assertBootstrapModel(t, models, "Qwen3.8-27B-FP8", types.ModelTypeJudge, "http://114.242.58.129:30000/v1")
 	embedding := assertBootstrapModel(t, models, "qwen3-embedding-4b", types.ModelTypeEmbedding, "http://192.168.10.232:8001/v1")
@@ -46,7 +45,7 @@ func TestBootstrapIsIdempotent(t *testing.T) {
 	if err := Bootstrap(context.Background(), repo, stateRepo, nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(repo.models) != 8 || repo.clearCalls != 8 {
+	if len(repo.models) != 7 || repo.clearCalls != 7 {
 		t.Fatalf("first bootstrap models=%d clearCalls=%d", len(repo.models), repo.clearCalls)
 	}
 	if stateRepo.settings.ModelSeedVersion != modelSeedVersion {
@@ -58,7 +57,7 @@ func TestBootstrapIsIdempotent(t *testing.T) {
 	if err := Bootstrap(context.Background(), repo, stateRepo, nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(repo.models) != 8 || repo.clearCalls != 8 {
+	if len(repo.models) != 7 || repo.clearCalls != 7 {
 		t.Fatalf("second bootstrap created duplicates: models=%d clearCalls=%d", len(repo.models), repo.clearCalls)
 	}
 }
@@ -79,8 +78,8 @@ func TestBootstrapSeedsOnlineAndOfflineProfilesIndependently(t *testing.T) {
 	if err := Bootstrap(context.Background(), repo, stateRepo, nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(repo.models) != 11 {
-		t.Fatalf("seeded models=%d, want 8 offline + 3 online", len(repo.models))
+	if len(repo.models) != 10 {
+		t.Fatalf("seeded models=%d, want 7 offline + 3 online", len(repo.models))
 	}
 	assertProfileRole(t, repo.models, types.ModelProfileOnline, "chat", "Qwen/Qwen3.6-27B")
 	assertProfileRole(t, repo.models, types.ModelProfileOnline, "verifier_2", "Qwen/Qwen3.5-9B")
@@ -108,7 +107,7 @@ func TestBootstrapSeedsEditableModelsAndDoesNotRestoreEnvValues(t *testing.T) {
 	if err := Bootstrap(context.Background(), repo, stateRepo, nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(repo.models) != 7 || repo.models[0].Name != "admin-edited-model" {
+	if len(repo.models) != 6 || repo.models[0].Name != "admin-edited-model" {
 		t.Fatalf("restart restored env seeds: %+v", repo.models)
 	}
 }
@@ -286,7 +285,7 @@ func TestBootstrapDoesNotMutateUnrelatedBuiltinModel(t *testing.T) {
 	if !builtin.IsBuiltin {
 		t.Fatal("unrelated builtin model was made editable")
 	}
-	if len(repo.models) != 9 {
+	if len(repo.models) != 8 {
 		t.Fatalf("expected an editable seed alongside the builtin model, got %d models", len(repo.models))
 	}
 }
@@ -304,8 +303,8 @@ func TestFullOfflineBootstrapPlanSatisfiesChecklist(t *testing.T) {
 	t.Setenv("OFFLINE_TTS_MODEL_BASE_URL", "http://192.168.10.232:8005/v1")
 
 	models := BootstrapPlan(types.ModelProfileOffline)
-	if len(models) != 11 {
-		t.Fatalf("expected 11 registrations for 11 roles, got %d", len(models))
+	if len(models) != 10 {
+		t.Fatalf("expected 10 registrations for 10 roles, got %d", len(models))
 	}
 	views := make([]ModelView, 0, len(models))
 	for index, model := range models {
@@ -317,7 +316,7 @@ func TestFullOfflineBootstrapPlanSatisfiesChecklist(t *testing.T) {
 		})
 	}
 	status := Build(views)
-	if status.Summary.OK != 11 || status.Summary.MissingEnv != 0 || status.Summary.MissingRegistration != 0 || status.Summary.Mismatch != 0 {
+	if status.Summary.OK != 10 || status.Summary.MissingEnv != 0 || status.Summary.MissingRegistration != 0 || status.Summary.Mismatch != 0 {
 		t.Fatalf("bootstrap plan does not satisfy checklist: %+v", status.Summary)
 	}
 }
