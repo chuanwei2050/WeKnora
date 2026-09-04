@@ -191,6 +191,6 @@ export async function createIntegrationClient(input: IntegrationClientInput): Pr
   return (await post<ApiResponse<CreatedIntegrationClient>>('/api/v1/admin/integration-clients', input)).data
 }
 
-export async function rotateIntegrationClientSecret(clientId: string): Promise<{ client_secret: string }> {
-  return (await post<ApiResponse<{ client_secret: string }>>(`/api/v1/admin/integration-clients/${encodeURIComponent(clientId)}/rotate-secret`, {})).data
+export async function rotateIntegrationClientSecret(clientId: string, allowedOrigins?: string[]): Promise<{ client_secret: string }> {
+  return (await post<ApiResponse<{ client_secret: string }>>(`/api/v1/admin/integration-clients/${encodeURIComponent(clientId)}/rotate-secret`, allowedOrigins ? { allowed_origins: allowedOrigins } : {})).data
 }

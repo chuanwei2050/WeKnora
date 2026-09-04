@@ -2245,9 +2245,26 @@ func jsonMarshal(value any) (string, error) {
 func (h *IntegrationHandler) RotateClientSecret(c *gin.Context) {
 	actor, _ := c.Get(types.UserContextKey.String())
 	user, _ := actor.(*types.User)
-	secret, err := h.service.RotateSecret(c.Request.Context(), user, c.Param("client_id"))
+	var req struct {
+		AllowedOrigins []string `json:"allowed_origins"`
+	}
+	if bindErr := c.ShouldBindJSON(&req); bindErr != nil && !errors.Is(bindErr, io.EOF) {
+		integrationError(c, http.StatusBadRequest, "invalid_allowed_origins", "invalid allowed_origins")
+		return
+	}
+	var secret string
+	var err error
+	if len(req.AllowedOrigins) > 0 {
+		secret, err = h.service.RotateSecretWithAllowedOrigins(c.Request.Context(), user, c.Param("client_id"), req.AllowedOrigins)
+	} else {
+		secret, err = h.service.RotateSecret(c.Request.Context(), user, c.Param("client_id"))
+	}
 	if err != nil {
-		integrationError(c, http.StatusForbidden, "rotate_failed", "secret rotation failed")
+		status := http.StatusForbidden
+		if errors.Is(err, integrationauth.ErrInvalid) {
+			status = http.StatusBadRequest
+		}
+		integrationError(c, status, "rotate_failed", "secret rotation failed")
 		return
 	}
 	integrationData(c, http.StatusOK, gin.H{"client_secret": secret})

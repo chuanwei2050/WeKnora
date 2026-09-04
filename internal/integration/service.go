@@ -131,6 +131,20 @@ func parseStringArray(value string) ([]string, error) {
 	}
 	return result, nil
 }
+
+func validateAllowedOrigins(origins []string) error {
+	if len(origins) == 0 {
+		return ErrInvalid
+	}
+	for _, origin := range origins {
+		parsed, err := url.ParseRequestURI(origin)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("%w: invalid allowed origin: %s", ErrInvalid, origin)
+		}
+	}
+	return nil
+}
+
 func validClient(client *Client, now time.Time) bool {
 	return client != nil && client.Enabled && (client.ExpiresAt == nil || client.ExpiresAt.After(now))
 }
@@ -200,8 +214,11 @@ func (s *Service) CreateClient(ctx context.Context, actor *types.User, client *C
 		}
 	}
 	origins, err := parseStringArray(client.AllowedOriginsJSON)
-	if err != nil || len(origins) == 0 {
+	if err != nil {
 		return "", ErrInvalid
+	}
+	if err = validateAllowedOrigins(origins); err != nil {
+		return "", err
 	}
 	var mappings map[string]string
 	if json.Unmarshal([]byte(client.RoleMappingsJSON), &mappings) != nil {
@@ -227,12 +244,6 @@ func (s *Service) CreateClient(ctx context.Context, actor *types.User, client *C
 	if s.db.WithContext(ctx).First(&provider, "id = ?", client.IdentityProviderID).Error != nil {
 		return "", ErrForbidden
 	}
-	for _, origin := range origins {
-		parsed, err := url.ParseRequestURI(origin)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
-			return "", fmt.Errorf("invalid allowed origin: %s", origin)
-		}
-	}
 	if secret == "" {
 		var err error
 		secret, err = randomToken()
@@ -250,6 +261,43 @@ func (s *Service) CreateClient(ctx context.Context, actor *types.User, client *C
 	client.SecretCipher = sealed
 	client.Enabled = true
 	return secret, s.db.WithContext(ctx).Create(client).Error
+}
+
+func (s *Service) RotateSecretWithAllowedOrigins(ctx context.Context, actor *types.User, clientID string, origins []string) (string, error) {
+	if actor == nil || !actor.IsPlatformAdmin() || strings.TrimSpace(clientID) == "" {
+		return "", ErrForbidden
+	}
+	origins = uniqueStrings(origins)
+	if err := validateAllowedOrigins(origins); err != nil {
+		return "", err
+	}
+	secret, err := randomToken()
+	if err != nil {
+		return "", err
+	}
+	sealed, err := sealClientSecret(secret)
+	if err != nil {
+		return "", err
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&Client{}).Where("id = ?", clientID).Updates(map[string]any{
+			"allowed_origins_json": encodeStrings(origins),
+			"previous_secret_hash": gorm.Expr("secret_hash"),
+			"secret_hash":          digest(secret),
+			"secret_cipher":        sealed,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrForbidden
+		}
+		return tx.Model(&Session{}).Where("client_id = ? AND revoked_at IS NULL", clientID).Update("revoked_at", s.now()).Error
+	})
+	if err != nil {
+		return "", err
+	}
+	return secret, nil
 }
 
 func (s *Service) resolveClientKnowledgeBaseIDs(ctx context.Context, client *Client) ([]string, error) {

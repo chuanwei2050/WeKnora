@@ -99,10 +99,20 @@
           v-if="viewingIntegrationClient"
           :theme="integrationSecretRevealed ? 'default' : 'primary'"
           variant="base"
-          :loading="integrationRotating"
-          @click="rotateIntegrationSecret"
+          @click="openIntegrationEditor"
         >重新生成密钥</t-button>
       </div>
+    </t-dialog>
+
+    <t-dialog v-model:visible="integrationEditVisible" header="修改第三方接入信息" :confirm-btn="{ content: '保存并生成接入信息', loading: integrationEditSaving }" @confirm="saveIntegrationEdit">
+      <t-form label-align="top">
+        <t-form-item label="WeKnora 服务地址" required>
+          <div class="field-control"><t-input v-model="integrationEditForm.serverUrl" placeholder="例如：https://weknora.example.com" /><div class="field-hint">更换 WeKnora 部署服务器后，请填写新服务器的协议、域名和端口。</div></div>
+        </t-form-item>
+        <t-form-item label="第三方项目 Origin" required>
+          <div class="field-control"><t-input v-model="integrationEditForm.allowedOrigin" placeholder="例如：https://bidder.example.com" /><div class="field-hint">更换第三方项目服务器后，需同步更新允许访问的 Origin。</div></div>
+        </t-form-item>
+      </t-form>
     </t-dialog>
 
     <t-dialog v-model:visible="credentialVisible" header="租户创建成功" :footer="false">
@@ -139,9 +149,10 @@ const editingId = ref<number | null>(null)
 const integrationVisible = ref(false)
 const integrationCredentialVisible = ref(false)
 const integrationSaving = ref(false)
-const integrationRotating = ref(false)
 const integrationSecretRevealed = ref(false)
 const integrationSecretLoading = ref(false)
+const integrationEditVisible = ref(false)
+const integrationEditSaving = ref(false)
 const integrationTenant = ref<AdminTenant | null>(null)
 const viewingIntegrationClient = ref<IntegrationClient | null>(null)
 const integrationViewToken = ref(0)
@@ -149,6 +160,7 @@ const integrationForm = reactive({ projectName: 'Bidder Agent', providerId: 'bid
 const integrationAdministratorsLoading = ref(false)
 const integrationAdministratorOptions = ref<Array<{ label: string; value: string }>>([])
 const integrationPackageText = ref('')
+const integrationEditForm = reactive({ serverUrl: '', allowedOrigin: '' })
 const isInsecureDeployment = computed(() => window.location.protocol !== 'https:')
 const form = reactive({ name: '', business: '', description: '', storageQuotaGb: 10, adminUsername: '', adminPassword: 'Admin@123456' })
 
@@ -157,21 +169,31 @@ const formatDate = (value: string) => value ? new Date(value).toLocaleString('zh
 const isHomeTenant = (tenant: AdminTenant) => String(tenant.id) === String(authStore.currentTenantId)
 const tenantIntegrationClient = (tenant: AdminTenant) => integrationClients.value.find(client => Number(client.tenant_id) === Number(tenant.id) && client.enabled)
 
-function buildIntegrationPackage(clientId: string, secret: string | null, integrationOrigin: string) {
+function buildIntegrationPackage(clientId: string, secret: string | null, integrationOrigin: string, serverUrl = window.location.origin) {
   const secretLine = secret
     ? `WEKNORA_INTEGRATION_CLIENT_SECRET=${secret}`
     : 'WEKNORA_INTEGRATION_CLIENT_SECRET='
   return [
     'WEKNORA_ENABLED=true',
-    `WEKNORA_INTEGRATION_BASE_URL=${window.location.origin}/api/integration/v1`,
-    `WEKNORA_FRONTEND_URL=${window.location.origin}`,
-    `WEKNORA_FRONTEND_ORIGIN=${window.location.origin}`,
+    `WEKNORA_INTEGRATION_BASE_URL=${serverUrl}/api/integration/v1`,
+    `WEKNORA_FRONTEND_URL=${serverUrl}`,
+    `WEKNORA_FRONTEND_ORIGIN=${serverUrl}`,
     `WEKNORA_INTEGRATION_ORIGIN=${integrationOrigin || '<请填写第三方项目 Origin>'}`,
     'WEKNORA_INTEGRATION_TENANT_ID=<第三方项目内部租户ID>',
     `WEKNORA_INTEGRATION_CLIENT_ID=${clientId}`,
     secretLine,
     'WEKNORA_TIMEOUT_SECONDS=60',
   ].join('\n')
+}
+
+function parseOrigin(value: string, label: string): URL | null {
+  let origin: URL
+  try { origin = new URL(value.trim()) } catch { MessagePlugin.warning(`${label}格式不正确`); return null }
+  if (!['http:', 'https:'].includes(origin.protocol) || origin.pathname !== '/' || origin.search || origin.hash || origin.username || origin.password) {
+    MessagePlugin.warning(`${label}只能包含协议、域名和端口`)
+    return null
+  }
+  return origin
 }
 
 async function loadIntegrationClients() {
@@ -265,9 +287,8 @@ async function createIntegration() {
   if (!tenant || !integrationForm.projectName.trim() || !integrationForm.providerId.trim() || !integrationForm.administratorUserId || !integrationForm.allowedOrigin.trim()) { MessagePlugin.warning('请填写完整接入信息'); return }
   if (integrationForm.projectName.trim().length > 128 || integrationForm.providerId.trim().length > 64) { MessagePlugin.warning('项目名称或身份提供方 ID 过长'); return }
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(integrationForm.providerId.trim())) { MessagePlugin.warning('身份提供方 ID 仅支持英文字母、数字、点、下划线和短横线'); return }
-  let origin: URL
-  try { origin = new URL(integrationForm.allowedOrigin.trim()) } catch { MessagePlugin.warning('第三方项目 Origin 格式不正确'); return }
-  if (!['http:', 'https:'].includes(origin.protocol) || origin.pathname !== '/' || origin.search || origin.hash || origin.username || origin.password) { MessagePlugin.warning('Origin 只能包含协议、域名和端口'); return }
+  const origin = parseOrigin(integrationForm.allowedOrigin, '第三方项目 Origin')
+  if (!origin) return
   integrationSaving.value = true
   try {
     const providerId = integrationForm.providerId.trim()
@@ -284,35 +305,51 @@ async function createIntegration() {
   finally { integrationSaving.value = false }
 }
 
-async function rotateIntegrationSecret() {
+function openIntegrationEditor() {
   const client = viewingIntegrationClient.value
   if (!client) return
-  const dialog = DialogPlugin.confirm({
-    header: '重新生成密钥',
-    body: '重新生成后旧密钥将逐步失效，请确认第三方已准备好替换新密钥。',
-    confirmBtn: '重新生成',
-    onConfirm: async () => {
-      integrationRotating.value = true
-      try {
-        const rotated = await rotateIntegrationClientSecret(client.id)
-        integrationSecretRevealed.value = true
-        integrationPackageText.value = buildIntegrationPackage(client.id, rotated.client_secret, client.allowed_origins?.[0] || '')
-        MessagePlugin.success('新密钥已生成，可复制接入信息')
-        dialog.destroy()
-      } catch (error) {
-        MessagePlugin.error((error as { message?: string }).message || '重新生成密钥失败')
-      } finally {
-        integrationRotating.value = false
-      }
-    },
-  })
+  integrationEditForm.serverUrl = window.location.origin
+  integrationEditForm.allowedOrigin = client.allowed_origins?.[0] || ''
+  integrationEditVisible.value = true
+}
+
+async function saveIntegrationEdit() {
+  const client = viewingIntegrationClient.value
+  if (!client) return
+  const server = parseOrigin(integrationEditForm.serverUrl, 'WeKnora 服务地址')
+  const allowedOrigin = parseOrigin(integrationEditForm.allowedOrigin, '第三方项目 Origin')
+  if (!server || !allowedOrigin) return
+  integrationEditSaving.value = true
+  try {
+    const rotated = await rotateIntegrationClientSecret(client.id, [allowedOrigin.origin])
+    client.allowed_origins = [allowedOrigin.origin]
+    integrationSecretRevealed.value = true
+    integrationPackageText.value = buildIntegrationPackage(client.id, rotated.client_secret, allowedOrigin.origin, server.origin)
+    integrationEditVisible.value = false
+    MessagePlugin.success('新密钥和接入信息已生成，可直接复制')
+  } catch (error) {
+    MessagePlugin.error((error as { message?: string }).message || '接入信息更新失败')
+  } finally {
+    integrationEditSaving.value = false
+  }
 }
 
 async function copyIntegrationPackage() {
   if (integrationSecretLoading.value) return
   if (!integrationSecretRevealed.value) {
-    MessagePlugin.warning('请先重新生成密钥后再复制')
-    return
+    const client = viewingIntegrationClient.value
+    if (!client) return
+    integrationSecretLoading.value = true
+    try {
+      const revealed = await revealIntegrationClientSecret(client.id)
+      integrationSecretRevealed.value = true
+      integrationPackageText.value = buildIntegrationPackage(client.id, revealed.client_secret, client.allowed_origins?.[0] || '')
+    } catch (error) {
+      MessagePlugin.error((error as { message?: string }).message || '接入密钥读取失败')
+      return
+    } finally {
+      integrationSecretLoading.value = false
+    }
   }
   try {
     if (navigator.clipboard) await navigator.clipboard.writeText(integrationPackageText.value)

@@ -358,6 +358,28 @@ func TestRevealClientSecretLikeModelAPIKey(t *testing.T) {
 	require.NotEqual(t, secret, revealed)
 }
 
+func TestRotateSecretWithAllowedOrigins(t *testing.T) {
+	svc := testService(t)
+	actor := &types.User{Role: types.UserRolePlatformAdmin, IsActive: true}
+	require.NoError(t, svc.CreateIdentityProvider(context.Background(), actor, &IdentityProvider{ID: "idp", Name: "Test IdP"}))
+	client := &Client{TenantID: 1, IdentityProviderID: "idp", Name: "host", AllowedOriginsJSON: `["https://old.example"]`, KnowledgeBaseIDsJSON: `[]`, ScopesJSON: `["kb:list"]`, RoleMappingsJSON: `{}`}
+	_, err := svc.CreateClient(context.Background(), actor, client, "copyable-secret")
+	require.NoError(t, err)
+	require.NoError(t, svc.db.Create(&Session{ID: "active-session", ClientID: client.ID, TenantID: 1, Digest: "digest", ScopesJSON: `[]`, KnowledgeBaseIDsJSON: `[]`, ExpiresAt: time.Now().Add(time.Hour), AbsoluteExpiresAt: time.Now().Add(time.Hour)}).Error)
+
+	rotated, err := svc.RotateSecretWithAllowedOrigins(context.Background(), actor, client.ID, []string{"https://new.example"})
+	require.NoError(t, err)
+	require.NoError(t, svc.db.First(client, "id = ?", client.ID).Error)
+	require.Equal(t, []string{"https://new.example"}, client.AllowedOrigins())
+	require.Equal(t, digest(rotated), client.SecretHash)
+	var session Session
+	require.NoError(t, svc.db.First(&session, "id = ?", "active-session").Error)
+	require.NotNil(t, session.RevokedAt)
+
+	_, err = svc.RotateSecretWithAllowedOrigins(context.Background(), actor, client.ID, []string{"https://new.example/path"})
+	require.ErrorIs(t, err, ErrInvalid)
+}
+
 func TestClientRejectsCrossTenantKnowledgeBase(t *testing.T) {
 	svc := testService(t)
 	actor := &types.User{Role: types.UserRolePlatformAdmin, IsActive: true}
