@@ -180,8 +180,8 @@ func (p *PluginDataAnalysis) OnEvent(
 				lastErr = fmt.Errorf("model returned SQL while requesting to skip table analysis")
 				continue
 			}
-			if !canSkipDataAnalysis(analysisAttempted) {
-				lastErr = fmt.Errorf("model cannot skip table analysis after an execution attempt")
+			if !canSkipDataAnalysis(lastErr, analysisAttempted) {
+				lastErr = fmt.Errorf("model cannot skip table analysis after a previous attempt failed")
 				continue
 			}
 			emitPipelineStageResult(ctx, chatManage, stageID, "data_analysis", "无需表格分析", stageStarted, true, map[string]interface{}{"status": "skipped"})
@@ -320,8 +320,8 @@ func unwrapDataAnalysisJSONFence(content string) (string, error) {
 	return body, nil
 }
 
-func canSkipDataAnalysis(analysisAttempted bool) bool {
-	return !analysisAttempted
+func canSkipDataAnalysis(previousErr error, analysisAttempted bool) bool {
+	return previousErr == nil && !analysisAttempted
 }
 
 func dataAnalysisEvidence(results []*types.SearchResult, knowledgeID string, maxChars int) string {

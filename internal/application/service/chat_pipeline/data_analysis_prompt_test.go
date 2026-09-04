@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -58,11 +59,14 @@ func TestBindDataAnalysisInputRejectsJSONEmbeddedInProse(t *testing.T) {
 	}
 }
 
-func TestDataAnalysisSkipIsRejectedOnlyAfterExecutionAttempt(t *testing.T) {
-	if !canSkipDataAnalysis(false) {
+func TestDataAnalysisSkipIsRejectedAfterAnyFailedAttempt(t *testing.T) {
+	if !canSkipDataAnalysis(nil, false) {
 		t.Fatal("expected an initial skip to remain valid")
 	}
-	if canSkipDataAnalysis(true) {
+	if canSkipDataAnalysis(fmt.Errorf("invalid model response"), false) {
+		t.Fatal("expected skip after a parse failure to be rejected")
+	}
+	if canSkipDataAnalysis(nil, true) {
 		t.Fatal("expected skip after an execution attempt to be rejected")
 	}
 }
