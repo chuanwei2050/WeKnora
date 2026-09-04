@@ -578,21 +578,21 @@ const removeDocumentDirectory = async (item: KnowledgeCard) => {
 const selectedDirectoryItems = computed(() => cardList.value.filter(item => item.kind === 'directory' && selectedDirectoryIds.value.has(item.id)));
 const selectedDocumentItems = computed(() => cardList.value.filter(item => item.kind !== 'directory' && selectedIds.value.has(item.id)));
 
-const renameSelectedDirectory = () => {
-  if (!canEdit.value) return;
-  const [directory] = selectedDirectoryItems.value;
-  if (directory) openRenameDirectory(directory);
-};
-
-const downloadSelectedDirectory = async () => {
+const downloadSelectedEntries = async () => {
   const directories = selectedDirectoryItems.value;
-  if (!kbId.value || directories.length === 0) return;
+  const documents = selectedDocumentItems.value;
+  if (!kbId.value || directories.length + documents.length === 0) return;
   try {
-    const blob = await downloadDocumentDirectories(kbId.value, selectedTagId.value, directories.map(directory => directory.id));
+    const blob = await downloadDocumentDirectories(
+      kbId.value,
+      selectedTagId.value,
+      directories.map(directory => directory.id),
+      documents.map(document => document.id),
+    );
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${directories.length === 1 ? directories[0].file_name : '文档目录'}.zip`;
+    link.download = `${directories.length === 1 && documents.length === 0 ? directories[0].file_name : '文档'}.zip`;
     link.click();
     URL.revokeObjectURL(url);
   } catch (error) {
@@ -602,6 +602,7 @@ const downloadSelectedDirectory = async () => {
 
 const deleteSelectedDirectories = async () => {
   if (!canManage.value || !kbId.value || selectedDirectoryItems.value.length === 0) return;
+  const documentIDs = batchDeleteTargetIds.value;
   try {
     const previews = await Promise.all(selectedDirectoryItems.value.map(async directory => ({
       directory,
@@ -611,7 +612,7 @@ const deleteSelectedDirectories = async () => {
       directories: total.directories + item.preview.directory_count,
       documents: total.documents + item.preview.document_count,
       size: total.size + item.preview.total_storage_size,
-    }), { directories: 0, documents: 0, size: 0 });
+    }), { directories: 0, documents: documentIDs.length, size: 0 });
     const dialog = DialogPlugin.confirm({
       header: t('knowledgeBase.deleteDocumentDirectory'),
       body: t('knowledgeBase.confirmDirectoryDeleteImpact', { directories: impact.directories, documents: impact.documents }),
@@ -620,19 +621,54 @@ const deleteSelectedDirectories = async () => {
       cancelBtn: t('common.cancel'),
       onConfirm: async () => {
         dialog.hide();
-        for (const item of previews) {
-          const result = await confirmDocumentDirectoryDelete(kbId.value, selectedTagId.value, item.directory.id, item.preview.confirmation_token);
-          if (result.data?.id) pollDirectoryDeleteTask(result.data.id);
+        batchActionLoading.value = 'delete';
+        let acceptedCount = 0;
+        try {
+          if (documentIDs.length > 0) {
+            const result = await batchDeleteKnowledge(kbId.value, documentIDs);
+            if (!result?.success) throw new Error(result?.message || t('knowledgeBase.batchDeleteFailed'));
+            acceptedCount += documentIDs.length;
+          }
+          for (const item of previews) {
+            const result = await confirmDocumentDirectoryDelete(kbId.value, selectedTagId.value, item.directory.id, item.preview.confirmation_token);
+            if (result.data?.id) {
+              acceptedCount += 1;
+              pollDirectoryDeleteTask(result.data.id);
+            }
+          }
+          clearSelection();
+          page = 1;
+          loadKnowledgeFiles(kbId.value);
+          loadTags(kbId.value);
+          void loadMoveDirectoryOptions();
+        } catch (error) {
+          if (acceptedCount > 0) {
+            MessagePlugin.warning(t('knowledgeBase.batchGovernancePartial', {
+              success: acceptedCount,
+              failed: documentIDs.length + previews.length - acceptedCount,
+            }));
+          } else {
+            MessagePlugin.error(error instanceof Error ? error.message : t('common.operationFailed'));
+          }
+          page = 1;
+          loadKnowledgeFiles(kbId.value);
+          loadTags(kbId.value);
+        } finally {
+          batchActionLoading.value = null;
         }
-        clearSelection();
-        page = 1;
-        loadKnowledgeFiles(kbId.value);
-        void loadMoveDirectoryOptions();
       },
     });
   } catch (error) {
     MessagePlugin.error(error instanceof Error ? error.message : t('common.operationFailed'));
   }
+};
+
+const deleteSelectedEntries = () => {
+  if (selectedDirectoryItems.value.length > 0) {
+    void deleteSelectedDirectories();
+    return;
+  }
+  openBatchDeleteDialog();
 };
 
 const pollDirectoryDeleteTask = (taskId: string) => {
@@ -2449,7 +2485,7 @@ const handleBatchMoveToFolder = async (targetTagId: string) => {
   if (!canEdit.value || batchMovingFolder.value) return;
   const target = tagMap.value[targetTagId];
   if (selectedDirectoryIds.value.size > 0) {
-    if (selectedIds.value.size > 0 || !target || targetTagId === selectedTagId.value || !kbId.value) return;
+    if (!target || targetTagId === selectedTagId.value || !kbId.value) return;
     batchMovingFolder.value = true;
     try {
       await moveDocumentDirectoriesToCategory(
@@ -2457,8 +2493,9 @@ const handleBatchMoveToFolder = async (targetTagId: string) => {
         selectedTagId.value,
         targetTagId,
         Array.from(selectedDirectoryIds.value),
+        selectedKnowledgeItems.value.map(item => item.id),
       );
-      const count = selectedDirectoryIds.value.size;
+      const count = selectedDirectoryIds.value.size + selectedKnowledgeItems.value.length;
       clearSelection();
       MessagePlugin.success(t('knowledgeBase.batchMoveFolderSuccess', { count, name: target.name }));
       page = 1;
@@ -2467,6 +2504,10 @@ const handleBatchMoveToFolder = async (targetTagId: string) => {
       void loadMoveDirectoryOptions();
     } catch (error: any) {
       MessagePlugin.error(error?.message || t('knowledgeBase.batchMoveFolderFailed'));
+      page = 1;
+      loadKnowledgeFiles(kbId.value);
+      await loadTags(kbId.value, true);
+      void loadMoveDirectoryOptions();
     } finally {
       batchMovingFolder.value = false;
     }
@@ -2520,7 +2561,7 @@ const getEligibleBatchItems = (action: GovernanceRowAction): KnowledgeCard[] => 
 };
 
 const batchActions = computed<DocumentBatchAction[]>(() => (
-  selectedDirectoryIds.value.size > 0 ? [] : (['submit', 'withdraw', 'approve', 'reject', 'delete'] satisfies GovernanceRowAction[])
+  (['submit', 'withdraw', 'approve', 'reject', 'delete'] satisfies GovernanceRowAction[])
     .map(action => ({ action, count: getEligibleBatchItems(action).length }))
     .filter(item => item.count > 0)
 ));
@@ -3401,7 +3442,7 @@ async function createNewSession(value: string): Promise<void> {
                                 @click.stop="handleManualEdit(index, item)"
                               >
                                 <t-icon class="icon" name="edit" />
-                                <span>{{ t('knowledgeBase.editDocument') }}</span>
+                                <span>{{ t('knowledgeBase.rowEdit') }}</span>
                               </div>
                               <div
                                 v-if="canEdit && item.parse_status !== 'pending_review'"
@@ -3409,23 +3450,34 @@ async function createNewSession(value: string): Promise<void> {
                                 @click.stop="handleKnowledgeReparse(index, item)"
                               >
                                 <t-icon class="icon" name="refresh" />
-                                <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
+                                <span>{{ t('knowledgeBase.rowRebuild') }}</span>
                               </div>
-                              <div
+                              <FolderMoveCascader
                                 v-if="canEdit"
-                                class="card-menu-item"
-                                @click.stop="handleDirectoryItemAction('move', item)"
+                                :options="directoryMoveOptionsFor([toMoveEntry(item)])"
+                                :loading="moveDirectoryOptionsLoading"
+                                placement="top-right"
+                                @select="(directoryId: string) => handleDirectoryItemAction('move', item, directoryId)"
                               >
-                                <t-icon class="icon" name="move" />
-                                <span>{{ t('knowledgeBase.rowMoveToDirectory') }}</span>
-                              </div>
-                              <div
-                                v-if="canEdit"
-                                class="card-menu-item"
-                                @click.stop="handleMoveKnowledge(item)"
+                                <div class="card-menu-item" @click.stop>
+                                  <t-icon class="icon" name="move" />
+                                  <span>{{ t('knowledgeBase.rowMoveToDirectory') }}</span>
+                                </div>
+                              </FolderMoveCascader>
+                              <FolderMoveCascader
+                                v-if="canEdit && categoryTargetsFor(item).length"
+                                :options="categoryTargetsFor(item)"
+                                placement="top-right"
+                                @select="(tagId: string) => handleKnowledgeTagChange(item.id, tagId, item)"
                               >
+                                <div class="card-menu-item" @click.stop>
+                                  <t-icon class="icon" name="swap" />
+                                  <span>{{ t('knowledgeBase.rowMoveToCategory') }}</span>
+                                </div>
+                              </FolderMoveCascader>
+                              <div v-if="canEdit" class="card-menu-item" @click.stop="handleMoveKnowledge(item)">
                                 <t-icon class="icon" name="swap" />
-                                <span>{{ t('knowledgeBase.moveDocument') }}</span>
+                                <span>{{ t('knowledgeBase.moveToKnowledgeBase') }}</span>
                               </div>
                               <div
                                 v-if="canManage && !governanceActionsForItem(item).includes('delete')"
@@ -3435,7 +3487,7 @@ async function createNewSession(value: string): Promise<void> {
                                 @click.stop="delCard(index, item)"
                               >
                                 <t-icon class="icon" name="delete" />
-                                <span>{{ t('knowledgeBase.deleteDocument') }}</span>
+                                <span>{{ t('knowledgeBase.governanceDelete') }}</span>
                               </div>
                             </div>
 
@@ -3671,9 +3723,8 @@ async function createNewSession(value: string): Promise<void> {
                 @action="handleBatchAction"
                 @move-folder="handleBatchMoveToFolder"
                 @move-directory="handleBatchMoveDirectory"
-                @rename-directory="renameSelectedDirectory"
-                @download-directory="downloadSelectedDirectory"
-                @delete-directories="deleteSelectedDirectories"
+                @download-selection="downloadSelectedEntries"
+                @delete-selection="deleteSelectedEntries"
               />
             </div>
           </div>

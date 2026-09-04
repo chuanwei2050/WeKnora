@@ -7372,7 +7372,7 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 
 // MoveSubtreesToTag moves directory trees and their documents to another tag
 // without clearing directory associations, then keeps chunk tags and indexes in sync.
-func (s *knowledgeService) MoveSubtreesToTag(ctx context.Context, kbID, sourceTagID, targetTagID string, directoryIDs []string) (int, error) {
+func (s *knowledgeService) MoveSubtreesToTag(ctx context.Context, kbID, sourceTagID, targetTagID string, directoryIDs, directKnowledgeIDs []string) (int, error) {
 	tenantIDVal := ctx.Value(types.TenantIDContextKey)
 	tenantID, ok := tenantIDVal.(uint64)
 	if !ok {
@@ -7388,7 +7388,7 @@ func (s *knowledgeService) MoveSubtreesToTag(ctx context.Context, kbID, sourceTa
 	if targetTag.KnowledgeBaseID != kbID {
 		return 0, werrors.NewBadRequestError("目标分类不属于当前知识库")
 	}
-	knowledgeIDs, err := s.directoryRepo.MoveSubtreesToTag(ctx, tenantID, kbID, sourceTagID, targetTag.ID, directoryIDs)
+	knowledgeIDs, err := s.directoryRepo.MoveSubtreesToTag(ctx, tenantID, kbID, sourceTagID, targetTag.ID, directoryIDs, directKnowledgeIDs)
 	if err != nil {
 		return 0, err
 	}

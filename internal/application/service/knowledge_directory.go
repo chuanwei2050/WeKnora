@@ -73,8 +73,8 @@ func (s *knowledgeDirectoryService) MoveEntries(ctx context.Context, tenantID ui
 	return s.repo.MoveEntries(ctx, tenantID, kbID, directoryIDs, knowledgeIDs, parentID, tagID)
 }
 
-func (s *knowledgeDirectoryService) MoveSubtreesToTag(ctx context.Context, tenantID uint64, kbID, sourceTagID, targetTagID string, directoryIDs []string) ([]string, error) {
-	return s.repo.MoveSubtreesToTag(ctx, tenantID, kbID, sourceTagID, targetTagID, directoryIDs)
+func (s *knowledgeDirectoryService) MoveSubtreesToTag(ctx context.Context, tenantID uint64, kbID, sourceTagID, targetTagID string, directoryIDs, knowledgeIDs []string) ([]string, error) {
+	return s.repo.MoveSubtreesToTag(ctx, tenantID, kbID, sourceTagID, targetTagID, directoryIDs, knowledgeIDs)
 }
 
 func (s *knowledgeDirectoryService) DeleteEmpty(ctx context.Context, tenantID uint64, kbID, tagID, id string) error {

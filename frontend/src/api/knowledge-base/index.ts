@@ -237,9 +237,10 @@ export function moveDocumentDirectoryEntries(kbId: string, tagId: string, direct
   });
 }
 
-export function moveDocumentDirectoriesToCategory(kbId: string, tagId: string, targetTagId: string, directoryIds: string[]) {
+export function moveDocumentDirectoriesToCategory(kbId: string, tagId: string, targetTagId: string, directoryIds: string[], knowledgeIds: string[] = []) {
   return put(`/api/v1/knowledge-bases/${kbId}/knowledge/directories/move-to-category?tag_id=${encodeURIComponent(tagId)}`, {
     directory_ids: directoryIds,
+    knowledge_ids: knowledgeIds,
     target_tag_id: targetTagId,
   });
 }
@@ -248,9 +249,10 @@ export function downloadDocumentDirectory(kbId: string, tagId: string, directory
   return getDown(`/api/v1/knowledge-bases/${kbId}/knowledge/directories/${directoryId}/download?tag_id=${encodeURIComponent(tagId)}`);
 }
 
-export function downloadDocumentDirectories(kbId: string, tagId: string, directoryIds: string[]) {
+export function downloadDocumentDirectories(kbId: string, tagId: string, directoryIds: string[], knowledgeIds: string[] = []) {
   const query = new URLSearchParams({ tag_id: tagId });
   directoryIds.forEach(directoryId => query.append('directory_id', directoryId));
+  knowledgeIds.forEach(knowledgeId => query.append('knowledge_id', knowledgeId));
   return getDown(`/api/v1/knowledge-bases/${kbId}/knowledge/directories/download?${query.toString()}`);
 }
 

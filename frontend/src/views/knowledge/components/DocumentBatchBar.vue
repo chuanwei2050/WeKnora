@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { DocumentBatchAction, GovernanceRowAction } from './knowledge-governance-actions';
 import FolderMoveCascader from './FolderMoveCascader.vue';
 import type { FolderCascaderOption } from './document-folder-organization';
 
-defineProps<{
+const props = defineProps<{
   count: number;
   actions: DocumentBatchAction[];
   loadingAction?: GovernanceRowAction | null;
@@ -24,12 +25,18 @@ const emit = defineEmits<{
   (e: 'action', action: GovernanceRowAction): void;
   (e: 'move-folder', tagId: string): void;
   (e: 'move-directory', directoryId: string): void;
-  (e: 'rename-directory'): void;
-  (e: 'download-directory'): void;
-  (e: 'delete-directories'): void;
+  (e: 'download-selection'): void;
+  (e: 'delete-selection'): void;
 }>();
 
 const { t } = useI18n();
+
+const nonDeleteActions = computed(() => props.actions.filter(item => item.action !== 'delete'));
+const documentDeleteCount = computed(() => props.actions.find(item => item.action === 'delete')?.count || 0);
+const deleteSelectionCount = computed(() => documentDeleteCount.value + (props.directoryCount || 0));
+const canDeleteSelection = computed(() => (props.directoryCount || 0) > 0
+  ? Boolean(props.canManage) && documentDeleteCount.value === (props.documentCount || 0)
+  : documentDeleteCount.value > 0);
 
 const actionLabelKeys: Record<GovernanceRowAction, string> = {
   submit: 'knowledgeBase.governanceSubmit',
@@ -50,6 +57,9 @@ const actionLabelKeys: Record<GovernanceRowAction, string> = {
         </button>
       </div>
       <div class="batch-bar-actions">
+        <t-button v-if="canEdit" variant="outline" size="small" @click="emit('download-selection')">
+          {{ t('knowledgeBase.downloadDocumentDirectory') }}
+        </t-button>
         <FolderMoveCascader
           v-if="canEdit"
           :options="directoryTargets || []"
@@ -68,29 +78,8 @@ const actionLabelKeys: Record<GovernanceRowAction, string> = {
             {{ t('knowledgeBase.moveToDocumentDirectory') }}（{{ count }}）
           </t-button>
         </FolderMoveCascader>
-        <t-button v-if="(directoryCount || 0) > 0 && documentCount === 0" variant="outline" size="small" @click="emit('download-directory')">
-          {{ t('knowledgeBase.downloadDocumentDirectory') }}
-        </t-button>
-        <t-button v-if="canEdit && directoryCount === 1 && documentCount === 0" variant="outline" size="small" @click="emit('rename-directory')">
-          {{ t('knowledgeBase.renameDocumentDirectory') }}
-        </t-button>
-        <t-button v-if="canManage && directoryCount && documentCount === 0" theme="danger" variant="outline" size="small" @click="emit('delete-directories')">
-          {{ t('knowledgeBase.governanceDelete') }}（{{ directoryCount }}）
-        </t-button>
-        <t-button
-          v-for="item in actions"
-          :key="item.action"
-          :theme="item.action === 'delete' ? 'danger' : 'primary'"
-          :variant="item.action === 'submit' || item.action === 'approve' ? 'base' : 'outline'"
-          size="small"
-          :loading="loadingAction === item.action"
-          :disabled="Boolean(movingFolder) || (Boolean(loadingAction) && loadingAction !== item.action)"
-          @click="emit('action', item.action)"
-        >
-          {{ t(actionLabelKeys[item.action]) }}（{{ item.count }}）
-        </t-button>
         <FolderMoveCascader
-          v-if="folderTargets?.length && (documentCount === count || directoryCount === count)"
+          v-if="folderTargets?.length"
           :options="folderTargets"
           placement="top-right"
           @select="(folderId: string) => emit('move-folder', folderId)"
@@ -105,6 +94,28 @@ const actionLabelKeys: Record<GovernanceRowAction, string> = {
             {{ t('knowledgeBase.adjustKnowledgeCategory') }}（{{ count }}）
           </t-button>
         </FolderMoveCascader>
+        <t-button
+          v-for="item in nonDeleteActions"
+          :key="item.action"
+          :theme="item.action === 'delete' ? 'danger' : 'primary'"
+          :variant="item.action === 'submit' || item.action === 'approve' ? 'base' : 'outline'"
+          size="small"
+          :loading="loadingAction === item.action"
+          :disabled="Boolean(movingFolder) || (Boolean(loadingAction) && loadingAction !== item.action)"
+          @click="emit('action', item.action)"
+        >
+          {{ t(actionLabelKeys[item.action]) }}（{{ item.count }}）
+        </t-button>
+        <t-button
+          v-if="canDeleteSelection"
+          theme="danger"
+          variant="outline"
+          size="small"
+          :disabled="Boolean(movingFolder) || Boolean(loadingAction)"
+          @click="emit('delete-selection')"
+        >
+          {{ t('knowledgeBase.governanceDelete') }}（{{ deleteSelectionCount }}）
+        </t-button>
       </div>
     </div>
   </transition>

@@ -15,7 +15,7 @@ type KnowledgeDirectoryRepository interface {
 	Rename(ctx context.Context, tenantID uint64, kbID, id, name, normalizedName string, tagIDs ...string) error
 	Move(ctx context.Context, tenantID uint64, kbID, id string, parentID *string, tagIDs ...string) error
 	MoveEntries(ctx context.Context, tenantID uint64, kbID string, directoryIDs, knowledgeIDs []string, parentID *string, tagIDs ...string) error
-	MoveSubtreesToTag(ctx context.Context, tenantID uint64, kbID, sourceTagID, targetTagID string, directoryIDs []string) ([]string, error)
+	MoveSubtreesToTag(ctx context.Context, tenantID uint64, kbID, sourceTagID, targetTagID string, directoryIDs, knowledgeIDs []string) ([]string, error)
 	DeleteEmpty(ctx context.Context, tenantID uint64, kbID, id string, tagIDs ...string) error
 	DeleteByTag(ctx context.Context, tenantID uint64, kbID, tagID string) error
 	Breadcrumb(ctx context.Context, tenantID uint64, kbID, id string, tagIDs ...string) ([]types.PathNode, error)
@@ -38,7 +38,7 @@ type KnowledgeDirectoryService interface {
 	Rename(ctx context.Context, tenantID uint64, kbID, tagID, id, name string) error
 	Move(ctx context.Context, tenantID uint64, kbID, tagID, id string, parentID *string) error
 	MoveEntries(ctx context.Context, tenantID uint64, kbID, tagID string, directoryIDs, knowledgeIDs []string, parentID *string) error
-	MoveSubtreesToTag(ctx context.Context, tenantID uint64, kbID, sourceTagID, targetTagID string, directoryIDs []string) ([]string, error)
+	MoveSubtreesToTag(ctx context.Context, tenantID uint64, kbID, sourceTagID, targetTagID string, directoryIDs, knowledgeIDs []string) ([]string, error)
 	DeleteEmpty(ctx context.Context, tenantID uint64, kbID, tagID, id string) error
 	Breadcrumb(ctx context.Context, tenantID uint64, kbID, tagID, id string) ([]types.PathNode, error)
 	EnsureUploadPath(ctx context.Context, tenantID uint64, kbID string, parentID *string, relativePath string, tagIDs ...string) (*types.KnowledgeDirectory, error)

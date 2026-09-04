@@ -274,9 +274,14 @@ func TestKnowledgeDirectoryMoveSubtreesToTagPreservesHierarchyAndDocuments(t *te
 	require.NoError(t, repo.db.Create(document).Error)
 	require.NoError(t, repo.db.Create(chunk).Error)
 
-	ids, err := repo.MoveSubtreesToTag(ctx, 1, "kb", "category-a", "category-b", []string{root.ID})
+	directDocument := &types.Knowledge{ID: "direct-cross-category-document", TenantID: 1, KnowledgeBaseID: "kb", TagID: "category-a", FileName: "direct.txt", ParseStatus: types.ParseStatusCompleted}
+	directChunk := &types.Chunk{ID: "direct-cross-category-chunk", TenantID: 1, KnowledgeBaseID: "kb", KnowledgeID: directDocument.ID, TagID: "category-a", Content: "direct content"}
+	require.NoError(t, repo.db.Create(directDocument).Error)
+	require.NoError(t, repo.db.Create(directChunk).Error)
+
+	ids, err := repo.MoveSubtreesToTag(ctx, 1, "kb", "category-a", "category-b", []string{root.ID}, []string{directDocument.ID})
 	require.NoError(t, err)
-	require.Equal(t, []string{document.ID}, ids)
+	require.Equal(t, []string{document.ID, directDocument.ID}, ids)
 	movedRoot, err := repo.Get(ctx, 1, "kb", root.ID, "category-b")
 	require.NoError(t, err)
 	require.Nil(t, movedRoot.ParentID)
@@ -290,6 +295,10 @@ func TestKnowledgeDirectoryMoveSubtreesToTagPreservesHierarchyAndDocuments(t *te
 	var movedChunk types.Chunk
 	require.NoError(t, repo.db.First(&movedChunk, "id = ?", chunk.ID).Error)
 	require.Equal(t, "category-b", movedChunk.TagID)
+	var movedDirectDocument types.Knowledge
+	require.NoError(t, repo.db.First(&movedDirectDocument, "id = ?", directDocument.ID).Error)
+	require.Equal(t, "category-b", movedDirectDocument.TagID)
+	require.Nil(t, movedDirectDocument.DirectoryID)
 }
 
 func TestKnowledgeDirectoryMoveSubtreesToTagRejectsDestinationConflictAtomically(t *testing.T) {
@@ -299,11 +308,16 @@ func TestKnowledgeDirectoryMoveSubtreesToTagRejectsDestinationConflictAtomically
 	require.NoError(t, err)
 	_, err = repo.EnsurePath(ctx, 1, "kb", nil, []string{"same-name"}, "category-b")
 	require.NoError(t, err)
-	_, err = repo.MoveSubtreesToTag(ctx, 1, "kb", "category-a", "category-b", []string{source.ID})
+	document := &types.Knowledge{ID: "atomic-direct-document", TenantID: 1, KnowledgeBaseID: "kb", TagID: "category-a", FileName: "direct.txt", ParseStatus: types.ParseStatusCompleted}
+	require.NoError(t, repo.db.Create(document).Error)
+	_, err = repo.MoveSubtreesToTag(ctx, 1, "kb", "category-a", "category-b", []string{source.ID}, []string{document.ID})
 	require.Error(t, err)
 	stored, err := repo.Get(ctx, 1, "kb", source.ID, "category-a")
 	require.NoError(t, err)
 	require.Equal(t, "category-a", stored.TagID)
+	var storedDocument types.Knowledge
+	require.NoError(t, repo.db.First(&storedDocument, "id = ?", document.ID).Error)
+	require.Equal(t, "category-a", storedDocument.TagID)
 }
 
 func TestKnowledgeDirectoryMoveSubtreesToTagRejectsDeletingDescendantAtomically(t *testing.T) {
@@ -315,7 +329,7 @@ func TestKnowledgeDirectoryMoveSubtreesToTagRejectsDeletingDescendantAtomically(
 	require.NoError(t, err)
 	require.NoError(t, repo.db.Model(&types.KnowledgeDirectory{}).Where("id = ?", child.ID).Update("status", types.DirectoryStatusDeleting).Error)
 
-	_, err = repo.MoveSubtreesToTag(ctx, 1, "kb", "category-a", "category-b", []string{root.ID})
+	_, err = repo.MoveSubtreesToTag(ctx, 1, "kb", "category-a", "category-b", []string{root.ID}, nil)
 	require.Error(t, err)
 	storedRoot, err := repo.Get(ctx, 1, "kb", root.ID, "category-a")
 	require.NoError(t, err)

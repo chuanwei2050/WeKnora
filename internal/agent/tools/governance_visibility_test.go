@@ -37,9 +37,13 @@ func TestAgentKnowledgeVisibleRequiresScopedTenantAndDocument(t *testing.T) {
 
 func TestAgentKnowledgeVisibleChecksCurrentVersionValidity(t *testing.T) {
 	now := time.Now().UTC()
-	knowledge := &types.Knowledge{ID: "knowledge-1", KnowledgeBaseID: "kb-1", TenantID: 7, CurrentVersionID: "version-1", PendingVersionID: "version-2"}
+	knowledge := &types.Knowledge{ID: "knowledge-1", KnowledgeBaseID: "kb-1", TenantID: 7, CurrentVersionID: "version-1"}
 	repo := agentVisibilityGovernanceRepo{version: &types.KnowledgeVersion{Status: types.KnowledgeVersionActive, EffectiveAt: &now}}
 	targets := types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: 7}}
+	if !agentKnowledgeVisible(context.Background(), knowledge, targets, repo) {
+		t.Fatal("active current version in the authorized scope should be visible")
+	}
+	knowledge.PendingVersionID = "version-2"
 	if agentKnowledgeVisible(context.Background(), knowledge, targets, repo) {
 		t.Fatal("knowledge with a pending version should not be visible to agent retrieval")
 	}

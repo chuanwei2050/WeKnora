@@ -137,7 +137,7 @@ type KnowledgeService interface {
 	// pass empty string to skip (caller must ensure authorization by other means).
 	UpdateKnowledgeTagBatch(ctx context.Context, authorizedKBID string, updates map[string]*string) error
 	// MoveSubtreesToTag moves document directory subtrees to another category while preserving hierarchy.
-	MoveSubtreesToTag(ctx context.Context, kbID, sourceTagID, targetTagID string, directoryIDs []string) (int, error)
+	MoveSubtreesToTag(ctx context.Context, kbID, sourceTagID, targetTagID string, directoryIDs, knowledgeIDs []string) (int, error)
 	// UpdateFAQEntryTagBatch updates tag for FAQ entries in batch.
 	// Key: entry seq_id, Value: tag seq_id (nil to remove tag)
 	UpdateFAQEntryTagBatch(ctx context.Context, kbID string, updates map[int64]*int64) error

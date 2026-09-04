@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatFileSize, getFileIcon } from '@/utils/files';
 import FolderMoveCascader from './FolderMoveCascader.vue';
@@ -266,14 +266,6 @@ const resizeNameColumnWithKeyboard = (event: KeyboardEvent) => {
   );
 };
 
-onMounted(() => {
-  if (nameColumnHeader.value) {
-    nameColumnWidth.value = Math.min(
-      MAX_NAME_COLUMN_WIDTH,
-      Math.max(MIN_NAME_COLUMN_WIDTH, Math.round(nameColumnHeader.value.getBoundingClientRect().width)),
-    );
-  }
-});
 onBeforeUnmount(() => {
   stopNameColumnResize?.();
 });

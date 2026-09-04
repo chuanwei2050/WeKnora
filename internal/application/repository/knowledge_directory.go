@@ -325,10 +325,10 @@ func (r *knowledgeDirectoryRepository) MoveEntries(ctx context.Context, tenantID
 	})
 }
 
-func (r *knowledgeDirectoryRepository) MoveSubtreesToTag(ctx context.Context, tenantID uint64, kbID, sourceTagID, targetTagID string, directoryIDs []string) ([]string, error) {
-	knowledgeIDs := make([]string, 0)
+func (r *knowledgeDirectoryRepository) MoveSubtreesToTag(ctx context.Context, tenantID uint64, kbID, sourceTagID, targetTagID string, directoryIDs, directKnowledgeIDs []string) ([]string, error) {
+	movedKnowledgeIDs := make([]string, 0)
 	if sourceTagID == targetTagID {
-		return knowledgeIDs, fmt.Errorf("source and target categories must differ")
+		return movedKnowledgeIDs, fmt.Errorf("source and target categories must differ")
 	}
 	err := directoryTransaction(ctx, r.db, tenantID, kbID, func(tx *gorm.DB) error {
 		var sources []*types.KnowledgeDirectory
@@ -370,6 +370,9 @@ func (r *knowledgeDirectoryRepository) MoveSubtreesToTag(ctx context.Context, te
 
 		allDirectoryIDs := make([]string, 0)
 		seenDirectoryIDs := make(map[string]struct{})
+		originalParentIDs := make(map[string]string)
+		documentDirectoryIDs := make(map[string]string)
+		seenKnowledgeIDs := make(map[string]struct{})
 		rootNames := make(map[string]struct{}, len(collapsed))
 		for _, root := range collapsed {
 			if _, duplicate := rootNames[root.NormalizedName]; duplicate {
@@ -399,13 +402,60 @@ func (r *knowledgeDirectoryRepository) MoveSubtreesToTag(ctx context.Context, te
 				if _, seen := seenDirectoryIDs[directory.ID]; !seen {
 					seenDirectoryIDs[directory.ID] = struct{}{}
 					allDirectoryIDs = append(allDirectoryIDs, directory.ID)
+					if directory.ParentID != nil {
+						originalParentIDs[directory.ID] = *directory.ParentID
+					}
 				}
 			}
 			for _, knowledge := range knowledges {
 				if knowledge.ParseStatus == types.ParseStatusDeleting {
 					return fmt.Errorf("one or more documents are deleting")
 				}
-				knowledgeIDs = append(knowledgeIDs, knowledge.ID)
+				if _, seen := seenKnowledgeIDs[knowledge.ID]; !seen {
+					seenKnowledgeIDs[knowledge.ID] = struct{}{}
+					movedKnowledgeIDs = append(movedKnowledgeIDs, knowledge.ID)
+				}
+				if knowledge.DirectoryID != nil {
+					documentDirectoryIDs[knowledge.ID] = *knowledge.DirectoryID
+				}
+			}
+		}
+		if len(directKnowledgeIDs) > 0 {
+			var directDocuments []*types.Knowledge
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
+				"tenant_id = ? AND knowledge_base_id = ? AND tag_id = ? AND id IN ? AND parse_status <> ?",
+				tenantID, kbID, sourceTagID, directKnowledgeIDs, types.ParseStatusDeleting,
+			).Order("id ASC").Find(&directDocuments).Error; err != nil {
+				return err
+			}
+			if len(directDocuments) != len(directKnowledgeIDs) {
+				return fmt.Errorf("one or more documents are invalid")
+			}
+			for _, knowledge := range directDocuments {
+				if _, seen := seenKnowledgeIDs[knowledge.ID]; seen {
+					continue
+				}
+				seenKnowledgeIDs[knowledge.ID] = struct{}{}
+				movedKnowledgeIDs = append(movedKnowledgeIDs, knowledge.ID)
+			}
+		}
+		// Composite foreign keys include tag_id. Temporarily detach the moved
+		// graph so databases with immediate FK checks can update both sides in
+		// one transaction, then restore the exact same hierarchy.
+		if len(movedKnowledgeIDs) > 0 {
+			if err := tx.Model(&types.Knowledge{}).Where(
+				"tenant_id = ? AND knowledge_base_id = ? AND id IN ? AND tag_id = ?",
+				tenantID, kbID, movedKnowledgeIDs, sourceTagID,
+			).Update("directory_id", nil).Error; err != nil {
+				return err
+			}
+		}
+		if len(originalParentIDs) > 0 {
+			if err := tx.Model(&types.KnowledgeDirectory{}).Where(
+				"tenant_id = ? AND knowledge_base_id = ? AND id IN ? AND tag_id = ?",
+				tenantID, kbID, allDirectoryIDs, sourceTagID,
+			).Update("parent_id", nil).Error; err != nil {
+				return err
 			}
 		}
 		if err := tx.Model(&types.KnowledgeDirectory{}).Where(
@@ -419,16 +469,32 @@ func (r *knowledgeDirectoryRepository) MoveSubtreesToTag(ctx context.Context, te
 				return err
 			}
 		}
-		if len(knowledgeIDs) > 0 {
+		for directoryID, parentID := range originalParentIDs {
+			if err := tx.Model(&types.KnowledgeDirectory{}).Where(
+				"tenant_id = ? AND knowledge_base_id = ? AND id = ? AND tag_id = ?",
+				tenantID, kbID, directoryID, targetTagID,
+			).Update("parent_id", parentID).Error; err != nil {
+				return err
+			}
+		}
+		if len(movedKnowledgeIDs) > 0 {
 			if err := tx.Model(&types.Knowledge{}).Where(
 				"tenant_id = ? AND knowledge_base_id = ? AND id IN ? AND tag_id = ? AND parse_status <> ?",
-				tenantID, kbID, knowledgeIDs, sourceTagID, types.ParseStatusDeleting,
+				tenantID, kbID, movedKnowledgeIDs, sourceTagID, types.ParseStatusDeleting,
 			).Update("tag_id", targetTagID).Error; err != nil {
 				return err
 			}
+			for knowledgeID, directoryID := range documentDirectoryIDs {
+				if err := tx.Model(&types.Knowledge{}).Where(
+					"tenant_id = ? AND knowledge_base_id = ? AND id = ? AND tag_id = ?",
+					tenantID, kbID, knowledgeID, targetTagID,
+				).Update("directory_id", directoryID).Error; err != nil {
+					return err
+				}
+			}
 			if err := tx.Model(&types.Chunk{}).Where(
 				"tenant_id = ? AND knowledge_base_id = ? AND knowledge_id IN ?",
-				tenantID, kbID, knowledgeIDs,
+				tenantID, kbID, movedKnowledgeIDs,
 			).Update("tag_id", targetTagID).Error; err != nil {
 				return err
 			}
@@ -438,8 +504,8 @@ func (r *knowledgeDirectoryRepository) MoveSubtreesToTag(ctx context.Context, te
 	if err != nil {
 		return nil, err
 	}
-	sort.Strings(knowledgeIDs)
-	return knowledgeIDs, nil
+	sort.Strings(movedKnowledgeIDs)
+	return movedKnowledgeIDs, nil
 }
 
 func (r *knowledgeDirectoryRepository) DeleteEmpty(ctx context.Context, tenantID uint64, kbID, id string, tagIDs ...string) error {

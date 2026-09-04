@@ -29,6 +29,7 @@ type PluginDataAnalysis struct {
 	fileService          interfaces.FileService
 	chunkRepo            interfaces.ChunkRepository
 	tenantService        interfaces.TenantService
+	governanceRepo       interfaces.KnowledgeGovernanceRepository
 	db                   *sql.DB
 }
 
@@ -40,6 +41,7 @@ func NewPluginDataAnalysis(
 	fileService interfaces.FileService,
 	chunkRepo interfaces.ChunkRepository,
 	tenantService interfaces.TenantService,
+	governanceRepo interfaces.KnowledgeGovernanceRepository,
 	db *sql.DB,
 ) *PluginDataAnalysis {
 	p := &PluginDataAnalysis{
@@ -49,6 +51,7 @@ func NewPluginDataAnalysis(
 		fileService:          fileService,
 		chunkRepo:            chunkRepo,
 		tenantService:        tenantService,
+		governanceRepo:       governanceRepo,
 		db:                   db,
 	}
 	eventManager.Register(p)
@@ -106,7 +109,16 @@ func (p *PluginDataAnalysis) OnEvent(
 		return next()
 	}
 
-	tool := tools.NewDataAnalysisTool(p.knowledgeBaseService, p.knowledgeService, p.tenantService, p.fileService, p.db, chatManage.SessionID)
+	tool := tools.NewDataAnalysisToolWithGovernance(
+		p.knowledgeBaseService,
+		p.knowledgeService,
+		p.tenantService,
+		p.fileService,
+		p.db,
+		chatManage.SessionID,
+		chatManage.SearchTargets,
+		p.governanceRepo,
+	)
 	defer tool.Cleanup(ctx)
 	schema, err := tool.LoadFromKnowledge(ctx, knowledge)
 	if err != nil {
