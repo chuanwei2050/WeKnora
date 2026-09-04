@@ -15,6 +15,7 @@ import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
 import { buildKnowledgeUploadMetadata } from '@/utils/knowledge-upload-metadata';
+import { buildPreviewContentRevision } from '@/utils/documentPreviewCache';
 
 export default function (knowledgeBaseId?: string) {
   const usemenuStore = knowledgeStore();
@@ -33,6 +34,7 @@ export default function (knowledgeBaseId?: string) {
     source: "",
     channel: "",
     file_type: "",
+    content_revision: "",
     tag_id: "",
     description: "",
     summary_status: "",
@@ -217,6 +219,7 @@ export default function (knowledgeBaseId?: string) {
       source: "",
       channel: "",
       file_type: "",
+      content_revision: "",
       tag_id: "",
       description: "",
       summary_status: "",
@@ -236,6 +239,12 @@ export default function (knowledgeBaseId?: string) {
             source: data.source || '',
             channel: data.channel || '',
             file_type: data.file_type || '',
+            content_revision: buildPreviewContentRevision({
+              fileHash: data.file_hash,
+              currentVersionId: data.current_version_id,
+              pendingVersionId: data.pending_version_id,
+              updatedAt: data.updated_at,
+            }),
             tag_id: data.tag_id || '',
             description: data.description || '',
             summary_status: data.summary_status || '',

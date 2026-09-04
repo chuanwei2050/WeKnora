@@ -8,6 +8,7 @@ const (
 	TypeSummaryGeneration    = "summary:generation"     // 摘要生成任务
 	TypeKBClone              = "kb:clone"               // 知识库复制任务
 	TypeIndexDelete          = "index:delete"           // 索引删除任务
+	TypeChunkTagSync         = "chunk:tag_sync"         // 检索索引标签同步任务
 	TypeKBDelete             = "kb:delete"              // 知识库删除任务
 	TypeKnowledgeListDelete  = "knowledge:list_delete"  // 批量删除知识任务
 	TypeKnowledgeMove        = "knowledge:move"         // 知识移动任务
@@ -102,6 +103,14 @@ type IndexDeletePayload struct {
 	EmbeddingModelID string                  `json:"embedding_model_id"`
 	KBType           string                  `json:"kb_type"`
 	ChunkIDs         []string                `json:"chunk_ids"`
+	EffectiveEngines []RetrieverEngineParams `json:"effective_engines"`
+}
+
+type ChunkTagSyncPayload struct {
+	TracingContext
+	TenantID         uint64                  `json:"tenant_id"`
+	KnowledgeIDs     []string                `json:"knowledge_ids"`
+	ExpectedTagID    string                  `json:"expected_tag_id,omitempty"`
 	EffectiveEngines []RetrieverEngineParams `json:"effective_engines"`
 }
 

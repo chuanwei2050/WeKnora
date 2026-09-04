@@ -991,6 +991,7 @@ const handleDetailsScroll = () => {
           :knowledgeId="details.id"
           :fileType="details.file_type"
           :fileName="details.title"
+          :contentRevision="details.content_revision"
           :active="viewMode === 'preview'"
           @switchToChunks="viewMode = 'chunks'"
         />

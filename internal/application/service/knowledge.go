@@ -7388,6 +7388,15 @@ func (s *knowledgeService) MoveSubtreesToTag(ctx context.Context, kbID, sourceTa
 	if targetTag.KnowledgeBaseID != kbID {
 		return 0, werrors.NewBadRequestError("目标分类不属于当前知识库")
 	}
+	plannedKnowledgeIDs, err := s.planSubtreeMoveKnowledgeIDs(ctx, tenantID, kbID, sourceTagID, directoryIDs, directKnowledgeIDs)
+	if err != nil {
+		return 0, err
+	}
+	if len(plannedKnowledgeIDs) > 0 {
+		if err := s.enqueueChunkTagSync(ctx, tenantID, plannedKnowledgeIDs, targetTag.ID, nil); err != nil {
+			return 0, fmt.Errorf("index reconciliation task could not be persisted before directory move: %w", err)
+		}
+	}
 	knowledgeIDs, err := s.directoryRepo.MoveSubtreesToTag(ctx, tenantID, kbID, sourceTagID, targetTag.ID, directoryIDs, directKnowledgeIDs)
 	if err != nil {
 		return 0, err
@@ -7399,7 +7408,7 @@ func (s *knowledgeService) MoveSubtreesToTag(ctx context.Context, kbID, sourceTa
 	for _, knowledgeID := range knowledgeIDs {
 		chunks, chunkErr := s.chunkRepo.ListChunksByKnowledgeID(ctx, tenantID, knowledgeID)
 		if chunkErr != nil {
-			return 0, chunkErr
+			return len(knowledgeIDs), fmt.Errorf("directory move committed; persisted reconciliation will retry after chunk lookup failed: %w", chunkErr)
 		}
 		for _, chunk := range chunks {
 			chunkTagUpdates[chunk.ID] = targetTag.ID
@@ -7408,12 +7417,10 @@ func (s *knowledgeService) MoveSubtreesToTag(ctx context.Context, kbID, sourceTa
 	if len(chunkTagUpdates) > 0 {
 		tenantInfo, ok := types.TenantInfoFromContext(ctx)
 		if !ok {
-			logger.Errorf(ctx, "directory move committed but tenant info is unavailable; index reconciliation required for %d chunks", len(chunkTagUpdates))
 			return len(knowledgeIDs), nil
 		}
 		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 		if err != nil {
-			logger.Errorf(ctx, "directory move committed but retriever initialization failed; index reconciliation required for %d chunks: %v", len(chunkTagUpdates), err)
 			return len(knowledgeIDs), nil
 		}
 		var syncErr error
@@ -7433,10 +7440,109 @@ func (s *knowledgeService) MoveSubtreesToTag(ctx context.Context, kbID, sourceTa
 			}
 		}
 		if syncErr != nil {
-			logger.Errorf(ctx, "directory move committed but retriever tag sync failed after retries; index reconciliation required for %d chunks: %v", len(chunkTagUpdates), syncErr)
+			logger.Warnf(ctx, "directory move committed; persisted retriever tag reconciliation will retry for %d chunks after synchronous sync failed: %v", len(chunkTagUpdates), syncErr)
 		}
 	}
 	return len(knowledgeIDs), nil
+}
+
+func (s *knowledgeService) planSubtreeMoveKnowledgeIDs(ctx context.Context, tenantID uint64, kbID, sourceTagID string, directoryIDs, directKnowledgeIDs []string) ([]string, error) {
+	ids := make(map[string]struct{})
+	for _, directoryID := range directoryIDs {
+		_, knowledges, err := s.directoryRepo.ListSubtree(ctx, tenantID, kbID, directoryID, sourceTagID)
+		if err != nil {
+			return nil, err
+		}
+		for _, knowledge := range knowledges {
+			ids[knowledge.ID] = struct{}{}
+		}
+	}
+	if len(directKnowledgeIDs) > 0 {
+		knowledges, err := s.repo.GetKnowledgeBatch(ctx, tenantID, directKnowledgeIDs)
+		if err != nil {
+			return nil, err
+		}
+		if len(knowledges) != len(directKnowledgeIDs) {
+			return nil, fmt.Errorf("one or more documents are invalid")
+		}
+		for _, knowledge := range knowledges {
+			if knowledge.KnowledgeBaseID != kbID || knowledge.TagID != sourceTagID || knowledge.ParseStatus == types.ParseStatusDeleting {
+				return nil, fmt.Errorf("one or more documents are invalid")
+			}
+			ids[knowledge.ID] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(ids))
+	for id := range ids {
+		result = append(result, id)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func (s *knowledgeService) enqueueChunkTagSync(ctx context.Context, tenantID uint64, knowledgeIDs []string, expectedTagID string, engines []types.RetrieverEngineParams) error {
+	if s.task == nil {
+		return fmt.Errorf("task enqueuer is unavailable")
+	}
+	payload := types.ChunkTagSyncPayload{TenantID: tenantID, KnowledgeIDs: knowledgeIDs, ExpectedTagID: expectedTagID, EffectiveEngines: engines}
+	langfuse.InjectTracing(ctx, &payload)
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	task := asynq.NewTask(types.TypeChunkTagSync, payloadBytes)
+	_, err = s.task.Enqueue(task, asynq.Queue("low"), asynq.ProcessIn(time.Second), asynq.MaxRetry(25))
+	return err
+}
+
+func (s *knowledgeService) ProcessChunkTagSync(ctx context.Context, task *asynq.Task) error {
+	var payload types.ChunkTagSyncPayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return err
+	}
+	if payload.TenantID == 0 || len(payload.KnowledgeIDs) == 0 {
+		return fmt.Errorf("invalid chunk tag sync payload")
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	if payload.ExpectedTagID != "" {
+		knowledges, err := s.repo.GetKnowledgeBatch(ctx, payload.TenantID, payload.KnowledgeIDs)
+		if err != nil {
+			return err
+		}
+		if len(knowledges) != len(payload.KnowledgeIDs) {
+			return fmt.Errorf("chunk tag sync is waiting for the directory move to commit")
+		}
+		for _, knowledge := range knowledges {
+			if knowledge.TagID != payload.ExpectedTagID {
+				return fmt.Errorf("chunk tag sync is waiting for knowledge %s to reach tag %s", knowledge.ID, payload.ExpectedTagID)
+			}
+		}
+	}
+	if len(payload.EffectiveEngines) == 0 {
+		tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
+		if err != nil {
+			return err
+		}
+		payload.EffectiveEngines = tenantInfo.GetEffectiveEngines()
+	}
+	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, payload.EffectiveEngines)
+	if err != nil {
+		return err
+	}
+	updates := make(map[string]string)
+	for _, knowledgeID := range payload.KnowledgeIDs {
+		chunks, err := s.chunkRepo.ListChunksByKnowledgeID(ctx, payload.TenantID, knowledgeID)
+		if err != nil {
+			return err
+		}
+		for _, chunk := range chunks {
+			updates[chunk.ID] = chunk.TagID
+		}
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	return retrieveEngine.BatchUpdateChunkTagID(ctx, updates)
 }
 
 // UpdateFAQEntryTag updates the tag assigned to an FAQ entry.

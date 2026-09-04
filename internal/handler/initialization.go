@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1564,13 +1563,14 @@ func (h *InitializationHandler) CheckVLMModel(c *gin.Context) {
 	model := h.buildTestModel(&req, types.ModelTypeVLLM, types.ModelSourceRemote)
 	instance, err := vlm.NewVLM(vlm.ConfigFromModel(model, appID, appSecret), h.ollamaService)
 	if err == nil {
-		var image []byte
-		image, err = base64.StdEncoding.DecodeString(assets.VisionTestPNGBase64)
+		expected := 4 + rand.Intn(5)
+		var challenge []byte
+		challenge, err = assets.CreateVisionCountChallenge(expected)
 		if err == nil {
 			var output string
-			output, err = instance.Predict(ctx, [][]byte{image}, "请用一个词描述这张图片。")
-			if err == nil && strings.TrimSpace(output) == "" {
-				err = fmt.Errorf("视觉模型返回了空内容")
+			output, err = instance.Predict(ctx, [][]byte{challenge}, "图片中有几个红色圆形？只返回阿拉伯数字，不要添加其他内容。")
+			if err == nil {
+				err = validateVisionCountAnswer(output, expected)
 			}
 		}
 	}
@@ -1584,6 +1584,14 @@ func (h *InitializationHandler) CheckVLMModel(c *gin.Context) {
 		"available": available,
 		"message":   message,
 	}})
+}
+
+func validateVisionCountAnswer(output string, expected int) error {
+	answer, err := strconv.Atoi(strings.TrimSpace(output))
+	if err != nil || answer != expected {
+		return fmt.Errorf("视觉模型未正确识别测试图片")
+	}
+	return nil
 }
 
 func visionCapabilityTestMessage(err error) string {

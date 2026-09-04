@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
-	"encoding/base64"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -252,14 +254,23 @@ func (s *modelService) probeModelRole(ctx context.Context, model *types.Model, r
 		if err != nil {
 			return "", nil, err
 		}
-		output, err := visionModel.Predict(ctx, [][]byte{preflightPNG()}, "Describe this image in one short word.")
+		expectedCount, err := randomVisionChallengeCount()
 		if err != nil {
 			return visionModel.GetModelName(), nil, err
 		}
-		if strings.TrimSpace(output) == "" {
-			return visionModel.GetModelName(), nil, unsupportedCapability("vision probe returned empty output")
+		challenge, err := assets.CreateVisionCountChallenge(expectedCount)
+		if err != nil {
+			return visionModel.GetModelName(), nil, err
 		}
-		return visionModel.GetModelName(), map[string]interface{}{"output_non_empty": true}, nil
+		output, err := visionModel.Predict(ctx, [][]byte{challenge}, "How many red circles are in this image? Return only the Arabic numeral.")
+		if err != nil {
+			return visionModel.GetModelName(), nil, err
+		}
+		answer, parseErr := strconv.Atoi(strings.TrimSpace(output))
+		if parseErr != nil || answer != expectedCount {
+			return visionModel.GetModelName(), nil, unsupportedCapability("vision probe did not identify the image content")
+		}
+		return visionModel.GetModelName(), map[string]interface{}{"image_count": answer}, nil
 	case types.ModelRoleParserOCR:
 		visionModel, err := s.GetVLMModel(ctx, model.ID)
 		if err != nil {
@@ -389,6 +400,18 @@ func (s *modelService) probeChatRole(ctx context.Context, model *types.Model) (s
 }
 
 func preflightPNG() []byte {
-	data, _ := base64.StdEncoding.DecodeString(assets.VisionTestPNGBase64)
+	data, _ := assets.CreateVisionCountChallenge(4)
 	return data
+}
+
+func randomVisionChallengeCount() (int, error) {
+	return visionChallengeCount(rand.Reader)
+}
+
+func visionChallengeCount(random io.Reader) (int, error) {
+	value, err := rand.Int(random, big.NewInt(5))
+	if err != nil {
+		return 0, err
+	}
+	return 4 + int(value.Int64()), nil
 }

@@ -26,6 +26,37 @@ func newDirectoryTestRepository(t *testing.T) *knowledgeDirectoryRepository {
 	return &knowledgeDirectoryRepository{db: db}
 }
 
+func directorySegments(prefix string, count int) []string {
+	segments := make([]string, count)
+	for index := range segments {
+		segments[index] = fmt.Sprintf("%s-%02d", prefix, index)
+	}
+	return segments
+}
+
+func TestKnowledgeDirectoryEnsurePathEnforcesFinalDepth(t *testing.T) {
+	repo := newDirectoryTestRepository(t)
+	deepest, err := repo.EnsurePath(t.Context(), 1, "kb", nil, directorySegments("level", types.MaxDirectoryDepth))
+	require.NoError(t, err)
+	require.NotNil(t, deepest)
+
+	_, err = repo.EnsurePath(t.Context(), 1, "kb", &deepest.ID, []string{"too-deep"})
+	require.ErrorIs(t, err, types.ErrInvalidDirectoryPath)
+}
+
+func TestKnowledgeDirectoryMoveRejectsSubtreePastFinalDepth(t *testing.T) {
+	repo := newDirectoryTestRepository(t)
+	target, err := repo.EnsurePath(t.Context(), 1, "kb", nil, directorySegments("target", types.MaxDirectoryDepth-1))
+	require.NoError(t, err)
+	source, err := repo.EnsurePath(t.Context(), 1, "kb", nil, []string{"source"})
+	require.NoError(t, err)
+	_, err = repo.EnsurePath(t.Context(), 1, "kb", &source.ID, []string{"child"})
+	require.NoError(t, err)
+
+	require.ErrorIs(t, repo.Move(t.Context(), 1, "kb", source.ID, &target.ID), types.ErrInvalidDirectoryPath)
+	require.ErrorIs(t, repo.MoveEntries(t.Context(), 1, "kb", []string{source.ID}, nil, &target.ID), types.ErrInvalidDirectoryPath)
+}
+
 func TestKnowledgeDirectoryRecursiveDeleteCoordinatesExistingBatchWorker(t *testing.T) {
 	repo := newDirectoryTestRepository(t)
 	ctx := context.Background()

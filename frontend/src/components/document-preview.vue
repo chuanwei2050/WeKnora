@@ -6,7 +6,7 @@ import 'highlight.js/styles/github.css';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
 import { sanitizeHTML } from '@/utils/security';
-import { getCachedPreview, setCachedPreview, type PreviewType } from '@/utils/documentPreviewCache';
+import { buildPreviewCacheKey, getCachedPreview, setCachedPreview, type PreviewType } from '@/utils/documentPreviewCache';
 
 
 const VueOfficePptx = defineAsyncComponent(() => import('@vue-office/pptx'));
@@ -17,6 +17,7 @@ const props = defineProps<{
   knowledgeId: string;
   fileType: string;
   fileName: string;
+  contentRevision: string;
   active: boolean;
 }>();
 const emit = defineEmits<{ switchToChunks: [] }>();
@@ -38,7 +39,7 @@ const pptxData = shallowRef<ArrayBuffer | null>(null);
 const docxContainer = ref<HTMLElement | null>(null);
 const imageNaturalWidth = ref(0);
 const imageNaturalHeight = ref(0);
-let loadedForId = '';
+let loadedForKey = '';
 let excelPreviewWorker: Worker | null = null;
 let cancelExcelPreview: (() => void) | null = null;
 let textPreviewWorker: Worker | null = null;
@@ -224,7 +225,8 @@ async function loadPreview() {
   const id = props.knowledgeId;
   const ft = props.fileType;
   if (!id || !ft) return;
-  if (loadedForId === id) return;
+  const cacheKey = buildPreviewCacheKey(id, ft, props.contentRevision);
+  if (loadedForKey === cacheKey) return;
 
   cleanup();
   const loadVersion = previewLoadVersion;
@@ -232,7 +234,6 @@ async function loadPreview() {
   loading.value = true;
   error.value = '';
   previewType.value = resolvePreviewType(ft);
-  const cacheKey = `${id}:${ft.toLowerCase()}`;
 
   if (previewType.value === 'unsupported') {
     loading.value = false;
@@ -251,7 +252,7 @@ async function loadPreview() {
       textPreviewTruncated.value = Boolean(cached.textPreviewTruncated);
       largeFileBlocked.value = Boolean(cached.largeFileBlocked);
       pptxData.value = cached.pptxData || null;
-      loadedForId = id;
+      loadedForKey = cacheKey;
 
       if (cached.blob) {
         if (cached.previewType === 'docx') {
@@ -268,7 +269,7 @@ async function loadPreview() {
     const rawBlob = await previewKnowledgeFile(id);
     if (!isCurrent()) return;
     const blob = ensureBlobType(rawBlob, ft);
-    loadedForId = id;
+    loadedForKey = cacheKey;
 
     if (previewType.value === 'docx' || previewType.value === 'pptx') {
       const safe = await isOfficePreviewSafe(blob, isCurrent);
@@ -397,14 +398,14 @@ function cleanup() {
   pptxData.value = null;
   imageNaturalWidth.value = 0;
   imageNaturalHeight.value = 0;
-  loadedForId = '';
+  loadedForKey = '';
   if (docxContainer.value) {
     docxContainer.value.innerHTML = '';
   }
 }
 
 watch(
-  () => [props.active, props.knowledgeId],
+  () => [props.active, props.knowledgeId, props.fileType, props.contentRevision],
   ([active]) => {
     if (active && props.knowledgeId) {
       loadPreview();
@@ -442,7 +443,7 @@ onUnmounted(() => {
     <div v-else-if="error" class="preview-error">
       <t-icon name="error-circle" size="48px" />
       <p>{{ error }}</p>
-      <t-button theme="primary" size="small" @click="loadedForId = ''; loadPreview()">
+      <t-button theme="primary" size="small" @click="loadedForKey = ''; loadPreview()">
         {{ $t('preview.retry') }}
       </t-button>
     </div>

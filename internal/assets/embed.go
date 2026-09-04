@@ -4,7 +4,3 @@ import _ "embed"
 
 //go:embed asr_test.wav
 var ASRTestWAV []byte
-
-// VisionTestPNGBase64 is a 64x64 PNG used to verify real image-input support.
-// Some vision providers reject tiny placeholder images such as 1x1 pixels.
-const VisionTestPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAEDSURBVHhe7ZAxCgNAEITu/59OelvBEGYFmy1k2PcZ5/Gwxj2AhzXuATyscQ/gYY17AA9r3AN4WOMewMMa9wAe1tAPeO/9VIsucFCtRRc4qNaiCxxUa9EFDqq16AIH1Vp0gYNqLbrAQbUWXeCgWosucFCtRRc4qNaiCxxUa9EFDqq16AIH1Vp0gYNqLbrAQbUWXeCgWosucFCtRRc4qNaiCxxUa9EFDqq16AIH1Vp0gYNqLbrAQbUWXeCgWosucFCtRRc4qNaiCxxUa9EFDqq16AIH1Vp0gYNqLbrAQbUWX/hz7gE8rHEP4GGNewAPa9wDeFjjHsDDGvcAHta4B/CwxvwDvks7zv7mSmbzAAAAAElFTkSuQmCC"

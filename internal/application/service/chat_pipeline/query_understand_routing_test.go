@@ -119,23 +119,26 @@ func TestRoutingPromptUsesPreviousConversationForFollowUp(t *testing.T) {
 	}
 }
 
-func TestCompactDefaultQueryUnderstandPromptKeepsCoreRulesAndLoadsOptionalRulesOnDemand(t *testing.T) {
-	legacy := strings.Repeat("verbose example\n", 300) + "performs THREE tasks\n## Task 1: Query Understanding\n## Task 2: Intent Classification"
-	textOnly := compactDefaultQueryUnderstandPrompt(legacy, false, false, true)
-	if len(textOnly) >= len(legacy)/2 {
-		t.Fatalf("default prompt was not materially compacted: before=%d after=%d", len(legacy), len(textOnly))
+func TestBuildPromptsPreservesConfiguredDefaultTemplate(t *testing.T) {
+	const builtin = "deployed customized default prompt"
+	appCfg := &appconfig.Config{
+		Conversation: &appconfig.ConversationConfig{RewritePromptID: "default_rewrite", RewritePromptSystem: builtin},
+		PromptTemplates: &appconfig.PromptTemplatesConfig{Rewrite: []appconfig.PromptTemplate{{
+			ID: "default_rewrite", Content: builtin, Default: true,
+		}}},
 	}
-	for _, required := range []string{"{{language}}", "{{conversation}}", "kb_search", "follow_up", "No image is attached", "No document is attached"} {
-		if !strings.Contains(textOnly, required) {
-			t.Fatalf("compacted prompt lost %q: %s", required, textOnly)
-		}
+	plugin := &PluginQueryUnderstand{config: appCfg}
+	builtinResult, _ := plugin.buildPrompts(&types.ChatManage{}, nil)
+	if builtinResult != builtin {
+		t.Fatalf("configured default prompt was replaced: %q", builtinResult)
 	}
-	withAttachments := compactDefaultQueryUnderstandPrompt(legacy, true, true, false)
-	if !strings.Contains(withAttachments, "Image rules:") || !strings.Contains(withAttachments, "Document rules:") {
-		t.Fatalf("attachment rules were not loaded on demand: %s", withAttachments)
-	}
-	if got := compactDefaultQueryUnderstandPrompt("custom prompt", false, false, false); got != "custom prompt" {
-		t.Fatalf("custom prompt must remain untouched: %q", got)
+
+	custom := builtin + "\nAlways preserve product codes."
+	customChat := &types.ChatManage{}
+	customChat.RewritePromptSystem = custom
+	customResult, _ := plugin.buildPrompts(customChat, nil)
+	if customResult != custom {
+		t.Fatalf("custom prompt was replaced: %q", customResult)
 	}
 }
 

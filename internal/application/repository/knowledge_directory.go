@@ -105,7 +105,12 @@ func directoryTransaction(ctx context.Context, db *gorm.DB, tenantID uint64, kbI
 func (r *knowledgeDirectoryRepository) Create(ctx context.Context, directory *types.KnowledgeDirectory) error {
 	return directoryTransaction(ctx, r.db, directory.TenantID, directory.KnowledgeBaseID, func(tx *gorm.DB) error {
 		ancestor := directory.ParentID
+		depth := 1
 		for ancestor != nil {
+			depth++
+			if depth > types.MaxDirectoryDepth {
+				return types.ErrInvalidDirectoryPath
+			}
 			var parent types.KnowledgeDirectory
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id = ? AND id = ? AND status = ?", directory.TenantID, directory.KnowledgeBaseID, directory.TagID, *ancestor, types.DirectoryStatusActive).First(&parent).Error; err != nil {
 				return err
@@ -201,12 +206,17 @@ func (r *knowledgeDirectoryRepository) Move(ctx context.Context, tenantID uint64
 		if err := scopeDirectoryTag(query, tagID).First(&source).Error; err != nil {
 			return err
 		}
+		targetDepth := 0
 		if parentID != nil {
 			if *parentID == id {
 				return fmt.Errorf("directory cannot be its own parent")
 			}
 			current := *parentID
 			for current != "" {
+				targetDepth++
+				if targetDepth > types.MaxDirectoryDepth {
+					return types.ErrInvalidDirectoryPath
+				}
 				var parent types.KnowledgeDirectory
 				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id = ? AND id = ? AND status = ?", tenantID, kbID, source.TagID, current, types.DirectoryStatusActive).First(&parent).Error; err != nil {
 					return err
@@ -219,6 +229,13 @@ func (r *knowledgeDirectoryRepository) Move(ctx context.Context, tenantID uint64
 				}
 				current = *parent.ParentID
 			}
+		}
+		subtreeHeight, err := directorySubtreeHeight(tx, tenantID, kbID, source.TagID, source.ID)
+		if err != nil {
+			return err
+		}
+		if targetDepth+subtreeHeight > types.MaxDirectoryDepth {
+			return types.ErrInvalidDirectoryPath
 		}
 		return tx.Model(&source).Updates(map[string]any{"parent_id": parentID, "parent_key": directoryParentKey(parentID)}).Error
 	})
@@ -293,6 +310,13 @@ func (r *knowledgeDirectoryRepository) MoveEntries(ctx context.Context, tenantID
 			}
 			if count > 0 {
 				return fmt.Errorf("duplicate directory name at destination")
+			}
+			subtreeHeight, err := directorySubtreeHeight(tx, tenantID, kbID, tagID, source.ID)
+			if err != nil {
+				return err
+			}
+			if len(targetAncestors)+subtreeHeight > types.MaxDirectoryDepth {
+				return types.ErrInvalidDirectoryPath
 			}
 		}
 		if len(knowledgeIDs) > 0 {
@@ -620,12 +644,20 @@ func (r *knowledgeDirectoryRepository) EnsurePath(ctx context.Context, tenantID 
 	err := directoryTransaction(ctx, r.db, tenantID, kbID, func(tx *gorm.DB) error {
 		currentParent := parentID
 		ancestor := parentID
+		parentDepth := 0
 		for ancestor != nil {
+			parentDepth++
+			if parentDepth > types.MaxDirectoryDepth {
+				return types.ErrInvalidDirectoryPath
+			}
 			var directory types.KnowledgeDirectory
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id = ? AND id = ? AND status = ?", tenantID, kbID, tagID, *ancestor, types.DirectoryStatusActive).First(&directory).Error; err != nil {
 				return err
 			}
 			ancestor = directory.ParentID
+		}
+		if parentDepth+len(segments) > types.MaxDirectoryDepth {
+			return types.ErrInvalidDirectoryPath
 		}
 		for _, segment := range segments {
 			displayName, normalizedName, err := types.NormalizeDirectoryName(segment)
@@ -652,6 +684,47 @@ func (r *knowledgeDirectoryRepository) EnsurePath(ctx context.Context, tenantID 
 		return nil
 	})
 	return current, err
+}
+
+func directorySubtreeHeight(db *gorm.DB, tenantID uint64, kbID, tagID, rootID string) (int, error) {
+	var directories []*types.KnowledgeDirectory
+	cte := `id IN (WITH RECURSIVE directory_tree(id) AS (
+		SELECT id FROM knowledge_directories WHERE tenant_id = ? AND knowledge_base_id = ? AND tag_id = ? AND id = ?
+		UNION ALL SELECT child.id FROM knowledge_directories child JOIN directory_tree parent ON child.parent_id = parent.id
+		WHERE child.tenant_id = ? AND child.knowledge_base_id = ? AND child.tag_id = ?) SELECT id FROM directory_tree)`
+	if err := db.Where(cte, tenantID, kbID, tagID, rootID, tenantID, kbID, tagID).Find(&directories).Error; err != nil {
+		return 0, err
+	}
+	if len(directories) == 0 {
+		return 0, ErrKnowledgeDirectoryNotFound
+	}
+	byID := make(map[string]*types.KnowledgeDirectory, len(directories))
+	for _, directory := range directories {
+		byID[directory.ID] = directory
+	}
+	height := 1
+	for _, directory := range directories {
+		depth := 1
+		current := directory
+		for current.ID != rootID {
+			if current.ParentID == nil {
+				return 0, types.ErrInvalidDirectoryPath
+			}
+			parent, ok := byID[*current.ParentID]
+			if !ok {
+				return 0, types.ErrInvalidDirectoryPath
+			}
+			depth++
+			if depth > types.MaxDirectoryDepth {
+				return 0, types.ErrInvalidDirectoryPath
+			}
+			current = parent
+		}
+		if depth > height {
+			height = depth
+		}
+	}
+	return height, nil
 }
 
 func (r *knowledgeDirectoryRepository) ListSubtree(ctx context.Context, tenantID uint64, kbID, rootID string, tagIDs ...string) ([]*types.KnowledgeDirectory, []*types.Knowledge, error) {

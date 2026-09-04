@@ -23,6 +23,21 @@ const CACHE_MAX_ITEM_BYTES = 64 * 1024 * 1024;
 const cache = new Map<string, PreviewCacheEntry>();
 let expiryTimer: ReturnType<typeof setTimeout> | null = null;
 
+export function buildPreviewCacheKey(knowledgeId: string, fileType: string, contentRevision: string) {
+  return `${knowledgeId}:${fileType.toLowerCase()}:${contentRevision}`;
+}
+
+export function buildPreviewContentRevision(parts: {
+  fileHash?: string;
+  currentVersionId?: string;
+  pendingVersionId?: string;
+  updatedAt?: string;
+}) {
+  return [parts.fileHash, parts.currentVersionId, parts.pendingVersionId, parts.updatedAt]
+    .filter(Boolean)
+    .join(':');
+}
+
 function prune(now = Date.now()) {
   for (const [key, entry] of cache) {
     if (now - entry.lastAccessedAt >= CACHE_TTL_MS) cache.delete(key);

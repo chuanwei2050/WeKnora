@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
@@ -51,5 +52,19 @@ func TestDefaultModelEndpointUsePreservesLegacyModelAllowlist(t *testing.T) {
 	}
 	if got := defaultModelEndpointUse(types.ModelTypeKnowledgeQA, types.StringArray{"model", "chat"}); got != "chat" {
 		t.Fatalf("role-specific endpoint use = %q, want chat", got)
+	}
+}
+
+func TestVisionChallengeCountUsesRandomInput(t *testing.T) {
+	minimum, err := visionChallengeCount(bytes.NewReader([]byte{0}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	maximum, err := visionChallengeCount(bytes.NewReader([]byte{4}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if minimum != 4 || maximum != 8 {
+		t.Fatalf("unexpected challenge range: minimum=%d maximum=%d", minimum, maximum)
 	}
 }

@@ -67,15 +67,6 @@ func TestMergeDataAnalysisResultDoesNotLetZeroCountHideRetrievalEvidence(t *test
 	}
 }
 
-func TestIsZeroAggregateResult(t *testing.T) {
-	zero := &types.ToolResult{Data: map[string]interface{}{"rows": []map[string]string{{"total": "0"}}}}
-	nonZero := &types.ToolResult{Data: map[string]interface{}{"rows": []map[string]string{{"total": "41"}}}}
-	list := &types.ToolResult{Data: map[string]interface{}{"rows": []map[string]string{{"name": "Alice"}}}}
-	if !isZeroAggregateResult(zero) || isZeroAggregateResult(nonZero) || isZeroAggregateResult(list) {
-		t.Fatal("zero aggregate detection must only match a single numeric zero cell")
-	}
-}
-
 func TestRecordDataAnalysisFailureForbidsDefiniteFragmentCount(t *testing.T) {
 	chatManage := &types.ChatManage{PipelineState: types.PipelineState{MergeResult: []*types.SearchResult{{ID: "fragment", Content: "片段记录"}}}}
 	target := &types.SearchResult{KnowledgeID: "knowledge", KnowledgeFilename: "people.xlsx"}

@@ -180,10 +180,18 @@ func buildMissingColumnSuggestion(sqlErr error, schema *TableSchema) string {
 	return ""
 }
 
+type DataAnalysisAction string
+
+const (
+	DataAnalysisActionExecute DataAnalysisAction = "execute"
+	DataAnalysisActionSkip    DataAnalysisAction = "skip"
+)
+
 type DataAnalysisInput struct {
-	KnowledgeID string `json:"knowledge_id" jsonschema:"id of the knowledge to query"`
-	Sql         string `json:"sql" jsonschema:"SQL to be executed on knowledge"`
-	MaxRows     int    `json:"max_rows,omitempty" jsonschema:"optional maximum rows returned by a read-only SELECT query"`
+	Action      DataAnalysisAction `json:"action" jsonschema:"Required action: execute to run SQL, or skip when table analysis is unnecessary"`
+	KnowledgeID string             `json:"knowledge_id" jsonschema:"id of the knowledge to query"`
+	Sql         string             `json:"sql" jsonschema:"SQL to be executed on knowledge"`
+	MaxRows     int                `json:"max_rows,omitempty" jsonschema:"optional maximum rows returned by a read-only SELECT query"`
 }
 
 type dataAnalysisAuthorizationMode uint8
