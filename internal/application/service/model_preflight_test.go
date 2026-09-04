@@ -68,3 +68,20 @@ func TestVisionChallengeCountUsesRandomInput(t *testing.T) {
 		t.Fatalf("unexpected challenge range: minimum=%d maximum=%d", minimum, maximum)
 	}
 }
+
+func TestParseVisionCountAcceptsUnambiguousAnswers(t *testing.T) {
+	for _, output := range []string{`4`, `4.`, `The answer is 4.`, `答案是 4。`, `{"count":4}`, "```json\n{\"count\": 4}\n```", "```\n4\n```"} {
+		answer, err := parseVisionCount(output)
+		if err != nil || answer != 4 {
+			t.Fatalf("parseVisionCount(%q) = %d, %v; want 4", output, answer, err)
+		}
+	}
+}
+
+func TestParseVisionCountRejectsAmbiguousAnswers(t *testing.T) {
+	for _, output := range []string{"", "four", "-4", "4.5", "4 or 5", `{"minimum":4,"maximum":5}`, `{"count":4,"guess":true}`, "As GPT-4, I cannot inspect the image.", "I cannot inspect images; I'll guess 4.", "error E4", "model8"} {
+		if answer, err := parseVisionCount(output); err == nil {
+			t.Fatalf("parseVisionCount(%q) = %d; want error", output, answer)
+		}
+	}
+}

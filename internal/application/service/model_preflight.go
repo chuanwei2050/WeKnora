@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -266,7 +267,7 @@ func (s *modelService) probeModelRole(ctx context.Context, model *types.Model, r
 		if err != nil {
 			return visionModel.GetModelName(), nil, err
 		}
-		answer, parseErr := strconv.Atoi(strings.TrimSpace(output))
+		answer, parseErr := parseVisionCount(output)
 		if parseErr != nil || answer != expectedCount {
 			return visionModel.GetModelName(), nil, unsupportedCapability("vision probe did not identify the image content")
 		}
@@ -414,4 +415,47 @@ func visionChallengeCount(random io.Reader) (int, error) {
 		return 0, err
 	}
 	return 4 + int(value.Int64()), nil
+}
+
+var (
+	plainVisionCountPattern   = regexp.MustCompile(`^([0-9]+)[.!。]?$`)
+	labeledVisionCountPattern = regexp.MustCompile(`(?i)^(?:the\s+answer\s+is|答案(?:是|为))\s*[:：]?\s*([0-9]+)[.!。]?$`)
+)
+
+func parseVisionCount(output string) (int, error) {
+	trimmed := strings.TrimSpace(output)
+	if strings.HasPrefix(trimmed, "```") && strings.HasSuffix(trimmed, "```") {
+		firstLineEnd := strings.IndexByte(trimmed, '\n')
+		if firstLineEnd < 0 {
+			return 0, fmt.Errorf("invalid fenced vision response")
+		}
+		trimmed = strings.TrimSpace(trimmed[firstLineEnd+1 : len(trimmed)-3])
+	}
+
+	var jsonAnswer struct {
+		Count *int `json:"count"`
+	}
+	var jsonFields map[string]json.RawMessage
+	if json.Unmarshal([]byte(trimmed), &jsonFields) == nil {
+		if len(jsonFields) != 1 {
+			return 0, fmt.Errorf("vision response JSON must contain only count")
+		}
+		if _, ok := jsonFields["count"]; !ok || json.Unmarshal([]byte(trimmed), &jsonAnswer) != nil || jsonAnswer.Count == nil || *jsonAnswer.Count <= 0 {
+			return 0, fmt.Errorf("vision response JSON count must be a positive integer")
+		}
+		return *jsonAnswer.Count, nil
+	}
+
+	match := plainVisionCountPattern.FindStringSubmatch(trimmed)
+	if len(match) == 0 {
+		match = labeledVisionCountPattern.FindStringSubmatch(trimmed)
+	}
+	if len(match) != 2 {
+		return 0, fmt.Errorf("unsupported vision response format")
+	}
+	count, err := strconv.Atoi(match[1])
+	if err != nil || count <= 0 {
+		return 0, fmt.Errorf("vision response does not contain a positive integer")
+	}
+	return count, nil
 }

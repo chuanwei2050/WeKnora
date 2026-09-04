@@ -275,6 +275,7 @@ When translating natural-language filters into SQL:
 - Add an exact text predicate only when the user explicitly identifies that column/value pair. Never invent an equality predicate merely because a column name appears related.
 - Use the schema to choose every column that can directly answer the question; do not assume the answer is confined to one text column.
 - When the same fact may appear in multiple semantically relevant text columns, combine those predicates with OR so matching rows are not omitted.
+- The SQL is executed as written. Do not rely on the execution layer to broaden a predicate or search additional columns.
 - Use the evidence samples only to recognize how relevant values are actually represented in the table, including equivalent wording.
 - Select the fields needed to identify each result and include the matching source values as evidence of why it matched.
 
