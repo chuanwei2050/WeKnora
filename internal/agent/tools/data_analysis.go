@@ -375,8 +375,7 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}, err
 	}
 
-	modelSQL := modelFacingDataAnalysisSQL(executionSQL, schema.TableName)
-	queryOutput := t.formatQueryResults(results, modelSQL)
+	queryOutput := t.formatQueryResults(results)
 	logger.Infof(ctx, "[Tool][DataAnalysis] Completed execution query, total %d rows for session %s", len(results), t.sessionID)
 	return &types.ToolResult{
 		Success: true,
@@ -404,11 +403,6 @@ func validateDataAnalysisSQL(sqlText, tableName string) error {
 		return fmt.Errorf("%v", validation.Errors)
 	}
 	return nil
-}
-
-func modelFacingDataAnalysisSQL(executionSQL, tableName string) string {
-	logicalSQL := strings.ReplaceAll(executionSQL, quoteDuckDBIdentifier(tableName), "data")
-	return strings.ReplaceAll(logicalSQL, tableName, "data")
 }
 
 // executeSingleQuery executes a single SQL query and returns columns and results
@@ -472,12 +466,10 @@ func (t *DataAnalysisTool) executeSingleQuery(ctx context.Context, sqlQuery stri
 }
 
 // formatQueryResults formats query results into JSONL format (one JSON object per line)
-func (t *DataAnalysisTool) formatQueryResults(results []map[string]string, modelSQL string) string {
+func (t *DataAnalysisTool) formatQueryResults(results []map[string]string) string {
 	var output strings.Builder
 
 	output.WriteString("=== Structured Query Results ===\n\n")
-	output.WriteString("Internal query scope for verification only; never quote or expose it to the user:\n")
-	output.WriteString(fmt.Sprintf("<internal_query>%s</internal_query>\n\n", modelSQL))
 	output.WriteString(fmt.Sprintf("Returned %d rows\n\n", len(results)))
 
 	if len(results) == 0 {

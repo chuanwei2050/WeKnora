@@ -51,33 +51,15 @@ func TestValidateDataAnalysisSQLBlocksDuckDBExternalIO(t *testing.T) {
 	}
 }
 
-func TestFormatQueryResultsKeepsLogicalSQLForModelVerification(t *testing.T) {
+func TestFormatQueryResultsKeepsResultsWithoutSQL(t *testing.T) {
 	tool := &DataAnalysisTool{}
-	output := tool.formatQueryResults(
-		[]map[string]string{{"master_count": "41"}},
-		`SELECT COUNT(*) AS master_count FROM data WHERE 学历 = '硕士'`,
-	)
+	output := tool.formatQueryResults([]map[string]string{{"master_count": "41"}})
 
-	if !strings.Contains(output, "never quote or expose") || !strings.Contains(output, "<internal_query>") || !strings.Contains(output, "FROM data") {
-		t.Fatalf("answer evidence must retain a non-public logical query for verification: %q", output)
-	}
-	if strings.Contains(output, "DuckDB") || strings.Contains(output, "k_knowledge_1_session") {
+	if strings.Contains(output, "SELECT") || strings.Contains(output, "DuckDB") || strings.Contains(output, "internal_query") {
 		t.Fatalf("answer evidence must not expose query implementation details: %q", output)
 	}
 	if !strings.Contains(output, "Returned 1 rows") || !strings.Contains(output, `"master_count":"41"`) {
 		t.Fatalf("answer evidence must retain query results: %q", output)
-	}
-}
-
-func TestModelFacingDataAnalysisSQLHidesPhysicalTableName(t *testing.T) {
-	const physicalTable = "k_knowledge_1_session"
-	got := modelFacingDataAnalysisSQL(
-		`SELECT COUNT(*) FROM "k_knowledge_1_session" WHERE 学历 = '硕士'`,
-		physicalTable,
-	)
-
-	if strings.Contains(got, physicalTable) || !strings.Contains(got, "FROM data") {
-		t.Fatalf("expected logical table name only, got %q", got)
 	}
 }
 
