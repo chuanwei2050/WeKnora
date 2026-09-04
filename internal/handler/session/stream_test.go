@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -47,6 +48,28 @@ func TestRemainingTitleDeliveryWait(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if got := remainingTitleDeliveryWait(startedAt, test.now); got != test.want {
 				t.Fatalf("remainingTitleDeliveryWait() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestIsTerminalStreamEvent(t *testing.T) {
+	tests := []struct {
+		name  string
+		event interfaces.StreamEvent
+		want  bool
+	}{
+		{name: "complete", event: interfaces.StreamEvent{Type: types.ResponseTypeComplete}, want: true},
+		{name: "stop", event: interfaces.StreamEvent{Type: types.ResponseType(event.EventStop), Done: true}, want: true},
+		{name: "fatal error", event: interfaces.StreamEvent{Type: types.ResponseTypeError, Done: true}, want: true},
+		{name: "answer done", event: interfaces.StreamEvent{Type: types.ResponseTypeAnswer, Done: true}, want: true},
+		{name: "answer delta", event: interfaces.StreamEvent{Type: types.ResponseTypeAnswer}, want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isTerminalStreamEvent(test.event); got != test.want {
+				t.Fatalf("isTerminalStreamEvent() = %v, want %v", got, test.want)
 			}
 		})
 	}

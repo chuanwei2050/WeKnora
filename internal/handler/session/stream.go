@@ -25,6 +25,22 @@ func remainingTitleDeliveryWait(startedAt, now time.Time) time.Duration {
 	return remaining
 }
 
+func isTerminalStreamEvent(evt interfaces.StreamEvent) bool {
+	return evt.Type == types.ResponseTypeComplete ||
+		evt.Type == types.ResponseType(event.EventStop) ||
+		(evt.Done && (evt.Type == types.ResponseTypeError || evt.Type == types.ResponseTypeAnswer))
+}
+
+func (h *Handler) markMessageCompleted(ctx context.Context, message *types.Message) {
+	if message.IsCompleted {
+		return
+	}
+	message.IsCompleted = true
+	if err := h.messageService.UpdateMessage(ctx, message); err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+	}
+}
+
 // ContinueStream godoc
 // @Summary      继续流式响应
 // @Description  继续获取正在进行的流式响应
@@ -119,10 +135,13 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	// Check if stream is already completed
 	streamCompleted := false
 	for _, evt := range events {
-		if evt.Type == "complete" {
+		if isTerminalStreamEvent(evt) {
 			streamCompleted = true
 			break
 		}
+	}
+	if streamCompleted {
+		h.markMessageCompleted(ctx, message)
 	}
 
 	// Replay existing events
@@ -163,7 +182,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 			streamCompletedNow := false
 			for _, evt := range newEvents {
 				// Check for completion event
-				if evt.Type == "complete" {
+				if isTerminalStreamEvent(evt) {
 					streamCompletedNow = true
 				}
 
@@ -177,6 +196,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 
 			// If stream completed, send final event and exit
 			if streamCompletedNow {
+				h.markMessageCompleted(ctx, message)
 				logger.Infof(ctx, "Stream completed, session ID: %s, message ID: %s", sessionID, messageID)
 				sendCompletionEvent(c, message.RequestID)
 				return
