@@ -198,6 +198,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		chatManage.SearchResult[i].Metadata = ensureMetadata(chatManage.SearchResult[i].Metadata)
 	}
 	reranked := make([]*types.SearchResult, 0, len(rerankResp)+len(directLoadResults))
+	normalizedBaseScores := normalizeRerankBaseScores(candidatesToRerank, directLoadResults)
 
 	// Process reranked results
 	for _, rr := range rerankResp {
@@ -208,7 +209,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		base := sr.Score
 		sr.Metadata["base_score"] = fmt.Sprintf("%.4f", base)
 		modelScore := rr.RelevanceScore
-		sr.Score = searchutil.CompositeSearchScore(sr, modelScore, base, sr.StartAt >= 0)
+		sr.Score = searchutil.CompositeSearchScore(sr, modelScore, normalizedBaseScores[sr], sr.StartAt >= 0)
 
 		prior := sr.RankingSourcePrior
 		priorKind := sr.RankingSourcePriorKind
@@ -232,7 +233,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		sr.Metadata["base_score"] = fmt.Sprintf("%.4f", base)
 		// Assign high model score for direct load items
 		modelScore := 1.0
-		sr.Score = searchutil.CompositeSearchScore(sr, modelScore, base, sr.StartAt >= 0)
+		sr.Score = searchutil.CompositeSearchScore(sr, modelScore, normalizedBaseScores[sr], sr.StartAt >= 0)
 		reranked = append(reranked, sr)
 	}
 	searchutil.SortSearchResults(reranked)
@@ -266,6 +267,36 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	})
 	emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "相关内容筛选完成", stageStarted, true, map[string]interface{}{"status": "completed", "input_count": len(chatManage.SearchResult), "output_count": len(chatManage.RerankResult)})
 	return next()
+}
+
+func normalizeRerankBaseScores(groups ...[]*types.SearchResult) map[*types.SearchResult]float64 {
+	normalized := make(map[*types.SearchResult]float64)
+	minScore, maxScore := math.Inf(1), math.Inf(-1)
+	for _, group := range groups {
+		for _, result := range group {
+			if result == nil || math.IsNaN(result.Score) || math.IsInf(result.Score, 0) {
+				continue
+			}
+			minScore = min(minScore, result.Score)
+			maxScore = max(maxScore, result.Score)
+		}
+	}
+	if math.IsInf(minScore, 1) {
+		return normalized
+	}
+	for _, group := range groups {
+		for _, result := range group {
+			if result == nil {
+				continue
+			}
+			if maxScore == minScore {
+				normalized[result] = 0.5
+				continue
+			}
+			normalized[result] = searchutil.ClampFloat((result.Score-minScore)/(maxScore-minScore), 0, 1)
+		}
+	}
+	return normalized
 }
 
 func applyBoundedSourcePrior(result *types.SearchResult, prior float64, source string) {

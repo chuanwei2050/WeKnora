@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/redis/go-redis/v9"
@@ -16,6 +17,34 @@ import (
 type platformRerankModelService struct {
 	interfaces.ModelService
 	requestedModelID string
+}
+
+func TestNormalizeRerankBaseScoresUsesCandidateRange(t *testing.T) {
+	high := &types.SearchResult{Score: 35}
+	middle := &types.SearchResult{Score: 34}
+	low := &types.SearchResult{Score: 33}
+
+	got := normalizeRerankBaseScores([]*types.SearchResult{high, middle, low})
+
+	if got[high] != 1 || got[middle] != 0.5 || got[low] != 0 {
+		t.Fatalf("unexpected normalized scores: high=%v middle=%v low=%v", got[high], got[middle], got[low])
+	}
+	highFinal := searchutil.CompositeSearchScore(high, 0.9, got[high], false)
+	lowFinal := searchutil.CompositeSearchScore(low, 0.7, got[low], false)
+	if highFinal >= 1 || lowFinal >= 1 || highFinal <= lowFinal {
+		t.Fatalf("expected distinct non-saturated composite scores, got high=%v low=%v", highFinal, lowFinal)
+	}
+}
+
+func TestNormalizeRerankBaseScoresKeepsEqualScoresNeutral(t *testing.T) {
+	first := &types.SearchResult{Score: 34}
+	second := &types.SearchResult{Score: 34}
+
+	got := normalizeRerankBaseScores([]*types.SearchResult{first, second})
+
+	if got[first] != 0.5 || got[second] != 0.5 {
+		t.Fatalf("expected equal scores to be neutral, got first=%v second=%v", got[first], got[second])
+	}
 }
 
 func (s *platformRerankModelService) GetRerankModel(_ context.Context, modelID string) (rerank.Reranker, error) {
