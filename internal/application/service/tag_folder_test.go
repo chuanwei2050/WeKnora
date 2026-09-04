@@ -31,9 +31,18 @@ type folderTagRepositoryStub struct {
 	created             *types.KnowledgeTag
 	hasChildren         bool
 	deleteSubtreeResult bool
+	byName              *types.KnowledgeTag
+	byNameMatches       []*types.KnowledgeTag
+}
+
+func (s *folderTagRepositoryStub) ListByName(context.Context, uint64, string, string) ([]*types.KnowledgeTag, error) {
+	return s.byNameMatches, nil
 }
 
 func (s *folderTagRepositoryStub) GetByName(context.Context, uint64, string, string) (*types.KnowledgeTag, error) {
+	if s.byName != nil {
+		return s.byName, nil
+	}
 	return nil, gorm.ErrRecordNotFound
 }
 
@@ -135,6 +144,47 @@ func TestKnowledgeTagServiceCreatesOrdinaryChildFolder(t *testing.T) {
 	require.NotNil(t, tag.ParentID)
 	require.Equal(t, parentID, *tag.ParentID)
 	require.False(t, tag.IsPublic)
+}
+
+func TestKnowledgeTagServiceAllowsDuplicateFolderNames(t *testing.T) {
+	repo := &folderTagRepositoryStub{byName: &types.KnowledgeTag{ID: "existing", Name: "合同"}}
+	svc := &knowledgeTagService{
+		kbService: folderKBServiceStub{kb: &types.KnowledgeBase{ID: "kb", TenantID: 1}},
+		repo:      repo,
+	}
+
+	tag, err := svc.CreateTag(context.Background(), "kb", "合同", "", 0, false, nil)
+	require.NoError(t, err)
+	require.NotEqual(t, "existing", tag.ID)
+	require.Equal(t, "合同", tag.Name)
+	require.Same(t, tag, repo.created)
+}
+
+func TestKnowledgeTagServiceKeepsUntaggedNameReserved(t *testing.T) {
+	repo := &folderTagRepositoryStub{byName: &types.KnowledgeTag{ID: "untagged", Name: types.UntaggedTagName}}
+	svc := &knowledgeTagService{
+		kbService: folderKBServiceStub{kb: &types.KnowledgeBase{ID: "kb", TenantID: 1}},
+		repo:      repo,
+	}
+
+	_, err := svc.CreateTag(context.Background(), "kb", types.UntaggedTagName, "", 0, false, nil)
+	require.Error(t, err)
+	require.Nil(t, repo.created)
+}
+
+func TestKnowledgeTagServiceRejectsAmbiguousNameLookup(t *testing.T) {
+	repo := &folderTagRepositoryStub{byNameMatches: []*types.KnowledgeTag{
+		{ID: "contract-a", Name: "合同"},
+		{ID: "contract-b", Name: "合同"},
+	}}
+	svc := &knowledgeTagService{
+		kbService: folderKBServiceStub{kb: &types.KnowledgeBase{ID: "kb", TenantID: 1}},
+		repo:      repo,
+	}
+
+	_, err := svc.FindOrCreateTagByName(context.Background(), "kb", "合同")
+	require.ErrorContains(t, err, "文件夹名称不唯一")
+	require.Nil(t, repo.created)
 }
 
 func TestKnowledgeTagServiceRejectsInvalidChildParents(t *testing.T) {

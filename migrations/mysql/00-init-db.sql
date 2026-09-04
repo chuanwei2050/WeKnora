@@ -76,7 +76,6 @@ CREATE TABLE knowledge_tags (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL,
     UNIQUE KEY uq_knowledge_tags_scope_id (tenant_id, knowledge_base_id, id),
-    UNIQUE KEY idx_knowledge_tags_kb_name (tenant_id, knowledge_base_id, name),
     UNIQUE KEY idx_knowledge_tags_seq_id (seq_id),
     CONSTRAINT fk_knowledge_tags_kb FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_bases(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

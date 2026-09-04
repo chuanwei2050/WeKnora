@@ -60,6 +60,9 @@ type DataSource struct {
 	// User-friendly name
 	Name string `json:"name"`
 
+	// Stable folder used for synchronized items. The display name may change or repeat.
+	AutoTagID string `json:"-" gorm:"type:varchar(36);index"`
+
 	// Connector type (feishu, notion, confluence, etc.)
 	Type string `json:"type" gorm:"type:varchar(50);index"`
 

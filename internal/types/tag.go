@@ -29,7 +29,7 @@ type KnowledgeTag struct {
 	TenantID uint64 `json:"tenant_id"`
 	// Knowledge base ID that this tag belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
-	// Tag name, unique within the same knowledge base
+	// Tag display name; identity is provided by ID, so names may repeat
 	Name string `json:"name"              gorm:"type:varchar(128);not null"`
 	// Optional display color
 	Color string `json:"color"             gorm:"type:varchar(32)"`

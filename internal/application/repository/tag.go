@@ -93,6 +93,18 @@ func (r *knowledgeTagRepository) GetByName(ctx context.Context, tenantID uint64,
 	return &tag, nil
 }
 
+// ListByName gets all knowledge tags with an exact display-name match.
+func (r *knowledgeTagRepository) ListByName(ctx context.Context, tenantID uint64, kbID string, name string) ([]*types.KnowledgeTag, error) {
+	var tags []*types.KnowledgeTag
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND name = ?", tenantID, kbID, name).
+		Order("created_at ASC, id ASC").
+		Find(&tags).Error; err != nil {
+		return nil, err
+	}
+	return tags, nil
+}
+
 // ListByKB lists knowledge tags by knowledge base ID with pagination and optional keyword filtering.
 func (r *knowledgeTagRepository) ListByKB(
 	ctx context.Context,

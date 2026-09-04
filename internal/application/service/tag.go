@@ -175,13 +175,16 @@ func (s *knowledgeTagService) CreateTag(
 		}
 	}
 
-	// Check if tag with same name already exists
-	existingTag, err := s.repo.GetByName(ctx, kb.TenantID, kbID, name)
-	if err == nil && existingTag != nil {
-		return nil, werrors.NewConflictError("标签名称已存在")
-	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
+	// The system-managed untagged folder remains unique. User folders are
+	// identified by ID and may share a display name.
+	if name == types.UntaggedTagName {
+		existingTag, lookupErr := s.repo.GetByName(ctx, kb.TenantID, kbID, name)
+		if lookupErr == nil && existingTag != nil {
+			return nil, werrors.NewConflictError("未分类是系统保留名称")
+		}
+		if lookupErr != nil && !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+			return nil, lookupErr
+		}
 	}
 
 	now := time.Now()
@@ -205,6 +208,14 @@ func (s *knowledgeTagService) CreateTag(
 		return nil, err
 	}
 	return tag, nil
+}
+
+// GetTagByID gets a tag by its stable UUID in the current tenant.
+func (s *knowledgeTagService) GetTagByID(ctx context.Context, id string) (*types.KnowledgeTag, error) {
+	if strings.TrimSpace(id) == "" {
+		return nil, werrors.NewBadRequestError("标签ID不能为空")
+	}
+	return s.repo.GetByID(ctx, types.MustTenantIDFromContext(ctx), id)
 }
 
 // UpdateTag updates tag basic information.
@@ -600,7 +611,7 @@ func (s *knowledgeTagService) ProcessIndexDelete(ctx context.Context, t *asynq.T
 	return nil
 }
 
-// FindOrCreateTagByName finds a tag by name or creates it if not exists.
+// FindOrCreateTagByName finds an unambiguous tag by name or creates it if absent.
 func (s *knowledgeTagService) FindOrCreateTagByName(ctx context.Context, kbID string, name string) (*types.KnowledgeTag, error) {
 	name = strings.TrimSpace(name)
 	if kbID == "" || name == "" {
@@ -614,17 +625,15 @@ func (s *knowledgeTagService) FindOrCreateTagByName(ctx context.Context, kbID st
 
 	tenantID := kb.TenantID
 
-	// 先尝试查找现有标签
-	tag, err := s.repo.GetByName(ctx, tenantID, kbID, name)
-	if err == nil {
-		return tag, nil
-	}
-
-	// 如果不是 not found 错误，直接返回
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	tags, err := s.repo.ListByName(ctx, tenantID, kbID, name)
+	if err != nil {
 		return nil, err
 	}
-
-	// 创建新标签
+	if len(tags) == 1 {
+		return tags[0], nil
+	}
+	if len(tags) > 1 {
+		return nil, werrors.NewConflictError("文件夹名称不唯一，请提供文件夹ID")
+	}
 	return s.CreateTag(ctx, kbID, name, "", 0, false, nil)
 }

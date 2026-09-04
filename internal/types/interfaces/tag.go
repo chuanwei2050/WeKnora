@@ -13,6 +13,8 @@ type KnowledgeTagService interface {
 	ListTags(ctx context.Context, kbID string, page *types.Pagination, keyword string) (*types.PageResult, error)
 	// CreateTag creates a new tag under a knowledge base.
 	CreateTag(ctx context.Context, kbID string, name string, color string, sortOrder int, isPublic bool, parentID *string) (*types.KnowledgeTag, error)
+	// GetTagByID gets a tag by its stable UUID.
+	GetTagByID(ctx context.Context, id string) (*types.KnowledgeTag, error)
 	// UpdateTag updates tag basic information.
 	UpdateTag(ctx context.Context, id string, name *string, color *string, sortOrder *int, searchEnabled *bool) (*types.KnowledgeTag, error)
 	// ReorderTags atomically persists the complete order of non-default tags in a knowledge base.
@@ -21,7 +23,7 @@ type KnowledgeTagService interface {
 	// When contentOnly=true, only deletes the content under the tag but keeps the tag itself.
 	// excludeIDs: IDs of chunks to exclude from deletion (only valid when deleting chunks)
 	DeleteTag(ctx context.Context, id string, force bool, contentOnly bool, recursive bool, excludeIDs []string) error
-	// FindOrCreateTagByName finds a tag by name or creates it if not exists.
+	// FindOrCreateTagByName returns a unique name match, creates an absent name, and rejects ambiguity.
 	FindOrCreateTagByName(ctx context.Context, kbID string, name string) (*types.KnowledgeTag, error)
 	// ProcessIndexDelete handles async index deletion task
 	ProcessIndexDelete(ctx context.Context, t *asynq.Task) error
@@ -39,6 +41,7 @@ type KnowledgeTagRepository interface {
 	// GetBySeqIDs retrieves multiple tags by their seq_ids in a single query.
 	GetBySeqIDs(ctx context.Context, tenantID uint64, seqIDs []int64) ([]*types.KnowledgeTag, error)
 	GetByName(ctx context.Context, tenantID uint64, kbID string, name string) (*types.KnowledgeTag, error)
+	ListByName(ctx context.Context, tenantID uint64, kbID string, name string) ([]*types.KnowledgeTag, error)
 	ListByKB(
 		ctx context.Context,
 		tenantID uint64,

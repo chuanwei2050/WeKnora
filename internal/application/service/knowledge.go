@@ -2511,7 +2511,8 @@ func (s *knowledgeService) cloneKnowledge(
 		return nil
 	}
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	targetTagID := s.getOrCreateTagInTarget(ctx, src.TenantID, targetKB.TenantID, targetKB.ID, src.TagID, make(map[string]string))
+	tagIDMapping := make(map[string]string)
+	targetTagID := s.getOrCreateTagInTarget(ctx, src.TenantID, targetKB.TenantID, targetKB.ID, src.TagID, tagIDMapping)
 	if targetTagID == "" {
 		return fmt.Errorf("failed to map source knowledge category")
 	}
@@ -2579,7 +2580,7 @@ func (s *knowledgeService) cloneKnowledge(
 		logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge update tenant storage used failed")
 		return
 	}
-	if err = s.CloneChunk(ctx, src, dst); err != nil {
+	if err = s.CloneChunk(ctx, src, dst, tagIDMapping); err != nil {
 		logger.GetLogger(ctx).WithField("knowledge_id", dst.ID).
 			WithField("error", err).Errorf("MoveKnowledge move chunks failed")
 		return
@@ -5197,11 +5198,10 @@ func (s *knowledgeService) UpdateImageInfo(
 // and updating the vector database representation of the moved chunks.
 // It also ensures that the chunk's relationships (like pre and next chunk IDs) are maintained
 // by mapping the source chunk IDs to the new target chunk IDs.
-func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowledge) error {
+func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowledge, tagIDMapping map[string]string) error {
 	chunkPage := 1
 	chunkPageSize := 100
 	srcTodst := map[string]string{}
-	tagIDMapping := map[string]string{} // srcTagID -> dstTagID
 	targetChunks := make([]*types.Chunk, 0, 10)
 	chunkType := []types.ChunkType{
 		types.ChunkTypeText, types.ChunkTypeParentText, types.ChunkTypeSummary,
@@ -8573,6 +8573,9 @@ func (s *knowledgeService) resolveTagID(ctx context.Context, kbID string, payloa
 		if err != nil {
 			return "", fmt.Errorf("failed to find tag by seq_id %d: %w", payload.TagID, err)
 		}
+		if tag.KnowledgeBaseID != kbID {
+			return "", werrors.NewBadRequestError("目标文件夹不存在或不属于当前知识库")
+		}
 		return tag.ID, nil
 	}
 
@@ -11421,10 +11424,7 @@ func (s *knowledgeService) moveKnowledgeReparse(
 	return nil
 }
 
-// getOrCreateTagInTarget finds or creates a tag in the target knowledge base based on the source tag.
-// It looks up the source tag by ID, then tries to find a tag with the same name in the target KB.
-// If not found, it creates a new tag with the same properties.
-// The mapping is cached in tagIDMapping for subsequent lookups.
+// getOrCreateTagInTarget maps each source tag ID to a distinct target tag ID.
 func (s *knowledgeService) getOrCreateTagInTarget(
 	ctx context.Context,
 	srcTenantID, dstTenantID uint64,
@@ -11432,6 +11432,10 @@ func (s *knowledgeService) getOrCreateTagInTarget(
 	srcTagID string,
 	tagIDMapping map[string]string,
 ) string {
+	if mappedID, ok := tagIDMapping[srcTagID]; ok {
+		return mappedID
+	}
+
 	// Get source tag
 	srcTag, err := s.tagRepo.GetByID(ctx, srcTenantID, srcTagID)
 	if err != nil || srcTag == nil {
@@ -11440,30 +11444,52 @@ func (s *knowledgeService) getOrCreateTagInTarget(
 		return ""
 	}
 
-	// Try to find existing tag with same name in target KB
-	dstTag, err := s.tagRepo.GetByName(ctx, dstTenantID, dstKnowledgeBaseID, srcTag.Name)
-	if err == nil && dstTag != nil {
+	// The system folder remains unique; user folders are copied one-to-one even
+	// when their display names repeat.
+	if srcTag.Name == types.UntaggedTagName {
+		dstTag, findErr := s.tagService.FindOrCreateTagByName(ctx, dstKnowledgeBaseID, types.UntaggedTagName)
+		if findErr != nil {
+			logger.Warnf(ctx, "Failed to resolve target untagged folder: %v", findErr)
+			tagIDMapping[srcTagID] = ""
+			return ""
+		}
 		tagIDMapping[srcTagID] = dstTag.ID
 		return dstTag.ID
 	}
 
-	// Create new tag in target KB
-	// "未分类" tag should have the lowest sort order to appear first
-	sortOrder := srcTag.SortOrder
-	if srcTag.Name == types.UntaggedTagName {
-		sortOrder = -1
+	targetTagID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(dstKnowledgeBaseID+":"+srcTagID)).String()
+	if existing, findErr := s.tagRepo.GetByID(ctx, dstTenantID, targetTagID); findErr == nil && existing != nil && existing.KnowledgeBaseID == dstKnowledgeBaseID {
+		tagIDMapping[srcTagID] = existing.ID
+		return existing.ID
+	}
+
+	var targetParentID *string
+	if srcTag.ParentID != nil {
+		mappedParentID := s.getOrCreateTagInTarget(ctx, srcTenantID, dstTenantID, dstKnowledgeBaseID, *srcTag.ParentID, tagIDMapping)
+		if mappedParentID == "" {
+			tagIDMapping[srcTagID] = ""
+			return ""
+		}
+		targetParentID = &mappedParentID
 	}
 	newTag := &types.KnowledgeTag{
-		ID:              uuid.New().String(),
+		ID:              targetTagID,
 		TenantID:        dstTenantID,
 		KnowledgeBaseID: dstKnowledgeBaseID,
 		Name:            srcTag.Name,
 		Color:           srcTag.Color,
-		SortOrder:       sortOrder,
+		SortOrder:       srcTag.SortOrder,
+		IsPublic:        srcTag.IsPublic,
+		ParentID:        targetParentID,
+		SearchEnabled:   srcTag.SearchEnabled,
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 	}
 	if err := s.tagRepo.Create(ctx, newTag); err != nil {
+		if existing, findErr := s.tagRepo.GetByID(ctx, dstTenantID, targetTagID); findErr == nil && existing != nil && existing.KnowledgeBaseID == dstKnowledgeBaseID {
+			tagIDMapping[srcTagID] = existing.ID
+			return existing.ID
+		}
 		logger.Warnf(ctx, "Failed to create tag %s in target KB: %v", srcTag.Name, err)
 		tagIDMapping[srcTagID] = "" // Cache empty result
 		return ""

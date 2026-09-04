@@ -12,11 +12,13 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
+	"gorm.io/gorm"
 )
 
 // DataSourceService implements the DataSourceService interface
@@ -509,14 +511,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 
-	// Auto-tag: find or create a tag for this data source so synced items are easily identifiable
-	autoTagID := ""
-	autoTagName := ds.Name
-	if autoTag, tagErr := s.tagService.FindOrCreateTagByName(ctx, ds.KnowledgeBaseID, autoTagName); tagErr != nil {
-		logger.Warnf(ctx, "failed to find/create auto-tag %q: %v (proceeding without tag)", autoTagName, tagErr)
-	} else if autoTag != nil {
-		autoTagID = autoTag.ID
-		logger.Infof(ctx, "using auto-tag %q (id=%s) for data source sync", autoTagName, autoTagID)
+	autoTagID, err := s.resolveDataSourceAutoTag(ctx, ds)
+	if err != nil {
+		logger.Warnf(ctx, "failed to resolve auto-tag %q: %v (proceeding without tag)", ds.Name, err)
 	}
 
 	for _, item := range items {
@@ -603,6 +600,37 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		payload.DataSourceID, syncLog.ItemsCreated, syncLog.ItemsUpdated, syncLog.ItemsDeleted)
 
 	return nil
+}
+
+func (s *DataSourceService) resolveDataSourceAutoTag(ctx context.Context, ds *types.DataSource) (string, error) {
+	if ds.AutoTagID != "" {
+		tag, err := s.tagService.GetTagByID(ctx, ds.AutoTagID)
+		if err == nil && tag.KnowledgeBaseID == ds.KnowledgeBaseID {
+			return tag.ID, nil
+		}
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", err
+		}
+	}
+
+	autoTag, err := s.tagService.FindOrCreateTagByName(ctx, ds.KnowledgeBaseID, ds.Name)
+	if err != nil {
+		appErr, isAppError := werrors.IsAppError(err)
+		if !isAppError || appErr.Code != werrors.ErrConflict {
+			return "", err
+		}
+		autoTag, err = s.tagService.CreateTag(ctx, ds.KnowledgeBaseID, ds.Name, "", 0, false, nil)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	ds.AutoTagID = autoTag.ID
+	if err := s.dsRepo.Update(ctx, ds); err != nil {
+		return "", err
+	}
+	logger.Infof(ctx, "using auto-tag %q (id=%s) for data source sync", ds.Name, autoTag.ID)
+	return autoTag.ID, nil
 }
 
 // ValidateCredentials tests connectivity using raw credentials without persisting anything.
