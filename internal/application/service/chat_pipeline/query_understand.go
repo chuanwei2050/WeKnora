@@ -459,7 +459,7 @@ func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *typ
 		})
 	}
 
-	m, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	m, specialized, err := getAuxiliaryChatModel(ctx, p.modelService, types.ModelProfileRoleQueryUnderstand, chatManage.ChatModelID)
 	if err != nil {
 		pipelineError(ctx, "QueryUnderstand", "get_model", map[string]interface{}{
 			"session_id":    chatManage.SessionID,
@@ -468,6 +468,10 @@ func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *typ
 		})
 		return nil, false
 	}
+	pipelineInfo(ctx, "QueryUnderstand", "model_selected", map[string]interface{}{
+		"session_id":  chatManage.SessionID,
+		"specialized": specialized,
+	})
 	return m, false
 }
 
@@ -481,6 +485,12 @@ func (p *PluginQueryUnderstand) buildPrompts(chatManage *types.ChatManage, histo
 	if chatManage.RewritePromptSystem != "" {
 		systemPrompt = chatManage.RewritePromptSystem
 	}
+	systemPrompt = compactDefaultQueryUnderstandPrompt(
+		systemPrompt,
+		len(chatManage.Images) > 0,
+		len(chatManage.Attachments) > 0,
+		len(historyList) > 0,
+	)
 
 	conversationText := formatConversationHistory(historyList)
 
@@ -519,6 +529,65 @@ func (p *PluginQueryUnderstand) buildPrompts(chatManage *types.ChatManage, histo
 
 	return types.RenderPromptPlaceholders(systemPrompt, vals),
 		types.RenderPromptPlaceholders(userPrompt, vals)
+}
+
+func compactDefaultQueryUnderstandPrompt(prompt string, hasImages, hasAttachments, hasHistory bool) string {
+	if !strings.Contains(prompt, "performs THREE tasks") ||
+		!strings.Contains(prompt, "## Task 1: Query Understanding") ||
+		!strings.Contains(prompt, "## Task 2: Intent Classification") {
+		return prompt
+	}
+	compact := `Rewrite the user's question and classify its intent. Output only one JSON object matching the provided schema.
+
+Rewrite rules:
+- Resolve pronouns and omitted subjects from conversation history without adding facts.
+- Preserve filenames, labels, names, technical terms, filters, and the user's language ({{language}}).
+- Produce a concise, self-contained retrieval query; never replace actual keywords with instructions such as "search the knowledge base".
+- Broad requests to read, list, organize, or export knowledge-base documents remain knowledge-base queries and retain their scope words.
+
+Choose exactly one intent, using this priority:
+1. greeting: only greeting, thanks, or farewell.
+2. summarize: summarize the conversation itself; mentions of files, reports, documents, or knowledge base are not summarize.
+3. web_search: explicitly requests current or external information.
+4. kb_search: search, read, list, compare, organize, or extract stored knowledge, including requests with attachments.
+5. clarification: incomplete question that likely needs retrieval.
+6. follow_up: answerable entirely from conversation history without new retrieval.
+7. image_only: analyze only an actually attached image.
+8. doc_only: analyze only an actually attached document.
+9. chitchat: casual conversation requiring no retrieval.
+When uncertain, choose kb_search. image_only/doc_only require the corresponding attachment marker.
+
+Return: {"rewrite_query":"string","intent":"string","image_description":"string"}.
+No Markdown, explanation, or additional fields.
+
+Conversation history:
+{{conversation}}`
+	if hasHistory {
+		compact += `
+
+History examples:
+- If history names RAG, "它和传统搜索有什么区别" becomes "RAG和传统搜索有什么区别" with kb_search.
+- "上面第二点再展开" is follow_up only when the prior answer contains that point and no retrieval is needed.`
+	}
+	if hasImages {
+		compact += `
+
+Image rules:
+- Describe the attached image in image_description, including important layout, objects, relationships, and visible text.
+- If the user asks only about the image, use image_only; if they ask to match or search stored material, use kb_search.`
+	} else {
+		compact += "\n\nNo image is attached: image_description must be empty and intent must not be image_only."
+	}
+	if hasAttachments {
+		compact += `
+
+Document rules:
+- Use doc_only only when the user asks solely to understand, summarize, translate, or extract the attached document.
+- Requests to search or compare stored knowledge remain kb_search.`
+	} else {
+		compact += "\nNo document is attached: intent must not be doc_only."
+	}
+	return compact
 }
 
 func truncatePromptInput(value string, limit int) string {

@@ -36,6 +36,33 @@ func pipelineError(ctx context.Context, stage, action string, fields map[string]
 	common.PipelineError(ctx, stage, action, fields)
 }
 
+func getAuxiliaryChatModel(
+	ctx context.Context,
+	modelService interfaces.ModelService,
+	profileRole string,
+	fallbackModelID string,
+) (chat.Chat, bool, error) {
+	model, err := modelService.GetDefaultModel(ctx, types.ModelTypeVerifier, profileRole)
+	if err == nil && model != nil {
+		if specialized, specializedErr := modelService.GetChatModel(ctx, model.ID); specializedErr == nil {
+			return specialized, true, nil
+		} else {
+			pipelineWarn(ctx, "AuxiliaryModel", "specialized_model_unavailable", map[string]interface{}{
+				"profile_role": profileRole,
+				"model_id":     model.ID,
+				"error":        specializedErr.Error(),
+			})
+		}
+	} else if err != nil {
+		pipelineInfo(ctx, "AuxiliaryModel", "specialized_model_not_configured", map[string]interface{}{
+			"profile_role": profileRole,
+			"error":        err.Error(),
+		})
+	}
+	fallback, fallbackErr := modelService.GetChatModel(ctx, fallbackModelID)
+	return fallback, false, fallbackErr
+}
+
 func emitPipelineStageStart(ctx context.Context, chatManage *types.ChatManage, name, hint string) (string, time.Time) {
 	started := time.Now()
 	if chatManage.EventBus == nil {

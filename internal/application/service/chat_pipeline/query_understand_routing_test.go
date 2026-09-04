@@ -119,6 +119,26 @@ func TestRoutingPromptUsesPreviousConversationForFollowUp(t *testing.T) {
 	}
 }
 
+func TestCompactDefaultQueryUnderstandPromptKeepsCoreRulesAndLoadsOptionalRulesOnDemand(t *testing.T) {
+	legacy := strings.Repeat("verbose example\n", 300) + "performs THREE tasks\n## Task 1: Query Understanding\n## Task 2: Intent Classification"
+	textOnly := compactDefaultQueryUnderstandPrompt(legacy, false, false, true)
+	if len(textOnly) >= len(legacy)/2 {
+		t.Fatalf("default prompt was not materially compacted: before=%d after=%d", len(legacy), len(textOnly))
+	}
+	for _, required := range []string{"{{language}}", "{{conversation}}", "kb_search", "follow_up", "No image is attached", "No document is attached"} {
+		if !strings.Contains(textOnly, required) {
+			t.Fatalf("compacted prompt lost %q: %s", required, textOnly)
+		}
+	}
+	withAttachments := compactDefaultQueryUnderstandPrompt(legacy, true, true, false)
+	if !strings.Contains(withAttachments, "Image rules:") || !strings.Contains(withAttachments, "Document rules:") {
+		t.Fatalf("attachment rules were not loaded on demand: %s", withAttachments)
+	}
+	if got := compactDefaultQueryUnderstandPrompt("custom prompt", false, false, false); got != "custom prompt" {
+		t.Fatalf("custom prompt must remain untouched: %q", got)
+	}
+}
+
 func TestParseStructuredQueryOutputPreservesImageDescriptionOrder(t *testing.T) {
 	output, ok := parseStructuredQueryOutputJSON(`{
 		"rewrite_query":"图片内容",

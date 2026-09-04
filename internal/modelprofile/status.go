@@ -76,6 +76,8 @@ type roleSpec struct {
 var roleSpecs = []roleSpec{
 	{Role: "chat", Stem: "LLM_MODEL", AcceptTypes: []string{"KnowledgeQA"}, AddDialogType: "chat"},
 	{Role: "verifier_1", Stem: "VERIFIER_MODEL_1", AcceptTypes: []string{"Verifier", "KnowledgeQA"}, AddDialogType: "chat"},
+	{Role: "query_understand", Stem: "VERIFIER_MODEL_1", AcceptTypes: []string{"Verifier", "KnowledgeQA"}, AddDialogType: "chat"},
+	{Role: "data_analysis", Stem: "VERIFIER_MODEL_1", AcceptTypes: []string{"Verifier", "KnowledgeQA"}, AddDialogType: "chat"},
 	{Role: "verifier_2", Stem: "VERIFIER_MODEL_2", AcceptTypes: []string{"Verifier", "KnowledgeQA"}, AddDialogType: "chat"},
 	{Role: "evaluation_judge", Stem: "EVALUATION_JUDGE_MODEL", AcceptTypes: []string{"EvaluationJudge", "KnowledgeQA"}, AddDialogType: "chat"},
 	{Role: "embedding", Stem: "EMBEDDING_MODEL", AcceptTypes: []string{"Embedding"}, AddDialogType: "embedding", HasDimension: true},

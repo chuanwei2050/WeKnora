@@ -21,6 +21,8 @@ type bootstrapRole struct {
 var bootstrapRoles = map[string]bootstrapRole{
 	"chat":             {modelType: types.ModelTypeKnowledgeQA, modelRole: types.ModelRoleChat, use: "chat"},
 	"verifier_1":       {modelType: types.ModelTypeVerifier, modelRole: types.ModelRoleVerifier, use: "verifier"},
+	"query_understand": {modelType: types.ModelTypeVerifier, modelRole: types.ModelRoleVerifier, use: "verifier"},
+	"data_analysis":    {modelType: types.ModelTypeVerifier, modelRole: types.ModelRoleVerifier, use: "verifier"},
 	"verifier_2":       {modelType: types.ModelTypeVerifier, modelRole: types.ModelRoleVerifier, use: "verifier"},
 	"evaluation_judge": {modelType: types.ModelTypeJudge, modelRole: types.ModelRoleEvaluationJudge, use: "judge"},
 	"embedding":        {modelType: types.ModelTypeEmbedding, modelRole: types.ModelRoleEmbedding, use: "embedding"},
@@ -30,7 +32,7 @@ var bootstrapRoles = map[string]bootstrapRole{
 	"tts":              {modelType: types.ModelTypeTTS, modelRole: types.ModelRoleTTS, use: "tts"},
 }
 
-const modelSeedVersion = 8
+const modelSeedVersion = 9
 
 const legacyPrivateOpenAICompatibleProvider = "private-openai-compatible"
 
@@ -166,6 +168,29 @@ func Bootstrap(
 	for _, profile := range []types.ModelProfile{types.ModelProfileOnline, types.ModelProfileOffline} {
 		for _, candidate := range BootstrapPlan(profile) {
 			matched := findEquivalentModel(existing, candidate)
+			if settings.ModelSeedVersion >= 2 && settings.ModelSeedVersion < 9 && matched == nil && isAuxiliaryChatRole(candidate.ProfileRole) {
+				if hasProfileRole(existing, profile, candidate.ProfileRole) {
+					continue
+				}
+				approved, err := bindPreapprovedProfileEndpoint(ctx, approvedEndpoints, candidate)
+				if err != nil {
+					return fmt.Errorf("approve profile model endpoint %q (%s): %w", candidate.Name, candidate.Type, err)
+				}
+				if !approved {
+					continue
+				}
+				candidate.IsDefault = profile == settings.ModelProfile
+				if err := repo.Create(ctx, candidate); err != nil {
+					return fmt.Errorf("create auxiliary profile model %q (%s): %w", candidate.Name, candidate.Type, err)
+				}
+				if candidate.IsDefault {
+					if err := repo.ClearDefaultByType(ctx, uint(types.PlatformModelTenantID), candidate.Type, candidate.Profile, candidate.ProfileRole, candidate.ID); err != nil {
+						return fmt.Errorf("set auxiliary profile model default %q (%s): %w", candidate.Name, candidate.Type, err)
+					}
+				}
+				existing = append(existing, candidate)
+				continue
+			}
 			if settings.ModelSeedVersion >= 2 {
 				if matched == nil {
 					continue
@@ -266,6 +291,69 @@ func Bootstrap(
 		return fmt.Errorf("save model seed state: %w", err)
 	}
 	return nil
+}
+
+func isAuxiliaryChatRole(role string) bool {
+	return role == types.ModelProfileRoleQueryUnderstand || role == types.ModelProfileRoleDataAnalysis
+}
+
+func hasProfileRole(models []*types.Model, profile types.ModelProfile, role string) bool {
+	for _, model := range models {
+		if model != nil && model.Profile == profile && model.ProfileRole == role {
+			return true
+		}
+	}
+	return false
+}
+
+func bindPreapprovedProfileEndpoint(
+	ctx context.Context,
+	repo interfaces.ApprovedEndpointRepository,
+	model *types.Model,
+) (bool, error) {
+	if model == nil || model.Profile != types.ModelProfileOffline || model.Source == types.ModelSourceLocal ||
+		model.Parameters.BaseURL == "" || types.DeriveEndpointLocation(model.Parameters.BaseURL, nil) == types.EndpointPublic {
+		return true, nil
+	}
+	if repo == nil {
+		return false, nil
+	}
+	scheme, host, port, err := types.NormalizeEndpoint(model.Parameters.BaseURL)
+	if err != nil {
+		return false, err
+	}
+	items, err := repo.List(ctx, types.PlatformScopeTenantID, types.EndpointCategoryModel)
+	if err != nil {
+		return false, err
+	}
+	use := model.Parameters.EndpointUse
+	role := bootstrapRoles[model.ProfileRole].modelRole
+	for _, endpoint := range items {
+		if endpoint != nil && strings.EqualFold(endpoint.Scheme, scheme) && strings.EqualFold(endpoint.Host, host) && endpoint.Port == port &&
+			containsString(endpoint.AllowedUses, use) && containsModelRole(endpoint.AllowedModelRoles, role) {
+			model.Parameters.ApprovedEndpointID = endpoint.ID
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func containsString(values types.StringArray, target string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(target)) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsModelRole(values types.ModelRoleArray, target types.ModelRole) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func bindApprovedProfileEndpoint(

@@ -124,11 +124,15 @@ func (p *PluginDataAnalysis) OnEvent(
 	}
 
 	// Ask LLM to generate SQL for data analysis
-	chatModel, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	chatModel, specializedModel, err := getAuxiliaryChatModel(ctx, p.modelService, types.ModelProfileRoleDataAnalysis, chatManage.ChatModelID)
 	if err != nil {
 		finishStage()
 		return ErrGetChatModel.WithError(err)
 	}
+	pipelineInfo(ctx, "DataAnalysis", "model_selected", map[string]interface{}{
+		"session_id":  chatManage.SessionID,
+		"specialized": specializedModel,
+	})
 
 	// Use utils.GenerateSchema to generate format schema for DataAnalysisInput
 	formatSchema := utils.GenerateSchema[tools.DataAnalysisInput]()

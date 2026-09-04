@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -35,16 +36,47 @@ func (s *validationChatStub) GetModelID() string   { return "validator-id" }
 
 type validationModelServiceStub struct {
 	interfaces.ModelService
-	model *types.Model
-	chat  modelchat.Chat
+	model            *types.Model
+	chat             modelchat.Chat
+	specializedModel *types.Model
+	specializedChat  modelchat.Chat
 }
 
 func (s *validationModelServiceStub) GetModelByID(context.Context, string) (*types.Model, error) {
 	return s.model, nil
 }
 
-func (s *validationModelServiceStub) GetChatModel(context.Context, string) (modelchat.Chat, error) {
+func (s *validationModelServiceStub) GetChatModel(_ context.Context, id string) (modelchat.Chat, error) {
+	if s.specializedModel != nil && id == s.specializedModel.ID {
+		return s.specializedChat, nil
+	}
 	return s.chat, nil
+}
+
+func (s *validationModelServiceStub) GetDefaultModel(_ context.Context, _ types.ModelType, role string) (*types.Model, error) {
+	if s.specializedModel != nil && s.specializedModel.ProfileRole == role {
+		return s.specializedModel, nil
+	}
+	return nil, errors.New("specialized model is not configured")
+}
+
+func TestGetAuxiliaryChatModelUsesPersistedRoleAndFallsBack(t *testing.T) {
+	fallback := &validationChatStub{}
+	specialized := &validationChatStub{}
+	service := &validationModelServiceStub{
+		chat:             fallback,
+		specializedModel: &types.Model{ID: "query-model", ProfileRole: types.ModelProfileRoleQueryUnderstand},
+		specializedChat:  specialized,
+	}
+
+	got, selected, err := getAuxiliaryChatModel(context.Background(), service, types.ModelProfileRoleQueryUnderstand, "main-model")
+	if err != nil || !selected || got != specialized {
+		t.Fatalf("specialized selection = %#v, %v, %v", got, selected, err)
+	}
+	got, selected, err = getAuxiliaryChatModel(context.Background(), service, types.ModelProfileRoleDataAnalysis, "main-model")
+	if err != nil || selected || got != fallback {
+		t.Fatalf("fallback selection = %#v, %v, %v", got, selected, err)
+	}
 }
 
 func TestValidateWithChatModelParsesStrictStructuredOutput(t *testing.T) {

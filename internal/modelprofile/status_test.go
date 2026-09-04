@@ -112,7 +112,7 @@ func TestBuildOnlineOK(t *testing.T) {
 	}
 
 	status := Build(models)
-	if status.Summary.MissingRegistration != 0 || status.Summary.MissingEnv != 0 || status.Summary.Mismatch != 0 || status.Summary.OK != 9 {
+	if status.Summary.MissingRegistration != 0 || status.Summary.MissingEnv != 0 || status.Summary.Mismatch != 0 || status.Summary.OK != 11 {
 		t.Fatalf("summary %+v", status.Summary)
 	}
 	raw, _ := json.Marshal(status)

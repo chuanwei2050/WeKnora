@@ -21,6 +21,11 @@ const (
 	ModelProfileOffline ModelProfile = "offline"
 )
 
+const (
+	ModelProfileRoleQueryUnderstand = "query_understand"
+	ModelProfileRoleDataAnalysis    = "data_analysis"
+)
+
 func ParseModelProfile(value string) (ModelProfile, bool) {
 	switch ModelProfile(strings.ToLower(strings.TrimSpace(value))) {
 	case ModelProfileOnline:

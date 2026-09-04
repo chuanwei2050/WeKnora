@@ -61,6 +61,46 @@
       </div>
     </div>
 
+    <!-- 辅助模型 -->
+    <div class="settings-group model-type-group" data-model-type="auxiliary">
+      <div class="section-subheader">
+        <div class="subheader-text">
+          <h3>辅助模型</h3>
+          <p class="section-desc">用于问题理解和 Text2SQL，最终回答仍使用对话模型</p>
+        </div>
+      </div>
+      <div class="verifier-role-list">
+        <section v-for="role in auxiliaryRoles" :key="role.value" class="verifier-role-group">
+          <div class="verifier-role-header">
+            <div>
+              <h4>{{ role.label }}</h4>
+              <p>{{ role.description }}</p>
+            </div>
+            <t-button v-if="modelsForStructuredRole(role.value).length === 0" variant="text" theme="primary" size="small" @click="openAddStructuredModelDialog(role.value)">
+              添加模型
+            </t-button>
+          </div>
+          <div v-if="modelsForStructuredRole(role.value).length > 0" class="model-list-container">
+            <div v-for="model in modelsForStructuredRole(role.value)" :key="model.id" class="model-card">
+              <div class="model-info">
+                <div class="model-name">{{ model.name }} <t-tag v-if="model.isDefault" theme="success" size="small">默认</t-tag></div>
+                <div class="model-meta">
+                  <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.remote') }}</span>
+                  <span class="deployment-tag">{{ deploymentSummary(model) }}</span>
+                </div>
+              </div>
+              <div class="model-actions">
+                <t-dropdown :options="getModelOptions('chat', model)" @click="(data: any) => handleMenuAction(data, 'chat', model)" placement="bottom-right" attach="body">
+                  <t-button variant="text" shape="square" size="small" class="more-btn" :aria-label="`${role.label}模型操作`"><t-icon name="more" /></t-button>
+                </t-dropdown>
+              </div>
+            </div>
+          </div>
+          <div v-else class="verifier-role-empty">暂未配置，将回退对话模型</div>
+        </section>
+      </div>
+    </div>
+
     <!-- 校验模型 -->
     <div class="settings-group model-type-group" data-model-type="verifier">
       <div class="section-subheader">
@@ -367,11 +407,13 @@ import { isVLLMSettingsModel } from '@/utils/model-profile'
 const { t } = useI18n()
 
 type VerifierRole = 'verifier_1' | 'verifier_2' | 'evaluation_judge'
+type AuxiliaryRole = 'query_understand' | 'data_analysis'
+type StructuredModelRole = VerifierRole | AuxiliaryRole
 
 const showDialog = ref(false)
 const currentModelType = ref<'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts'>('chat')
 const editingModel = ref<any>(null)
-const pendingVerifierMeta = ref<{ originType: 'Verifier' | 'EvaluationJudge'; profileRole: VerifierRole } | null>(null)
+const pendingVerifierMeta = ref<{ originType: 'Verifier' | 'EvaluationJudge'; profileRole: StructuredModelRole } | null>(null)
 const loading = ref(true)
 const preflightResults = ref<Record<string, ModelPreflightResult>>({})
 const selectedProfile = ref<ModelProfile>('online')
@@ -402,16 +444,23 @@ const verifierRoles: Array<{ value: VerifierRole; label: string; description: st
   { value: 'evaluation_judge', label: '裁判', description: '汇总校验结果并作出裁决' }
 ]
 
+const auxiliaryRoles: Array<{ value: AuxiliaryRole; label: string; description: string }> = [
+  { value: 'query_understand', label: '问题理解', description: '意图识别、问题改写和复杂度路由' },
+  { value: 'data_analysis', label: 'Text2SQL', description: '根据表结构生成只读 SQL' },
+]
+
 const verifierRoleOptions = verifierRoles.map(role => ({
   content: role.label,
   value: role.value
 }))
 
-const modelsForVerifierRole = (role: VerifierRole) => verifierModels.value.filter(model =>
+const modelsForStructuredRole = (role: StructuredModelRole) => verifierModels.value.filter(model =>
   role === 'evaluation_judge'
     ? model.originType === 'EvaluationJudge' || model.profileRole === role
     : model.profileRole === role
 )
+
+const modelsForVerifierRole = (role: VerifierRole) => modelsForStructuredRole(role)
 
 const embeddingModels = computed(() => 
   visibleModels.value
@@ -467,6 +516,8 @@ function convertToLegacyFormat(model: ModelConfig) {
     location: model.parameters.location,
     artifactPolicy: model.parameters.artifact_policy,
     inferenceEngine: model.parameters.inference_engine || '',
+    approvedEndpointId: model.parameters.approved_endpoint_id || '',
+    endpointUse: model.parameters.endpoint_use || '',
     defaultVoice: model.parameters.extra_config?.voice || model.parameters.extra_config?.voice_name || '',
     // 将后端 map 形式转换为前端可编辑的数组形式
     customHeaders: model.parameters.custom_headers
@@ -518,7 +569,7 @@ const openAddDialog = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 
   showDialog.value = true
 }
 
-const openAddVerifierDialog = (role: VerifierRole) => {
+const openAddStructuredModelDialog = (role: StructuredModelRole) => {
   currentModelType.value = 'chat'
   pendingVerifierMeta.value = {
     originType: role === 'evaluation_judge' ? 'EvaluationJudge' : 'Verifier',
@@ -527,6 +578,8 @@ const openAddVerifierDialog = (role: VerifierRole) => {
   editingModel.value = null
   showDialog.value = true
 }
+
+const openAddVerifierDialog = (role: VerifierRole) => openAddStructuredModelDialog(role)
 
 // 编辑模型
 const editModel = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr' | 'tts', model: any) => {
@@ -602,12 +655,20 @@ const handleModelSave = async (modelData: any) => {
       type: editingModel.value?.originType || pendingVerifierMeta.value?.originType || getModelType(currentModelType.value),
       profile: selectedProfile.value,
       profile_role: editingModel.value?.profileRole || pendingVerifierMeta.value?.profileRole || getProfileRole(currentModelType.value),
+      is_default: editingModel.value?.isDefault ?? false,
+      status: editingModel.value?.status || undefined,
       source: modelData.source,
       description: '',
       parameters: {
         base_url: modelData.baseUrl?.trim() || '',
         api_key: modelData.apiKey?.trim() || '',
         provider: modelData.provider || '', // 添加 provider 字段
+        protocol: editingModel.value?.protocol,
+        location: editingModel.value?.location,
+        artifact_policy: editingModel.value?.artifactPolicy,
+        inference_engine: editingModel.value?.inferenceEngine,
+        approved_endpoint_id: editingModel.value?.approvedEndpointId,
+        endpoint_use: editingModel.value?.endpointUse,
         ...(currentModelType.value === 'tts' ? {
           extra_config: { voice: modelData.defaultVoice.trim() }
         } : {}),
