@@ -177,11 +177,6 @@ export default function (knowledgeBaseId?: string) {
           window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
             detail: { kbId: currentKbId }
           }));
-          getKnowled({
-            page: 1,
-            page_size: 35,
-            tag_id: uiStore.selectedTagId || undefined,
-          }, currentKbId);
         } else {
           const errorMessage = result.error?.message || result.message || t('knowledgeBase.uploadFailed');
           if (result.code === 'duplicate_file') {

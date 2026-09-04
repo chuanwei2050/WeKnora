@@ -1901,14 +1901,26 @@ type DuplicateKnowledge = KnowledgeCard & {
   directory_breadcrumb?: Array<{ id: string; name: string }>;
 };
 
+type BatchDuplicateFile = {
+  fileName: string;
+  knowledge: DuplicateKnowledge | null;
+};
+
 const duplicateDialogVisible = ref(false);
 const duplicateKnowledge = ref<DuplicateKnowledge | null>(null);
+const batchDuplicateDialogVisible = ref(false);
+const batchDuplicates = ref<BatchDuplicateFile[]>([]);
+const batchUploadSummary = ref({ success: 0, duplicate: 0, fail: 0 });
+
+const duplicateLocation = (existing: DuplicateKnowledge) => {
+  const tagName = existing.tag_name || getTagName(existing.tag_id) || t('knowledgeBase.documentDirectoryRoot');
+  return [tagName, ...(existing.directory_breadcrumb || []).map(node => node.name)].join(' / ');
+};
 
 const duplicateLocationName = computed(() => {
   const existing = duplicateKnowledge.value;
   if (!existing) return '';
-  const tagName = existing.tag_name || getTagName(existing.tag_id) || t('knowledgeBase.documentDirectoryRoot');
-  return [tagName, ...(existing.directory_breadcrumb || []).map(node => node.name)].join(' / ');
+  return duplicateLocation(existing);
 });
 
 const duplicateFolderName = computed(() => {
@@ -1931,18 +1943,20 @@ const openDuplicateDialog = (value: any) => {
   duplicateDialogVisible.value = true;
 };
 
-const locateDuplicateKnowledge = async () => {
-  const existing = duplicateKnowledge.value;
+const locateDuplicateKnowledge = async (existing = duplicateKnowledge.value) => {
   if (!existing?.tag_id) return;
   duplicateDialogVisible.value = false;
+  batchDuplicateDialogVisible.value = false;
   handleTagFilterChange(existing.tag_id);
   await nextTick();
   await enterDocumentDirectory(existing.directory_id || undefined);
 };
 
-const showBatchUploadResult = (successCount: number, failCount: number, duplicateCount: number, deletingCount: number) => {
+const showBatchUploadResult = (successCount: number, failCount: number, duplicateCount: number, deletingCount: number, duplicates: BatchDuplicateFile[]) => {
   if (duplicateCount > 0) {
-    MessagePlugin.info(t('knowledgeBase.duplicateFilesSkipped', { count: duplicateCount }));
+    batchDuplicates.value = duplicates;
+    batchUploadSummary.value = { success: successCount, duplicate: duplicateCount, fail: failCount };
+    batchDuplicateDialogVisible.value = true;
   }
   if (deletingCount > 0) {
     MessagePlugin.warning(t('knowledgeBase.deletingFilesSkipped', { count: deletingCount }));
@@ -2038,6 +2052,7 @@ const handleDocumentUpload = async (event: Event) => {
   let failCount = 0;
   let duplicateCount = 0;
   let deletingCount = 0;
+  const duplicates: BatchDuplicateFile[] = [];
   const totalCount = validFiles.length;
 
   const tagIdToUpload = uploadTargetTagId.value;
@@ -2063,6 +2078,8 @@ const handleDocumentUpload = async (event: Event) => {
         duplicateCount++;
         if (totalCount === 1) {
           openDuplicateDialog(responseData);
+        } else {
+          duplicates.push({ fileName: file.name, knowledge: duplicateData(responseData) });
         }
       } else {
         failCount++;
@@ -2087,6 +2104,8 @@ const handleDocumentUpload = async (event: Event) => {
         duplicateCount++;
         if (totalCount === 1) {
           openDuplicateDialog(error);
+        } else {
+          duplicates.push({ fileName: file.name, knowledge: duplicateData(error) });
         }
       } else {
         failCount++;
@@ -2110,7 +2129,7 @@ const handleDocumentUpload = async (event: Event) => {
       MessagePlugin.success(t('knowledgeBase.uploadSuccess'));
     }
   } else {
-    showBatchUploadResult(successCount, failCount, duplicateCount, deletingCount);
+    showBatchUploadResult(successCount, failCount, duplicateCount, deletingCount, duplicates);
   }
 
   resetUploadInput();
@@ -2198,6 +2217,7 @@ const handleFolderUpload = async (event: Event) => {
   let failCount = 0;
   let duplicateCount = 0;
   let deletingCount = 0;
+  const duplicates: BatchDuplicateFile[] = [];
   const tagIdToUpload = uploadTargetTagId.value;
 
   for (const file of validFiles) {
@@ -2227,6 +2247,7 @@ const handleFolderUpload = async (event: Event) => {
         deletingCount++;
       } else if (isDuplicateFileError(error)) {
         duplicateCount++;
+        duplicates.push({ fileName, knowledge: duplicateData(error) });
       } else {
         failCount++;
       }
@@ -2239,7 +2260,7 @@ const handleFolderUpload = async (event: Event) => {
     }));
   }
 
-  showBatchUploadResult(successCount, failCount, duplicateCount, deletingCount);
+  showBatchUploadResult(successCount, failCount, duplicateCount, deletingCount, duplicates);
 
   if (input) input.value = '';
 };
@@ -3747,6 +3768,45 @@ async function createNewSession(value: string): Promise<void> {
               </t-button>
               <t-button theme="primary" @click="locateDuplicateKnowledge">
                 {{ $t('knowledgeBase.locateExistingFile') }}
+              </t-button>
+            </div>
+          </t-dialog>
+          <t-dialog
+            v-model:visible="batchDuplicateDialogVisible"
+            :header="$t('knowledgeBase.fileExists')"
+            :footer="false"
+            width="640px"
+            @close="batchDuplicates = []"
+          >
+            <p class="duplicate-file-message">
+              {{ $t('knowledgeBase.uploadBatchSummary', batchUploadSummary) }}
+            </p>
+            <div class="batch-duplicate-list">
+              <div
+                v-for="item in batchDuplicates"
+                :key="`${item.fileName}-${item.knowledge?.id || ''}`"
+                class="batch-duplicate-item"
+              >
+                <div class="batch-duplicate-info">
+                  <div class="batch-duplicate-name">{{ item.fileName }}</div>
+                  <div v-if="item.knowledge" class="duplicate-file-location">
+                    {{ $t('knowledgeBase.existingFileLocation', { location: duplicateLocation(item.knowledge) }) }}
+                  </div>
+                </div>
+                <t-button
+                  size="small"
+                  theme="primary"
+                  variant="outline"
+                  :disabled="!item.knowledge?.tag_id"
+                  @click="locateDuplicateKnowledge(item.knowledge)"
+                >
+                  {{ $t('knowledgeBase.locateExistingFile') }}
+                </t-button>
+              </div>
+            </div>
+            <div class="duplicate-file-actions">
+              <t-button theme="default" variant="outline" @click="batchDuplicateDialogVisible = false">
+                {{ $t('common.close') }}
               </t-button>
             </div>
           </t-dialog>
@@ -6197,6 +6257,34 @@ async function createNewSession(value: string): Promise<void> {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 24px;
+}
+
+.batch-duplicate-list {
+  max-height: 360px;
+  margin-top: 16px;
+  overflow-y: auto;
+  border-top: 1px solid var(--td-component-border);
+}
+
+.batch-duplicate-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--td-component-border);
+}
+
+.batch-duplicate-info {
+  min-width: 0;
+}
+
+.batch-duplicate-name {
+  overflow: hidden;
+  color: var(--td-text-color-primary);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 </style>

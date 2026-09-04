@@ -370,6 +370,8 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	// 知识库下的知识路由组
 	kb := r.Group("/knowledge-bases/:id/knowledge")
 	{
+		// 上传文件前按内容哈希检查重复，避免重复传输大文件
+		kb.GET("/file/preflight", handler.PreflightKnowledgeFile)
 		// 从文件创建知识
 		kb.POST("/file", handler.CreateKnowledgeFromFile)
 		// 从URL创建知识（支持网页URL和文件URL，传 file_name/file_type 或 URL 含已知扩展名时自动切换为文件下载模式）

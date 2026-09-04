@@ -104,6 +104,7 @@ export default {
     uploadingMultiple: 'Загрузка {total} файлов...',
     uploadAllSuccess: 'Успешно загружено {count} файлов!',
     uploadPartialSuccess: 'Загрузка завершена: успешно {success}, ошибка {fail}',
+    uploadBatchSummary: 'Загрузка завершена: успешно {success}, дубликаты {duplicate}, ошибки {fail}',
     uploadAllFailed: 'Все файлы не удалось загрузить',
     uploadingFolder: 'Загрузка {total} файлов из папки...',
     uploadingValidFiles: 'Загрузка {valid}/{total} действительных файлов...',

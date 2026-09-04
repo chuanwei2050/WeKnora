@@ -147,6 +147,18 @@ describe('document directory category scope', () => {
     expect(list).toContain(':disabled="item.kind === \'directory\' ? !canEdit')
   })
 
+  it('refreshes the current directory only through the upload event', () => {
+    const hook = source('../src/hooks/useKnowledgeBase.ts')
+    const requestMethod = hook.indexOf('const requestMethod =')
+    const successStart = hook.indexOf('if (result.success) {', requestMethod)
+    const uploadSuccess = hook.slice(
+      successStart,
+      hook.indexOf('} else {', successStart),
+    )
+    expect(uploadSuccess).toContain("new CustomEvent('knowledgeFileUploaded'")
+    expect(uploadSuccess).not.toContain('getKnowled(')
+  })
+
   it('carries directory context through search and reference navigation', () => {
     const search = source('../src/views/knowledge/KnowledgeSearch.vue')
     const references = source('../src/views/chat/components/docInfo.vue')

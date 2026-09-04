@@ -1,4 +1,5 @@
 import { get, post, put, del, postUpload, getDown } from "../../utils/request";
+import { calculateFileMD5 } from "../../utils/file-hash";
 
 // 知识库管理 API（列表、创建、获取、更新、删除、复制）
 export function listKnowledgeBases(params?: { agent_id?: string }) {
@@ -121,7 +122,24 @@ export function togglePinKnowledgeBase(id: string) {
 
 // 知识文件 API（基于具体知识库）
 // data.tag_id: 可选，指定知识所属的分类ID
-export function uploadKnowledgeFile(kbId: string, data: { file: File; tag_id?: string; [key: string]: any } = { file: new File([], '') }, onProgress?: (progressEvent: any) => void) {
+export async function uploadKnowledgeFile(kbId: string, data: { file: File; tag_id?: string; [key: string]: any } = { file: new File([], '') }, onProgress?: (progressEvent: any) => void) {
+  const preflight = await calculateFileMD5(data.file)
+    .then(fileHash => get<{
+      success: boolean;
+      data: { exists: boolean; knowledge?: unknown };
+    }>(`/api/v1/knowledge-bases/${kbId}/knowledge/file/preflight?file_hash=${fileHash}`))
+    .catch(() => null);
+
+  if (preflight?.data.exists) {
+    return Promise.reject({
+      status: 409,
+      code: 'duplicate_file',
+      message: 'File already exists',
+      success: false,
+      data: preflight.data.knowledge,
+    });
+  }
+
   const formData = new FormData();
   Object.keys(data).forEach(key => {
     if (data[key] !== undefined) formData.append(key, data[key]);

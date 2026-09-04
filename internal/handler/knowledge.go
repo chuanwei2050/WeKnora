@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -275,6 +276,69 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 		return true
 	}
 	return false
+}
+
+type filePreflightResult struct {
+	Exists    bool             `json:"exists"`
+	Knowledge *types.Knowledge `json:"knowledge,omitempty"`
+}
+
+func normalizeFileMD5(value string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if len(normalized) != 32 {
+		return "", false
+	}
+	if _, err := hex.DecodeString(normalized); err != nil {
+		return "", false
+	}
+	return normalized, true
+}
+
+// PreflightKnowledgeFile checks an exact content hash before the request body is uploaded.
+func (h *KnowledgeHandler) PreflightKnowledgeFile(c *gin.Context) {
+	ctx := c.Request.Context()
+	kb, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+	if permission != types.OrgRoleAdmin && !types.CanContributeKnowledge(ctx, kb) {
+		c.Error(errors.NewForbiddenError("No permission to create knowledge"))
+		return
+	}
+
+	fileHash, ok := normalizeFileMD5(c.Query("file_hash"))
+	if !ok {
+		c.Error(errors.NewBadRequestError("Invalid file hash"))
+		return
+	}
+	exists, knowledge, err := h.kgService.GetRepository().CheckKnowledgeExists(
+		ctx,
+		effectiveTenantID,
+		kbID,
+		&types.KnowledgeCheckParams{Type: "file", FileHash: fileHash},
+	)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if exists && knowledge != nil && !h.canViewGovernedKnowledge(ctx, knowledge, kb) {
+		knowledge = nil
+	}
+	if knowledge != nil && knowledge.DirectoryID != nil {
+		knowledge.DirectoryBreadcrumb, _ = h.directoryService.Breadcrumb(
+			ctx, effectiveTenantID, kbID, knowledge.TagID, *knowledge.DirectoryID,
+		)
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": filePreflightResult{
+			Exists:    exists,
+			Knowledge: knowledge,
+		},
+	})
 }
 
 // enqueueKnowledgeListDelete enqueues an async batch-delete task for the

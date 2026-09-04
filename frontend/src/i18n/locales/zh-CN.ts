@@ -121,6 +121,7 @@ export default {
     uploadingMultiple: "正在上传 {total} 个文件...",
     uploadAllSuccess: "成功上传 {count} 个文件！",
     uploadPartialSuccess: "上传完成：成功 {success} 个，失败 {fail} 个",
+    uploadBatchSummary: "上传完成：成功 {success} 个，重复 {duplicate} 个，失败 {fail} 个",
     uploadAllFailed: "所有文件上传失败",
     uploadingFolder: "正在上传文件夹中的 {total} 个文件...",
     uploadingValidFiles: "正在上传 {valid}/{total} 个有效文件...",

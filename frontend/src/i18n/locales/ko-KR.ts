@@ -121,6 +121,7 @@ export default {
     uploadingMultiple: "{total}개 파일 업로드 중...",
     uploadAllSuccess: "{count}개 파일 업로드 성공!",
     uploadPartialSuccess: "업로드 완료: 성공 {success}개, 실패 {fail}개",
+    uploadBatchSummary: "업로드 완료: 성공 {success}개, 중복 {duplicate}개, 실패 {fail}개",
     uploadAllFailed: "모든 파일 업로드 실패",
     uploadingFolder: "폴더의 {total}개 파일 업로드 중...",
     uploadingValidFiles: "{valid}/{total}개 유효 파일 업로드 중...",

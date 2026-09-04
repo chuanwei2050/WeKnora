@@ -122,6 +122,7 @@ export default {
     uploadingMultiple: 'Uploading {total} files...',
     uploadAllSuccess: 'Successfully uploaded {count} files!',
     uploadPartialSuccess: 'Upload completed: {success} succeeded, {fail} failed',
+    uploadBatchSummary: 'Upload completed: {success} succeeded, {duplicate} duplicated, {fail} failed',
     uploadAllFailed: 'All files failed to upload',
     uploadingFolder: 'Uploading {total} files from folder...',
     uploadingValidFiles: 'Uploading {valid}/{total} valid files...',
