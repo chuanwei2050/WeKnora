@@ -5,10 +5,28 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func TestDataAnalysisLLMCallTimeoutUsesAgentConfig(t *testing.T) {
+	plugin := &PluginDataAnalysis{config: &config.Config{Agent: &config.AgentConfig{LLMCallTimeout: 45}}}
+
+	if got := plugin.llmCallTimeout(); got != 45*time.Second {
+		t.Fatalf("expected configured timeout, got %s", got)
+	}
+}
+
+func TestDataAnalysisLLMCallTimeoutFallsBackToAgentDefault(t *testing.T) {
+	plugin := &PluginDataAnalysis{}
+
+	if got := plugin.llmCallTimeout(); got != defaultLLMCallTimeout {
+		t.Fatalf("expected default timeout %s, got %s", defaultLLMCallTimeout, got)
+	}
+}
 
 func TestBindDataAnalysisInputUsesAuthorizedKnowledgeID(t *testing.T) {
 	got, err := bindDataAnalysisInput(`{"action":"execute","knowledge_id":"other-tenant","sql":"SELECT * FROM data","max_rows":0}`, "authorized")

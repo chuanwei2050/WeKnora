@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -20,8 +21,8 @@ import (
 const (
 	dataAnalysisMaxRows     = 1000
 	dataAnalysisTimeout     = 10 * time.Second
-	dataAnalysisLLMTimeout  = 10 * time.Second
 	dataAnalysisMaxAttempts = 3
+	defaultLLMCallTimeout   = 120 * time.Second
 )
 
 type PluginDataAnalysis struct {
@@ -33,6 +34,7 @@ type PluginDataAnalysis struct {
 	tenantService        interfaces.TenantService
 	governanceRepo       interfaces.KnowledgeGovernanceRepository
 	db                   *sql.DB
+	config               *config.Config
 }
 
 func NewPluginDataAnalysis(
@@ -45,6 +47,7 @@ func NewPluginDataAnalysis(
 	tenantService interfaces.TenantService,
 	governanceRepo interfaces.KnowledgeGovernanceRepository,
 	db *sql.DB,
+	config *config.Config,
 ) *PluginDataAnalysis {
 	p := &PluginDataAnalysis{
 		modelService:         modelService,
@@ -55,6 +58,7 @@ func NewPluginDataAnalysis(
 		tenantService:        tenantService,
 		governanceRepo:       governanceRepo,
 		db:                   db,
+		config:               config,
 	}
 	eventManager.Register(p)
 	return p
@@ -114,7 +118,11 @@ func (p *PluginDataAnalysis) OnEvent(
 		chatManage.SessionID,
 		tools.AgentDataAnalysisAuthorization(chatManage.SearchTargets, p.governanceRepo),
 	)
-	defer tool.Cleanup(ctx)
+	defer func() {
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), dataAnalysisTimeout)
+		defer cancelCleanup()
+		tool.Cleanup(cleanupCtx)
+	}()
 	schema, err := tool.LoadFromKnowledge(ctx, knowledge)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get data schema: %v", err)
@@ -144,12 +152,14 @@ func (p *PluginDataAnalysis) OnEvent(
 	var toolResult *types.ToolResult
 	var lastErr error
 	analysisAttempted := false
+	analysisCtx, cancelAnalysis := context.WithTimeout(ctx, p.llmCallTimeout())
+	defer cancelAnalysis()
 	for attempt := 1; attempt <= dataAnalysisMaxAttempts; attempt++ {
 		attemptPrompt := basePrompt
 		if lastErr != nil {
 			attemptPrompt += fmt.Sprintf("\n\nThe previous SQL attempt failed validation or execution: %s\nRegenerate it using only the authoritative table and columns above.", lastErr)
 		}
-		generationCtx, cancelGeneration := context.WithTimeout(ctx, dataAnalysisLLMTimeout)
+		generationCtx, cancelGeneration := context.WithCancel(analysisCtx)
 		response, err := chatModel.Chat(generationCtx, []chat.Message{{Role: "user", Content: attemptPrompt}}, &chat.ChatOptions{
 			Temperature: 0,
 			Thinking:    &thinking,
@@ -159,7 +169,7 @@ func (p *PluginDataAnalysis) OnEvent(
 		if err != nil {
 			lastErr = err
 			logger.Errorf(ctx, "Failed to generate analysis response (attempt %d/%d): %v", attempt, dataAnalysisMaxAttempts, err)
-			continue
+			break
 		}
 
 		toolInput, err := bindDataAnalysisInput(response.Content, knowledge.ID)
@@ -197,7 +207,7 @@ func (p *PluginDataAnalysis) OnEvent(
 			logger.Errorf(ctx, "Empty analysis SQL (attempt %d/%d)", attempt, dataAnalysisMaxAttempts)
 			continue
 		}
-		executionCtx, cancel := context.WithTimeout(ctx, dataAnalysisTimeout)
+		executionCtx, cancel := context.WithTimeout(analysisCtx, dataAnalysisTimeout)
 		toolResult, err = tool.Execute(executionCtx, toolInput)
 		cancel()
 		if err == nil {
@@ -226,6 +236,13 @@ func (p *PluginDataAnalysis) OnEvent(
 	stageSuccess = true
 	finishStage()
 	return next()
+}
+
+func (p *PluginDataAnalysis) llmCallTimeout() time.Duration {
+	if p.config != nil && p.config.Agent != nil && p.config.Agent.LLMCallTimeout > 0 {
+		return time.Duration(p.config.Agent.LLMCallTimeout) * time.Second
+	}
+	return defaultLLMCallTimeout
 }
 
 const dataAnalysisEvidenceInstruction = "结构化查询结果：这是对原始表格执行 SQL 得到的一条候选证据。请将其与 ES、向量检索及 rerank 后的证据共同判断，不要机械地优先采用任一来源。判断时核对每条证据的查询条件、语义匹配程度和数据覆盖范围；若证据冲突，请指出冲突及采用结论的理由。"
