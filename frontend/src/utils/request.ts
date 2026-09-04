@@ -261,6 +261,7 @@ export async function getDown<T = Blob>(url: string, config?: AxiosRequestConfig
 
 export function postUpload<T = any>(url: string, data = {}, onUploadProgress?: (progressEvent: any) => void): Promise<T> {
   return unwrapResponse(instance.post<T>(url, data, {
+    timeout: 0,
     headers: {
       "Content-Type": "multipart/form-data",
       "X-Request-ID": `${generateRandomString(12)}`,
