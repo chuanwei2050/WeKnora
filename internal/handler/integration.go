@@ -941,7 +941,7 @@ func (h *IntegrationHandler) AnalyzeKnowledgeTable(c *gin.Context) {
 		integrationError(c, http.StatusServiceUnavailable, "table_analysis_model_unavailable", "default chat model is unavailable")
 		return
 	}
-	tool := tools.NewDataAnalysisTool(h.kbs, h.knowledges, h.tenant, h.files, h.duckdb, "integration_"+uuid.NewString())
+	tool := tools.NewDataAnalysisTool(h.kbs, h.knowledges, h.tenant, h.files, h.duckdb, "integration_"+uuid.NewString(), tools.InternalDataAnalysisAuthorization())
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

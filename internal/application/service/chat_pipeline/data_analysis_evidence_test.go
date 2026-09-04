@@ -8,10 +8,10 @@ import (
 )
 
 func TestDataAnalysisEvidenceInstructionBalancesSQLAndRetrieval(t *testing.T) {
-	if strings.Contains(dataAnalysisEvidenceInstruction, "优先依据") {
-		t.Fatal("ordinary fact queries must not force the model to prefer SQL over retrieval evidence")
+	if strings.Contains(dataAnalysisEvidenceInstruction, "必须以 SQL") {
+		t.Fatal("evidence fusion must not force the model to prefer SQL over retrieval evidence")
 	}
-	for _, required := range []string{"交叉核对", "统计", "SQL 结果为准", "不得因 SQL 未命中而忽略其他证据"} {
+	for _, required := range []string{"候选证据", "ES、向量检索", "rerank", "不要机械地优先采用任一来源", "查询条件", "数据覆盖范围", "证据冲突"} {
 		if !strings.Contains(dataAnalysisEvidenceInstruction, required) {
 			t.Fatalf("missing evidence fusion instruction %q", required)
 		}

@@ -37,6 +37,7 @@ const excelSheetNameColumn = "__sheet_name"
 const (
 	dataAnalysisQueryTimeout    = 10 * time.Second
 	maxDeterministicTextColumns = 32
+	maxSQLIdentifierLength      = 63
 )
 
 // sqlSingleQuoteEscape escapes single quotes in a string so it can be safely
@@ -185,14 +186,39 @@ type DataAnalysisInput struct {
 	MaxRows     int    `json:"max_rows,omitempty" jsonschema:"optional maximum rows returned by a read-only SELECT query"`
 }
 
+type dataAnalysisAuthorizationMode uint8
+
+const (
+	dataAnalysisAuthorizationInvalid dataAnalysisAuthorizationMode = iota
+	dataAnalysisAuthorizationAgentScope
+	dataAnalysisAuthorizationInternal
+)
+
+// DataAnalysisAuthorization makes the caller's authorization responsibility
+// explicit. Values can only be created by the constructors below.
+type DataAnalysisAuthorization struct {
+	mode           dataAnalysisAuthorizationMode
+	searchTargets  types.SearchTargets
+	governanceRepo interfaces.KnowledgeGovernanceRepository
+}
+
+func AgentDataAnalysisAuthorization(searchTargets types.SearchTargets, governanceRepo interfaces.KnowledgeGovernanceRepository) DataAnalysisAuthorization {
+	return DataAnalysisAuthorization{mode: dataAnalysisAuthorizationAgentScope, searchTargets: searchTargets, governanceRepo: governanceRepo}
+}
+
+// InternalDataAnalysisAuthorization is for callers that have already
+// authorized the exact knowledge before invoking the tool.
+func InternalDataAnalysisAuthorization() DataAnalysisAuthorization {
+	return DataAnalysisAuthorization{mode: dataAnalysisAuthorizationInternal}
+}
+
 type DataAnalysisTool struct {
 	BaseTool
 	knowledgeBaseService interfaces.KnowledgeBaseService
 	knowledgeService     interfaces.KnowledgeService
 	fileService          interfaces.FileService
 	tenantService        interfaces.TenantService
-	searchTargets        types.SearchTargets
-	governanceRepo       interfaces.KnowledgeGovernanceRepository
+	authorization        DataAnalysisAuthorization
 	db                   *sql.DB
 	sessionID            string
 	createdTables        []string // Track tables created in this session
@@ -206,32 +232,7 @@ func NewDataAnalysisTool(
 	fileService interfaces.FileService,
 	db *sql.DB,
 	sessionID string,
-) *DataAnalysisTool {
-	return newDataAnalysisTool(knowledgeBaseService, knowledgeService, tenantService, fileService, db, sessionID, nil, nil)
-}
-
-func NewDataAnalysisToolWithGovernance(
-	knowledgeBaseService interfaces.KnowledgeBaseService,
-	knowledgeService interfaces.KnowledgeService,
-	tenantService interfaces.TenantService,
-	fileService interfaces.FileService,
-	db *sql.DB,
-	sessionID string,
-	searchTargets types.SearchTargets,
-	governanceRepo interfaces.KnowledgeGovernanceRepository,
-) *DataAnalysisTool {
-	return newDataAnalysisTool(knowledgeBaseService, knowledgeService, tenantService, fileService, db, sessionID, searchTargets, governanceRepo)
-}
-
-func newDataAnalysisTool(
-	knowledgeBaseService interfaces.KnowledgeBaseService,
-	knowledgeService interfaces.KnowledgeService,
-	tenantService interfaces.TenantService,
-	fileService interfaces.FileService,
-	db *sql.DB,
-	sessionID string,
-	searchTargets types.SearchTargets,
-	governanceRepo interfaces.KnowledgeGovernanceRepository,
+	authorization DataAnalysisAuthorization,
 ) *DataAnalysisTool {
 	return &DataAnalysisTool{
 		BaseTool:             dataAnalysisTool,
@@ -239,8 +240,7 @@ func newDataAnalysisTool(
 		knowledgeService:     knowledgeService,
 		fileService:          fileService,
 		tenantService:        tenantService,
-		searchTargets:        searchTargets,
-		governanceRepo:       governanceRepo,
+		authorization:        authorization,
 		db:                   db,
 		sessionID:            sessionID,
 		loadedSchemas:        make(map[string]*TableSchema),
@@ -328,19 +328,12 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 
 	// Validate SQL with comprehensive security checks
 	// IMPORTANT: Must enable validateSelectStmt to block RangeFunction attacks
-	_, validation := utils.ValidateSQL(input.Sql,
-		utils.WithAllowedTables(schema.TableName),
-		utils.WithSelectOnly(),
-		utils.WithNoSubqueries(),
-		utils.WithSingleStatement(),      // Block multiple statements
-		utils.WithNoDangerousFunctions(), // Block dangerous functions
-	)
-	if !validation.Valid {
-		logger.Warnf(ctx, "[Tool][DataAnalysis] SQL validation failed for session %s: %v", t.sessionID, validation.Errors)
+	if err := validateDataAnalysisSQL(input.Sql, schema.TableName); err != nil {
+		logger.Warnf(ctx, "[Tool][DataAnalysis] SQL validation failed for session %s: %v", t.sessionID, err)
 		return &types.ToolResult{
 			Success: false,
-			Error:   fmt.Sprintf("SQL validation failed: %v", validation.Errors),
-		}, fmt.Errorf("SQL validation failed: %v", validation.Errors)
+			Error:   fmt.Sprintf("SQL validation failed: %v", err),
+		}, fmt.Errorf("SQL validation failed: %w", err)
 	}
 
 	executionSQL := input.Sql
@@ -387,6 +380,21 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 			"session_id":   t.sessionID,
 		},
 	}, nil
+}
+
+func validateDataAnalysisSQL(sqlText, tableName string) error {
+	_, validation := utils.ValidateSQL(sqlText,
+		utils.WithAllowedTables(tableName),
+		utils.WithSelectOnly(),
+		utils.WithNoSubqueries(),
+		utils.WithSingleStatement(),      // Block multiple statements
+		utils.WithNoDangerousFunctions(), // Block dangerous functions
+		utils.WithDefaultSafeFunctions(), // Block DuckDB external I/O and unapproved functions
+	)
+	if !validation.Valid {
+		return fmt.Errorf("%v", validation.Errors)
+	}
+	return nil
 }
 
 // executeSingleQuery executes a single SQL query and returns columns and results
@@ -824,8 +832,15 @@ func (t *DataAnalysisTool) LoadFromKnowledgeID(ctx context.Context, knowledgeID 
 		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to get knowledge by ID '%s': %v", knowledgeID, err)
 		return nil, fmt.Errorf("failed to get knowledge by ID: %w", err)
 	}
-	if !agentKnowledgeVisible(ctx, knowledge, t.searchTargets, t.governanceRepo) {
-		return nil, fmt.Errorf("knowledge is not available in the authorized search scope")
+	switch t.authorization.mode {
+	case dataAnalysisAuthorizationAgentScope:
+		if !agentKnowledgeVisible(ctx, knowledge, t.authorization.searchTargets, t.authorization.governanceRepo) {
+			return nil, fmt.Errorf("knowledge is not available in the authorized search scope")
+		}
+	case dataAnalysisAuthorizationInternal:
+		// The caller authorized this exact knowledge before constructing the tool.
+	default:
+		return nil, fmt.Errorf("data analysis authorization context is not configured")
 	}
 	if schema := t.loadedSchemas[knowledgeSchemaCacheKey(knowledge)]; schema != nil {
 		return schema, nil
@@ -919,7 +934,12 @@ func (t *DataAnalysisTool) TableName(knowledge *types.Knowledge) string {
 	}
 	sessionDigest := sha256.Sum256([]byte(t.sessionID))
 	sessionPart := fmt.Sprintf("%x", sessionDigest[:6])
-	return "k_" + knowledgePart + versionPart + "_" + sessionPart
+	suffix := versionPart + "_" + sessionPart
+	maxKnowledgeLength := maxSQLIdentifierLength - len("k_") - len(suffix)
+	if len(knowledgePart) > maxKnowledgeLength {
+		knowledgePart = knowledgePart[:maxKnowledgeLength]
+	}
+	return "k_" + knowledgePart + suffix
 }
 
 func knowledgeSchemaCacheKey(knowledge *types.Knowledge) string {

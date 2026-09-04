@@ -28,6 +28,40 @@ func TestTableNameIsIsolatedByKnowledgeVersion(t *testing.T) {
 	}
 }
 
+func TestDataAnalysisAuthorizationDistinguishesAgentAndInternalCallers(t *testing.T) {
+	agent := AgentDataAnalysisAuthorization(types.SearchTargets{}, nil)
+	internal := InternalDataAnalysisAuthorization()
+	if agent.mode != dataAnalysisAuthorizationAgentScope {
+		t.Fatalf("unexpected agent authorization mode: %v", agent.mode)
+	}
+	if internal.mode != dataAnalysisAuthorizationInternal {
+		t.Fatalf("unexpected internal authorization mode: %v", internal.mode)
+	}
+}
+
+func TestValidateDataAnalysisSQLAllowsSafeAggregate(t *testing.T) {
+	if err := validateDataAnalysisSQL(`SELECT COUNT(*) FROM "people" WHERE 学历 = '硕士'`, "people"); err != nil {
+		t.Fatalf("expected safe aggregate to pass validation: %v", err)
+	}
+}
+
+func TestValidateDataAnalysisSQLBlocksDuckDBExternalIO(t *testing.T) {
+	if err := validateDataAnalysisSQL(`SELECT read_text('/etc/passwd') FROM "people"`, "people"); err == nil {
+		t.Fatal("expected DuckDB external I/O function to be rejected")
+	}
+}
+
+func TestTableNameFitsSQLParserIdentifierLimit(t *testing.T) {
+	tool := &DataAnalysisTool{sessionID: "40bc6638-0128-4952-a36f-a670e94a7902"}
+	knowledge := &types.Knowledge{
+		ID:               "b1e8124d-fd1a-4093-9907-da77757d1934",
+		CurrentVersionID: "e44a6104-2afa-4c22-8888-123456789abc",
+	}
+	if got := tool.TableName(knowledge); len(got) > maxSQLIdentifierLength {
+		t.Fatalf("table name exceeds SQL parser limit: %d characters (%s)", len(got), got)
+	}
+}
+
 func TestReconcileSQLTableUsesAuthorizedSessionTable(t *testing.T) {
 	schema := &TableSchema{TableName: "k_authorized_123"}
 	got := reconcileSQLTableWithSchema(`SELECT * FROM "k_hallucinated-123" JOIN other_table ON 1=1`, schema)
