@@ -76,6 +76,18 @@ func TestFilterGovernedSearchResultsKeepsOnlyCurrentRetrievableVersion(t *testin
 	}
 }
 
+func TestFilterGovernedSearchResultsWithoutExplicitTargetsKeepsAuthorizedKnowledge(t *testing.T) {
+	plugin := &PluginSearch{knowledgeService: governanceKnowledgeFixture{items: []*types.Knowledge{
+		{ID: "knowledge", KnowledgeBaseID: "kb"},
+	}}}
+	results := []*types.SearchResult{{ID: "chunk", KnowledgeID: "knowledge", KnowledgeBaseID: "kb"}}
+
+	filtered := plugin.filterGovernedSearchResults(context.Background(), 7, nil, results)
+	if len(filtered) != 1 || filtered[0].ID != "chunk" {
+		t.Fatalf("authorized result was removed without explicit targets: %+v", filtered)
+	}
+}
+
 func TestFilterGovernedSearchResultsUsesSharedKnowledgeTenantForVersion(t *testing.T) {
 	version := &types.KnowledgeVersion{ID: "shared-version", Status: types.KnowledgeVersionActive}
 	tenantIDs := make([]uint64, 0, 1)

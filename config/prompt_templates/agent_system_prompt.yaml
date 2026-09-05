@@ -204,7 +204,8 @@ templates:
       - Use double quotes for identifiers: SELECT "Column Name" FROM "table_name"
       - Aggregate functions: COUNT(*), SUM(), AVG(), MIN(), MAX(), MEDIAN(), STDDEV()
       - String matching: LIKE, ILIKE (case-insensitive), REGEXP
-      - Use LIMIT to prevent overwhelming output (default to 100 rows max)
+      - Preserve the requested operation: detail retrieval, filtering, ordering, grouping, calculations and aggregation are all supported.
+      - Use configured result limits for detail display and make truncation explicit. Use pagination for more details; do not insert a fixed row limit that changes the requested scope. Aggregates must run over all matching authorized rows.
 
       ### Tool Guidelines
       - **data_schema:** ALWAYS use first. Required before any query.

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
+	"github.com/google/uuid"
+	"github.com/xuri/excelize/v2"
 	"io"
 	"net/url"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -26,7 +29,7 @@ var dataAnalysisTool = BaseTool{
 	name: ToolDataAnalysis,
 	description: "Use this tool when the knowledge is CSV or Excel files. It loads the data into memory and executes SQL for data analysis. " +
 		"For Excel files with multiple sheets, every sheet is loaded into the same table and the source sheet name is exposed as a '__sheet_name' column so you can filter/aggregate per sheet. " +
-		"If the user's question requires data statistics, convert the question into SQL and execute it.",
+		"Use SQL for detail retrieval, filtering, sorting, grouping, calculations and aggregation. Preserve the user's requested operation; do not replace a detail query with statistics.",
 	schema: utils.GenerateSchema[DataAnalysisInput](),
 }
 
@@ -35,8 +38,16 @@ var dataAnalysisTool = BaseTool{
 const excelSheetNameColumn = "__sheet_name"
 
 const (
-	dataAnalysisQueryTimeout = 10 * time.Second
-	maxSQLIdentifierLength   = 63
+	dataSourceFileColumn      = "__source_file"
+	dataSourceKnowledgeColumn = "__source_knowledge_id"
+)
+
+const (
+	dataAnalysisQueryTimeout            = 10 * time.Second
+	maxSQLIdentifierLength              = 63
+	dataAnalysisMaxCacheFileBytes int64 = 64 << 20
+	dataAnalysisDefaultRows             = 1000
+	dataAnalysisMaxResultBytes          = 256 << 10
 )
 
 // sqlSingleQuoteEscape escapes single quotes in a string so it can be safely
@@ -50,52 +61,6 @@ func normalizeIdentifierForMatch(s string) string {
 	normalized = strings.ReplaceAll(normalized, " ", "")
 	normalized = strings.ReplaceAll(normalized, "\u3000", "")
 	return normalized
-}
-
-func reconcileSQLColumnsWithSchema(sqlText string, schema *TableSchema) (string, []string) {
-	if schema == nil || len(schema.Columns) == 0 {
-		return sqlText, nil
-	}
-
-	normalizedToCanonical := make(map[string]string, len(schema.Columns))
-	for _, col := range schema.Columns {
-		key := normalizeIdentifierForMatch(col.Name)
-		if key == "" {
-			continue
-		}
-		if _, exists := normalizedToCanonical[key]; !exists {
-			normalizedToCanonical[key] = col.Name
-		}
-	}
-
-	quotedIdentifierPattern := regexp.MustCompile(`"([^"]+)"`)
-	fixes := make([]string, 0)
-	rewritten := quotedIdentifierPattern.ReplaceAllStringFunc(sqlText, func(token string) string {
-		name := strings.Trim(token, "\"")
-		canonical, ok := normalizedToCanonical[normalizeIdentifierForMatch(name)]
-		if !ok || canonical == name {
-			return token
-		}
-		fixes = append(fixes, fmt.Sprintf("%q -> %q", name, canonical))
-		return fmt.Sprintf(`"%s"`, canonical)
-	})
-
-	return rewritten, fixes
-}
-
-var sqlTableReferencePattern = regexp.MustCompile(`(?i)\b(FROM|JOIN)\s+(?:"[^"]+"|[a-zA-Z_][a-zA-Z0-9_-]*)`)
-
-func reconcileSQLTableWithSchema(sqlText string, schema *TableSchema) string {
-	if schema == nil || strings.TrimSpace(schema.TableName) == "" {
-		return sqlText
-	}
-	return sqlTableReferencePattern.ReplaceAllStringFunc(sqlText, func(reference string) string {
-		parts := strings.Fields(reference)
-		if len(parts) != 2 {
-			return reference
-		}
-		return parts[0] + ` "` + schema.TableName + `"`
-	})
 }
 
 func quoteDuckDBIdentifier(value string) string {
@@ -136,10 +101,11 @@ type DataAnalysisAction string
 const (
 	DataAnalysisActionExecute DataAnalysisAction = "execute"
 	DataAnalysisActionSkip    DataAnalysisAction = "skip"
+	DataAnalysisActionClarify DataAnalysisAction = "clarify"
 )
 
 type DataAnalysisInput struct {
-	Action      DataAnalysisAction `json:"action" jsonschema:"Required action: execute to run SQL, or skip when table analysis is unnecessary"`
+	Action      DataAnalysisAction `json:"action" jsonschema:"Required action: execute to run SQL, skip when table analysis is unnecessary, or clarify when the requested scope or value interpretation is ambiguous"`
 	KnowledgeID string             `json:"knowledge_id" jsonschema:"id of the knowledge to query"`
 	Sql         string             `json:"sql" jsonschema:"SQL to be executed on knowledge"`
 	MaxRows     int                `json:"max_rows,omitempty" jsonschema:"optional maximum rows returned by a read-only SELECT query"`
@@ -162,6 +128,9 @@ type DataAnalysisAuthorization struct {
 }
 
 func AgentDataAnalysisAuthorization(searchTargets types.SearchTargets, governanceRepo interfaces.KnowledgeGovernanceRepository) DataAnalysisAuthorization {
+	if len(searchTargets) == 0 {
+		return DataAnalysisAuthorization{}
+	}
 	return DataAnalysisAuthorization{mode: dataAnalysisAuthorizationAgentScope, searchTargets: searchTargets, governanceRepo: governanceRepo}
 }
 
@@ -180,6 +149,9 @@ type DataAnalysisTool struct {
 	authorization        DataAnalysisAuthorization
 	db                   *sql.DB
 	sessionID            string
+	instanceID           string
+	identityOnce         sync.Once
+	operationMu          sync.Mutex
 	createdTables        []string // Track tables created in this session
 	loadedSchemas        map[string]*TableSchema
 }
@@ -220,6 +192,8 @@ func (t *DataAnalysisTool) recordCreatedTable(tableName string) bool {
 
 // Cleanup cleans up the session-specific schema
 func (t *DataAnalysisTool) Cleanup(ctx context.Context) {
+	t.operationMu.Lock()
+	defer t.operationMu.Unlock()
 	if len(t.createdTables) == 0 {
 		logger.Infof(ctx, "[Tool][DataAnalysis] No tables to clean up for session: %s", t.sessionID)
 		return
@@ -239,10 +213,13 @@ func (t *DataAnalysisTool) Cleanup(ctx context.Context) {
 
 	// Clear the list after cleanup
 	t.createdTables = nil
+	t.loadedSchemas = make(map[string]*TableSchema)
 }
 
 // Execute executes the SQL query on DuckDB (only read-only queries are allowed)
 func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	t.operationMu.Lock()
+	defer t.operationMu.Unlock()
 	logger.Infof(ctx, "[Tool][DataAnalysis] Execute started for session: %s", t.sessionID)
 	var input DataAnalysisInput
 	if err := json.Unmarshal(args, &input); err != nil {
@@ -253,7 +230,7 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}, err
 	}
 
-	schema, err := t.LoadFromKnowledgeID(ctx, input.KnowledgeID)
+	schema, err := t.loadFromKnowledgeID(ctx, input.KnowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to load knowledge ID '%s': %v", input.KnowledgeID, err)
 		return &types.ToolResult{
@@ -262,16 +239,13 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}, err
 	}
 
-	// Legacy prompts may use the knowledge ID as a table placeholder. Do not
-	// rewrite it when the SQL already contains the session-isolated table name,
-	// because that name itself contains the knowledge ID.
-	if !strings.Contains(input.Sql, schema.TableName) {
-		input.Sql = strings.ReplaceAll(input.Sql, input.KnowledgeID, schema.TableName)
+	boundSQL, fixes, err := bindAnalysisSQL(input.Sql, schema, input.KnowledgeID)
+	if err != nil {
+		return &types.ToolResult{Success: false, Error: err.Error()}, err
 	}
-	input.Sql = reconcileSQLTableWithSchema(input.Sql, schema)
-	if rewrittenSQL, fixes := reconcileSQLColumnsWithSchema(input.Sql, schema); len(fixes) > 0 {
-		logger.Infof(ctx, "[Tool][DataAnalysis] Auto-rewrote SQL identifiers for session %s: %v", t.sessionID, fixes)
-		input.Sql = rewrittenSQL
+	input.Sql = boundSQL
+	if len(fixes) > 0 {
+		logger.Infof(ctx, "[Tool][DataAnalysis] Bound SQL columns: %v", fixes)
 	}
 
 	// Integration and agent callers may only execute SELECT statements.
@@ -299,14 +273,17 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 	if input.MaxRows < 0 || input.MaxRows > 10000 {
 		return &types.ToolResult{Success: false, Error: "max_rows must be between 1 and 10000"}, fmt.Errorf("invalid max_rows")
 	}
+	if input.MaxRows == 0 {
+		input.MaxRows = dataAnalysisDefaultRows
+	}
 	if input.MaxRows > 0 {
-		executionSQL = fmt.Sprintf("SELECT * FROM (%s) AS limited_result LIMIT %d", strings.TrimSpace(strings.TrimSuffix(input.Sql, ";")), input.MaxRows)
+		executionSQL = fmt.Sprintf("SELECT * FROM (%s) AS limited_result LIMIT %d", strings.TrimSpace(strings.TrimSuffix(input.Sql, ";")), input.MaxRows+1)
 	}
 	logger.Infof(ctx, "[Tool][DataAnalysis] Received SQL query for session %s: %s", t.sessionID, executionSQL)
 	// Execute single query and get results
 	queryCtx, cancel := context.WithTimeout(ctx, dataAnalysisQueryTimeout)
 	defer cancel()
-	results, err := t.executeSingleQuery(queryCtx, executionSQL)
+	results, truncated, err := t.executeBoundedQuery(queryCtx, executionSQL, input.MaxRows)
 	if err != nil {
 		if suggestion := buildMissingColumnSuggestion(err, schema); suggestion != "" {
 			return &types.ToolResult{
@@ -320,7 +297,13 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}, err
 	}
 
-	queryOutput := t.formatQueryResults(results, executionSQL)
+	queryOutput := t.formatQueryResults(results, input.Sql)
+	if truncated {
+		if len(results) == 0 {
+			queryOutput = strings.ReplaceAll(queryOutput, "No matching records found.", "匹配记录超出展示字节限制，不能视为零条匹配。")
+		}
+		queryOutput += "\n结果已截断：当前展示不是完整结果。请分页获取明细；仅在需要统计时使用聚合查询。\n"
+	}
 	logger.Infof(ctx, "[Tool][DataAnalysis] Completed execution query, total %d rows for session %s", len(results), t.sessionID)
 	return &types.ToolResult{
 		Success: true,
@@ -328,7 +311,9 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		Data: map[string]interface{}{
 			"rows":         results,
 			"row_count":    len(results),
-			"query":        executionSQL,
+			"query":        input.Sql,
+			"truncated":    truncated,
+			"max_rows":     input.MaxRows,
 			"display_type": ToolDataAnalysis,
 			"session_id":   t.sessionID,
 		},
@@ -340,9 +325,11 @@ func validateDataAnalysisSQL(sqlText, tableName string) error {
 		utils.WithAllowedTables(tableName),
 		utils.WithSelectOnly(),
 		utils.WithNoSubqueries(),
+		utils.WithNoCTEs(),
 		utils.WithSingleStatement(),      // Block multiple statements
 		utils.WithNoDangerousFunctions(), // Block dangerous functions
 		utils.WithDefaultSafeFunctions(), // Block DuckDB external I/O and unapproved functions
+		utils.WithAdditionalSafeFunctions("regexp_matches", "median", "stddev", "stddev_pop", "stddev_samp"), // DuckDB scalar/aggregate functions without external I/O
 	)
 	if !validation.Valid {
 		return fmt.Errorf("%v", validation.Errors)
@@ -361,53 +348,33 @@ func validateDataAnalysisSQL(sqlText, tableName string) error {
 //   - []map[string]string: query results
 //   - error: any error that occurred during execution
 func (t *DataAnalysisTool) executeSingleQuery(ctx context.Context, sqlQuery string, args ...interface{}) ([]map[string]string, error) {
-	rows, err := t.db.QueryContext(ctx, sqlQuery, args...)
+	result, _, err := t.executeBoundedQuery(ctx, sqlQuery, dataAnalysisDefaultRows, args...)
+	return result, err
+}
+
+func (t *DataAnalysisTool) executeBoundedQuery(ctx context.Context, query string, limit int, args ...interface{}) ([]map[string]string, bool, error) {
+	rows, err := t.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		logger.Errorf(ctx, "[Tool][DataAnalysis] Query execution failed: %v", err)
-		return nil, fmt.Errorf("query execution failed: %w", err)
+		return nil, false, err
 	}
 	defer rows.Close()
-
-	// Get column names
-	columns, err := rows.Columns()
+	_, raw, truncated, err := scanSQLRows(rows, limit, dataAnalysisMaxResultBytes)
 	if err != nil {
-		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to get columns: %v", err)
-		return nil, fmt.Errorf("failed to get columns: %w", err)
+		return nil, false, err
 	}
-
-	// Process results
-	results := make([]map[string]string, 0)
-	for rows.Next() {
-		columnValues := make([]interface{}, len(columns))
-		columnPointers := make([]interface{}, len(columns))
-		for i := range columnValues {
-			columnPointers[i] = &columnValues[i]
-		}
-
-		if err := rows.Scan(columnPointers...); err != nil {
-			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to scan row: %v", err)
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		rowMap := make(map[string]string)
-		for i, colName := range columns {
-			val := columnValues[i]
-			// Convert []byte to string for better readability
-			if b, ok := val.([]byte); ok {
-				rowMap[colName] = string(b)
+	results := make([]map[string]string, 0, len(raw))
+	for _, row := range raw {
+		converted := make(map[string]string, len(row))
+		for name, value := range row {
+			if value == nil {
+				converted[name] = "NULL"
 			} else {
-				rowMap[colName] = fmt.Sprintf("%v", val)
+				converted[name] = fmt.Sprint(value)
 			}
 		}
-		results = append(results, rowMap)
+		results = append(results, converted)
 	}
-
-	if err := rows.Err(); err != nil {
-		logger.Errorf(ctx, "[Tool][DataAnalysis] Error iterating rows: %v", err)
-		return nil, fmt.Errorf("error iterating rows: %w", err)
-	}
-
-	return results, nil
+	return results, truncated, nil
 }
 
 // formatQueryResults formats query results into JSONL format (one JSON object per line)
@@ -425,7 +392,7 @@ func (t *DataAnalysisTool) formatQueryResults(results []map[string]string, query
 
 	output.WriteString("=== Data Details ===\n\n")
 	if len(results) > 10 {
-		output.WriteString(fmt.Sprintf("Showing all %d records. Consider using a LIMIT clause to restrict the result count for better performance.\n\n", len(results)))
+		output.WriteString(fmt.Sprintf("Showing %d returned records. Check the truncation flag before treating these as complete.\n\n", len(results)))
 	}
 
 	// Write each record as a separate JSON line
@@ -450,9 +417,12 @@ type TableSchema struct {
 
 // ColumnInfo represents information about a single column
 type ColumnInfo struct {
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	Nullable string `json:"nullable"`
+	Name          string   `json:"name"`
+	Type          string   `json:"type"`
+	Nullable      string   `json:"nullable"`
+	AnalysisType  string   `json:"analysis_type,omitempty"`
+	ValueExamples []string `json:"value_examples,omitempty"`
+	Multiline     bool     `json:"multiline,omitempty"`
 }
 
 // LoadFromCSV loads data from a CSV file into a DuckDB table and returns the table schema
@@ -468,7 +438,7 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 	logger.Infof(ctx, "[Tool][DataAnalysis] Loading CSV file '%s' into table '%s' for session %s", filename, tableName, t.sessionID)
 
 	// Record the created table for cleanup. If already exists, skip creation
-	if t.recordCreatedTable(tableName) {
+	if !t.hasCreatedTable(tableName) {
 		// Create table from CSV using DuckDB's read_csv_auto function
 		// with explicit header detection and VARCHAR coercion to align with
 		// Excel loading behavior.
@@ -484,11 +454,12 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 			return nil, fmt.Errorf("failed to create table from CSV: %w", err)
 		}
 
+		t.recordCreatedTable(tableName)
 		logger.Infof(ctx, "[Tool][DataAnalysis] Successfully created table '%s' from CSV file in session %s", tableName, t.sessionID)
 	}
 
 	// Get and return the table schema
-	return t.LoadFromTable(ctx, tableName)
+	return t.profileAnalysisTable(ctx, tableName)
 }
 
 // LoadFromExcel loads data from an Excel file into a DuckDB table and returns the table schema.
@@ -496,8 +467,8 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 // Multi-sheet workbooks are fully supported: every sheet in the workbook is
 // loaded and the rows from all sheets are unioned (UNION ALL BY NAME) into a
 // single table. A synthetic '__sheet_name' column is added so downstream SQL
-// can filter / aggregate per sheet. If sheet enumeration fails for any
-// reason, we fall back to reading just the first sheet (original behavior).
+// can filter / aggregate per sheet. Enumeration errors abort analysis so a
+// partial workbook can never be presented as a complete result.
 //
 // Parameters:
 //   - ctx: context for cancellation and timeout
@@ -508,28 +479,30 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 //   - *TableSchema: schema information of the created table
 //   - error: any error that occurred during the operation
 //
-// Note: requires the DuckDB 'excel' extension (for read_xlsx) and the
-// 'spatial' extension (for st_read_meta used to enumerate sheets).
+// Note: requires the DuckDB 'excel' extension for read_xlsx.
 func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, tableName string) (*TableSchema, error) {
 	logger.Infof(ctx, "[Tool][DataAnalysis] Loading Excel file '%s' into table '%s' for session %s", filename, tableName, t.sessionID)
 
 	// Record the created table for cleanup. If already exists, skip creation.
-	if t.recordCreatedTable(tableName) {
+	if !t.hasCreatedTable(tableName) {
 		sheetNames, enumErr := t.listExcelSheets(ctx, filename)
-		if enumErr != nil {
-			logger.Warnf(ctx,
-				"[Tool][DataAnalysis] Could not enumerate sheets for '%s' (session=%s): %v. Falling back to first sheet only.",
-				filename, t.sessionID, enumErr,
-			)
+		if enumErr != nil || len(sheetNames) == 0 {
+			return nil, fmt.Errorf("cannot enumerate every Excel sheet: %v", enumErr)
 		}
 
-		createTableSQL := buildExcelCreateTableSQL(tableName, filename, sheetNames)
+		analysisPath, cleanup, err := prepareAnalysisExcel(ctx, filename)
+		if err != nil {
+			return nil, fmt.Errorf("prepare merged Excel cells: %w", err)
+		}
+		defer cleanup()
+		createTableSQL := buildExcelCreateTableSQL(tableName, analysisPath, sheetNames)
 
 		if _, err := t.db.ExecContext(ctx, createTableSQL); err != nil {
 			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from Excel (sheets=%v): %v", sheetNames, err)
 			return nil, fmt.Errorf("failed to create table from Excel file (sheets=%v): %w", sheetNames, err)
 		}
 
+		t.recordCreatedTable(tableName)
 		logger.Infof(ctx,
 			"[Tool][DataAnalysis] Successfully created table '%s' from Excel file in session %s (sheets=%v)",
 			tableName, t.sessionID, sheetNames,
@@ -537,43 +510,20 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 	}
 
 	// Get and return the table schema
-	return t.LoadFromTable(ctx, tableName)
+	return t.profileAnalysisTable(ctx, tableName)
 }
 
-// listExcelSheets returns the names of every sheet (layer) inside the given
-// Excel workbook by querying DuckDB's spatial st_read_meta table function.
-// The returned slice preserves the on-disk order of sheets.
-//
-// st_read_meta returns a single row whose `layers` column is a LIST of
-// STRUCTs (one per layer / sheet). We UNNEST that list and project the
-// struct's `name` field to get a flat list of sheet names.
+// listExcelSheets reads workbook metadata in on-disk sheet order.
 func (t *DataAnalysisTool) listExcelSheets(ctx context.Context, filename string) ([]string, error) {
-	metaSQL := fmt.Sprintf(
-		"SELECT UNNEST(layers).name FROM st_read_meta('%s')",
-		sqlSingleQuoteEscape(filename),
-	)
-
-	rows, err := t.db.QueryContext(ctx, metaSQL)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	workbook, err := excelize.OpenFile(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query sheet metadata: %w", err)
+		return nil, fmt.Errorf("read Excel sheet metadata: %w", err)
 	}
-	defer rows.Close()
-
-	var names []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("failed to scan sheet name: %w", err)
-		}
-		if strings.TrimSpace(name) == "" {
-			continue
-		}
-		names = append(names, name)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating sheet metadata rows: %w", err)
-	}
-	return names, nil
+	defer workbook.Close()
+	return workbook.GetSheetList(), nil
 }
 
 // buildExcelCreateTableSQL assembles the CREATE TABLE statement used by
@@ -633,7 +583,7 @@ func buildExcelCreateTableSQL(tableName, filename string, sheetNames []string) s
 // Returns:
 //   - *TableSchema: schema information of the created table
 //   - error: any error that occurred during the operation
-func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *types.Knowledge) (*TableSchema, error) {
+func (t *DataAnalysisTool) loadKnowledgeFile(ctx context.Context, knowledge *types.Knowledge) (*TableSchema, error) {
 	if knowledge == nil {
 		return nil, fmt.Errorf("knowledge cannot be nil")
 	}
@@ -744,7 +694,16 @@ func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowled
 		}
 	}
 
-	if _, err := io.Copy(tmp, reader); err != nil {
+	stopClose := context.AfterFunc(ctx, func() { _ = reader.Close() })
+	defer stopClose()
+	copied, copyErr := io.Copy(tmp, io.LimitReader(reader, utils.GetMaxFileSize()+1))
+	if copyErr == nil {
+		copyErr = ctx.Err()
+	}
+	if copyErr == nil && copied > utils.GetMaxFileSize() {
+		copyErr = fmt.Errorf("file exceeds %d byte analysis limit", utils.GetMaxFileSize())
+	}
+	if err := copyErr; err != nil {
 		_ = tmp.Close()
 		cleanup()
 		return "", noop, fmt.Errorf("failed to copy knowledge '%s' to temp file: %w", knowledge.ID, err)
@@ -770,6 +729,111 @@ func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowled
 //   - *TableSchema: schema information of the created table
 //   - error: any error that occurred during the operation
 func (t *DataAnalysisTool) LoadFromKnowledgeID(ctx context.Context, knowledgeID string) (*TableSchema, error) {
+	t.operationMu.Lock()
+	defer t.operationMu.Unlock()
+	return t.loadFromKnowledgeID(ctx, knowledgeID)
+}
+
+// LoadFromKnowledgeSet creates one query table from all authorized, retrieved
+// structured sources. UNION ALL BY NAME preserves heterogeneous schemas while
+// provenance columns keep every row auditable. The first knowledge ID remains
+// the execution handle, so the existing authorization boundary stays intact.
+func (t *DataAnalysisTool) LoadFromKnowledgeSet(ctx context.Context, knowledges []*types.Knowledge) (*TableSchema, error) {
+	t.operationMu.Lock()
+	defer t.operationMu.Unlock()
+	if len(knowledges) == 0 {
+		return nil, fmt.Errorf("at least one knowledge source is required")
+	}
+	for _, knowledge := range knowledges {
+		if knowledge == nil {
+			return nil, fmt.Errorf("knowledge source cannot be nil")
+		}
+		switch t.authorization.mode {
+		case dataAnalysisAuthorizationAgentScope:
+			if !agentKnowledgeVisible(ctx, knowledge, t.authorization.searchTargets, t.authorization.governanceRepo) {
+				return nil, fmt.Errorf("knowledge is not available in the authorized search scope")
+			}
+		case dataAnalysisAuthorizationInternal:
+			// The caller authorized this exact knowledge set before constructing the tool.
+		default:
+			return nil, fmt.Errorf("data analysis authorization context is not configured")
+		}
+	}
+	loaded := make([]struct {
+		knowledge *types.Knowledge
+		schema    *TableSchema
+	}, 0, len(knowledges))
+	for _, knowledge := range knowledges {
+		schema, err := t.loadFromKnowledge(ctx, knowledge)
+		if err != nil {
+			return nil, err
+		}
+		loaded = append(loaded, struct {
+			knowledge *types.Knowledge
+			schema    *TableSchema
+		}{knowledge: knowledge, schema: schema})
+	}
+	if len(loaded) == 1 {
+		return loaded[0].schema, nil
+	}
+	primaryName := loaded[0].schema.TableName
+	combinedName := primaryName + "_combined"
+	sourceFileColumn := availableMetadataColumn(loaded, dataSourceFileColumn)
+	sourceKnowledgeColumn := availableMetadataColumn(loaded, dataSourceKnowledgeColumn)
+	parts := make([]string, 0, len(loaded))
+	for _, source := range loaded {
+		parts = append(parts, fmt.Sprintf(
+			"SELECT *, '%s' AS %s, '%s' AS %s FROM %s",
+			sqlSingleQuoteEscape(source.knowledge.FileName), quoteDuckDBIdentifier(sourceFileColumn),
+			sqlSingleQuoteEscape(source.knowledge.ID), quoteDuckDBIdentifier(sourceKnowledgeColumn),
+			quoteDuckDBIdentifier(source.schema.TableName),
+		))
+	}
+	tx, err := t.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("start combining analysis sources: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, "CREATE TABLE "+quoteDuckDBIdentifier(combinedName)+" AS "+strings.Join(parts, " UNION ALL BY NAME ")); err != nil {
+		return nil, fmt.Errorf("combine analysis sources: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "DROP TABLE "+quoteDuckDBIdentifier(primaryName)); err != nil {
+		return nil, fmt.Errorf("replace primary analysis table: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "ALTER TABLE "+quoteDuckDBIdentifier(combinedName)+" RENAME TO "+quoteDuckDBIdentifier(primaryName)); err != nil {
+		return nil, fmt.Errorf("activate combined analysis table: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit combined analysis table: %w", err)
+	}
+	schema, err := t.profileAnalysisTable(ctx, primaryName)
+	if err == nil {
+		schema.Metadata["source_count"] = len(loaded)
+		schema.Metadata["source_file_column"] = sourceFileColumn
+		schema.Metadata["source_knowledge_column"] = sourceKnowledgeColumn
+		t.loadedSchemas[knowledgeSchemaCacheKey(knowledges[0])] = schema
+	}
+	return schema, err
+}
+
+func availableMetadataColumn(loaded []struct {
+	knowledge *types.Knowledge
+	schema    *TableSchema
+}, preferred string) string {
+	used := make(map[string]bool)
+	for _, source := range loaded {
+		for _, column := range source.schema.Columns {
+			used[strings.ToLower(column.Name)] = true
+		}
+	}
+	name := preferred
+	for suffix := 2; used[strings.ToLower(name)]; suffix++ {
+		name = fmt.Sprintf("%s_%d", preferred, suffix)
+	}
+	return name
+}
+
+func (t *DataAnalysisTool) loadFromKnowledgeID(ctx context.Context, knowledgeID string) (*TableSchema, error) {
 	// Unit-only callers may provide a preloaded schema without a knowledge
 	// service. Production constructors always provide the service, so cached
 	// production schemas still pass the visibility check below.
@@ -799,7 +863,7 @@ func (t *DataAnalysisTool) LoadFromKnowledgeID(ctx context.Context, knowledgeID 
 		return schema, nil
 	}
 
-	return t.LoadFromKnowledge(ctx, knowledge)
+	return t.loadFromKnowledge(ctx, knowledge)
 }
 
 // LoadFromTable retrieves the schema information of an existing table
@@ -881,11 +945,12 @@ func (t *DataAnalysisTool) LoadFromTable(ctx context.Context, tableName string) 
 func (t *DataAnalysisTool) TableName(knowledge *types.Knowledge) string {
 	knowledgePart := sanitizeDuckDBIdentifierPart(knowledge.ID)
 	versionPart := ""
-	if versionID := strings.TrimSpace(knowledge.CurrentVersionID); versionID != "" {
-		versionDigest := sha256.Sum256([]byte(versionID))
+	if knowledge.CurrentVersionID != "" || !knowledge.UpdatedAt.IsZero() {
+		versionDigest := sha256.Sum256([]byte(knowledgeSchemaCacheKey(knowledge)))
 		versionPart = "_" + fmt.Sprintf("%x", versionDigest[:6])
 	}
-	sessionDigest := sha256.Sum256([]byte(t.sessionID))
+	t.identityOnce.Do(func() { t.instanceID = uuid.NewString() })
+	sessionDigest := sha256.Sum256([]byte(t.sessionID + "|" + t.instanceID))
 	sessionPart := fmt.Sprintf("%x", sessionDigest[:6])
 	suffix := versionPart + "_" + sessionPart
 	maxKnowledgeLength := maxSQLIdentifierLength - len("k_") - len(suffix)
@@ -899,7 +964,8 @@ func knowledgeSchemaCacheKey(knowledge *types.Knowledge) string {
 	if knowledge == nil {
 		return ""
 	}
-	return knowledge.ID + "|" + strings.TrimSpace(knowledge.CurrentVersionID)
+	encoded, _ := json.Marshal([]interface{}{knowledge.TenantID, knowledge.ID, knowledge.CurrentVersionID, knowledge.UpdatedAt, knowledge.FilePath, knowledge.FileSize})
+	return fmt.Sprintf("%x", sha256.Sum256(encoded))
 }
 
 var nonDuckDBIdentifierPart = regexp.MustCompile(`[^a-zA-Z0-9_]+`)
@@ -922,7 +988,14 @@ func (t *TableSchema) Description() string {
 	builder.WriteString("Column info:\n")
 
 	for _, col := range t.Columns {
-		builder.WriteString(fmt.Sprintf("- %s (%s)\n", col.Name, col.Type))
+		builder.WriteString(fmt.Sprintf("- %s (%s) %s\n", col.Name, col.Type, col.AnalysisType))
+		if col.Multiline {
+			builder.WriteString("  Contains multiline cells: a row may contain multiple independent values. Whole-cell negative matching can discard an entity that also has a valid matching value. Clarify row versus value exclusions; do not assume they are equivalent.\n")
+		}
+		if len(col.ValueExamples) > 0 {
+			values, _ := json.Marshal(col.ValueExamples)
+			builder.WriteString("  Observed value fragments (not exhaustive; never use sample frequency as a total): " + string(values) + "\n")
+		}
 	}
 
 	return builder.String()
@@ -999,4 +1072,13 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 	logger.Infof(ctx, "[Tool][DataAnalysis][storage] resolved file service: session_id=%s knowledge_id=%s kb_id=%s provider=%s",
 		t.sessionID, knowledge.ID, kbID, resolvedProvider)
 	return resolvedSvc
+}
+
+func (t *DataAnalysisTool) hasCreatedTable(tableName string) bool {
+	for _, name := range t.createdTables {
+		if name == tableName {
+			return true
+		}
+	}
+	return false
 }

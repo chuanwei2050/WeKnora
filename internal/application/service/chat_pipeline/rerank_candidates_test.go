@@ -222,6 +222,42 @@ func TestRerankEmptyResultIsNoRelevantResult(t *testing.T) {
 	}
 }
 
+func TestRerankEmptyResultContinuesForStructuredCandidate(t *testing.T) {
+	plugin := &PluginRerank{modelService: fixedRerankModelService{model: fixedReranker{}}}
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankThreshold: 0.3, RerankTopK: 3},
+		PipelineState: types.PipelineState{
+			RewriteQuery: "统计记录数",
+			SearchResult: []*types.SearchResult{{ID: "table", KnowledgeID: "records", KnowledgeFilename: "records.xlsx", Content: "columns"}},
+		},
+	}
+	nextCalled := false
+	if err := plugin.OnEvent(context.Background(), types.CHUNK_RERANK, manage, func() *PluginError { nextCalled = true; return nil }); err != nil || !nextCalled {
+		t.Fatalf("structured candidate did not reach later SQL stages: err=%v next=%v", err, nextCalled)
+	}
+	merged := (&PluginMerge{}).selectInputResults(context.Background(), manage)
+	if len(merged) != 1 || merged[0].KnowledgeID != "records" {
+		t.Fatalf("merge discarded the structured candidate: %+v", merged)
+	}
+}
+
+func TestRerankEmptyResultDoesNotRestoreTableForNonTableIntent(t *testing.T) {
+	no := false
+	plugin := &PluginRerank{modelService: fixedRerankModelService{model: fixedReranker{}}}
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankThreshold: 0.3, RerankTopK: 3},
+		PipelineState: types.PipelineState{
+			NeedsTableQuery: &no,
+			RewriteQuery:    "解释测试流程",
+			SearchResult:    []*types.SearchResult{{ID: "table", KnowledgeID: "records", KnowledgeFilename: "records.xlsx", Content: "columns"}},
+		},
+	}
+	nextCalled := false
+	if err := plugin.OnEvent(context.Background(), types.CHUNK_RERANK, manage, func() *PluginError { nextCalled = true; return nil }); err != ErrSearchNothing || nextCalled {
+		t.Fatalf("non-table intent restored rejected table evidence: err=%v next=%v", err, nextCalled)
+	}
+}
+
 func TestRerankUnavailableFallsBackToRawRecall(t *testing.T) {
 	plugin := &PluginRerank{modelService: fixedRerankModelService{model: fixedReranker{err: errors.New("service unavailable")}}}
 	candidate := &types.SearchResult{ID: "chunk", Content: "candidate", MatchType: types.MatchTypeEmbedding}

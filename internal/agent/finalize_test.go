@@ -32,7 +32,7 @@ func TestBuildFinalAnswerPromptUsesPublicOutputContract(t *testing.T) {
 	if strings.Contains(prompt, "Clearly cite information sources (chunk_id") {
 		t.Fatal("fallback prompt must not request internal chunk identifiers")
 	}
-	for _, required := range []string{"只输出面向用户的最终答案", "不要输出分析过程", "谁持有证书？"} {
+	for _, required := range []string{"只输出面向用户的最终答案", "不要输出分析过程", "谁持有证书？", "physical table names", "internally generated aliases", "business column names", "natural language"} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("fallback prompt missing public-output requirement %q", required)
 		}

@@ -52,7 +52,7 @@ func (p *PluginFilterTopK) OnEvent(ctx context.Context,
 		chatManage.MergeResult = filterTopK(chatManage.MergeResult, chatManage.RerankTopK)
 	} else if len(chatManage.RerankResult) > 0 {
 		chatManage.RerankResult = filterTopK(chatManage.RerankResult, chatManage.RerankTopK)
-	} else if len(chatManage.SearchResult) > 0 {
+	} else if len(chatManage.SearchResult) > 0 && chatManage.RerankOutcome != types.RerankOutcomeNoRelevantResult {
 		chatManage.SearchResult = filterTopK(chatManage.SearchResult, chatManage.RerankTopK)
 	} else {
 		pipelineWarn(ctx, "FilterTopK", "skip", map[string]interface{}{

@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -70,6 +71,35 @@ func TestIntoChatMessage_WithMergeResults(t *testing.T) {
 	}
 	if !contains(cm.UserContent, "chunk A content") {
 		t.Errorf("UserContent should contain chunk A, got: %s", cm.UserContent)
+	}
+}
+
+func TestStructuredAnswerOutputRulesAreAppendedWithoutChangingEvidence(t *testing.T) {
+	result := &types.SearchResult{
+		ID:        "analysis",
+		MatchType: types.MatchTypeDataAnalysis,
+		Content:   `Executed SQL: SELECT master_count FROM k_secret {"master_count":"41"}`,
+	}
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			Query:         "有多少人",
+			SummaryConfig: types.SummaryConfig{ContextTemplate: "{{contexts}}\n{{query}}"},
+		},
+		PipelineState: types.PipelineState{
+			MergeResult: []*types.SearchResult{result},
+		},
+	}
+	plugin := &PluginIntoChatMessage{}
+	if err := plugin.OnEvent(context.Background(), types.INTO_CHAT_MESSAGE, manage, func() *PluginError { return nil }); err != nil {
+		t.Fatalf("OnEvent returned error: %v", err)
+	}
+	if !strings.Contains(manage.UserContent, result.Content) {
+		t.Fatal("structured evidence was changed before answer generation")
+	}
+	for _, rule := range []string{"SQL", "物理表名", "内部标识", "内部生成的字段别名", "原始结果载荷", "自然语言", "业务列名"} {
+		if !strings.Contains(manage.UserContent, rule) {
+			t.Fatalf("missing output rule %q", rule)
+		}
 	}
 }
 

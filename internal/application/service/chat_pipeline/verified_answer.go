@@ -533,7 +533,7 @@ func rewriteDraftWithChatModel(ctx context.Context, model modelchat.Chat, draft 
 		return "", fmt.Errorf("marshal validation reports: %w", err)
 	}
 	response, err := model.Chat(ctx, []modelchat.Message{
-		{Role: "system", Content: "You rewrite an answer after independent validation found issues. Use only the supplied evidence, fix unsupported or incomplete claims, and return only the revised answer. Do not return analysis, validator commentary, chain-of-thought, or a confidence explanation."},
+		{Role: "system", Content: "You rewrite an answer after independent validation found issues. Use only the supplied evidence, fix unsupported or incomplete claims, and return only the revised answer. Do not expose physical table names, internal identifiers, internally generated aliases, or raw result payloads. Convert needed structured results into natural language. If the user explicitly asks about SQL, table structure, or business column names, answer that request; otherwise do not expose SQL or the query process. Do not return analysis, validator commentary, chain-of-thought, or a confidence explanation."},
 		{Role: "user", Content: buildValidationPrompt(draft, evidence) + "\nValidation issues to address:\n" + string(reportPayload)},
 	}, &modelchat.ChatOptions{Temperature: 0, MaxTokens: 1024})
 	if err != nil {

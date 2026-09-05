@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -152,7 +153,8 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 
 	wg.Wait()
 
-	chatManage.SearchResult = allResults
+	historyResults := p.searchHistory(ctx, chatManage, allResults)
+	chatManage.SearchResult = append(allResults, historyResults...)
 	beforeLimit := len(chatManage.SearchResult)
 	chatManage.SearchResult = limitRetrievalCandidates(chatManage.SearchResult, chatManage.EmbeddingTopK, chatManage.SearchTargets)
 	logCandidateTruncation(ctx, beforeLimit, len(chatManage.SearchResult), chatManage.EmbeddingTopK)
@@ -216,7 +218,7 @@ func (p *PluginSearch) filterGovernedSearchResults(
 	candidates := make([]retrievalkernel.GovernanceCandidate, len(results))
 	for index, result := range results {
 		expectedKBID := ""
-		if result != nil && targets.ContainsKB(result.KnowledgeBaseID) {
+		if result != nil && (targets == nil || targets.ContainsKB(result.KnowledgeBaseID)) {
 			expectedKBID = result.KnowledgeBaseID
 		}
 		candidates[index] = retrievalkernel.GovernanceCandidate{
@@ -226,6 +228,31 @@ func (p *PluginSearch) filterGovernedSearchResults(
 	var knowledgeLoader retrievalkernel.KnowledgeLoader
 	if p.knowledgeService != nil {
 		knowledgeLoader = p.knowledgeService.GetKnowledgeBatchWithSharedAccess
+		if targets != nil {
+			knowledgeLoader = func(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error) {
+				items, err := p.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, ids)
+				if err != nil {
+					return nil, err
+				}
+				scoped := make([]*types.Knowledge, 0, len(items))
+				for _, item := range items {
+					if item == nil {
+						continue
+					}
+					for _, target := range targets {
+						if target == nil || target.KnowledgeBaseID != item.KnowledgeBaseID {
+							continue
+						}
+						if target.Type == types.SearchTargetTypeKnowledge && target.KnowledgeIDs != nil && !slices.Contains(target.KnowledgeIDs, item.ID) {
+							continue
+						}
+						scoped = append(scoped, item)
+						break
+					}
+				}
+				return scoped, nil
+			}
+		}
 	}
 	var versionLoader retrievalkernel.VersionLoader
 	if p.governanceRepo != nil {
@@ -254,10 +281,6 @@ func getSearchResultFromHistory(chatManage *types.ChatManage) []*types.SearchRes
 	// Search history in reverse chronological order
 	for i := len(chatManage.History) - 1; i >= 0; i-- {
 		if len(chatManage.History[i].KnowledgeReferences) > 0 {
-			// Mark all references as history matches
-			for _, reference := range chatManage.History[i].KnowledgeReferences {
-				reference.MatchType = types.MatchTypeHistory
-			}
 			return chatManage.History[i].KnowledgeReferences
 		}
 	}
@@ -336,93 +359,46 @@ func buildContentSignature(content string) string {
 	return searchutil.BuildContentSignature(content)
 }
 
-// removePartialOverlaps drops chunks whose content is largely contained within
-// a higher-scored chunk, even across different knowledge sources. This catches
-// cross-KB duplicates and near-duplicates that exact-signature dedup misses.
-//
-// Two thresholds are used:
-//   - Substring containment: if the normalized short text is a literal substring
-//     of the normalized long text, the shorter chunk is removed.
-//   - Token overlap coefficient >= 0.85: if 85%+ of the smaller chunk's tokens
-//     appear in the larger chunk, the smaller one is redundant.
-//
-// The input slice MUST already be deduplicated by ID/signature. Within each
-// pair the chunk with the lower score is the candidate for removal; ties are
-// broken by content length (longer wins).
+// removePartialOverlaps removes only literal containment within the same source
+// version. Token overlap cannot distinguish negation, numbers or conditions.
 func removePartialOverlaps(ctx context.Context, results []*types.SearchResult) []*types.SearchResult {
-	const overlapThreshold = 0.85
-
-	if len(results) <= 1 {
-		return results
+	normalized := make([]string, len(results))
+	for i, result := range results {
+		normalized[i] = strings.TrimSpace(result.Content)
 	}
-
-	type normEntry struct {
-		norm   string
-		result *types.SearchResult
-	}
-
-	entries := make([]normEntry, 0, len(results))
-	for _, r := range results {
-		entries = append(entries, normEntry{
-			norm:   searchutil.NormalizeContent(r.Content),
-			result: r,
-		})
-	}
-
-	removed := make(map[int]bool)
-
-	for i := 0; i < len(entries); i++ {
+	removed := make([]bool, len(results))
+	for i, a := range results {
 		if removed[i] {
 			continue
 		}
-		for j := i + 1; j < len(entries); j++ {
-			if removed[j] {
+		for j := i + 1; j < len(results); j++ {
+			b := results[j]
+			if removed[j] || a.KnowledgeID == "" || a.KnowledgeID != b.KnowledgeID || a.KnowledgeVersionID != b.KnowledgeVersionID || a.ChunkType != b.ChunkType {
 				continue
 			}
-
-			a, b := entries[i], entries[j]
-
-			shortIdx, longIdx := i, j
-			if len(a.norm) > len(b.norm) {
-				shortIdx, longIdx = j, i
+			short, long := i, j
+			if len(normalized[short]) > len(normalized[long]) {
+				short, long = long, short
 			}
-
-			contained := searchutil.IsContentContained(
-				entries[shortIdx].norm, entries[longIdx].norm,
-			)
-
-			if !contained {
-				ratio := searchutil.ContentOverlapRatio(
-					entries[shortIdx].result.Content,
-					entries[longIdx].result.Content,
-				)
-				if ratio < overlapThreshold {
-					continue
-				}
+			if results[short].StartAt < results[long].StartAt || results[short].EndAt > results[long].EndAt || results[short].EndAt <= results[short].StartAt {
+				continue
 			}
-
-			victim := shortIdx
-			if entries[shortIdx].result.Score > entries[longIdx].result.Score {
-				victim = longIdx
+			if !searchutil.IsContentContained(normalized[short], normalized[long]) {
+				continue
 			}
-			removed[victim] = true
-
-			keptIdx := i
-			if victim == i {
-				keptIdx = j
+			// Keep the full evidence, even when the shorter match scored higher.
+			results[long].Score = max(results[long].Score, results[short].Score)
+			removed[short] = true
+			pipelineInfo(ctx, "Merge", "partial_overlap_drop", map[string]interface{}{"kept_id": results[long].ID, "dropped_id": results[short].ID})
+			if short == i {
+				break
 			}
-			pipelineInfo(ctx, "Merge", "partial_overlap_drop", map[string]interface{}{
-				"kept_id":    entries[keptIdx].result.ID,
-				"dropped_id": entries[victim].result.ID,
-				"contained":  contained,
-			})
 		}
 	}
-
-	out := make([]*types.SearchResult, 0, len(results)-len(removed))
-	for i, e := range entries {
+	out := make([]*types.SearchResult, 0, len(results))
+	for i, result := range results {
 		if !removed[i] {
-			out = append(out, e.result)
+			out = append(out, result)
 		}
 	}
 	return out

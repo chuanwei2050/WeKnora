@@ -16,6 +16,11 @@ type PluginIntoChatMessage struct {
 	messageService interfaces.MessageService
 }
 
+const structuredAnswerOutputRules = `
+<answer_output_rules>
+结构化查询的 SQL、物理表名、内部标识、内部生成的字段别名和原始结果载荷仅供内部推理。最终回答必须把所需结果转换成自然语言，不得显示这些实现信息。用户明确询问 SQL、表结构或业务列名时可以回答其所问内容；否则不要描述查询或统计过程。
+</answer_output_rules>`
+
 // NewPluginIntoChatMessage creates and registers a new PluginIntoChatMessage instance
 func NewPluginIntoChatMessage(eventManager *EventManager, messageService interfaces.MessageService) *PluginIntoChatMessage {
 	res := &PluginIntoChatMessage{messageService: messageService}
@@ -173,6 +178,9 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		"contexts": chatManage.RenderedContexts,
 		"language": chatManage.Language,
 	})
+	if containsDataAnalysisResult(chatManage.MergeResult) {
+		userContent += structuredAnswerOutputRules
+	}
 
 	// Append image description as text fallback only when the chat model cannot
 	// process images directly. Vision-capable models see images via MultiContent.
@@ -200,6 +208,15 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 
 	p.persistRenderedContent(ctx, chatManage)
 	return next()
+}
+
+func containsDataAnalysisResult(results []*types.SearchResult) bool {
+	for _, result := range results {
+		if result != nil && result.MatchType == types.MatchTypeDataAnalysis {
+			return true
+		}
+	}
+	return false
 }
 
 // persistRenderedContent asynchronously writes the RAG-augmented UserContent back

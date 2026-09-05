@@ -172,7 +172,7 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	errs := RunParallel(tasks...)
 
 	// Merge results from both searches
-	chatManage.SearchResult = append(chunkCM.SearchResult, entityCM.SearchResult...)
+	chatManage.SearchResult = interleaveSearchResults(chunkCM.SearchResult, entityCM.SearchResult)
 	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
 	chatManage.GraphResult = entityCM.GraphResult
 	chatManage.GraphSearchResult = entityCM.GraphSearchResult
@@ -201,4 +201,22 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 
 	emitPipelineStageResult(ctx, chatManage, stageID, "knowledge_search", "知识检索完成", stageStarted, true, map[string]interface{}{"status": "completed", "result_count": len(chatManage.SearchResult)})
 	return next()
+}
+
+// Interleave ranked channels before the rerank budget is applied so graph
+// evidence is not systematically excluded by a full ordinary recall list.
+func interleaveSearchResults(channels ...[]*types.SearchResult) []*types.SearchResult {
+	var results []*types.SearchResult
+	for rank := 0; ; rank++ {
+		added := false
+		for _, channel := range channels {
+			if rank < len(channel) {
+				results = append(results, channel[rank])
+				added = true
+			}
+		}
+		if !added {
+			return results
+		}
+	}
 }

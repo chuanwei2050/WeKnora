@@ -31,14 +31,14 @@ func TestCleanPassageForRerank(t *testing.T) {
 			expect: "访问  获取更多信息",
 		},
 		{
-			name:   "remove code blocks",
+			name:   "preserve code block body",
 			input:  "示例代码：\n```python\nprint('hello')\n```\n以上是示例",
-			expect: "示例代码：\n\n以上是示例",
+			expect: "示例代码：\nprint('hello')\n以上是示例",
 		},
 		{
-			name:   "remove LaTeX blocks",
+			name:   "preserve LaTeX body",
 			input:  "公式如下 $$E=mc^2$$ 其中E是能量",
-			expect: "公式如下  其中E是能量",
+			expect: "公式如下 E=mc^2 其中E是能量",
 		},
 		{
 			name:   "remove table separator rows and convert data rows",
@@ -89,7 +89,7 @@ func TestCleanPassageForRerank(t *testing.T) {
 - 功能二
 
 ` + "```json\n{\"key\": \"value\"}\n```",
-			expect: "产品介绍\n\n这是一个 重要的 产品。详见 产品页面。\n\n用户评价：非常好用\n\n功能一\n功能二",
+			expect: "产品介绍\n\n这是一个 重要的 产品。详见 产品页面。\n\n用户评价：非常好用\n\n功能一\n功能二\n\n{\"key\": \"value\"}",
 		},
 		{
 			name:   "convert table data rows to plain text",

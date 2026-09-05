@@ -245,6 +245,13 @@ func genericRequestCustomizer(
 	req.ChatTemplateKwargs = map[string]interface{}{
 		"enable_thinking": thinking,
 	}
+	if opts != nil {
+		// The SDK omits zero temperature; preserve an explicit sampling setting.
+		return struct {
+			*openai.ChatCompletionRequest
+			Temperature float32 `json:"temperature"`
+		}{req, req.Temperature}, true
+	}
 	return req, true
 }
 

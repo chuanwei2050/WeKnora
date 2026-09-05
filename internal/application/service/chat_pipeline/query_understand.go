@@ -31,6 +31,7 @@ var (
 )
 
 type queryUnderstandOutput struct {
+	NeedsTableQuery     *bool                  `json:"needs_table_query"`
 	RewriteQuery        string                 `json:"rewrite_query"`
 	Intent              types.QueryIntent      `json:"intent"`
 	ImageDescription    string                 `json:"image_description"`
@@ -84,7 +85,7 @@ func ClassifyQuery(ctx context.Context, model chat.Chat, appConfig *config.Confi
 	response, err := model.Chat(ctx, []chat.Message{
 		{Role: "system", Content: systemContent},
 		{Role: "user", Content: userContent},
-	}, routingChatOptions(&thinking, 150))
+	}, routingChatOptions(&thinking, 200))
 	if err != nil {
 		decision := conservativeRoutingDecision(chatManage, types.DegradationMissingCapability)
 		return &decision, fmt.Errorf("classify query: %w", err)
@@ -172,6 +173,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	chatManage.RewriteQuery = chatManage.Query
+	chatManage.NeedsTableQuery = nil
 	stageID, stageStarted := emitPipelineStageStart(ctx, chatManage, "query_understand", "理解问题")
 	stageSuccess := false
 	finishStage := func() {
@@ -241,7 +243,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 		userMsg.Images = chatManage.Images
 	}
 
-	maxTokens := 150
+	maxTokens := 200
 	if useImages {
 		maxTokens = 500
 	}
@@ -519,6 +521,7 @@ func (p *PluginQueryUnderstand) buildPrompts(chatManage *types.ChatManage, histo
 		systemPrompt += "\nReturn JSON fields complexity_level (L1/L2/L3/L4), reasoning_subtype (one of explicit_fact, contextual_fact, comparison, multi_hop, causal, hypothetical, transfer, unknown), needs_entity_relation (true only when entity relations, hierarchy, or multi-hop graph reasoning is needed), confidence (0..1), and rationale_summary (one short sentence, no chain-of-thought)."
 		systemPrompt = AppendComplexityFewShotExamples(systemPrompt, chatManage.ComplexityRouting.FewShot, defaultComplexityFewShotLimit)
 	}
+	systemPrompt += tableQueryIntentInstruction
 
 	return types.RenderPromptPlaceholders(systemPrompt, vals),
 		types.RenderPromptPlaceholders(userPrompt, vals)
@@ -540,6 +543,7 @@ func truncatePromptInput(value string, limit int) string {
 //
 // Expected format: {"rewrite_query":"...","intent":"kb_search","image_description":"..."}
 func (p *PluginQueryUnderstand) parseOutput(chatManage *types.ChatManage, raw string) {
+	chatManage.NeedsTableQuery = nil
 	content := strings.TrimSpace(raw)
 	if content == "" {
 		return
@@ -576,6 +580,7 @@ func (p *PluginQueryUnderstand) parseOutput(chatManage *types.ChatManage, raw st
 }
 
 func applyQueryUnderstandOutput(chatManage *types.ChatManage, output queryUnderstandOutput, applyRouting bool) {
+	chatManage.NeedsTableQuery = output.NeedsTableQuery
 	if rewrite := strings.TrimSpace(output.RewriteQuery); rewrite != "" {
 		chatManage.RewriteQuery = rewrite
 	}
@@ -676,7 +681,8 @@ func parseStrictRoutingOutput(raw string) (queryUnderstandOutput, error) {
 	}
 
 	output := queryUnderstandOutput{
-		RewriteQuery: rewrite, Intent: types.QueryIntent(intent),
+		NeedsTableQuery: optionalTableQueryIntent(fields),
+		RewriteQuery:    rewrite, Intent: types.QueryIntent(intent),
 		ComplexityLevel: types.ComplexityLevel(level), ReasoningSubtype: types.ReasoningSubtype(subtype),
 		NeedsEntityRelation: needsEntityRelation,
 		Confidence:          confidence, RationaleSummary: rationale, ImageDescription: imageDescription,
@@ -722,6 +728,7 @@ func parseStructuredQueryOutputJSON(content string) (queryUnderstandOutput, bool
 	}
 
 	out := queryUnderstandOutput{
+		NeedsTableQuery: optionalTableQueryIntent(obj),
 		RewriteQuery: strings.TrimSpace(firstStringField(obj,
 			"rewrite_query", "rewritten_query", "query", "question")),
 	}
@@ -766,6 +773,21 @@ func routingSummary(decision *types.RoutingDecision) map[string]interface{} {
 		return nil
 	}
 	return decision.Summary()
+}
+
+const tableQueryIntentInstruction = `
+Also return needs_table_query (true, false, or null), independently of intent and complexity.
+Use true for operations on records: filtered detail lists, sorting/ranking, grouping, calculations, aggregation, or comparisons that require evaluating structured records. This is not limited to statistics.
+Use false only when the request can be answered from relevant passages: conceptual explanations, advice, narrative summaries, or an ordinary factual question without a record-processing requirement. Mentioning a file or a topic alone does not require SQL.
+Use null when unsure, when a follow-up's operation cannot be resolved from history, or when the necessary operation depends on data not yet retrieved. Do not guess false for an unresolved record query. Classify the current user request; history may resolve references but cannot override a changed request.
+Keep the JSON compact; do not explain this field.`
+
+func optionalTableQueryIntent(fields map[string]json.RawMessage) *bool {
+	var value *bool
+	if err := json.Unmarshal(fields["needs_table_query"], &value); err != nil {
+		return nil
+	}
+	return value
 }
 
 func firstStringField(obj map[string]json.RawMessage, keys ...string) string {

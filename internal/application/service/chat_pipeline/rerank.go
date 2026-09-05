@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -134,8 +135,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 
 	// Only call rerank model if there are candidates
 	if len(candidatesToRerank) > 0 {
-		// Single rerank call with RewriteQuery, use threshold degradation if no results
-		originalThreshold := chatManage.RerankThreshold
+		// Run inference once; threshold filtering uses this response locally.
 		var rerankErr error
 		rerankResp, rerankErr = p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages, candidatesToRerank)
 		if rerankErr != nil {
@@ -153,34 +153,6 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 			})
 			emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "相关内容筛选不可用，已使用原始召回", stageStarted, false, map[string]interface{}{"status": "degraded", "reason": "rerank_unavailable", "output_count": len(chatManage.RerankResult)})
 			return next()
-		}
-
-		// If no results and threshold is high enough, try with lower threshold
-		if len(rerankResp) == 0 && originalThreshold > 0.3 {
-			degradedThreshold := originalThreshold * 0.7
-			if degradedThreshold < 0.3 {
-				degradedThreshold = 0.3
-			}
-			pipelineWarn(ctx, "Rerank", "threshold_degrade", map[string]interface{}{
-				"original":      originalThreshold,
-				"degraded":      degradedThreshold,
-				"candidate_cnt": len(candidatesToRerank),
-				"reason":        "no results above original threshold, retrying with lower threshold",
-			})
-			chatManage.RerankThreshold = degradedThreshold
-			rerankResp, rerankErr = p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages, candidatesToRerank)
-			// Restore original threshold
-			chatManage.RerankThreshold = originalThreshold
-			if rerankErr != nil {
-				if errors.Is(rerankErr, rerank.ErrInvalidResponse) {
-					chatManage.RerankOutcome = types.RerankOutcomeInvalidCandidate
-					return ErrRerank.WithError(rerankErr)
-				}
-				chatManage.RerankOutcome = types.RerankOutcome(retrievalkernel.ClassifyRerank(0, rerankErr, true))
-				chatManage.RerankResult = append([]*types.SearchResult(nil), chatManage.SearchResult...)
-				pipelineWarn(ctx, "Rerank", "fallback", map[string]interface{}{"reason": "rerank_unavailable", "error": rerankErr.Error()})
-				return next()
-			}
 		}
 	}
 	if len(candidatesToRerank) == 0 && len(directLoadResults) == 0 {
@@ -238,7 +210,6 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	}
 	searchutil.SortSearchResults(reranked)
 	final := applyMMR(ctx, reranked, chatManage, min(len(reranked), max(1, chatManage.RerankTopK)), 0.7)
-	final = preserveStrongKeywordResults(final, chatManage.SearchResult, chatManage.RerankTopK)
 	chatManage.RerankResult = final
 
 	// Log composite top scores and MMR selection summary
@@ -258,6 +229,10 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 			"filtered_cnt": 0,
 		})
 		emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "未筛选出相关内容", stageStarted, true, map[string]interface{}{"status": "empty", "input_count": len(chatManage.SearchResult), "output_count": 0})
+		if shouldAttemptDataAnalysis(chatManage) && selectDataAnalysisTarget(chatManage.SearchResult, chatManage.KnowledgeIDs, chatManage.SearchTargets) != nil {
+			// Passage relevance does not establish whether the original table can answer SQL.
+			return next()
+		}
 		return ErrSearchNothing
 	}
 	chatManage.RerankOutcome = types.RerankOutcome(retrievalkernel.ClassifyRerank(len(chatManage.RerankResult), nil, true))
@@ -313,45 +288,6 @@ func applyBoundedSourcePrior(result *types.SearchResult, prior float64, source s
 	result.Metadata["ranking_source_prior"] = fmt.Sprintf("%.4f", prior)
 	result.Metadata["ranking_source_prior_kind"] = source
 	result.Metadata["final_ranking_score"] = fmt.Sprintf("%.4f", result.Score)
-}
-
-// preserveStrongKeywordResults prevents the semantic reranker from completely
-// vetoing the top lexical match from an individual retrieval request.
-func preserveStrongKeywordResults(
-	reranked, candidates []*types.SearchResult,
-	limit int,
-) []*types.SearchResult {
-	if limit <= 0 || len(candidates) == 0 {
-		return reranked
-	}
-	seen := make(map[string]struct{}, len(reranked))
-	for _, result := range reranked {
-		seen[result.ID] = struct{}{}
-	}
-	missing := make([]*types.SearchResult, 0)
-	for _, candidate := range candidates {
-		if !candidate.KeywordLeader {
-			continue
-		}
-		if _, exists := seen[candidate.ID]; exists {
-			continue
-		}
-		missing = append(missing, candidate)
-		seen[candidate.ID] = struct{}{}
-	}
-	if len(missing) > limit {
-		missing = missing[:limit]
-	}
-	keepReranked := min(len(reranked), limit-len(missing))
-	result := append([]*types.SearchResult(nil), reranked[:keepReranked]...)
-	for _, candidate := range missing {
-		candidate.Metadata = ensureMetadata(candidate.Metadata)
-		candidate.Metadata["base_score"] = fmt.Sprintf("%.4f", candidate.Score)
-		candidate.Metadata["keyword_preserved"] = "true"
-		candidate.Score = 1.0
-		result = append(result, candidate)
-	}
-	return result
 }
 
 // prepareRerankCandidates removes duplicate chunks/content before model inference
@@ -461,12 +397,6 @@ func (p *PluginRerank) rerank(ctx context.Context,
 		})
 		return nil, err
 	}
-	if err := rerank.ValidateResults(rerankResp, len(candidates)); err != nil {
-		pipelineError(ctx, "Rerank", "invalid_response", map[string]interface{}{
-			"candidate_count": len(candidates), "error": err.Error(),
-		})
-		return nil, err
-	}
 
 	// Log top scores for debugging
 	pipelineInfo(ctx, "Rerank", "threshold", map[string]interface{}{
@@ -535,24 +465,32 @@ func (p *PluginRerank) rerankWithCache(
 	candidates []*types.SearchResult,
 ) ([]rerank.RankResult, error) {
 	cacheKey := buildRerankCacheKey(rerankModel.GetModelID(), query, passages, candidates)
-	if cached, ok := p.loadRerankCache(ctx, cacheKey); ok {
+	if cached, ok := p.loadRerankCache(ctx, cacheKey); ok && rerank.ValidateResults(cached, len(passages)) == nil {
 		pipelineInfo(ctx, "Rerank", "cache_hit", map[string]interface{}{"candidates": len(passages)})
 		return cached, nil
 	}
 	pipelineInfo(ctx, "Rerank", "cache_miss", map[string]interface{}{"candidates": len(passages)})
 
-	value, err, shared := p.calls.Do(cacheKey, func() (interface{}, error) {
-		if cached, ok := p.loadRerankCache(ctx, cacheKey); ok {
+	call := func() (interface{}, error) {
+		if cached, ok := p.loadRerankCache(ctx, cacheKey); ok && rerank.ValidateResults(cached, len(passages)) == nil {
 			return cached, nil
 		}
 		results, callErr := rerankModel.Rerank(ctx, query, passages)
 		if callErr != nil {
 			return nil, callErr
 		}
+		if err := rerank.ValidateResults(results, len(passages)); err != nil {
+			return nil, err
+		}
 		compact := compactRankResults(results)
+		sort.SliceStable(compact, func(i, j int) bool { return compact[i].RelevanceScore > compact[j].RelevanceScore })
 		p.storeRerankCache(ctx, cacheKey, compact)
 		return compact, nil
-	})
+	}
+	value, err, shared := p.calls.Do(cacheKey, call)
+	if shared && err != nil && ctx.Err() == nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		value, err = call()
+	}
 	if shared {
 		pipelineInfo(ctx, "Rerank", "singleflight_shared", map[string]interface{}{"candidates": len(passages)})
 	}
@@ -577,7 +515,7 @@ func buildRerankCacheKey(
 		ModelID    string           `json:"model_id"`
 		Query      string           `json:"query"`
 		Candidates []cacheCandidate `json:"candidates"`
-	}{Version: 1, ModelID: modelID, Query: query, Candidates: make([]cacheCandidate, 0, len(passages))}
+	}{Version: 2, ModelID: modelID, Query: query, Candidates: make([]cacheCandidate, 0, len(passages))}
 	for index, passage := range passages {
 		candidateID := ""
 		if index < len(candidates) {
@@ -587,7 +525,7 @@ func buildRerankCacheKey(
 	}
 	encoded, _ := json.Marshal(payload)
 	hash := sha256.Sum256(encoded)
-	return fmt.Sprintf("rerank:result:v1:%x", hash[:])
+	return fmt.Sprintf("rerank:result:v2:%x", hash[:])
 }
 
 func compactRankResults(results []rerank.RankResult) []rerank.RankResult {
@@ -753,10 +691,8 @@ var (
 	reMarkdownLink = regexp.MustCompile(`\[([^\]]+)\]\([^()\s]*(?:\([^)]*\)[^()\s]*)*\)`)
 	// reRawURL matches standalone http(s) URLs.
 	reRawURL = regexp.MustCompile(`https?://[^\s)\]>]+`)
-	// reCodeBlock matches fenced code blocks (```...```).
-	reCodeBlock = regexp.MustCompile("(?s)```(?:\\w*)\n?.*?```")
-	// reLatexBlock matches block-level LaTeX ($$...$$).
-	reLatexBlock = regexp.MustCompile(`(?s)\$\$.*?\$\$`)
+	// Preserve code and block math verbatim while cleaning surrounding prose.
+	reRerankLiteral = regexp.MustCompile("(?s)```[^\\n]*\n.*?```|~~~[^\\n]*\n.*?~~~|\\$\\$.*?\\$\\$")
 	// reTableSep matches table separator rows like |---|---|.
 	// Uses [ \t] instead of \s to avoid consuming newlines across rows.
 	reTableSep = regexp.MustCompile(`(?m)^[ \t]*\|[ \t:|-]+\|[ \t]*$`)
@@ -786,10 +722,18 @@ var (
 // preserve all meaningful natural-language content while removing formatting
 // that would confuse text-similarity scoring.
 func cleanPassageForRerank(text string) string {
-	// 1. Remove code blocks (before other patterns to avoid partial matches)
-	text = reCodeBlock.ReplaceAllString(text, "")
-	// 2. Remove LaTeX block math
-	text = reLatexBlock.ReplaceAllString(text, "")
+	var literals []string
+	text = reRerankLiteral.ReplaceAllStringFunc(text, func(block string) string {
+		body := block
+		if strings.HasPrefix(block, "$$") {
+			body = strings.TrimSuffix(strings.TrimPrefix(block, "$$"), "$$")
+		} else if newline := strings.IndexByte(block, '\n'); newline >= 0 {
+			body = block[newline+1 : len(block)-3]
+		}
+		key := fmt.Sprintf("\x00RERANKLITERAL%d\x00", len(literals))
+		literals = append(literals, strings.TrimSpace(body))
+		return key
+	})
 	// 3. Remove HTML tags
 	text = reHTMLTag.ReplaceAllString(text, "")
 	// 3.5. Unwrap nested [![alt](img_url)](link_url) → ![alt](img_url)
@@ -832,6 +776,9 @@ func cleanPassageForRerank(text string) string {
 	// 12. Collapse excessive newlines
 	text = reExcessiveNewlines.ReplaceAllString(text, "\n\n")
 
+	for index, literal := range literals {
+		text = strings.ReplaceAll(text, fmt.Sprintf("\x00RERANKLITERAL%d\x00", index), literal)
+	}
 	return strings.TrimSpace(text)
 }
 

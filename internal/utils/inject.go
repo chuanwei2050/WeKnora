@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	pg_query "github.com/pganalyze/pg_query_go/v6"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // This file provides comprehensive SQL validation and security features
@@ -533,6 +534,19 @@ func WithDefaultSafeFunctions() SQLValidationOption {
 	}
 }
 
+// WithAdditionalSafeFunctions extends an existing allowlist for a SQL dialect.
+func WithAdditionalSafeFunctions(functions ...string) SQLValidationOption {
+	return func(v *sqlValidator) {
+		v.checkFunctionNames = true
+		if v.allowedFunctions == nil {
+			v.allowedFunctions = make(map[string]bool)
+		}
+		for _, name := range functions {
+			v.allowedFunctions[strings.ToLower(name)] = true
+		}
+	}
+}
+
 // WithNoSubqueries blocks all subqueries
 func WithNoSubqueries() SQLValidationOption {
 	return func(v *sqlValidator) {
@@ -864,27 +878,95 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 		return "", validationResult, fmt.Errorf("failed to parse SQL: %v", err)
 	}
 
-	// Normalize SQL
-	normalizedSQL, err := pg_query.Deparse(result)
-	if err != nil {
-		return "", validationResult, fmt.Errorf("failed to normalize SQL: %v", err)
+	// Filter each input relation separately. Outer joins must keep their NULL
+	// rows, and every self-join alias must receive the same authorization rules.
+	rewriteAuthorizedQualifiers(result)
+	stmt := result.Stmts[0].Stmt.GetSelectStmt()
+	for i, item := range stmt.FromClause {
+		secured, err := validator.secureRelation(item)
+		if err != nil {
+			return "", validationResult, err
+		}
+		stmt.FromClause[i] = secured
 	}
+	securedSQL, err := pg_query.Deparse(result)
+	return securedSQL, validationResult, err
+}
 
-	// Build table→alias map from parse tree (respects SQL aliases like "kb", "k")
-	tablesInQuery := extractTableAliasMap(result)
+// Derived relations retain table aliases, not schema qualification. Rewrite
+// original schema.table.column references before wrapping their source tables.
+func rewriteAuthorizedQualifiers(tree *pg_query.ParseResult) {
+	var walk func(protoreflect.Message, func(protoreflect.Message))
+	walk = func(message protoreflect.Message, visit func(protoreflect.Message)) {
+		visit(message)
+		message.Range(func(field protoreflect.FieldDescriptor, value protoreflect.Value) bool {
+			if field.Kind() != protoreflect.MessageKind {
+				return true
+			}
+			if field.IsList() {
+				list := value.List()
+				for i := 0; i < list.Len(); i++ {
+					walk(list.Get(i).Message(), visit)
+				}
+			} else {
+				walk(value.Message(), visit)
+			}
+			return true
+		})
+	}
+	relations := make(map[[2]string]bool)
+	walk(tree.ProtoReflect(), func(message protoreflect.Message) {
+		if relation, ok := message.Interface().(*pg_query.RangeVar); ok && relation.Schemaname != "" && relation.Alias == nil {
+			relations[[2]string{relation.Schemaname, relation.Relname}] = true
+		}
+	})
+	walk(tree.ProtoReflect(), func(message protoreflect.Message) {
+		column, ok := message.Interface().(*pg_query.ColumnRef)
+		if !ok || len(column.Fields) != 3 {
+			return
+		}
+		schema, table := column.Fields[0].GetString_(), column.Fields[1].GetString_()
+		if schema != nil && table != nil && relations[[2]string{schema.Sval, table.Sval}] {
+			column.Fields = column.Fields[1:]
+		}
+	})
+}
 
-	// Inject tenant conditions
-	securedSQL := validator.injectTenantConditions(normalizedSQL, tablesInQuery)
-	// Inject deleted_at IS NULL conditions
-	securedSQL = validator.injectSoftDeleteConditions(securedSQL, tablesInQuery)
-	// Inject hidden KB filter (exclude is_temporary = true knowledge bases)
-	securedSQL = validator.injectHiddenKBFilter(securedSQL, tablesInQuery)
-	// Inject search scope filter (restrict to allowed KBs and knowledges)
-	securedSQL = validator.injectSearchScopeConditions(securedSQL, tablesInQuery)
-	// Inject current governed-version filter for chunk retrieval
-	securedSQL = validator.injectKnowledgeVersionConditions(securedSQL, tablesInQuery)
-
-	return securedSQL, validationResult, nil
+func (v *sqlValidator) secureRelation(node *pg_query.Node) (*pg_query.Node, error) {
+	if join := node.GetJoinExpr(); join != nil {
+		var err error
+		join.Larg, err = v.secureRelation(join.Larg)
+		if err != nil {
+			return nil, err
+		}
+		join.Rarg, err = v.secureRelation(join.Rarg)
+		return node, err
+	}
+	relation := node.GetRangeVar()
+	if relation == nil {
+		return nil, fmt.Errorf("unsupported relation for authorization")
+	}
+	quote := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	table := quote(relation.Relname)
+	if relation.Schemaname != "" {
+		table = quote(relation.Schemaname) + "." + table
+	}
+	aliases := map[string]string{strings.ToLower(relation.Relname): quote(relation.Relname)}
+	filtered := "SELECT * FROM " + table
+	filtered = v.injectTenantConditions(filtered, aliases)
+	filtered = v.injectSoftDeleteConditions(filtered, aliases)
+	filtered = v.injectHiddenKBFilter(filtered, aliases)
+	filtered = v.injectSearchScopeConditions(filtered, aliases)
+	filtered = v.injectKnowledgeVersionConditions(filtered, aliases)
+	inner, err := pg_query.Parse(filtered)
+	if err != nil {
+		return nil, fmt.Errorf("build authorized relation: %w", err)
+	}
+	alias := relation.Alias
+	if alias == nil {
+		alias = &pg_query.Alias{Aliasname: relation.Relname}
+	}
+	return &pg_query.Node{Node: &pg_query.Node_RangeSubselect{RangeSubselect: &pg_query.RangeSubselect{Subquery: inner.Stmts[0].Stmt, Alias: alias}}}, nil
 }
 
 func (v *sqlValidator) injectKnowledgeVersionConditions(sql string, tablesInQuery map[string]string) string {
@@ -965,37 +1047,25 @@ func InjectAndConditions(sql, filter string) string {
 		return sql
 	}
 
-	// Check if WHERE clause exists
-	wherePattern := regexp.MustCompile(`(?i)\bWHERE\b`)
-	if loc := wherePattern.FindStringIndex(sql); loc != nil {
-		// Add filter and wrap existing conditions in parentheses to prevent OR precedence issues.
-		// The wrapping must only apply to the original WHERE expression, not trailing clauses like
-		// ORDER BY / GROUP BY / LIMIT, otherwise it can generate invalid SQL.
-		whereExprStart := loc[1]
-		tailPattern := regexp.MustCompile(`(?i)\b(GROUP BY|ORDER BY|LIMIT|OFFSET|HAVING|FETCH)\b`)
-		tailLoc := tailPattern.FindStringIndex(sql[whereExprStart:])
-
-		if tailLoc == nil {
-			originalWhereExpr := strings.TrimSpace(sql[whereExprStart:])
-			return fmt.Sprintf("%sWHERE %s AND (%s)", sql[:loc[0]], filter, originalWhereExpr)
-		}
-
-		whereExprEnd := whereExprStart + tailLoc[0]
-		originalWhereExpr := strings.TrimSpace(sql[whereExprStart:whereExprEnd])
-		tailClause := strings.TrimLeft(sql[whereExprEnd:], " \t\r\n")
-		return fmt.Sprintf("%sWHERE %s AND (%s) %s", sql[:loc[0]], filter, originalWhereExpr, tailClause)
+	tree, err := pg_query.Parse(sql)
+	if err != nil || len(tree.Stmts) != 1 || tree.Stmts[0].Stmt.GetSelectStmt() == nil {
+		return "SELECT * FROM (" + sql + ") AS invalid_query WHERE FALSE"
 	}
-
-	// Add new WHERE clause before ORDER BY, GROUP BY, LIMIT, etc.
-	clausePattern := regexp.MustCompile(`(?i)\b(GROUP BY|ORDER BY|LIMIT|OFFSET|HAVING|FETCH)\b`)
-	if loc := clausePattern.FindStringIndex(sql); loc != nil {
-		prefix := strings.TrimRight(sql[:loc[0]], " \t\r\n")
-		suffix := strings.TrimLeft(sql[loc[0]:], " \t\r\n")
-		return fmt.Sprintf("%s WHERE %s %s", prefix, filter, suffix)
+	predicate, err := pg_query.Parse("SELECT 1 WHERE " + filter)
+	if err != nil || len(predicate.Stmts) != 1 {
+		return "SELECT * FROM (" + sql + ") AS invalid_query WHERE FALSE"
 	}
-
-	// Add WHERE clause at the end
-	return fmt.Sprintf("%s WHERE %s", sql, filter)
+	stmt := tree.Stmts[0].Stmt.GetSelectStmt()
+	condition := predicate.Stmts[0].Stmt.GetSelectStmt().WhereClause
+	if stmt.WhereClause != nil {
+		condition = &pg_query.Node{Node: &pg_query.Node_BoolExpr{BoolExpr: &pg_query.BoolExpr{Boolop: pg_query.BoolExprType_AND_EXPR, Args: []*pg_query.Node{condition, stmt.WhereClause}}}}
+	}
+	stmt.WhereClause = condition
+	result, err := pg_query.Deparse(tree)
+	if err != nil {
+		return "SELECT * FROM (" + sql + ") AS invalid_query WHERE FALSE"
+	}
+	return result
 }
 
 // injectTenantConditions adds tenant_id filtering to the query
@@ -1280,6 +1350,12 @@ func (v *sqlValidator) validateSelectStmt(stmt *pg_query.SelectStmt, result *SQL
 		}
 	}
 
+	for _, expression := range append(append([]*pg_query.Node{stmt.LimitCount, stmt.LimitOffset}, stmt.DistinctClause...), stmt.WindowClause...) {
+		if err := v.validateNode(expression, result); err != nil {
+			return err
+		}
+	}
+
 	// Ensure at least one valid table is referenced
 	if len(tablesInQuery) == 0 {
 		return fmt.Errorf("no valid table found in query")
@@ -1382,7 +1458,17 @@ func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationRe
 		if tc.TypeName != nil {
 			typeName := v.getTypeName(tc.TypeName)
 			if strings.HasPrefix(strings.ToLower(typeName), "pg_") {
-				return fmt.Errorf("casting to system type '%s' is not allowed", typeName)
+				// The PostgreSQL parser itself qualifies standard SQL casts
+				// (e.g. DECIMAL) with pg_catalog. Allow scalar built-ins only.
+				switch strings.ToLower(typeName) {
+				case "pg_catalog.numeric", "pg_catalog.int2", "pg_catalog.int4", "pg_catalog.int8",
+					"pg_catalog.float4", "pg_catalog.float8", "pg_catalog.bool", "pg_catalog.bpchar",
+					"pg_catalog.varchar", "pg_catalog.text", "pg_catalog.date", "pg_catalog.time",
+					"pg_catalog.timetz", "pg_catalog.timestamp", "pg_catalog.timestamptz", "pg_catalog.interval",
+					"pg_catalog.bit", "pg_catalog.varbit":
+				default:
+					return fmt.Errorf("casting to system type '%s' is not allowed", typeName)
+				}
 			}
 		}
 	}

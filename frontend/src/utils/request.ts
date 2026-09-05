@@ -70,6 +70,7 @@ instance.interceptors.request.use(
 
 // Token刷新标志，防止多个请求同时刷新token
 let isRefreshing = false;
+let lastRefresh: { authorization: string; token: string } | null = null;
 let failedQueue: Array<{ resolve: Function; reject: Function }> = [];
 
 const PUBLIC_AUTH_PATHS = ['/auth/auto-setup', '/auth/login', '/auth/register', '/auth/oidc/'];
@@ -133,7 +134,14 @@ instance.interceptors.response.use(
     if (error.response.status === 401) {
       const requestAuthorization = originalRequest?.headers?.Authorization || originalRequest?.headers?.get?.('Authorization')
       const currentToken = localStorage.getItem('weknora_token')
+      if (currentToken && requestAuthorization !== `Bearer ${currentToken}` && !originalRequest._retry
+        && lastRefresh !== null && lastRefresh.authorization === requestAuthorization && lastRefresh.token === currentToken) {
+        originalRequest._retry = true
+        originalRequest.headers['Authorization'] = `Bearer ${currentToken}`
+        return instance(originalRequest)
+      }
       if (!requestAuthorization || (currentToken && requestAuthorization !== `Bearer ${currentToken}`)) {
+        if (!currentToken) redirectToLogin()
         const data = error.response.data
         return Promise.reject({
           status: 401,
@@ -149,8 +157,9 @@ instance.interceptors.response.use(
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
         }).then(token => {
+          originalRequest._retry = true;
           originalRequest.headers['Authorization'] = 'Bearer ' + token;
-          return instance(originalRequest).then(response => response.data);
+          return instance(originalRequest);
         }).catch(err => {
           return Promise.reject(err);
         });
@@ -170,6 +179,13 @@ instance.interceptors.response.use(
           if (response.success && response.data) {
             const { token, refreshToken: newRefreshToken } = response.data;
             
+            // Do not apply an old refresh response over a newly logged-in session.
+            if (localStorage.getItem('weknora_refresh_token') !== refreshToken) {
+              const error = { status: 401, message: t('error.pleaseRelogin') };
+              processQueue(error);
+              return Promise.reject(error);
+            }
+            lastRefresh = { authorization: originalRequest.headers['Authorization'], token };
             // 更新localStorage中的token
             localStorage.setItem('weknora_token', token);
             localStorage.setItem('weknora_refresh_token', newRefreshToken);
@@ -180,11 +196,16 @@ instance.interceptors.response.use(
             // 处理队列中的请求
             processQueue(null, token);
             
-            return instance(originalRequest).then(response => response.data);
+            return instance(originalRequest);
           } else {
             throw new Error(response.message || t('error.tokenRefreshFailed'));
           }
         } catch (refreshError) {
+          // A failed refresh from an older login must not clear the current login.
+          if (localStorage.getItem('weknora_refresh_token') !== refreshToken) {
+            processQueue(refreshError);
+            return Promise.reject(refreshError);
+          }
           // 刷新失败，清除所有token并跳转到登录页
           localStorage.removeItem('weknora_token');
           localStorage.removeItem('weknora_refresh_token');
@@ -200,7 +221,9 @@ instance.interceptors.response.use(
           isRefreshing = false;
         }
       } else {
-        // 没有refresh token，直接跳转到登录页
+        // 没有refresh token，结束刷新状态并拒绝等待中的请求
+        isRefreshing = false;
+        processQueue({ status: 401, message: t('error.pleaseRelogin') });
         localStorage.removeItem('weknora_token');
         localStorage.removeItem('weknora_user');
         localStorage.removeItem('weknora_tenant');

@@ -1,97 +1,34 @@
 package chatpipeline
 
 import (
-	"testing"
-
+	"context"
+	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
+	"testing"
 )
 
-func TestPreserveStrongKeywordResultsRestoresOmittedExactMatch(t *testing.T) {
-	semantic := &types.SearchResult{ID: "semantic", MatchType: types.MatchTypeEmbedding, Score: 0.8}
-	keywordTop := &types.SearchResult{ID: "keyword-top", MatchType: types.MatchTypeKeywords, Score: 21.1}
-	exact := &types.SearchResult{ID: "exact", MatchType: types.MatchTypeKeywords, Score: 19.36, KeywordLeader: true}
-	weak := &types.SearchResult{ID: "weak", MatchType: types.MatchTypeKeywords, Score: 10}
-
-	got := preserveStrongKeywordResults(
-		[]*types.SearchResult{semantic, keywordTop},
-		[]*types.SearchResult{semantic, keywordTop, exact, weak},
-		3,
-	)
-	if len(got) != 3 {
-		t.Fatalf("expected 3 results, got %d", len(got))
-	}
-	if got[2].ID != exact.ID || got[2].Metadata["keyword_preserved"] != "true" {
-		t.Fatalf("strong omitted keyword result was not restored: %#v", got[2])
-	}
-	if got[2].Score != 1.0 || got[2].Metadata["base_score"] != "19.3600" {
-		t.Fatalf("preserved keyword score was not normalized: %#v", got[2])
-	}
-}
-
-func TestPreserveStrongKeywordResultsRestoresFusedKeywordLeader(t *testing.T) {
-	semantic := &types.SearchResult{ID: "semantic", MatchType: types.MatchTypeEmbedding, Score: 0.8}
-	fusedLeader := &types.SearchResult{
-		ID:            "fused-keyword-leader",
-		MatchType:     types.MatchTypeEmbedding,
-		Score:         0.7,
-		KeywordLeader: true,
-	}
-
-	got := preserveStrongKeywordResults(
-		[]*types.SearchResult{semantic},
-		[]*types.SearchResult{semantic, fusedLeader},
-		3,
-	)
-
-	if len(got) != 2 || got[1] != fusedLeader {
-		t.Fatalf("fused keyword leader was not preserved: %+v", got)
-	}
-}
-
-func TestPreserveStrongKeywordResultsIgnoresForgedMetadata(t *testing.T) {
-	semantic := &types.SearchResult{ID: "semantic", MatchType: types.MatchTypeEmbedding, Score: 0.8}
-	forged := &types.SearchResult{
-		ID:        "forged",
-		MatchType: types.MatchTypeEmbedding,
-		Score:     0.7,
-		Metadata:  map[string]string{"keyword_leader": "true"},
-	}
-
-	got := preserveStrongKeywordResults(
-		[]*types.SearchResult{semantic},
-		[]*types.SearchResult{semantic, forged},
-		3,
-	)
-
-	if len(got) != 1 || got[0] != semantic {
-		t.Fatalf("document metadata must not restore a rerank-rejected candidate: %+v", got)
-	}
-}
-
-func TestPreserveStrongKeywordResultsDoesNotRestoreWeakMatch(t *testing.T) {
-	top := &types.SearchResult{ID: "top", MatchType: types.MatchTypeKeywords, Score: 20, KeywordLeader: true}
-	weak := &types.SearchResult{ID: "weak", MatchType: types.MatchTypeKeywords, Score: 10}
-
-	got := preserveStrongKeywordResults([]*types.SearchResult{top}, []*types.SearchResult{top, weak}, 3)
-	if len(got) != 1 {
-		t.Fatalf("weak keyword result should remain filtered, got %d results", len(got))
-	}
-}
-
-func TestPreserveStrongKeywordResultsReservesCapacityForEveryStrongMatch(t *testing.T) {
-	reranked := []*types.SearchResult{
-		{ID: "semantic-1", MatchType: types.MatchTypeEmbedding, Score: 0.9},
-		{ID: "semantic-2", MatchType: types.MatchTypeEmbedding, Score: 0.8},
-		{ID: "semantic-3", MatchType: types.MatchTypeEmbedding, Score: 0.7},
-	}
-	first := &types.SearchResult{ID: "keyword-1", MatchType: types.MatchTypeKeywords, Score: 20, KeywordLeader: true}
-	second := &types.SearchResult{ID: "keyword-2", MatchType: types.MatchTypeKeywords, Score: 19, KeywordLeader: true}
-
-	got := preserveStrongKeywordResults(reranked, []*types.SearchResult{first, second}, 3)
-	if len(got) != 3 {
-		t.Fatalf("expected 3 results, got %d", len(got))
-	}
-	if got[1].ID != first.ID || got[2].ID != second.ID {
-		t.Fatalf("expected both strong keyword matches to be retained, got %#v", got)
+func TestRerankKeywordLeaderCannotOverrideModelRejection(t *testing.T) {
+	for _, onlyKeyword := range []bool{false, true} {
+		t.Run(map[bool]string{false: "retain_semantic", true: "reject_all"}[onlyKeyword], func(t *testing.T) {
+			candidates := []*types.SearchResult{{ID: "keyword", Content: "unrelated lexical hit", Score: 0.001, KeywordLeader: true}}
+			scores := []rerank.RankResult{{Index: 0, RelevanceScore: 0.01}}
+			if !onlyKeyword {
+				candidates = append(candidates, &types.SearchResult{ID: "semantic", Content: "correct answer", Score: 0.9})
+				scores = append(scores, rerank.RankResult{Index: 1, RelevanceScore: 0.99})
+			}
+			plugin := &PluginRerank{modelService: fixedRerankModelService{model: fixedReranker{results: scores}}}
+			manage := &types.ChatManage{PipelineRequest: types.PipelineRequest{RerankTopK: 1, RerankThreshold: 0.5}, PipelineState: types.PipelineState{RewriteQuery: "query", SearchResult: candidates}}
+			err := plugin.OnEvent(context.Background(), types.CHUNK_RERANK, manage, func() *PluginError { return nil })
+			if onlyKeyword {
+				if err != ErrSearchNothing || len(manage.RerankResult) != 0 {
+					t.Fatalf("rejected leader restored: %v %+v", err, manage.RerankResult)
+				}
+			} else if err != nil || len(manage.RerankResult) != 1 || manage.RerankResult[0].ID != "semantic" {
+				t.Fatalf("semantic result displaced: %v %+v", err, manage.RerankResult)
+			}
+			if candidates[0].Score != 0.001 {
+				t.Fatal("keyword score was inflated")
+			}
+		})
 	}
 }

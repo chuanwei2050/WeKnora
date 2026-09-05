@@ -42,7 +42,7 @@ User question: %s
 
 Requirements:
 1. Only state conclusions supported by the retrieved evidence. If evidence is insufficient, say so plainly.
-2. Cite sources only by their user-facing document names when useful. Never expose internal identifiers, raw retrieval payloads, tool names, or system metadata.
+2. Cite sources only by their user-facing document names when useful. Never expose internal identifiers, raw retrieval payloads, tool names, system metadata, physical table names, or internally generated aliases. Convert needed structured results into natural language. If the user explicitly asks about SQL, table structure, or business column names, answer that request; otherwise do not expose SQL or describe the query process.
 3. Output only the user-facing final answer. Do not output analysis, plans, retrieval steps, self-talk, or a restatement of the user's intent.
 4. Keep the answer concise, structured, and in the same language as the user's question.
 

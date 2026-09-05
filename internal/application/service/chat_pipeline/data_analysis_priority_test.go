@@ -77,7 +77,7 @@ func TestRecordDataAnalysisFailureForbidsDefiniteFragmentCount(t *testing.T) {
 		t.Fatalf("failure evidence was not prioritized: %#v", chatManage.MergeResult)
 	}
 	content := chatManage.MergeResult[0].Content
-	if !strings.Contains(content, "不得根据检索片段") || !strings.Contains(content, "未能完成全表统计") {
+	if !strings.Contains(content, "不得根据检索片段") || !strings.Contains(content, "表格查询未完成") {
 		t.Fatalf("failure evidence does not constrain the final answer: %q", content)
 	}
 }

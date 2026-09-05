@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -73,9 +74,9 @@ Count documents by status:
   "sql": "SELECT parse_status, COUNT(*) as count FROM knowledges GROUP BY parse_status"
 }
 
-Find recent sessions:
+Find recent documents:
 {
-  "sql": "SELECT id, title, created_at FROM sessions ORDER BY created_at DESC LIMIT 5"
+  "sql": "SELECT id, title, created_at FROM knowledges ORDER BY created_at DESC LIMIT 5"
 }
 
 Get storage usage:
@@ -131,6 +132,8 @@ func NewDatabaseQueryToolWithGovernance(
 // Execute executes the database query tool
 func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Execute started")
+	ctx, cancel := context.WithTimeout(ctx, dataAnalysisQueryTimeout)
+	defer cancel()
 
 	tenantID := uint64(0)
 	if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
@@ -174,6 +177,7 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 	logger.Infof(ctx, "Executing secured SQL query - original: %s, secured: %s, tenant_id: %d",
 		input.SQL, securedSQL, tenantID)
 
+	securedSQL = fmt.Sprintf("SELECT * FROM (%s) AS bounded_query LIMIT %d", strings.TrimSuffix(strings.TrimSpace(securedSQL), ";"), dataAnalysisDefaultRows+1)
 	// Execute the query
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Executing query against database...")
 	rows, err := t.db.WithContext(ctx).Raw(securedSQL).Rows()
@@ -188,52 +192,9 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 
 	logger.Debugf(ctx, "[Tool][DatabaseQuery] Query executed successfully, processing rows...")
 
-	// Get column names
-	columns, err := rows.Columns()
+	columns, results, truncated, err := scanSQLRows(rows, dataAnalysisDefaultRows, dataAnalysisMaxResultBytes)
 	if err != nil {
-		return &types.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Failed to get columns: %v", err),
-		}, err
-	}
-
-	// Process results
-	results := make([]map[string]interface{}, 0)
-	for rows.Next() {
-		// Create a slice of interface{} to hold each column value
-		columnValues := make([]interface{}, len(columns))
-		columnPointers := make([]interface{}, len(columns))
-		for i := range columnValues {
-			columnPointers[i] = &columnValues[i]
-		}
-
-		// Scan the row
-		if err := rows.Scan(columnPointers...); err != nil {
-			return &types.ToolResult{
-				Success: false,
-				Error:   fmt.Sprintf("Failed to scan row: %v", err),
-			}, err
-		}
-
-		// Create a map for this row
-		rowMap := make(map[string]interface{})
-		for i, colName := range columns {
-			val := columnValues[i]
-			// Convert []byte to string for better readability
-			if b, ok := val.([]byte); ok {
-				rowMap[colName] = string(b)
-			} else {
-				rowMap[colName] = val
-			}
-		}
-		results = append(results, rowMap)
-	}
-
-	if err := rows.Err(); err != nil {
-		return &types.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Error iterating rows: %v", err),
-		}, err
+		return &types.ToolResult{Success: false, Error: err.Error()}, err
 	}
 
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Retrieved %d rows with %d columns", len(results), len(columns))
@@ -250,6 +211,12 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 	// Format output
 	logger.Debugf(ctx, "[Tool][DatabaseQuery] Formatting query results...")
 	output := t.formatQueryResults(columns, results)
+	if truncated {
+		if len(results) == 0 {
+			output = strings.ReplaceAll(output, "No matching records found.", "Matching records exceeded the output budget.")
+		}
+		output += "\n结果已截断，当前展示不是完整清单。请分页获取明细；仅在需要统计总数时使用聚合查询。\n"
+	}
 
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Execute completed successfully: %d rows returned", len(results))
 	return &types.ToolResult{
@@ -259,6 +226,7 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 			"columns":      columns,
 			"rows":         results,
 			"row_count":    len(results),
+			"truncated":    truncated,
 			"display_type": "database_query",
 		},
 	}, nil
@@ -266,14 +234,15 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 
 // validateAndSecureSQL validates the SQL query and injects tenant_id conditions
 func (t *DatabaseQueryTool) validateAndSecureSQL(ctx context.Context, sqlQuery string, tenantID uint64) (string, error) {
+	if tenantID == 0 {
+		return "", fmt.Errorf("tenant is required")
+	}
 	kbIDs := t.searchTargets.GetAllKnowledgeBaseIDs()
+	if t.searchTargets != nil && len(kbIDs) == 0 {
+		kbIDs = []string{noVisibleKnowledgeID}
+	}
 	var knowledgeIDs []string
 	var currentVersions map[string]string
-	for _, target := range t.searchTargets {
-		if target.Type == types.SearchTargetTypeKnowledge && len(target.KnowledgeIDs) > 0 {
-			knowledgeIDs = append(knowledgeIDs, target.KnowledgeIDs...)
-		}
-	}
 	if t.searchTargets != nil {
 		visibleIDs, versions, err := t.visibleKnowledgeVersions(ctx)
 		if err != nil {
@@ -328,13 +297,46 @@ func (t *DatabaseQueryTool) visibleKnowledgeVersions(ctx context.Context) ([]str
 			if target == nil || target.KnowledgeBaseID == "" || target.TenantID == 0 {
 				continue
 			}
-			conditions = append(conditions, "(knowledge_base_id = ? AND tenant_id = ?)")
+			condition := "(knowledge_base_id = ? AND tenant_id = ?"
 			args = append(args, target.KnowledgeBaseID, target.TenantID)
+			if target.Type == types.SearchTargetTypeKnowledge && target.KnowledgeIDs != nil {
+				if len(target.KnowledgeIDs) == 0 {
+					condition += " AND 1 = 0"
+				} else {
+					condition += " AND id IN ?"
+					args = append(args, target.KnowledgeIDs)
+				}
+			}
+			if target.TagIDs != nil {
+				if len(target.TagIDs) == 0 {
+					condition += " AND 1 = 0"
+				} else {
+					condition += " AND tag_id IN ?"
+					args = append(args, target.TagIDs)
+				}
+			}
+			conditions = append(conditions, condition+")")
 		}
 		if len(conditions) == 0 {
 			return []string{noVisibleKnowledgeID}, map[string]string{noVisibleKnowledgeID: ""}, nil
 		}
 		query = query.Where("("+strings.Join(conditions, " OR ")+")", args...)
+	}
+	// Keep visibility checks in one database round-trip instead of fetching a
+	// governance record separately for every document.
+	query = query.Where("coalesce(pending_version_id, '') = ''")
+	if t.governanceRepo == nil {
+		query = query.Where("coalesce(current_version_id, '') = ''")
+	} else {
+		now := time.Now().UTC()
+		query = query.Where(`((coalesce(current_version_id, '') = '' AND NOT EXISTS
+   (SELECT 1 FROM knowledge_versions v WHERE v.knowledge_id = knowledges.id AND v.tenant_id = knowledges.tenant_id))
+   OR EXISTS (SELECT 1 FROM knowledge_versions v WHERE v.id = knowledges.current_version_id
+   AND v.knowledge_id = knowledges.id AND v.tenant_id = knowledges.tenant_id AND v.status = ?
+   AND (v.effective_at IS NULL OR v.effective_at <= ?) AND (v.expires_at IS NULL OR v.expires_at > ?)))`, types.KnowledgeVersionActive, now, now)
+	}
+	if len(t.searchTargets) == 0 {
+		return []string{noVisibleKnowledgeID}, map[string]string{noVisibleKnowledgeID: ""}, nil
 	}
 	if err := query.Find(&rows).Error; err != nil {
 		return nil, nil, fmt.Errorf("load authorized knowledge scope: %w", err)
@@ -343,7 +345,7 @@ func (t *DatabaseQueryTool) visibleKnowledgeVersions(ctx context.Context) ([]str
 	currentVersions := make(map[string]string, len(rows))
 	for _, row := range rows {
 		knowledge := &types.Knowledge{ID: row.ID, TenantID: row.TenantID, KnowledgeBaseID: row.KnowledgeBaseID, CurrentVersionID: row.CurrentVersionID, PendingVersionID: row.PendingVersionID}
-		if agentKnowledgeVisible(ctx, knowledge, t.searchTargets, t.governanceRepo) {
+		if knowledgeInAgentSearchScope(knowledge, t.searchTargets) {
 			visible = append(visible, row.ID)
 			currentVersions[row.ID] = row.CurrentVersionID
 		}
@@ -359,19 +361,20 @@ func (t *DatabaseQueryTool) formatQueryResults(
 	columns []string,
 	results []map[string]interface{},
 ) string {
-	output := "=== Query Results ===\n\n"
-	output += fmt.Sprintf("Returned %d rows\n\n", len(results))
+	var output strings.Builder
+	output.WriteString("=== Query Results ===\n\n")
+	output.WriteString(fmt.Sprintf("Returned %d rows\n\n", len(results)))
 
 	if len(results) == 0 {
-		output += "No matching records found.\n"
-		return output
+		output.WriteString("No matching records found.\n")
+		return output.String()
 	}
 
-	output += "=== Data Details ===\n\n"
+	output.WriteString("=== Data Details ===\n\n")
 
 	// Format each row
 	for i, row := range results {
-		output += fmt.Sprintf("--- Record #%d ---\n", i+1)
+		output.WriteString(fmt.Sprintf("--- Record #%d ---\n", i+1))
 		for _, col := range columns {
 			value := row[col]
 			// Format the value
@@ -392,15 +395,15 @@ func (t *DatabaseQueryTool) formatQueryResults(
 				formattedValue = fmt.Sprintf("%v", value)
 			}
 
-			output += fmt.Sprintf("  %s: %s\n", col, formattedValue)
+			output.WriteString(fmt.Sprintf("  %s: %s\n", col, formattedValue))
 		}
-		output += "\n"
+		output.WriteString("\n")
 	}
 
 	// Add summary statistics if applicable
 	if len(results) > 10 {
-		output += fmt.Sprintf("Note: Showing %d records out of %d total. Consider using a LIMIT clause to restrict the result count.\n", len(results), len(results))
+		output.WriteString(fmt.Sprintf("Showing %d returned records. Check the truncation flag before treating these as complete.\n", len(results)))
 	}
 
-	return output
+	return output.String()
 }

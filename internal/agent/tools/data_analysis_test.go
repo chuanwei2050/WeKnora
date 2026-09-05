@@ -29,13 +29,24 @@ func TestTableNameIsIsolatedByKnowledgeVersion(t *testing.T) {
 }
 
 func TestDataAnalysisAuthorizationDistinguishesAgentAndInternalCallers(t *testing.T) {
-	agent := AgentDataAnalysisAuthorization(types.SearchTargets{}, nil)
+	emptyAgent := AgentDataAnalysisAuthorization(nil, nil)
+	agent := AgentDataAnalysisAuthorization(types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb"}}, nil)
 	internal := InternalDataAnalysisAuthorization()
+	if emptyAgent.mode != dataAnalysisAuthorizationInvalid {
+		t.Fatalf("empty agent scope must fail closed, got mode: %v", emptyAgent.mode)
+	}
 	if agent.mode != dataAnalysisAuthorizationAgentScope {
 		t.Fatalf("unexpected agent authorization mode: %v", agent.mode)
 	}
 	if internal.mode != dataAnalysisAuthorizationInternal {
 		t.Fatalf("unexpected internal authorization mode: %v", internal.mode)
+	}
+}
+
+func TestAnalysisProfileSourceIsBounded(t *testing.T) {
+	got := analysisProfileSource(`records"archive`)
+	if !strings.Contains(got, `FROM "records""archive" LIMIT 10000`) {
+		t.Fatalf("profile source is not safely bounded: %s", got)
 	}
 }
 
@@ -64,10 +75,12 @@ func TestTableNameFitsSQLParserIdentifierLimit(t *testing.T) {
 
 func TestReconcileSQLTableUsesAuthorizedSessionTable(t *testing.T) {
 	schema := &TableSchema{TableName: "k_authorized_123"}
-	got := reconcileSQLTableWithSchema(`SELECT * FROM "k_hallucinated-123" JOIN other_table ON 1=1`, schema)
-	want := `SELECT * FROM "k_authorized_123" JOIN "k_authorized_123" ON 1=1`
-	if got != want {
-		t.Fatalf("unexpected reconciled SQL: %s", got)
+	got, _, err := bindAnalysisSQL(`SELECT * FROM data`, schema, "")
+	if err != nil || !strings.Contains(got, "k_authorized_123") {
+		t.Fatalf("bind: %s %v", got, err)
+	}
+	if _, _, err := bindAnalysisSQL(`SELECT * FROM other_table`, schema, ""); err == nil {
+		t.Fatal("unrelated table accepted")
 	}
 }
 

@@ -24,3 +24,15 @@ func TestSelectDataAnalysisTargetUsesRankingForKnowledgeBaseScope(t *testing.T) 
 		t.Fatalf("expected highest-ranked table, got %#v", got)
 	}
 }
+
+func TestExplicitDataAnalysisTargetDoesNotOverrideNonTableIntent(t *testing.T) {
+	no := false
+	table := &types.SearchResult{KnowledgeID: "selected", KnowledgeFilename: "records.xlsx"}
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{KnowledgeIDs: []string{"selected"}},
+		PipelineState:   types.PipelineState{NeedsTableQuery: &no, SearchResult: []*types.SearchResult{table}},
+	}
+	if shouldAttemptDataAnalysis(manage) {
+		t.Fatal("explicit file scope overrode the classified non-table intent")
+	}
+}

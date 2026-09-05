@@ -8,6 +8,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestGenericRequestPreservesSamplingOptions(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		for _, temperature := range []float64{0, 0.75} {
+			opts := &ChatOptions{Temperature: temperature}
+			req := newTestRemoteChat(t).BuildChatCompletionRequest(nil, opts, streaming)
+			custom, raw := genericRequestCustomizer(&req, opts, streaming)
+			require.True(t, raw)
+			payload, err := json.Marshal(custom)
+			require.NoError(t, err)
+			var decoded map[string]any
+			require.NoError(t, json.Unmarshal(payload, &decoded))
+			require.Contains(t, decoded, "temperature")
+			require.Equal(t, temperature, decoded["temperature"])
+			require.Contains(t, decoded, "chat_template_kwargs")
+		}
+	}
+	req := newTestRemoteChat(t).BuildChatCompletionRequest(nil, nil, false)
+	custom, _ := genericRequestCustomizer(&req, nil, false)
+	payload, err := json.Marshal(custom)
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(payload, &decoded))
+	require.NotContains(t, decoded, "temperature")
+}
+
 func TestSiliconFlowQwen3RequestDisablesThinking(t *testing.T) {
 	spec := findProviderSpec(provider.ProviderSiliconFlow, "Qwen/Qwen3.6-27B")
 	require.NotNil(t, spec)

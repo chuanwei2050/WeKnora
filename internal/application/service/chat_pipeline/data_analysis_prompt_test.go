@@ -100,7 +100,7 @@ func TestDataAnalysisPromptRequiresSchemaDrivenSemanticFiltering(t *testing.T) {
 
 func TestDataAnalysisPromptDistinguishesSkipFromFailedSQLGeneration(t *testing.T) {
 	prompt := dataAnalysisPrompt("query", "knowledge-id", "people.xlsx", "schema", "sample")
-	for _, requirement := range []string{`action to "execute"`, `action to "skip"`, "leave the sql field empty"} {
+	for _, requirement := range []string{`action to "execute"`, `action to "skip"`, `action to "clarify"`, "leave the sql field empty", "detail retrieval"} {
 		if !strings.Contains(prompt, requirement) {
 			t.Fatalf("expected prompt to contain %q", requirement)
 		}

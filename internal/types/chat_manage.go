@@ -114,9 +114,11 @@ func (i QueryIntent) NeedsKBRetrieval() bool {
 // PipelineState holds mutable intermediate data that plugins read and write
 // as the pipeline progresses.
 type PipelineState struct {
-	RewriteQuery string      `json:"rewrite_query,omitempty"`
-	Intent       QueryIntent `json:"intent,omitempty"`
-	History      []*History  `json:"history,omitempty"`
+	// Nil means classification is unavailable/uncertain; retain the schema-based decision.
+	NeedsTableQuery *bool       `json:"needs_table_query,omitempty"`
+	RewriteQuery    string      `json:"rewrite_query,omitempty"`
+	Intent          QueryIntent `json:"intent,omitempty"`
+	History         []*History  `json:"history,omitempty"`
 
 	SearchResult         []*SearchResult    `json:"-"`
 	RerankResult         []*SearchResult    `json:"-"`
@@ -273,6 +275,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			VerifiedAnswer:           c.VerifiedAnswer,
 		},
 		PipelineState: PipelineState{
+			NeedsTableQuery:      c.NeedsTableQuery,
 			RewriteQuery:         c.RewriteQuery,
 			Intent:               c.Intent,
 			ImageDescription:     c.ImageDescription,

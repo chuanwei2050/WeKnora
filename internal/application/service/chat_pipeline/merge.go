@@ -34,7 +34,7 @@ func (p *PluginMerge) ActivationEvents() []types.EventType {
 // The merge pipeline is:
 //  1. Select input (rerank or search fallback)
 //  2. Deduplicate by ID and content signature
-//  3. Inject relevant history references
+//  3. History candidates have already been governed and reranked
 //  4. Resolve parent chunks (child → parent content)
 //  5. Group by knowledge source + chunk type, merge overlapping ranges
 //  6. Populate FAQ answers
@@ -58,9 +58,6 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 
 	// Step 2: Initial dedup
 	searchResult = p.dedup(ctx, "dedup_summary", searchResult)
-
-	// Step 3: Inject history references
-	searchResult = p.injectHistoryResults(ctx, chatManage, searchResult)
 
 	pipelineInfo(ctx, "Merge", "candidate_ready", map[string]interface{}{
 		"chunk_cnt": len(searchResult),
@@ -114,6 +111,12 @@ func partitionDirectLoadResults(results []*types.SearchResult) ([]*types.SearchR
 // selectInputResults picks rerank results if available, falling back to search
 // results sorted by score descending.
 func (p *PluginMerge) selectInputResults(ctx context.Context, chatManage *types.ChatManage) []*types.SearchResult {
+	if chatManage.RerankOutcome == types.RerankOutcomeNoRelevantResult {
+		if target := selectDataAnalysisTarget(chatManage.SearchResult, chatManage.KnowledgeIDs, chatManage.SearchTargets); shouldAttemptDataAnalysis(chatManage) && target != nil {
+			return []*types.SearchResult{target}
+		}
+		return nil
+	}
 	if len(chatManage.RerankResult) > 0 {
 		return chatManage.RerankResult
 	}
@@ -138,25 +141,6 @@ func (p *PluginMerge) dedup(ctx context.Context, label string, results []*types.
 		})
 	}
 	return out
-}
-
-// injectHistoryResults appends relevant history references to the current results
-// and deduplicates the combined set.
-func (p *PluginMerge) injectHistoryResults(
-	ctx context.Context,
-	chatManage *types.ChatManage,
-	current []*types.SearchResult,
-) []*types.SearchResult {
-	historyResults := filterHistoryResults(ctx, chatManage, current)
-	if len(historyResults) == 0 {
-		return current
-	}
-	pipelineInfo(ctx, "Merge", "history_inject", map[string]interface{}{
-		"session_id":   chatManage.SessionID,
-		"history_hits": len(historyResults),
-	})
-	combined := append(current, historyResults...)
-	return removeDuplicateResults(combined)
 }
 
 // groupAndMergeOverlapping groups chunks by KnowledgeID + ChunkType, then merges
