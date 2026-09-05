@@ -168,3 +168,69 @@ func TestDataAnalysisEvidenceUsesOnlyTargetKnowledgeAndCapsLength(t *testing.T) 
 		t.Fatalf("unexpected evidence %q", got)
 	}
 }
+
+func TestDataAnalysisGroundingEvidenceIncludesRelevantRecalledValue(t *testing.T) {
+	reranked := []*types.SearchResult{
+		{ID: "accepted", KnowledgeID: "target", Content: "项目人员基础信息"},
+	}
+	recalled := []*types.SearchResult{
+		{ID: "rejected", KnowledgeID: "target", Content: "张三持有项目协调师证书"},
+		{ID: "other-table", KnowledgeID: "other", Content: "张三持有项目协调工程师证书"},
+	}
+
+	evidence := dataAnalysisGroundingEvidence(
+		reranked,
+		recalled,
+		"target",
+		"持有项目协调工程师证书的人员",
+		1000,
+	)
+	if !strings.Contains(evidence, "项目协调师") {
+		t.Fatalf("recalled value variant was omitted from SQL grounding: %q", evidence)
+	}
+	if strings.Contains(evidence, "other-table") || strings.Count(evidence, "张三") != 1 {
+		t.Fatalf("grounding crossed table scope: %q", evidence)
+	}
+}
+
+func TestDataAnalysisGroundingEvidenceKeepsRerankedEvidencePrimaryAndDeduplicatesContent(t *testing.T) {
+	reranked := []*types.SearchResult{
+		{ID: "accepted", KnowledgeID: "target", Content: "已通过重排的主要证据"},
+	}
+	recalled := []*types.SearchResult{
+		{ID: "high-overlap", KnowledgeID: "target", Content: "项目协调工程师 项目协调工程师"},
+		{ID: "duplicate-a", KnowledgeID: "target", Content: "重复的召回证据"},
+		{ID: "duplicate-b", KnowledgeID: "target", Content: "重复的召回证据"},
+	}
+
+	evidence := dataAnalysisGroundingEvidence(
+		reranked,
+		recalled,
+		"target",
+		"项目协调工程师",
+		1000,
+	)
+	if !strings.HasPrefix(evidence, "已通过重排的主要证据") {
+		t.Fatalf("reranked evidence did not remain primary: %q", evidence)
+	}
+	if strings.Count(evidence, "重复的召回证据") != 1 {
+		t.Fatalf("duplicate recalled content was not removed: %q", evidence)
+	}
+}
+
+func TestCloneDataAnalysisManageKeepsRerankedTargetsAndRecallForGrounding(t *testing.T) {
+	accepted := &types.SearchResult{ID: "accepted", KnowledgeID: "target"}
+	rejected := &types.SearchResult{ID: "rejected", KnowledgeID: "target"}
+	clone := cloneDataAnalysisManage(
+		&types.ChatManage{},
+		[]*types.SearchResult{accepted},
+		[]*types.SearchResult{accepted, rejected},
+	)
+
+	if len(clone.MergeResult) != 1 || clone.MergeResult[0].ID != "accepted" {
+		t.Fatalf("table selection candidates changed: %#v", clone.MergeResult)
+	}
+	if len(clone.SearchResult) != 2 || clone.SearchResult[1].ID != "rejected" {
+		t.Fatalf("raw recall was not retained for SQL grounding: %#v", clone.SearchResult)
+	}
+}

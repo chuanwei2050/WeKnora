@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -112,7 +114,11 @@ func (p *PluginDataAnalysis) onRerank(ctx context.Context, chatManage *types.Cha
 		return rerankErr
 	}
 
-	analysisManage := cloneDataAnalysisManage(chatManage, dataAnalysisCandidatesAfterRerank(chatManage))
+	analysisManage := cloneDataAnalysisManage(
+		chatManage,
+		dataAnalysisCandidatesAfterRerank(chatManage),
+		chatManage.SearchResult,
+	)
 	analysisErr := p.analyze(ctx, analysisManage, func() *PluginError { return nil })
 	results := make([]*types.SearchResult, 0)
 	for _, result := range analysisManage.MergeResult {
@@ -135,11 +141,15 @@ func dataAnalysisCandidatesAfterRerank(chatManage *types.ChatManage) []*types.Se
 	return chatManage.SearchResult
 }
 
-func cloneDataAnalysisManage(source *types.ChatManage, candidates []*types.SearchResult) *types.ChatManage {
+func cloneDataAnalysisManage(
+	source *types.ChatManage,
+	candidates []*types.SearchResult,
+	recalled []*types.SearchResult,
+) *types.ChatManage {
 	clone := *source
-	clone.SearchResult = cloneDataAnalysisSearchResults(candidates)
+	clone.SearchResult = cloneDataAnalysisSearchResults(recalled)
 	clone.RerankResult = nil
-	clone.MergeResult = append([]*types.SearchResult(nil), clone.SearchResult...)
+	clone.MergeResult = cloneDataAnalysisSearchResults(candidates)
 	clone.DataAnalysisResult = nil
 	clone.DataAnalysisAttempted = false
 	return &clone
@@ -241,7 +251,13 @@ func (p *PluginDataAnalysis) analyze(
 				loads <- loadOutcome{index: index, tool: tool, err: fmt.Errorf("无法读取表格信息: %w", err)}
 				return
 			}
-			evidence := dataAnalysisEvidence(retrievedResults, knowledge.ID, dataAnalysisEvidenceCharsPerTable)
+			evidence := dataAnalysisGroundingEvidence(
+				retrievedResults,
+				chatManage.SearchResult,
+				knowledge.ID,
+				chatManage.RewriteQuery,
+				dataAnalysisEvidenceCharsPerTable,
+			)
 			type tableLoadResult struct {
 				schema *tools.TableSchema
 				err    error
@@ -610,6 +626,72 @@ func dataAnalysisEvidence(results []*types.SearchResult, knowledgeID string, max
 		written += len(contentRunes)
 	}
 	return builder.String()
+}
+
+// dataAnalysisGroundingEvidence lets SQL planning recognize values that were
+// retrieved from the selected table even when a reranker rejected the larger
+// passage. These samples only guide SQL construction; they are not added to
+// the evidence used by the answer model, and the generated query still has to
+// pass validation and execute against the authorized table.
+func dataAnalysisGroundingEvidence(
+	reranked []*types.SearchResult,
+	recalled []*types.SearchResult,
+	knowledgeID string,
+	query string,
+	maxChars int,
+) string {
+	type candidate struct {
+		result   *types.SearchResult
+		overlap  float64
+		accepted bool
+		order    int
+	}
+
+	seen := make(map[string]struct{}, len(reranked)+len(recalled))
+	candidates := make([]candidate, 0, len(reranked)+len(recalled))
+	appendCandidates := func(results []*types.SearchResult, accepted bool) {
+		for _, result := range results {
+			if result == nil || result.KnowledgeID != knowledgeID {
+				continue
+			}
+			content := result.Content
+			if strings.TrimSpace(content) == "" {
+				content = result.MatchedContent
+			}
+			signature := searchutil.BuildContentSignature(content)
+			if signature == "" {
+				continue
+			}
+			if _, ok := seen[signature]; ok {
+				continue
+			}
+			seen[signature] = struct{}{}
+			candidates = append(candidates, candidate{
+				result: result, overlap: searchutil.ContentOverlapRatio(query, content),
+				accepted: accepted, order: len(candidates),
+			})
+		}
+	}
+	appendCandidates(reranked, true)
+	appendCandidates(recalled, false)
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].accepted != candidates[j].accepted {
+			return candidates[i].accepted
+		}
+		if candidates[i].overlap != candidates[j].overlap {
+			return candidates[i].overlap > candidates[j].overlap
+		}
+		return candidates[i].order < candidates[j].order
+	})
+
+	ordered := make([]*types.SearchResult, 0, len(candidates))
+	for _, item := range candidates {
+		copy := *item.result
+		copy.MatchedContent = ""
+		ordered = append(ordered, &copy)
+	}
+	return dataAnalysisEvidence(ordered, knowledgeID, maxChars)
 }
 
 func recordDataAnalysisFailure(chatManage *types.ChatManage, target *types.SearchResult, reason string) {
