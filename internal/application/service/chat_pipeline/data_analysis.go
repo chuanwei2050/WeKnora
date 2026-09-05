@@ -19,11 +19,21 @@ import (
 )
 
 const (
-	dataAnalysisMaxRows     = 1000
-	dataAnalysisTimeout     = 10 * time.Second
-	dataAnalysisMaxAttempts = 3
-	defaultLLMCallTimeout   = 120 * time.Second
+	dataAnalysisMaxRows               = 1000
+	dataAnalysisMaxTables             = 3
+	dataAnalysisEvidenceCharsPerTable = 3000
+	dataAnalysisTimeout               = 10 * time.Second
+	dataAnalysisMaxAttempts           = 3
+	defaultLLMCallTimeout             = 120 * time.Second
 )
+
+type dataAnalysisDataset struct {
+	target    *types.SearchResult
+	knowledge *types.Knowledge
+	schema    *tools.TableSchema
+	evidence  string
+	tool      *tools.DataAnalysisTool
+}
 
 type PluginDataAnalysis struct {
 	modelService         interfaces.ModelService
@@ -65,12 +75,89 @@ func NewPluginDataAnalysis(
 }
 
 func (p *PluginDataAnalysis) ActivationEvents() []types.EventType {
-	return []types.EventType{types.DATA_ANALYSIS}
+	return []types.EventType{types.CHUNK_RERANK, types.DATA_ANALYSIS}
 }
 
 func (p *PluginDataAnalysis) OnEvent(
 	ctx context.Context,
 	eventType types.EventType,
+	chatManage *types.ChatManage,
+	next func() *PluginError,
+) *PluginError {
+	if eventType == types.CHUNK_RERANK {
+		return p.onRerank(ctx, chatManage, next)
+	}
+	if chatManage.DataAnalysisAttempted {
+		if shouldAttemptDataAnalysis(chatManage) {
+			chatManage.MergeResult = filterOutTableChunks(chatManage.MergeResult)
+			chatManage.MergeResult = append(chatManage.MergeResult, chatManage.DataAnalysisResult...)
+		}
+		return next()
+	}
+	return p.analyze(ctx, chatManage, next)
+}
+
+func (p *PluginDataAnalysis) onRerank(ctx context.Context, chatManage *types.ChatManage, next func() *PluginError) *PluginError {
+	if !chatManage.NeedsRetrieval() || !shouldAttemptDataAnalysis(chatManage) {
+		return next()
+	}
+	rerankErr := next()
+	if rerankErr != nil {
+		return rerankErr
+	}
+
+	analysisManage := cloneDataAnalysisManage(chatManage, dataAnalysisCandidatesAfterRerank(chatManage))
+	analysisErr := p.analyze(ctx, analysisManage, func() *PluginError { return nil })
+	results := make([]*types.SearchResult, 0)
+	for _, result := range analysisManage.MergeResult {
+		if result != nil && result.MatchType == types.MatchTypeDataAnalysis {
+			results = append(results, result)
+		}
+	}
+	chatManage.DataAnalysisAttempted = true
+	chatManage.DataAnalysisResult = results
+	return analysisErr
+}
+
+func dataAnalysisCandidatesAfterRerank(chatManage *types.ChatManage) []*types.SearchResult {
+	if len(chatManage.RerankScoredResult) > 0 {
+		return chatManage.RerankScoredResult
+	}
+	if len(chatManage.RerankResult) > 0 {
+		return chatManage.RerankResult
+	}
+	return chatManage.SearchResult
+}
+
+func cloneDataAnalysisManage(source *types.ChatManage, candidates []*types.SearchResult) *types.ChatManage {
+	clone := *source
+	clone.SearchResult = cloneDataAnalysisSearchResults(candidates)
+	clone.RerankResult = nil
+	clone.MergeResult = append([]*types.SearchResult(nil), clone.SearchResult...)
+	clone.DataAnalysisResult = nil
+	clone.DataAnalysisAttempted = false
+	return &clone
+}
+
+func cloneDataAnalysisSearchResults(source []*types.SearchResult) []*types.SearchResult {
+	cloned := make([]*types.SearchResult, 0, len(source))
+	for _, result := range source {
+		if result == nil {
+			continue
+		}
+		item := *result
+		item.SubChunkID = append([]string(nil), result.SubChunkID...)
+		item.Metadata = make(map[string]string, len(result.Metadata))
+		for key, value := range result.Metadata {
+			item.Metadata[key] = value
+		}
+		cloned = append(cloned, &item)
+	}
+	return cloned
+}
+
+func (p *PluginDataAnalysis) analyze(
+	ctx context.Context,
 	chatManage *types.ChatManage,
 	next func() *PluginError,
 ) *PluginError {
@@ -84,171 +171,199 @@ func (p *PluginDataAnalysis) OnEvent(
 		}
 		return next()
 	}
-	// Keep the complete retrieved evidence for the selected table before table
-	// metadata chunks are removed from the final answer context.
+
 	retrievedResults := chatManage.MergeResult
-	targetFile := selectDataAnalysisTarget(retrievedResults, chatManage.KnowledgeIDs, chatManage.SearchTargets)
-
-	// Filter out table column and table summary chunks from MergeResult
+	targets := selectDataAnalysisTargets(retrievedResults, chatManage.KnowledgeIDs, chatManage.SearchTargets, dataAnalysisMaxTables)
 	chatManage.MergeResult = filterOutTableChunks(chatManage.MergeResult)
-
-	if targetFile == nil {
+	if len(targets) == 0 {
 		return next()
 	}
+	for i, target := range targets {
+		pipelineInfo(ctx, "DataAnalysis", "target_selected", map[string]interface{}{
+			"rank": i + 1, "knowledge_id": target.KnowledgeID, "score": target.Score, "chunk_type": target.ChunkType,
+		})
+	}
+
 	stageID, stageStarted := emitPipelineStageStart(ctx, chatManage, "data_analysis", "分析表格")
-	stageSuccess := false
-	finishStage := func() {
-		status := "failed"
-		output := "表格分析未完成"
-		if stageSuccess {
-			status = "completed"
-			output = "表格分析完成"
+	finishStage := func(success bool, output string, data map[string]interface{}) {
+		if data == nil {
+			data = make(map[string]interface{})
 		}
-		emitPipelineStageResult(ctx, chatManage, stageID, "data_analysis", output, stageStarted, stageSuccess, map[string]interface{}{"status": status})
+		if success {
+			data["status"] = "completed"
+		} else {
+			data["status"] = "failed"
+		}
+		emitPipelineStageResult(ctx, chatManage, stageID, "data_analysis", output, stageStarted, success, data)
 	}
 
-	// Analyze only the highest-ranked retrieved table to keep the synchronous
-	// routing cost bounded to one model call.
-	knowledge, err := p.knowledgeService.GetKnowledgeByID(ctx, targetFile.KnowledgeID)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get knowledge %s: %v", targetFile.KnowledgeID, err)
-		finishStage()
-		return next()
-	}
-
-	tool := tools.NewDataAnalysisTool(
-		p.knowledgeBaseService,
-		p.knowledgeService,
-		p.tenantService,
-		p.fileService,
-		p.db,
-		chatManage.SessionID,
-		tools.AgentDataAnalysisAuthorization(chatManage.SearchTargets, p.governanceRepo),
-	)
+	authorization := tools.AgentDataAnalysisAuthorization(chatManage.SearchTargets, p.governanceRepo)
+	var datasetTools []*tools.DataAnalysisTool
 	defer func() {
 		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), dataAnalysisTimeout)
 		defer cancelCleanup()
-		tool.Cleanup(cleanupCtx)
+		for _, tool := range datasetTools {
+			tool.Cleanup(cleanupCtx)
+		}
 	}()
-	schema, err := tool.LoadFromKnowledge(ctx, knowledge)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get data schema: %v", err)
-		recordDataAnalysisFailure(chatManage, targetFile, "无法加载原始表格")
-		finishStage()
+
+	datasets := make([]dataAnalysisDataset, 0, len(targets))
+	results := make([]*types.SearchResult, 0, len(targets))
+	type loadOutcome struct {
+		index   int
+		dataset *dataAnalysisDataset
+		tool    *tools.DataAnalysisTool
+		err     error
+	}
+	loads := make(chan loadOutcome, len(targets))
+	for i, target := range targets {
+		go func(index int, target *types.SearchResult) {
+			tool := tools.NewDataAnalysisTool(p.knowledgeBaseService, p.knowledgeService, p.tenantService, p.fileService, p.db, chatManage.SessionID, authorization)
+			knowledge, err := p.knowledgeService.GetKnowledgeByID(ctx, target.KnowledgeID)
+			if err != nil {
+				loads <- loadOutcome{index: index, tool: tool, err: fmt.Errorf("无法读取表格信息: %w", err)}
+				return
+			}
+			schema, err := tool.LoadFromKnowledge(ctx, knowledge)
+			if err != nil {
+				loads <- loadOutcome{index: index, tool: tool, err: fmt.Errorf("无法加载原始表格: %w", err)}
+				return
+			}
+			loads <- loadOutcome{index: index, tool: tool, dataset: &dataAnalysisDataset{
+				target: target, knowledge: knowledge, schema: schema,
+				evidence: dataAnalysisEvidence(retrievedResults, knowledge.ID, dataAnalysisEvidenceCharsPerTable),
+				tool:     tool,
+			}}
+		}(i, target)
+	}
+	loaded := make([]loadOutcome, len(targets))
+	for range targets {
+		outcome := <-loads
+		loaded[outcome.index] = outcome
+	}
+	for i, outcome := range loaded {
+		datasetTools = append(datasetTools, outcome.tool)
+		if outcome.err != nil {
+			logger.Errorf(ctx, "Failed to load knowledge %s: %v", targets[i].KnowledgeID, outcome.err)
+			reason := strings.SplitN(outcome.err.Error(), ":", 2)[0]
+			results = append(results, dataAnalysisFailureResult(targets[i], reason))
+			continue
+		}
+		datasets = append(datasets, *outcome.dataset)
+	}
+	if len(datasets) == 0 {
+		chatManage.MergeResult = append(chatManage.MergeResult, results...)
+		finishStage(false, "表格分析未完成", map[string]interface{}{"table_count": len(targets), "success_count": 0})
 		return next()
 	}
 
-	// Ask LLM to generate SQL for data analysis
 	chatModel, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
 	if err != nil {
-		finishStage()
+		finishStage(false, "表格分析未完成", map[string]interface{}{"table_count": len(targets), "success_count": 0})
 		return ErrGetChatModel.WithError(err)
 	}
 	pipelineInfo(ctx, "DataAnalysis", "model_selected", map[string]interface{}{
-		"session_id": chatManage.SessionID,
-		"model_role": "chat",
+		"session_id":  chatManage.SessionID,
+		"model_role":  "chat",
+		"table_count": len(datasets),
 	})
 
-	// Use utils.GenerateSchema to generate format schema for DataAnalysisInput
-	formatSchema := utils.GenerateSchema[tools.DataAnalysisInput]()
-
-	evidence := dataAnalysisEvidence(retrievedResults, knowledge.ID, 3000)
-	datasetName := targetFile.KnowledgeFilename
-	basePrompt := dataAnalysisPrompt(chatManage.Query, knowledge.ID, datasetName, dataAnalysisSchemaForPrompt(schema), evidence)
-	thinking := false
-	var toolResult *types.ToolResult
-	var lastErr error
-	analysisAttempted := false
 	analysisCtx, cancelAnalysis := context.WithTimeout(ctx, p.llmCallTimeout())
 	defer cancelAnalysis()
-	for attempt := 1; attempt <= dataAnalysisMaxAttempts; attempt++ {
-		attemptPrompt := basePrompt
-		if lastErr != nil {
-			attemptPrompt += fmt.Sprintf("\n\nThe previous SQL attempt failed validation or execution: %s\nRegenerate it using only the authoritative table and columns above.", lastErr)
-		}
-		generationCtx, cancelGeneration := context.WithCancel(analysisCtx)
-		response, err := chatModel.Chat(generationCtx, []chat.Message{{Role: "user", Content: attemptPrompt}}, &chat.ChatOptions{
-			Temperature: 0,
-			Thinking:    &thinking,
-			Format:      formatSchema,
-		})
-		cancelGeneration()
-		if err != nil {
-			lastErr = err
-			logger.Errorf(ctx, "Failed to generate analysis response (attempt %d/%d): %v", attempt, dataAnalysisMaxAttempts, err)
-			break
-		}
-
-		toolInput, err := bindDataAnalysisInput(response.Content, knowledge.ID)
-		if err != nil {
-			lastErr = err
-			logger.Errorf(ctx, "Failed to parse analysis response (attempt %d/%d): %v", attempt, dataAnalysisMaxAttempts, err)
-			continue
-		}
-		var analysisInput tools.DataAnalysisInput
-		if err := json.Unmarshal(toolInput, &analysisInput); err != nil {
-			lastErr = err
-			logger.Errorf(ctx, "Failed to decode analysis input (attempt %d/%d): %v", attempt, dataAnalysisMaxAttempts, err)
-			continue
-		}
-		switch analysisInput.Action {
-		case tools.DataAnalysisActionClarify:
-			recordDataAnalysisFailure(chatManage, targetFile, "需要补充查询范围或字段含义")
-			finishStage()
-			return next()
-		case tools.DataAnalysisActionSkip:
-			if strings.TrimSpace(analysisInput.Sql) != "" {
-				lastErr = fmt.Errorf("model returned SQL while requesting to skip table analysis")
-				continue
-			}
-			if !canSkipDataAnalysis(lastErr, analysisAttempted) {
-				lastErr = fmt.Errorf("model cannot skip table analysis after a previous attempt failed")
-				continue
-			}
-			emitPipelineStageResult(ctx, chatManage, stageID, "data_analysis", "无需表格分析", stageStarted, true, map[string]interface{}{"status": "skipped"})
-			return next()
-		case tools.DataAnalysisActionExecute:
-			analysisAttempted = true
-		default:
-			lastErr = fmt.Errorf("model returned an invalid data analysis action %q", analysisInput.Action)
-			continue
-		}
-		if strings.TrimSpace(analysisInput.Sql) == "" {
-			lastErr = fmt.Errorf("model returned an empty SQL query for a requested table analysis")
-			logger.Errorf(ctx, "Empty analysis SQL (attempt %d/%d)", attempt, dataAnalysisMaxAttempts)
-			continue
-		}
-		executionCtx, cancel := context.WithTimeout(analysisCtx, dataAnalysisTimeout)
-		toolResult, err = tool.Execute(executionCtx, toolInput)
-		cancel()
-		if err == nil {
-			lastErr = nil
-			break
-		}
-		lastErr = err
-		logger.Errorf(ctx, "Failed to execute SQL (attempt %d/%d): %v", attempt, dataAnalysisMaxAttempts, err)
+	type datasetOutcome struct {
+		index   int
+		result  *types.SearchResult
+		skipped bool
+		err     error
 	}
-	if toolResult == nil || lastErr != nil {
-		recordDataAnalysisFailure(chatManage, targetFile, "表格查询连续执行失败")
-		finishStage()
-		return next()
+	outcomes := make(chan datasetOutcome, len(datasets))
+	for i := range datasets {
+		dataset := &datasets[i]
+		go func(index int) {
+			result, skipped, err := p.analyzeDataset(analysisCtx, chatModel, dataset.tool, chatManage.Query, dataset)
+			outcomes <- datasetOutcome{index: index, result: result, skipped: skipped, err: err}
+		}(i)
 	}
-	analysisResult := &types.SearchResult{
-		ID:                   "analysis_" + knowledge.ID,
-		Content:              dataAnalysisEvidenceInstruction + "\n\n" + toolResult.Output,
-		Score:                1.0,
-		MatchType:            types.MatchTypeDataAnalysis,
-		KnowledgeID:          knowledge.ID,
-		KnowledgeTitle:       knowledge.Title,
-		KnowledgeFilename:    knowledge.FileName,
-		KnowledgeDescription: knowledge.Description,
+	ordered := make([]datasetOutcome, len(datasets))
+	for range datasets {
+		outcome := <-outcomes
+		ordered[outcome.index] = outcome
 	}
-	chatManage.MergeResult = mergeDataAnalysisResult(chatManage.MergeResult, analysisResult, toolResult.Data)
-	stageSuccess = true
-	finishStage()
+	successCount := 0
+	for i, outcome := range ordered {
+		if outcome.result != nil {
+			results = append(results, outcome.result)
+			successCount++
+			continue
+		}
+		if outcome.skipped {
+			continue
+		}
+		reason := "表格查询连续执行失败"
+		if outcome.err != nil && strings.Contains(outcome.err.Error(), "clarify") {
+			reason = "需要补充查询范围或字段含义"
+		}
+		results = append(results, dataAnalysisFailureResult(datasets[i].target, reason))
+	}
+	chatManage.MergeResult = append(chatManage.MergeResult, results...)
+	finishStage(successCount == len(targets), dataAnalysisStageOutput(successCount, len(targets)), map[string]interface{}{
+		"table_count":   len(targets),
+		"success_count": successCount,
+	})
 	return next()
 }
 
+func (p *PluginDataAnalysis) analyzeDataset(ctx context.Context, chatModel chat.Chat, tool *tools.DataAnalysisTool, query string, dataset *dataAnalysisDataset) (*types.SearchResult, bool, error) {
+	formatSchema := utils.GenerateSchema[tools.DataAnalysisInput]()
+	basePrompt := dataAnalysisPrompt(query, dataset.knowledge.ID, dataset.target.KnowledgeFilename, dataAnalysisSchemaForPrompt(dataset.schema), dataset.evidence)
+	thinking := false
+	var lastErr error
+	analysisAttempted := false
+	for attempt := 1; attempt <= dataAnalysisMaxAttempts; attempt++ {
+		prompt := basePrompt
+		if lastErr != nil {
+			prompt += fmt.Sprintf("\n\nThe previous SQL attempt failed validation or execution: %s\nRegenerate the SQL using only the authoritative table and columns above.", lastErr)
+		}
+		response, err := chatModel.Chat(ctx, []chat.Message{{Role: "user", Content: prompt}}, &chat.ChatOptions{Temperature: 0, Thinking: &thinking, Format: formatSchema})
+		if err != nil {
+			return nil, false, err
+		}
+		bound, err := bindDataAnalysisInput(response.Content, dataset.knowledge.ID)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var input tools.DataAnalysisInput
+		if err := json.Unmarshal(bound, &input); err != nil {
+			lastErr = err
+			continue
+		}
+		switch input.Action {
+		case tools.DataAnalysisActionSkip:
+			if canSkipDataAnalysis(lastErr, analysisAttempted) {
+				return nil, true, nil
+			}
+			lastErr = fmt.Errorf("model cannot skip table analysis after a previous attempt failed")
+			continue
+		case tools.DataAnalysisActionClarify:
+			return nil, false, fmt.Errorf("clarify")
+		case tools.DataAnalysisActionExecute:
+			analysisAttempted = true
+		default:
+			lastErr = fmt.Errorf("model returned an invalid data analysis action %q", input.Action)
+			continue
+		}
+		executionCtx, cancel := context.WithTimeout(ctx, dataAnalysisTimeout)
+		toolResult, err := tool.Execute(executionCtx, bound)
+		cancel()
+		if err == nil {
+			return dataAnalysisSearchResult(dataset, toolResult), false, nil
+		}
+		lastErr = err
+		logger.Errorf(ctx, "Failed to execute SQL for dataset %s (attempt %d/%d): %v", dataset.knowledge.ID, attempt, dataAnalysisMaxAttempts, err)
+	}
+	return nil, false, lastErr
+}
 func (p *PluginDataAnalysis) llmCallTimeout() time.Duration {
 	if p.config != nil && p.config.Agent != nil && p.config.Agent.LLMCallTimeout > 0 {
 		return time.Duration(p.config.Agent.LLMCallTimeout) * time.Second
@@ -256,7 +371,7 @@ func (p *PluginDataAnalysis) llmCallTimeout() time.Duration {
 	return defaultLLMCallTimeout
 }
 
-const dataAnalysisEvidenceInstruction = "结构化查询结果：这是对原始表格执行 SQL 得到的一条候选证据。请将其与 ES、向量检索及 rerank 后的证据共同判断，不要机械地优先采用任一来源。判断时核对每条证据的查询条件、语义匹配程度和数据覆盖范围；若证据冲突，请指出冲突及采用结论的理由。"
+const dataAnalysisEvidenceInstruction = "结构化查询结果：这是对原始表格执行 SQL 得到的一条候选证据。请将其与 ES、向量检索的局部检索证据共同判断，不要机械地优先采用任一来源。检索证据由 rerank 决定相关性和候选资格，MMR 仅作低权重去重补充，不提高证据的相关性、可信度或完整性。检索证据入选只表示相关，不表示覆盖完整；判断时核对每条证据的查询条件、语义匹配程度和数据覆盖范围。涉及完整名单、总数或聚合时，只有过滤条件覆盖目标字段和值的结构化结果才能证明完整性；若证据冲突，请指出冲突及采用结论的理由。"
 
 const dataAnalysisFailureInstruction = "结构化表格查询未完成：%s。不得根据检索片段补全缺失的查询结果；必须明确说明本次表格查询未完成。"
 
@@ -269,6 +384,29 @@ func dataAnalysisSchemaForPrompt(schema *tools.TableSchema) string {
 	promptSchema := *schema
 	promptSchema.TableName = dataAnalysisLogicalTableName
 	return promptSchema.Description()
+}
+
+func dataAnalysisSearchResult(dataset *dataAnalysisDataset, toolResult *types.ToolResult) *types.SearchResult {
+	return &types.SearchResult{
+		ID:                   "analysis_" + dataset.knowledge.ID,
+		Content:              dataAnalysisEvidenceInstruction + "\n\n" + toolResult.Output,
+		Score:                1.0,
+		MatchType:            types.MatchTypeDataAnalysis,
+		KnowledgeID:          dataset.knowledge.ID,
+		KnowledgeTitle:       dataset.knowledge.Title,
+		KnowledgeFilename:    dataset.knowledge.FileName,
+		KnowledgeDescription: dataset.knowledge.Description,
+	}
+}
+
+func dataAnalysisStageOutput(successCount, tableCount int) string {
+	if successCount == tableCount {
+		return "表格分析完成"
+	}
+	if successCount > 0 {
+		return "表格分析部分完成"
+	}
+	return "表格分析未完成"
 }
 
 func dataAnalysisPrompt(query, knowledgeID, datasetName, schemaDescription, evidence string) string {
@@ -304,6 +442,7 @@ When translating natural-language filters into SQL:
 - Add an exact text predicate only when the user explicitly identifies that column/value pair. Never invent an equality predicate merely because a column name appears related.
 - Use the schema to choose every column that can directly answer the question; do not assume the answer is confined to one text column.
 - When the same fact may appear in multiple semantically relevant text columns, combine those predicates with OR so matching rows are not omitted.
+- For multiple requested categories, apply each category independently across every semantically relevant text column before combining the categories according to the user's AND/OR meaning. Do not partition categories between columns.
 - The SQL is executed as written. Do not rely on the execution layer to broaden a predicate or search additional columns.
 - Use the evidence samples only to recognize how relevant values are actually represented in the table, including equivalent wording.
 - Before writing text predicates, compare the user's wording with observed evidence and column value examples. If they show suffix, abbreviation, or phrasing variants of the same requested concept, cover the observed variants explicitly or match their distinctive stable terms. Keep enough distinctive terms to avoid broad substring matches.
@@ -390,7 +529,11 @@ func recordDataAnalysisFailure(chatManage *types.ChatManage, target *types.Searc
 	if chatManage == nil || target == nil {
 		return
 	}
-	failure := &types.SearchResult{
+	chatManage.MergeResult = append([]*types.SearchResult{dataAnalysisFailureResult(target, reason)}, chatManage.MergeResult...)
+}
+
+func dataAnalysisFailureResult(target *types.SearchResult, reason string) *types.SearchResult {
+	return &types.SearchResult{
 		ID:                   "analysis_failure_" + target.KnowledgeID,
 		Content:              fmt.Sprintf(dataAnalysisFailureInstruction, reason),
 		Score:                1.0,
@@ -400,7 +543,6 @@ func recordDataAnalysisFailure(chatManage *types.ChatManage, target *types.Searc
 		KnowledgeFilename:    target.KnowledgeFilename,
 		KnowledgeDescription: target.KnowledgeDescription,
 	}
-	chatManage.MergeResult = append([]*types.SearchResult{failure}, chatManage.MergeResult...)
 }
 
 // mergeDataAnalysisResult preserves reranked retrieval order and adds the SQL
@@ -419,6 +561,17 @@ func isDataFile(filename string) bool {
 }
 
 func selectDataAnalysisTarget(results []*types.SearchResult, knowledgeIDs []string, targets types.SearchTargets) *types.SearchResult {
+	selected := selectDataAnalysisTargets(results, knowledgeIDs, targets, 1)
+	if len(selected) == 0 {
+		return nil
+	}
+	return selected[0]
+}
+
+func selectDataAnalysisTargets(results []*types.SearchResult, knowledgeIDs []string, targets types.SearchTargets, limit int) []*types.SearchResult {
+	if limit <= 0 {
+		return nil
+	}
 	explicit := make(map[string]struct{}, len(knowledgeIDs))
 	for _, knowledgeID := range knowledgeIDs {
 		explicit[knowledgeID] = struct{}{}
@@ -432,19 +585,63 @@ func selectDataAnalysisTarget(results []*types.SearchResult, knowledgeIDs []stri
 		}
 	}
 
-	var ranked *types.SearchResult
+	selected := make([]*types.SearchResult, 0, limit)
+	seen := make(map[string]struct{}, limit)
+	seenLogicalFiles := make(map[string]struct{}, limit)
+	appendResult := func(result *types.SearchResult) {
+		if result == nil || len(selected) >= limit {
+			return
+		}
+		if _, ok := seen[result.KnowledgeID]; ok {
+			return
+		}
+		logicalFile := strings.ToLower(strings.TrimSpace(result.KnowledgeBaseID + "\x00" + result.KnowledgeFilename))
+		if len(explicit) == 0 && logicalFile != "" {
+			if _, ok := seenLogicalFiles[logicalFile]; ok {
+				return
+			}
+			seenLogicalFiles[logicalFile] = struct{}{}
+		}
+		seen[result.KnowledgeID] = struct{}{}
+		selected = append(selected, result)
+	}
+	if len(explicit) > 0 {
+		for _, result := range results {
+			if result == nil || !isDataFile(result.KnowledgeFilename) {
+				continue
+			}
+			if _, ok := explicit[result.KnowledgeID]; ok {
+				appendResult(result)
+			}
+		}
+		if len(selected) > 0 {
+			return selected
+		}
+		explicit = nil
+	}
+	for _, result := range results {
+		if result == nil || !isDataFile(result.KnowledgeFilename) || !isTableMetadataChunk(result) {
+			continue
+		}
+		appendResult(result)
+		if len(selected) == limit {
+			return selected
+		}
+	}
 	for _, result := range results {
 		if result == nil || !isDataFile(result.KnowledgeFilename) {
 			continue
 		}
-		if ranked == nil {
-			ranked = result
-		}
-		if _, ok := explicit[result.KnowledgeID]; ok {
-			return result
+		appendResult(result)
+		if len(selected) == limit {
+			break
 		}
 	}
-	return ranked
+	return selected
+}
+
+func isTableMetadataChunk(result *types.SearchResult) bool {
+	return result.ChunkType == string(types.ChunkTypeTableSummary) || result.ChunkType == string(types.ChunkTypeTableColumn)
 }
 
 func shouldAttemptDataAnalysis(chatManage *types.ChatManage) bool {

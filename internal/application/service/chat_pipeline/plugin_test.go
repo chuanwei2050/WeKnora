@@ -98,6 +98,7 @@ func TestStructuredAnswerOutputRulesAreAppendedWithoutChangingEvidence(t *testin
 	}
 	for _, rule := range []string{
 		"SQL", "物理表名", "内部标识", "内部生成的字段别名", "原始结果载荷", "自然语言", "业务列名",
+		"rerank 决定相关性和候选资格", "MMR 仅作为低权重", "MMR 不提高证据", "局部检索片段", "入选只表示与问题相关", "不表示覆盖完整", "完整名单、总数或聚合结果",
 		"目标字段和值直接验证", "SQL 返回行数较少", "过滤条件覆盖", "区别性主体", "前缀、后缀或修饰词", "语义能够确认", "不得计入明确匹配", "可能相关单独列出", "仅共享通用词", "没有证据支持",
 	} {
 		if !strings.Contains(manage.UserContent, rule) {

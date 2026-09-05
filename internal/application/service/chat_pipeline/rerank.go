@@ -21,7 +21,10 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-const rerankCacheTTL = 10 * time.Minute
+const (
+	rerankCacheTTL     = 10 * time.Minute
+	mmrRelevanceWeight = 0.90
+)
 
 type rerankRedisCache interface {
 	Get(ctx context.Context, key string) *redis.StringCmd
@@ -209,7 +212,8 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		reranked = append(reranked, sr)
 	}
 	searchutil.SortSearchResults(reranked)
-	final := applyMMR(ctx, reranked, chatManage, min(len(reranked), max(1, chatManage.RerankTopK)), 0.7)
+	chatManage.RerankScoredResult = append([]*types.SearchResult(nil), reranked...)
+	final := applyMMR(ctx, reranked, chatManage, min(len(reranked), max(1, chatManage.RerankTopK)), mmrRelevanceWeight)
 	final = ensureAcceptedKeywordLeader(final, reranked, chatManage.RerankTopK)
 	chatManage.RerankResult = final
 

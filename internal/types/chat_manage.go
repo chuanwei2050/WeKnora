@@ -120,25 +120,28 @@ type PipelineState struct {
 	Intent          QueryIntent `json:"intent,omitempty"`
 	History         []*History  `json:"history,omitempty"`
 
-	SearchResult         []*SearchResult    `json:"-"`
-	RerankResult         []*SearchResult    `json:"-"`
-	RerankOutcome        RerankOutcome      `json:"rerank_outcome,omitempty"`
-	MergeResult          []*SearchResult    `json:"-"`
-	Entity               []string           `json:"-"`
-	EntityKBIDs          []string           `json:"-"`
-	EntityKnowledge      map[string]string  `json:"-"`
-	GraphResult          *GraphData         `json:"-"`
-	GraphSearchResult    *GraphSearchResult `json:"-"`
-	GraphContext         string             `json:"-"`
-	UserContent          string             `json:"-"`
-	RenderedContexts     string             `json:"-"`
-	ChatResponse         *ChatResponse      `json:"-"`
-	ImageDescription     string             `json:"-"`
-	ImageDescriptions    []string           `json:"-"`
-	QuotedContext        string             `json:"-"` // Quoted message text, injected at LLM prompt stage
-	SystemPromptOverride string             `json:"-"`
-	RoutingDecision      *RoutingDecision   `json:"routing_decision,omitempty"`
-	VerifiedResult       *VerifiedAnswer    `json:"verified_result,omitempty"`
+	SearchResult          []*SearchResult    `json:"-"`
+	RerankResult          []*SearchResult    `json:"-"`
+	RerankScoredResult    []*SearchResult    `json:"-"`
+	RerankOutcome         RerankOutcome      `json:"rerank_outcome,omitempty"`
+	MergeResult           []*SearchResult    `json:"-"`
+	DataAnalysisResult    []*SearchResult    `json:"-"`
+	DataAnalysisAttempted bool               `json:"-"`
+	Entity                []string           `json:"-"`
+	EntityKBIDs           []string           `json:"-"`
+	EntityKnowledge       map[string]string  `json:"-"`
+	GraphResult           *GraphData         `json:"-"`
+	GraphSearchResult     *GraphSearchResult `json:"-"`
+	GraphContext          string             `json:"-"`
+	UserContent           string             `json:"-"`
+	RenderedContexts      string             `json:"-"`
+	ChatResponse          *ChatResponse      `json:"-"`
+	ImageDescription      string             `json:"-"`
+	ImageDescriptions     []string           `json:"-"`
+	QuotedContext         string             `json:"-"` // Quoted message text, injected at LLM prompt stage
+	SystemPromptOverride  string             `json:"-"`
+	RoutingDecision       *RoutingDecision   `json:"routing_decision,omitempty"`
+	VerifiedResult        *VerifiedAnswer    `json:"verified_result,omitempty"`
 }
 
 type RerankOutcome string
