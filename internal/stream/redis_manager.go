@@ -17,6 +17,8 @@ type RedisStreamManager struct {
 	prefix string        // Redis key prefix
 }
 
+const streamActivityLease = 30 * time.Second
+
 // NewRedisStreamManager creates a new Redis-based stream manager
 func NewRedisStreamManager(redisAddr, redisUsername, redisPassword string,
 	redisDB int, prefix string, ttl time.Duration,
@@ -52,6 +54,27 @@ func NewRedisStreamManager(redisAddr, redisUsername, redisPassword string,
 // buildKey builds the Redis key for event list
 func (r *RedisStreamManager) buildKey(sessionID, messageID string) string {
 	return fmt.Sprintf("%s:%s:%s", r.prefix, sessionID, messageID)
+}
+
+func (r *RedisStreamManager) buildActiveKey(sessionID, messageID string) string {
+	return r.buildKey(sessionID, messageID) + ":active"
+}
+
+func (r *RedisStreamManager) MarkStreamActive(ctx context.Context, sessionID, messageID string) error {
+	return r.client.Set(ctx, r.buildActiveKey(sessionID, messageID), "1", streamActivityLease).Err()
+}
+
+func (r *RedisStreamManager) RefreshStreamActivity(ctx context.Context, sessionID, messageID string) error {
+	return r.client.Set(ctx, r.buildActiveKey(sessionID, messageID), "1", streamActivityLease).Err()
+}
+
+func (r *RedisStreamManager) MarkStreamInactive(ctx context.Context, sessionID, messageID string) error {
+	return r.client.Del(ctx, r.buildActiveKey(sessionID, messageID)).Err()
+}
+
+func (r *RedisStreamManager) IsStreamActive(ctx context.Context, sessionID, messageID string) (bool, error) {
+	count, err := r.client.Exists(ctx, r.buildActiveKey(sessionID, messageID)).Result()
+	return count > 0, err
 }
 
 // AppendEvent appends a single event to the stream using Redis RPush
@@ -135,3 +158,4 @@ func (r *RedisStreamManager) Close() error {
 
 // Ensure RedisStreamManager implements StreamManager interface
 var _ interfaces.StreamManager = (*RedisStreamManager)(nil)
+var _ interfaces.StreamLifecycleManager = (*RedisStreamManager)(nil)

@@ -24,7 +24,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -39,6 +41,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+func isExpectedServeClose(err error) bool {
+	return errors.Is(err, http.ErrServerClosed) || errors.Is(err, net.ErrClosed)
+}
 
 func main() {
 	// Set Gin mode
@@ -110,7 +116,7 @@ func main() {
 		}()
 
 		logger.Infof(context.Background(), "Server is running at %s", addr)
-		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+		if err := server.Serve(listener); err != nil && !isExpectedServeClose(err) {
 			return fmt.Errorf("server error: %v", err)
 		}
 

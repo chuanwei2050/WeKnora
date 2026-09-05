@@ -306,6 +306,7 @@ When translating natural-language filters into SQL:
 - When the same fact may appear in multiple semantically relevant text columns, combine those predicates with OR so matching rows are not omitted.
 - The SQL is executed as written. Do not rely on the execution layer to broaden a predicate or search additional columns.
 - Use the evidence samples only to recognize how relevant values are actually represented in the table, including equivalent wording.
+- Before writing text predicates, compare the user's wording with observed evidence and column value examples. If they show suffix, abbreviation, or phrasing variants of the same requested concept, cover the observed variants explicitly or match their distinctive stable terms. Keep enough distinctive terms to avoid broad substring matches.
 - Select the fields needed to identify each result and include the matching source values as evidence of why it matched.
 
 Return your response in the specified JSON format.`, query, knowledgeID, quotedMetadata, quotedEvidence)
@@ -358,14 +359,21 @@ func dataAnalysisEvidence(results []*types.SearchResult, knowledgeID string, max
 	var builder strings.Builder
 	written := 0
 	for _, result := range results {
-		if result.KnowledgeID != knowledgeID || strings.TrimSpace(result.Content) == "" {
+		if result.KnowledgeID != knowledgeID {
+			continue
+		}
+		content := result.MatchedContent
+		if strings.TrimSpace(content) == "" {
+			content = result.Content
+		}
+		if strings.TrimSpace(content) == "" {
 			continue
 		}
 		remaining := maxChars - written
 		if remaining <= 0 {
 			break
 		}
-		contentRunes := []rune(result.Content)
+		contentRunes := []rune(content)
 		if len(contentRunes) > remaining {
 			contentRunes = contentRunes[:remaining]
 		}

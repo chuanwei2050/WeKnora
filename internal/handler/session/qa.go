@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -586,11 +587,14 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 
 	// Setup SSE stream
 	streamCtx := h.setupSSEStream(reqCtx, generateTitle)
+	stopActivityFunc := h.trackStreamActivity(streamCtx.asyncCtx, sessionID, reqCtx.assistantMessage.ID)
+	var stopActivityOnce sync.Once
+	stopActivity := func() { stopActivityOnce.Do(stopActivityFunc) }
 
 	// Normal mode: register completion handler on EventAgentFinalAnswer
 	// (Agent mode handles completion in the defer block instead)
+	var completionHandled bool
 	if mode == qaModeNormal {
-		var completionHandled bool
 		streamCtx.eventBus.On(event.EventAgentFinalAnswer, func(ctx context.Context, evt event.Event) error {
 			data, ok := evt.Data.(event.AgentFinalAnswerData)
 			if !ok {
@@ -614,6 +618,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 					SessionID: sessionID,
 					Data:      event.AgentCompleteData{FinalAnswer: streamCtx.assistantMessage.Content},
 				})
+				stopActivity()
 			}
 			return nil
 		})
@@ -621,6 +626,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 
 	// Execute QA asynchronously
 	go func() {
+		var serviceErr error
 		defer func() {
 			if r := recover(); r != nil {
 				buf := make([]byte, 10240)
@@ -629,12 +635,27 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				if mode == qaModeAgent {
 					stageName = "Agent QA"
 				}
-				logger.ErrorWithFields(streamCtx.asyncCtx,
-					errors.NewInternalServerError(fmt.Sprintf("%s service panicked: %v\n%s", stageName, r, string(buf))),
+				serviceErr = errors.NewInternalServerError(fmt.Sprintf("%s service panicked: %v\n%s", stageName, r, string(buf)))
+				logger.ErrorWithFields(streamCtx.asyncCtx, serviceErr,
 					map[string]interface{}{"session_id": sessionID})
+			}
+			if mode == qaModeNormal && serviceErr != nil && !completionHandled {
+				streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
+					Type:      event.EventError,
+					SessionID: sessionID,
+					Data: event.ErrorData{
+						Error:     serviceErr.Error(),
+						Stage:     "knowledge_qa_execution",
+						SessionID: sessionID,
+					},
+				})
+				updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
+				h.markMessageCompleted(updateCtx, streamCtx.assistantMessage)
+				stopActivity()
 			}
 			// Agent mode: complete the assistant message in defer (normal mode does it via event handler)
 			if mode == qaModeAgent {
+				defer stopActivity()
 				updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
 				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query)
 				logger.Infof(streamCtx.asyncCtx, "Agent QA service completed for session: %s", sessionID)
@@ -647,7 +668,6 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		// Build QA request and invoke the appropriate service
 		qaReq := reqCtx.buildQARequest()
 
-		var serviceErr error
 		var stageName string
 		if mode == qaModeNormal {
 			stageName = "knowledge_qa_execution"
@@ -657,7 +677,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			serviceErr = h.sessionService.AgentQA(streamCtx.asyncCtx, qaReq, streamCtx.eventBus)
 		}
 
-		if serviceErr != nil {
+		if serviceErr != nil && mode == qaModeAgent {
 			logger.ErrorWithFields(streamCtx.asyncCtx, serviceErr, nil)
 			streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
 				Type:      event.EventError,
@@ -675,6 +695,40 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	shouldWaitForTitle := generateTitle && reqCtx.session.Title == ""
 	h.handleAgentEventsForSSE(ctx, reqCtx.c, sessionID, reqCtx.assistantMessage.ID,
 		reqCtx.requestID, streamCtx.eventBus, shouldWaitForTitle)
+}
+
+func (h *Handler) trackStreamActivity(ctx context.Context, sessionID, messageID string) func() {
+	lifecycle, ok := h.streamManager.(interfaces.StreamLifecycleManager)
+	if !ok {
+		return func() {}
+	}
+	if err := lifecycle.MarkStreamActive(ctx, sessionID, messageID); err != nil {
+		logger.Errorf(ctx, "Failed to mark stream active: %v", err)
+		return func() {}
+	}
+	heartbeatCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-ticker.C:
+				if err := lifecycle.RefreshStreamActivity(heartbeatCtx, sessionID, messageID); err != nil {
+					logger.Warnf(ctx, "Failed to refresh stream activity: %v", err)
+				}
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cleanupCancel()
+		if err := lifecycle.MarkStreamInactive(cleanupCtx, sessionID, messageID); err != nil {
+			logger.Warnf(ctx, "Failed to mark stream inactive: %v", err)
+		}
+	}
 }
 
 // runVLMAnalysisIfNeeded runs VLM image analysis within the async goroutine,

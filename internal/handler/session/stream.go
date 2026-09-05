@@ -41,6 +41,21 @@ func (h *Handler) markMessageCompleted(ctx context.Context, message *types.Messa
 	}
 }
 
+func (h *Handler) finishInterruptedStream(ctx context.Context, message *types.Message) interfaces.StreamEvent {
+	evt := interfaces.StreamEvent{
+		ID:        fmt.Sprintf("interrupted-%d", time.Now().UnixNano()),
+		Type:      types.ResponseTypeError,
+		Content:   "生成任务已中断，请重试",
+		Done:      true,
+		Timestamp: time.Now(),
+	}
+	if err := h.streamManager.AppendEvent(ctx, message.SessionID, message.ID, evt); err != nil {
+		logger.Errorf(ctx, "Failed to append interrupted stream event: %v", err)
+	}
+	h.markMessageCompleted(ctx, message)
+	return evt
+}
+
 // ContinueStream godoc
 // @Summary      继续流式响应
 // @Description  继续获取正在进行的流式响应
@@ -143,6 +158,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	if streamCompleted {
 		h.markMessageCompleted(ctx, message)
 	}
+	lifecycle, hasLifecycle := h.streamManager.(interfaces.StreamLifecycleManager)
 
 	// Replay existing events
 	logger.Debugf(ctx, "Replaying %d existing events", len(events))
@@ -150,6 +166,20 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 		response := buildStreamResponse(evt, message.RequestID, message.ID)
 		c.SSEvent("message", response)
 		c.Writer.Flush()
+	}
+	if !streamCompleted && hasLifecycle {
+		active, activeErr := lifecycle.IsStreamActive(ctx, sessionID, messageID)
+		if activeErr != nil {
+			logger.Errorf(ctx, "Failed to read stream activity: %v", activeErr)
+		} else if !active {
+			logger.Infof(ctx, "Finishing interrupted stream, session ID: %s, message ID: %s", sessionID, messageID)
+			evt := h.finishInterruptedStream(ctx, message)
+			response := buildStreamResponse(evt, message.RequestID, message.ID)
+			c.SSEvent("message", response)
+			c.Writer.Flush()
+			sendCompletionEvent(c, message.RequestID)
+			return
+		}
 	}
 
 	// If stream is already completed, send final event and return
@@ -163,12 +193,33 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	logger.Debug(ctx, "Starting event update monitoring")
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
+	var activityTicker *time.Ticker
+	var activityChecks <-chan time.Time
+	if hasLifecycle {
+		activityTicker = time.NewTicker(time.Second)
+		activityChecks = activityTicker.C
+		defer activityTicker.Stop()
+	}
 
 	for {
 		select {
 		case <-c.Request.Context().Done():
 			logger.Debug(ctx, "Client connection closed")
 			return
+		case <-activityChecks:
+			active, activeErr := lifecycle.IsStreamActive(ctx, sessionID, messageID)
+			if activeErr != nil {
+				logger.Errorf(ctx, "Failed to read stream activity: %v", activeErr)
+				continue
+			}
+			if !active {
+				evt := h.finishInterruptedStream(ctx, message)
+				response := buildStreamResponse(evt, message.RequestID, message.ID)
+				c.SSEvent("message", response)
+				c.Writer.Flush()
+				sendCompletionEvent(c, message.RequestID)
+				return
+			}
 
 		case <-ticker.C:
 			// Get new events from current offset

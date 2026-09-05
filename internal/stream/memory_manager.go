@@ -20,13 +20,42 @@ type MemoryStreamManager struct {
 	// Map: sessionID -> messageID -> stream data
 	streams map[string]map[string]*memoryStreamData
 	mu      sync.RWMutex
+	active  map[string]map[string]bool
 }
 
 // NewMemoryStreamManager creates a new in-memory stream manager
 func NewMemoryStreamManager() *MemoryStreamManager {
 	return &MemoryStreamManager{
 		streams: make(map[string]map[string]*memoryStreamData),
+		active:  make(map[string]map[string]bool),
 	}
+}
+
+func (m *MemoryStreamManager) MarkStreamActive(_ context.Context, sessionID, messageID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.active[sessionID] == nil {
+		m.active[sessionID] = make(map[string]bool)
+	}
+	m.active[sessionID][messageID] = true
+	return nil
+}
+
+func (m *MemoryStreamManager) RefreshStreamActivity(_ context.Context, sessionID, messageID string) error {
+	return nil
+}
+
+func (m *MemoryStreamManager) MarkStreamInactive(_ context.Context, sessionID, messageID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.active[sessionID], messageID)
+	return nil
+}
+
+func (m *MemoryStreamManager) IsStreamActive(_ context.Context, sessionID, messageID string) (bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.active[sessionID][messageID], nil
 }
 
 // getOrCreateStream gets or creates stream data
@@ -116,3 +145,4 @@ func (m *MemoryStreamManager) GetEvents(
 
 // Ensure MemoryStreamManager implements StreamManager interface
 var _ interfaces.StreamManager = (*MemoryStreamManager)(nil)
+var _ interfaces.StreamLifecycleManager = (*MemoryStreamManager)(nil)

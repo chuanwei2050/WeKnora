@@ -30,3 +30,13 @@ type StreamManager interface {
 	// Returns: events slice, next offset for subsequent reads, error
 	GetEvents(ctx context.Context, sessionID, messageID string, fromOffset int) ([]StreamEvent, int, error)
 }
+
+// StreamLifecycleManager tracks whether a stream still has a live producer.
+// Implementations may use a renewable lease so a crashed producer is not
+// mistaken for a slow model call.
+type StreamLifecycleManager interface {
+	MarkStreamActive(ctx context.Context, sessionID, messageID string) error
+	RefreshStreamActivity(ctx context.Context, sessionID, messageID string) error
+	MarkStreamInactive(ctx context.Context, sessionID, messageID string) error
+	IsStreamActive(ctx context.Context, sessionID, messageID string) (bool, error)
+}
