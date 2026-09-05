@@ -100,9 +100,34 @@ func TestDataAnalysisPromptRequiresSchemaDrivenSemanticFiltering(t *testing.T) {
 
 func TestDataAnalysisPromptDistinguishesSkipFromFailedSQLGeneration(t *testing.T) {
 	prompt := dataAnalysisPrompt("query", "knowledge-id", "people.xlsx", "schema", "sample")
-	for _, requirement := range []string{`action to "execute"`, `action to "skip"`, `action to "clarify"`, "leave the sql field empty", "detail retrieval"} {
+	for _, requirement := range []string{`action to "execute"`, `action to "skip"`, `action to "clarify"`, "DuckDB SQL", "detail retrieval"} {
 		if !strings.Contains(prompt, requirement) {
 			t.Fatalf("expected prompt to contain %q", requirement)
+		}
+	}
+}
+
+func TestDataAnalysisStageTreatsSkippedTablesAsSuccessfulCompletion(t *testing.T) {
+	if got := dataAnalysisStageOutput(2, 0); got != "表格分析完成" {
+		t.Fatalf("skipped tables incorrectly made the stage partial: %q", got)
+	}
+	if got := dataAnalysisStageOutput(2, 1); got != "表格分析部分完成" {
+		t.Fatalf("actual failures must remain visible: %q", got)
+	}
+}
+
+func TestDataAnalysisResponseSkipsTableOnlyForCompleteSkipResponse(t *testing.T) {
+	if !dataAnalysisResponseSkipsTable(`{"action":"skip","knowledge_id":"ignored","sql":""}`) {
+		t.Fatal("valid skip response was not recognized")
+	}
+	for _, content := range []string{
+		`{"action":"execute","knowledge_id":"ignored","sql":"SELECT 1"}`,
+		`{"action":"skip"}`,
+		`{"action":"skip","sql":"SELECT 1"}`,
+		`not-json`,
+	} {
+		if dataAnalysisResponseSkipsTable(content) {
+			t.Fatalf("unsafe early skip accepted for %q", content)
 		}
 	}
 }

@@ -33,6 +33,12 @@ type dataAnalysisDataset struct {
 	schema    *tools.TableSchema
 	evidence  string
 	tool      *tools.DataAnalysisTool
+	initial   <-chan dataAnalysisModelResponse
+}
+
+type dataAnalysisModelResponse struct {
+	content string
+	err     error
 }
 
 type PluginDataAnalysis struct {
@@ -198,6 +204,15 @@ func (p *PluginDataAnalysis) analyze(
 	}
 
 	authorization := tools.AgentDataAnalysisAuthorization(chatManage.SearchTargets, p.governanceRepo)
+	chatModel, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	if err != nil {
+		finishStage(false, "表格分析未完成", map[string]interface{}{"table_count": len(targets), "success_count": 0})
+		return ErrGetChatModel.WithError(err)
+	}
+	pipelineInfo(ctx, "DataAnalysis", "model_selected", map[string]interface{}{
+		"session_id": chatManage.SessionID, "model_role": "chat", "table_count": len(targets),
+	})
+	formatSchema := utils.GenerateSchema[tools.DataAnalysisInput]()
 	var datasetTools []*tools.DataAnalysisTool
 	defer func() {
 		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), dataAnalysisTimeout)
@@ -209,10 +224,12 @@ func (p *PluginDataAnalysis) analyze(
 
 	datasets := make([]dataAnalysisDataset, 0, len(targets))
 	results := make([]*types.SearchResult, 0, len(targets))
+	failedCount := 0
 	type loadOutcome struct {
 		index   int
 		dataset *dataAnalysisDataset
 		tool    *tools.DataAnalysisTool
+		skipped bool
 		err     error
 	}
 	loads := make(chan loadOutcome, len(targets))
@@ -224,15 +241,66 @@ func (p *PluginDataAnalysis) analyze(
 				loads <- loadOutcome{index: index, tool: tool, err: fmt.Errorf("无法读取表格信息: %w", err)}
 				return
 			}
-			schema, err := tool.LoadFromKnowledge(ctx, knowledge)
-			if err != nil {
-				loads <- loadOutcome{index: index, tool: tool, err: fmt.Errorf("无法加载原始表格: %w", err)}
+			evidence := dataAnalysisEvidence(retrievedResults, knowledge.ID, dataAnalysisEvidenceCharsPerTable)
+			type tableLoadResult struct {
+				schema *tools.TableSchema
+				err    error
+			}
+			previewReady := make(chan *tools.TableSchema, 1)
+			loadDone := make(chan tableLoadResult, 1)
+			loadCtx, cancelLoad := context.WithCancel(ctx)
+			defer cancelLoad()
+			go func() {
+				schema, loadErr := tool.LoadFromKnowledgeWithPreview(loadCtx, knowledge, func(preview *tools.TableSchema) {
+					select {
+					case previewReady <- preview:
+					default:
+					}
+				})
+				loadDone <- tableLoadResult{schema: schema, err: loadErr}
+			}()
+
+			var load tableLoadResult
+			var planSchema *tools.TableSchema
+			loadFinished := false
+			select {
+			case planSchema = <-previewReady:
+			case load = <-loadDone:
+				loadFinished = true
+				planSchema = load.schema
+			}
+			if loadFinished && load.err != nil {
+				loads <- loadOutcome{index: index, tool: tool, err: fmt.Errorf("无法加载原始表格: %w", load.err)}
+				return
+			}
+
+			prompt := dataAnalysisPrompt(chatManage.Query, knowledge.ID, target.KnowledgeFilename, dataAnalysisSchemaForPrompt(planSchema), evidence)
+			modelCtx, cancelModel := context.WithTimeout(ctx, p.llmCallTimeout())
+			thinking := false
+			response, modelErr := chatModel.Chat(modelCtx, []chat.Message{{Role: "user", Content: prompt}}, &chat.ChatOptions{Temperature: 0, Thinking: &thinking, Format: formatSchema})
+			cancelModel()
+			content := ""
+			if modelErr == nil {
+				content = response.Content
+			}
+			initial := make(chan dataAnalysisModelResponse, 1)
+			initial <- dataAnalysisModelResponse{content: content, err: modelErr}
+			if !loadFinished && dataAnalysisResponseSkipsTable(content) {
+				cancelLoad()
+				<-loadDone
+				loads <- loadOutcome{index: index, tool: tool, skipped: true}
+				return
+			}
+			if !loadFinished {
+				load = <-loadDone
+			}
+			if load.err != nil {
+				loads <- loadOutcome{index: index, tool: tool, err: fmt.Errorf("无法加载原始表格: %w", load.err)}
 				return
 			}
 			loads <- loadOutcome{index: index, tool: tool, dataset: &dataAnalysisDataset{
-				target: target, knowledge: knowledge, schema: schema,
-				evidence: dataAnalysisEvidence(retrievedResults, knowledge.ID, dataAnalysisEvidenceCharsPerTable),
-				tool:     tool,
+				target: target, knowledge: knowledge, schema: load.schema,
+				evidence: evidence, tool: tool, initial: initial,
 			}}
 		}(i, target)
 	}
@@ -243,7 +311,11 @@ func (p *PluginDataAnalysis) analyze(
 	}
 	for i, outcome := range loaded {
 		datasetTools = append(datasetTools, outcome.tool)
+		if outcome.skipped {
+			continue
+		}
 		if outcome.err != nil {
+			failedCount++
 			logger.Errorf(ctx, "Failed to load knowledge %s: %v", targets[i].KnowledgeID, outcome.err)
 			reason := strings.SplitN(outcome.err.Error(), ":", 2)[0]
 			results = append(results, dataAnalysisFailureResult(targets[i], reason))
@@ -253,23 +325,14 @@ func (p *PluginDataAnalysis) analyze(
 	}
 	if len(datasets) == 0 {
 		chatManage.MergeResult = append(chatManage.MergeResult, results...)
-		finishStage(false, "表格分析未完成", map[string]interface{}{"table_count": len(targets), "success_count": 0})
+		finishStage(failedCount == 0, dataAnalysisStageOutput(0, failedCount), map[string]interface{}{
+			"table_count": len(targets), "success_count": 0, "failure_count": failedCount,
+		})
 		return next()
 	}
-
-	chatModel, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
-	if err != nil {
-		finishStage(false, "表格分析未完成", map[string]interface{}{"table_count": len(targets), "success_count": 0})
-		return ErrGetChatModel.WithError(err)
-	}
-	pipelineInfo(ctx, "DataAnalysis", "model_selected", map[string]interface{}{
-		"session_id":  chatManage.SessionID,
-		"model_role":  "chat",
-		"table_count": len(datasets),
-	})
-
 	analysisCtx, cancelAnalysis := context.WithTimeout(ctx, p.llmCallTimeout())
 	defer cancelAnalysis()
+
 	type datasetOutcome struct {
 		index   int
 		result  *types.SearchResult
@@ -304,11 +367,13 @@ func (p *PluginDataAnalysis) analyze(
 			reason = "需要补充查询范围或字段含义"
 		}
 		results = append(results, dataAnalysisFailureResult(datasets[i].target, reason))
+		failedCount++
 	}
 	chatManage.MergeResult = append(chatManage.MergeResult, results...)
-	finishStage(successCount == len(targets), dataAnalysisStageOutput(successCount, len(targets)), map[string]interface{}{
+	finishStage(failedCount == 0, dataAnalysisStageOutput(successCount, failedCount), map[string]interface{}{
 		"table_count":   len(targets),
 		"success_count": successCount,
+		"failure_count": failedCount,
 	})
 	return next()
 }
@@ -324,11 +389,21 @@ func (p *PluginDataAnalysis) analyzeDataset(ctx context.Context, chatModel chat.
 		if lastErr != nil {
 			prompt += fmt.Sprintf("\n\nThe previous SQL attempt failed validation or execution: %s\nRegenerate the SQL using only the authoritative table and columns above.", lastErr)
 		}
-		response, err := chatModel.Chat(ctx, []chat.Message{{Role: "user", Content: prompt}}, &chat.ChatOptions{Temperature: 0, Thinking: &thinking, Format: formatSchema})
-		if err != nil {
-			return nil, false, err
+		var content string
+		if attempt == 1 && dataset.initial != nil {
+			initial := <-dataset.initial
+			if initial.err != nil {
+				return nil, false, initial.err
+			}
+			content = initial.content
+		} else {
+			response, err := chatModel.Chat(ctx, []chat.Message{{Role: "user", Content: prompt}}, &chat.ChatOptions{Temperature: 0, Thinking: &thinking, Format: formatSchema})
+			if err != nil {
+				return nil, false, err
+			}
+			content = response.Content
 		}
-		bound, err := bindDataAnalysisInput(response.Content, dataset.knowledge.ID)
+		bound, err := bindDataAnalysisInput(content, dataset.knowledge.ID)
 		if err != nil {
 			lastErr = err
 			continue
@@ -399,8 +474,8 @@ func dataAnalysisSearchResult(dataset *dataAnalysisDataset, toolResult *types.To
 	}
 }
 
-func dataAnalysisStageOutput(successCount, tableCount int) string {
-	if successCount == tableCount {
+func dataAnalysisStageOutput(successCount, failedCount int) string {
+	if failedCount == 0 {
 		return "表格分析完成"
 	}
 	if successCount > 0 {
@@ -463,6 +538,18 @@ func bindDataAnalysisInput(content, knowledgeID string) (json.RawMessage, error)
 	input.KnowledgeID = knowledgeID
 	input.MaxRows = dataAnalysisMaxRows
 	return json.Marshal(input)
+}
+
+func dataAnalysisResponseSkipsTable(content string) bool {
+	content, err := unwrapDataAnalysisJSONFence(content)
+	if err != nil {
+		return false
+	}
+	var envelope struct {
+		Action tools.DataAnalysisAction `json:"action"`
+		SQL    *string                  `json:"sql"`
+	}
+	return json.Unmarshal([]byte(content), &envelope) == nil && envelope.Action == tools.DataAnalysisActionSkip && envelope.SQL != nil && strings.TrimSpace(*envelope.SQL) == ""
 }
 
 func unwrapDataAnalysisJSONFence(content string) (string, error) {

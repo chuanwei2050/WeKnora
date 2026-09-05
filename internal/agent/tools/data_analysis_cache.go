@@ -157,6 +157,18 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, k *types.Knowl
 }
 
 func (t *DataAnalysisTool) loadFromKnowledge(ctx context.Context, k *types.Knowledge) (*TableSchema, error) {
+	return t.loadFromKnowledgeWithPreview(ctx, k, nil)
+}
+
+// LoadFromKnowledgeWithPreview reports a header-only schema before a cold
+// workbook is fully imported. Cached loads report the authoritative schema.
+func (t *DataAnalysisTool) LoadFromKnowledgeWithPreview(ctx context.Context, k *types.Knowledge, onPreview func(*TableSchema)) (*TableSchema, error) {
+	t.operationMu.Lock()
+	defer t.operationMu.Unlock()
+	return t.loadFromKnowledgeWithPreview(ctx, k, onPreview)
+}
+
+func (t *DataAnalysisTool) loadFromKnowledgeWithPreview(ctx context.Context, k *types.Knowledge, onPreview func(*TableSchema)) (*TableSchema, error) {
 	if k == nil {
 		return nil, fmt.Errorf("knowledge cannot be nil")
 	}
@@ -167,20 +179,26 @@ func (t *DataAnalysisTool) loadFromKnowledge(ctx context.Context, k *types.Knowl
 		t.loadedSchemas = make(map[string]*TableSchema)
 	}
 	if schema := t.loadedSchemas[knowledgeSchemaCacheKey(k)]; schema != nil {
+		if onPreview != nil {
+			onPreview(schema)
+		}
 		return schema, nil
 	}
 	key := analysisCacheKey(t, k)
 	if key == "" {
-		return t.loadKnowledgeFile(ctx, k)
+		return t.loadKnowledgeFileWithPreview(ctx, k, onPreview)
 	}
 	if schema, hit, err := t.loadCachedAnalysis(ctx, k, key); hit {
+		if err == nil && onPreview != nil {
+			onPreview(schema)
+		}
 		return schema, err
 	}
 	load := func() (interface{}, error) {
 		if schema, hit, err := t.loadCachedAnalysis(ctx, k, key); hit {
 			return schema, err
 		}
-		schema, err := t.loadKnowledgeFile(ctx, k)
+		schema, err := t.loadKnowledgeFileWithPreview(ctx, k, onPreview)
 		if err == nil {
 			t.storeAnalysisCache(ctx, key, schema)
 		}
@@ -214,7 +232,7 @@ func (t *DataAnalysisTool) loadFromKnowledge(ctx context.Context, k *types.Knowl
 	}
 	if waiting && call.err != nil && ctx.Err() == nil && (errors.Is(call.err, context.Canceled) || errors.Is(call.err, context.DeadlineExceeded)) {
 		// A canceled leader must not cancel an independently live request.
-		return t.loadKnowledgeFile(ctx, k)
+		return t.loadKnowledgeFileWithPreview(ctx, k, onPreview)
 	}
 	if call.err != nil {
 		return nil, call.err
@@ -223,11 +241,17 @@ func (t *DataAnalysisTool) loadFromKnowledge(ctx context.Context, k *types.Knowl
 		return nil, err
 	}
 	if schema := t.loadedSchemas[knowledgeSchemaCacheKey(k)]; schema != nil {
+		if onPreview != nil {
+			onPreview(schema)
+		}
 		return schema, nil
 	}
 	if schema, hit, err := t.loadCachedAnalysis(ctx, k, key); hit {
+		if err == nil && onPreview != nil {
+			onPreview(schema)
+		}
 		return schema, err
 	}
 	// Cache capacity is bounded. A rejected cache write still allows this request.
-	return t.loadKnowledgeFile(ctx, k)
+	return t.loadKnowledgeFileWithPreview(ctx, k, onPreview)
 }

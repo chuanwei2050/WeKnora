@@ -584,6 +584,10 @@ func buildExcelCreateTableSQL(tableName, filename string, sheetNames []string) s
 //   - *TableSchema: schema information of the created table
 //   - error: any error that occurred during the operation
 func (t *DataAnalysisTool) loadKnowledgeFile(ctx context.Context, knowledge *types.Knowledge) (*TableSchema, error) {
+	return t.loadKnowledgeFileWithPreview(ctx, knowledge, nil)
+}
+
+func (t *DataAnalysisTool) loadKnowledgeFileWithPreview(ctx context.Context, knowledge *types.Knowledge, onPreview func(*TableSchema)) (*TableSchema, error) {
 	if knowledge == nil {
 		return nil, fmt.Errorf("knowledge cannot be nil")
 	}
@@ -609,6 +613,13 @@ func (t *DataAnalysisTool) loadKnowledgeFile(ctx context.Context, knowledge *typ
 		}
 		defer convertedCleanup()
 		localPath = convertedPath
+	}
+	if onPreview != nil {
+		if preview, previewErr := previewAnalysisSchema(ctx, localPath, fileType, tableName); previewErr == nil {
+			onPreview(preview)
+		} else {
+			logger.Warnf(ctx, "[Tool][DataAnalysis] Header preview unavailable for knowledge '%s': %v", knowledge.ID, previewErr)
+		}
 	}
 
 	var schema *TableSchema

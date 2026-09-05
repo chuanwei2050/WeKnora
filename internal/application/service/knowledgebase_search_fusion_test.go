@@ -113,7 +113,12 @@ func TestPreserveRetrieverLeadersProtectsCandidateWindowBeforeResultLimit(t *tes
 		vectorResults[i] = &types.IndexWithScore{ChunkID: fmt.Sprintf("vector-%02d", i)}
 		keywordResults[i] = &types.IndexWithScore{ChunkID: fmt.Sprintf("keyword-%02d", i)}
 	}
-	fused := append([]*types.IndexWithScore(nil), vectorResults...)
+	fused := make([]*types.IndexWithScore, 0, len(vectorResults)+len(keywordResults))
+	for _, candidate := range append(vectorResults, keywordResults...) {
+		fused = append(fused, &types.IndexWithScore{
+			ChunkID: candidate.ChunkID, Score: 0.01, ScoreDomain: types.RetrievalScoreDomainRRF,
+		})
+	}
 
 	got := preserveRetrieverLeaders(fused, vectorResults, keywordResults, 20, 30)
 	if len(got) != 30 {
@@ -150,6 +155,31 @@ func TestPreserveRetrieverLeadersDeduplicatesSharedLeaders(t *testing.T) {
 	}
 	if len(got) != 4 {
 		t.Fatalf("expected 4 candidates, got %d", len(got))
+	}
+}
+
+func TestPreserveRetrieverLeadersKeepsFusedScoreDomain(t *testing.T) {
+	vectorLeader := &types.IndexWithScore{ChunkID: "vector", Score: 0.9, ScoreDomain: types.RetrievalScoreDomainRelevance}
+	keywordLeader := &types.IndexWithScore{ChunkID: "keyword", Score: 32, ScoreDomain: types.RetrievalScoreDomainRelevance}
+	fused := []*types.IndexWithScore{
+		{ChunkID: "tail-1", Score: 0.016, ScoreDomain: types.RetrievalScoreDomainRRF},
+		{ChunkID: "tail-2", Score: 0.015, ScoreDomain: types.RetrievalScoreDomainRRF},
+		{ChunkID: "vector", Score: 0.011, ScoreDomain: types.RetrievalScoreDomainRRF},
+		{ChunkID: "keyword", Score: 0.005, ScoreDomain: types.RetrievalScoreDomainRRF},
+		{ChunkID: "tail-3", Score: 0.004, ScoreDomain: types.RetrievalScoreDomainRRF},
+	}
+
+	got := preserveRetrieverLeaders(fused, []*types.IndexWithScore{vectorLeader}, []*types.IndexWithScore{keywordLeader}, 2, 4)
+	if len(got) != 4 {
+		t.Fatalf("expected 4 candidates, got %d", len(got))
+	}
+	for _, candidate := range got {
+		if candidate.ScoreDomain != types.RetrievalScoreDomainRRF {
+			t.Fatalf("preserved candidate escaped the fused score domain: %+v", candidate)
+		}
+		if candidate.Score > 0.016 {
+			t.Fatalf("preserved candidate reused a raw retriever score: %+v", candidate)
+		}
 	}
 }
 

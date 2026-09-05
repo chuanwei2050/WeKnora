@@ -170,6 +170,12 @@ func preserveRetrieverLeaders(
 	leadersPerChannel := max(1, min(candidateLimit, resultLimit)/2)
 	result := make([]*types.IndexWithScore, 0, resultLimit)
 	seen := make(map[string]struct{}, resultLimit)
+	fusedByChunkID := make(map[string]*types.IndexWithScore, len(fused))
+	for _, candidate := range fused {
+		if candidate != nil {
+			fusedByChunkID[candidate.ChunkID] = candidate
+		}
+	}
 	appendUnique := func(candidate *types.IndexWithScore) {
 		if candidate == nil || len(result) >= resultLimit {
 			return
@@ -180,13 +186,19 @@ func preserveRetrieverLeaders(
 		seen[candidate.ChunkID] = struct{}{}
 		result = append(result, candidate)
 	}
+	appendFused := func(candidate *types.IndexWithScore) {
+		if candidate == nil {
+			return
+		}
+		appendUnique(fusedByChunkID[candidate.ChunkID])
+	}
 
 	for i := 0; i < leadersPerChannel; i++ {
 		if i < len(vectorResults) {
-			appendUnique(vectorResults[i])
+			appendFused(vectorResults[i])
 		}
 		if i < len(keywordResults) {
-			appendUnique(keywordResults[i])
+			appendFused(keywordResults[i])
 		}
 	}
 	for _, candidate := range fused {
