@@ -9,7 +9,7 @@
                 <t-icon :name="showReferBox ? 'chevron-up' : 'chevron-down'" />
             </div>
         </div>
-        <div class="refer_box" v-show="showReferBox">
+        <div class="refer_box" v-if="showReferBox">
             <!-- Web search references (ungrouped) -->
             <div v-for="(item, index) in webSearchRefs" :key="'web-' + index">
                 <a
@@ -40,7 +40,7 @@
                         </t-tooltip>
                     </div>
                 </div>
-                <div class="doc-group-chunks" v-show="expandedGroups[group.key]">
+                <div class="doc-group-chunks" v-if="expandedGroups[group.key]">
                     <div v-for="(chunk, cIdx) in group.chunks" :key="'chunk-' + cIdx" class="doc-chunk-item">
                         <t-popup overlayClassName="refer-to-layer" placement="bottom-left" width="400" :showArrow="false" trigger="click">
                             <template #content>

@@ -94,7 +94,7 @@
     </div>
 </template>
 <script setup>
-import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, defineProps, nextTick, onUpdated } from 'vue';
+import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, defineProps, nextTick } from 'vue';
 import { marked } from 'marked';
 import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
@@ -358,16 +358,15 @@ const renderMermaidDiagrams = async () => {
   await renderMermaidInContainer(parentMd.value);
 };
 
-// 监听内容变化并渲染 Mermaid - 只在会话完成后渲染
-onUpdated(() => {
+// 只在实际渲染内容变化时处理图片和 Mermaid，避免父组件更新导致所有历史消息重复扫描 DOM。
+watch([renderedHTML, () => props.session?.is_completed], () => {
     nextTick(async () => {
         await hydrateProtectedFileImages(parentMd.value);
-        // 只在会话完成后渲染 mermaid
         if (props.session?.is_completed) {
-            renderMermaidDiagrams();
+            await renderMermaidDiagrams();
         }
     });
-});
+}, { flush: 'post' });
 
 onMounted(async () => {
     // 为 markdown-content 中的图片添加点击事件

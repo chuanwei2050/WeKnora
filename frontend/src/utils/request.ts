@@ -271,8 +271,8 @@ function unwrapResponse<T>(request: Promise<AxiosResponse<T>>): Promise<T> {
   return request.then(response => response.data);
 }
 
-export function get<T = any>(url: string): Promise<T> {
-  return unwrapResponse(instance.get<T>(url));
+export function get<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
+  return unwrapResponse(instance.get<T>(url, config));
 }
 
 export async function getDown<T = Blob>(url: string, config?: AxiosRequestConfig): Promise<T> {

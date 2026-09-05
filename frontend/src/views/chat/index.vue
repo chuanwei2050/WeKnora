@@ -2,23 +2,8 @@
     <div class="chat" :class="{ 'is-embedded': embeddedMode, 'is-sidebar-collapsed': uiStore.sidebarCollapsed }">
         <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
             <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
-                <!-- 消息列表骨架屏 -->
-                <div v-if="historyLoading && messagesList.length === 0" class="msg-skeleton-list">
-                    <div class="msg-skeleton msg-skeleton-user">
-                        <t-skeleton animation="gradient" :row-col="[{ width: '45%', height: '36px', type: 'rect' }]" />
-                    </div>
-                    <div class="msg-skeleton msg-skeleton-bot">
-                        <t-skeleton animation="gradient" :row-col="[{ width: '80%', height: '16px' }, { width: '100%', height: '16px' }, { width: '60%', height: '16px' }]" />
-                    </div>
-                    <div class="msg-skeleton msg-skeleton-user">
-                        <t-skeleton animation="gradient" :row-col="[{ width: '35%', height: '36px', type: 'rect' }]" />
-                    </div>
-                    <div class="msg-skeleton msg-skeleton-bot">
-                        <t-skeleton animation="gradient" :row-col="[{ width: '70%', height: '16px' }, { width: '90%', height: '16px' }]" />
-                    </div>
-                </div>
                 <!-- 推荐问题卡片 - 仅在新会话（无消息）时展示 -->
-                <div v-if="messagesList.length === 0 && !loading" class="suggested-questions-container" :class="{ 'has-questions': suggestedQuestions.length > 0 || suggestedQuestionsLoading }">
+                <div v-if="messagesList.length === 0 && !loading && !historyLoading" class="suggested-questions-container" :class="{ 'has-questions': suggestedQuestions.length > 0 || suggestedQuestionsLoading }">
                     <div v-if="embeddedMode && !suggestedQuestionsLoading && suggestedQuestions.length === 0" class="embedded-welcome">
                         <div class="embedded-welcome-icon" aria-hidden="true">
                             <img src="/widget/icons/ai-assistant.png" alt="" />
@@ -55,7 +40,7 @@
                         </div>
                     </transition>
                 </div>
-                <div v-for="(session, id) in messagesList" :key='id'>
+                <div v-for="(session, id) in messagesList" :key="session.id || session.request_id || id">
                     <div v-if="session.role == 'user'">
                         <usermsg :content="session.content" :mentioned_items="session.mentioned_items" :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"></usermsg>
                     </div>
@@ -110,7 +95,7 @@ import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vu
 import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
-import { getMessageList, generateSessionsTitle, getSession } from "@/api/chat/index";
+import { getMessageList, generateSessionsTitle } from "@/api/chat/index";
 import { getAgentById, getSuggestedQuestions } from "@/api/agent/index";
 import { useStream } from '../../api/chat/streame'
 import { buildAgentCompleteEvent, isAGUITerminalEvent, mergeStreamContent, shouldUseIntegrationAGUI } from '../../api/chat/integration-stream'
@@ -148,7 +133,6 @@ const { output, onChunk, isStreaming, isLoading, error, startStream, stopStream 
 const route = useRoute();
 const router = useRouter();
 const session_id = ref(props.session_id || route.params.chatid);
-const sessionData = ref(null);
 const voiceConfig = ref({});
 const aguiDisplayEnabled = ref(false);
 const inputFieldRef = ref();
@@ -376,14 +360,29 @@ const handleScroll = () => {
     debouncedScrollTop();
 };
 
+let historyRequestId = 0;
+let historyRequestController = null;
 const getmsgList = (data, isScrollType = false, scrollHeight) => {
-    getMessageList(data).then(res => {
+    historyRequestController?.abort();
+    const requestController = new AbortController();
+    historyRequestController = requestController;
+    const requestId = ++historyRequestId;
+    const requestedSessionId = data.session_id;
+    getMessageList(data, requestController.signal).then(res => {
+        if (requestId !== historyRequestId || requestedSessionId !== session_id.value) return;
         if (res && res.data?.length) {
             created_at.value = res.data[0].created_at;
             handleMsgList(res.data, isScrollType, scrollHeight);
         }
+    }).catch(error => {
+        if (requestId === historyRequestId && !requestController.signal.aborted) {
+            console.error('[Message Load] Failed to load history:', error);
+        }
     }).finally(() => {
-        historyLoading.value = false;
+        if (requestId === historyRequestId && requestedSessionId === session_id.value) {
+            historyLoading.value = false;
+            historyRequestController = null;
+        }
     })
 }
 
@@ -1323,16 +1322,6 @@ onMounted(async () => {
     loading.value = false;
     isReplying.value = false;
     
-    // Load session data to get agent_config
-    try {
-        const sessionRes = await getSession(session_id.value);
-        if (sessionRes?.data) {
-            sessionData.value = sessionRes.data;
-        }
-    } catch (error) {
-        console.error('Failed to load session data:', error);
-    }
-    
     checkmenuTitle(session_id.value)
     if (firstQuery.value) {
         scrollLock.value = true;
@@ -1353,6 +1342,8 @@ onMounted(async () => {
     fetchSuggestedQuestions();
 })
 const clearData = () => {
+    historyRequestController?.abort();
+    historyRequestController = null;
     stopStream();
     isReplying.value = false;
     fullContent.value = '';
@@ -1500,25 +1491,6 @@ onBeforeRouteUpdate((to, from, next) => {
 @keyframes contentFadeIn {
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: translateY(0); }
-}
-
-.msg-skeleton-list {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    max-width: 800px;
-    padding: 16px 0;
-    animation: contentFadeIn 0.3s ease-out;
-}
-.msg-skeleton-user {
-    display: flex;
-    justify-content: flex-end;
-}
-.msg-skeleton-bot {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding-left: 4px;
 }
 
 .input-container {

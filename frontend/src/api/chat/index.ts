@@ -34,14 +34,14 @@ export async function agentChat(data: {
   });
 }
 
-export async function getMessageList(data: { session_id: string; limit: number, created_at: string }) {
+export async function getMessageList(data: { session_id: string; limit: number, created_at: string }, signal?: AbortSignal) {
   if (getRuntimeMode() === 'embedded-widget') {
-    return get(`/api/integration/v1/chat/sessions/${data.session_id}/messages?limit=${data.limit}`);
+    return get(`/api/integration/v1/chat/sessions/${data.session_id}/messages?limit=${data.limit}`, { signal });
   }
   if (data.created_at) {
-    return get(`/api/v1/messages/${data.session_id}/load?before_time=${encodeURIComponent(data.created_at)}&limit=${data.limit}`);
+    return get(`/api/v1/messages/${data.session_id}/load?before_time=${encodeURIComponent(data.created_at)}&limit=${data.limit}`, { signal });
   } else {
-    return get(`/api/v1/messages/${data.session_id}/load?limit=${data.limit}`);
+    return get(`/api/v1/messages/${data.session_id}/load?limit=${data.limit}`, { signal });
   }
 }
 

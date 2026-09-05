@@ -66,6 +66,7 @@ describe('document reference navigation', () => {
     mocks.getKnowledgeDetails.mockResolvedValue({ success: true, data: { id: 'knowledge-1' } })
     const wrapper = mountReference()
 
+    await wrapper.get('.refer_header').trigger('click')
     await wrapper.get('.doc-group-navigate').trigger('click')
     await flushPromises()
 
@@ -81,6 +82,7 @@ describe('document reference navigation', () => {
     mocks.getKnowledgeDetails.mockRejectedValue(new Error('not found'))
     const wrapper = mountReference()
 
+    await wrapper.get('.refer_header').trigger('click')
     await wrapper.get('.doc-group-navigate').trigger('click')
     await flushPromises()
 
