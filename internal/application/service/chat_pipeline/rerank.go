@@ -266,6 +266,11 @@ func ensureAcceptedKeywordLeader(selected, accepted []*types.SearchResult, limit
 		if kept < limit {
 			return append(final, result)
 		}
+		// A lexical channel winner is not an automatic relevance override.
+		// Preserve the MMR result when replacing it would lower relevance.
+		if final[kept-1] == nil || result.Score < final[kept-1].Score {
+			return final
+		}
 		final[kept-1] = result
 		return final
 	}
@@ -462,10 +467,27 @@ func (p *PluginRerank) rerank(ctx context.Context,
 		}
 	}
 
-	// Fallback: if threshold filtering removed all results but the top candidate
-	// still has a reasonable score, keep it as a safety net. Skip fallback entirely
-	// when the best score is too low — forcing irrelevant results is worse than
-	// returning nothing and letting the caller handle the empty-result case.
+	// When every score narrowly misses a high configured threshold, reuse the
+	// same model response with the former degraded threshold. This preserves
+	// supporting evidence without issuing a second model request.
+	if len(rankFilter) == 0 && chatManage.RerankThreshold > 0.3 {
+		degradedThreshold := max(chatManage.RerankThreshold*0.7, 0.3)
+		for _, result := range rerankResp {
+			if result.Index >= 0 && result.Index < len(candidates) && result.RelevanceScore >= degradedThreshold {
+				rankFilter = append(rankFilter, result)
+			}
+		}
+		if len(rankFilter) > 0 {
+			pipelineInfo(ctx, "Rerank", "threshold_degrade", map[string]interface{}{
+				"original": chatManage.RerankThreshold,
+				"degraded": degradedThreshold,
+				"retained": len(rankFilter),
+			})
+		}
+	}
+
+	// If even the degraded threshold removed everything, retain only a
+	// reasonable top candidate as the final safety net.
 	const fallbackMinScore = 0.15
 	if len(rankFilter) == 0 && len(rerankResp) > 0 && rerankResp[0].RelevanceScore >= fallbackMinScore {
 		rankFilter = rerankResp[:1]

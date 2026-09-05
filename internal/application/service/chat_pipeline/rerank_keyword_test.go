@@ -65,7 +65,7 @@ func TestPreserveAcceptedKeywordLeaderDoesNotAddRejectedCandidate(t *testing.T) 
 	}
 }
 
-func TestEnsureAcceptedKeywordLeaderDoesNotDisplaceAllMMRResults(t *testing.T) {
+func TestEnsureAcceptedKeywordLeaderDoesNotDisplaceStrongerMMRResult(t *testing.T) {
 	semantic := &types.SearchResult{ID: "semantic", Score: 0.95}
 	diverse := &types.SearchResult{ID: "diverse", Score: 0.9}
 	leader1 := &types.SearchResult{ID: "leader-1", Score: 0.8, KeywordLeader: true}
@@ -76,7 +76,42 @@ func TestEnsureAcceptedKeywordLeaderDoesNotDisplaceAllMMRResults(t *testing.T) {
 		[]*types.SearchResult{semantic, diverse, leader1, leader2},
 		2,
 	)
-	if len(got) != 2 || got[0].ID != "semantic" || got[1].ID != "leader-1" {
-		t.Fatalf("keyword leaders displaced all MMR results: %+v", got)
+	if len(got) != 2 || got[0].ID != "semantic" || got[1].ID != "diverse" {
+		t.Fatalf("keyword leader displaced a stronger MMR result: %+v", got)
 	}
 }
+
+func TestRerankReusesScoresForThresholdDegradation(t *testing.T) {
+	model := &countingRerankerWithResults{results: []rerank.RankResult{
+		{Index: 0, RelevanceScore: 0.49},
+		{Index: 1, RelevanceScore: 0.48},
+		{Index: 2, RelevanceScore: 0.47},
+	}}
+	plugin := &PluginRerank{}
+	candidates := []*types.SearchResult{{ID: "one"}, {ID: "two"}, {ID: "three"}}
+	manage := &types.ChatManage{PipelineRequest: types.PipelineRequest{RerankThreshold: 0.5}}
+
+	got, err := plugin.rerank(context.Background(), manage, model, "query", []string{"one", "two", "three"}, candidates)
+	if err != nil {
+		t.Fatalf("rerank failed: %v", err)
+	}
+	if model.calls != 1 {
+		t.Fatalf("expected one model call, got %d", model.calls)
+	}
+	if len(got) != 3 {
+		t.Fatalf("degraded threshold retained %d results, want 3: %+v", len(got), got)
+	}
+}
+
+type countingRerankerWithResults struct {
+	results []rerank.RankResult
+	calls   int
+}
+
+func (r *countingRerankerWithResults) Rerank(context.Context, string, []string) ([]rerank.RankResult, error) {
+	r.calls++
+	return r.results, nil
+}
+
+func (r *countingRerankerWithResults) GetModelName() string { return "test-reranker" }
+func (r *countingRerankerWithResults) GetModelID() string   { return "test-reranker-id" }

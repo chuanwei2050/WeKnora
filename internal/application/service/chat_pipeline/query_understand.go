@@ -31,7 +31,7 @@ var (
 )
 
 type queryUnderstandOutput struct {
-	NeedsTableQuery     *bool                  `json:"needs_table_query"`
+	NeedsTableQuery     *bool                  `json:"needs_table_query" jsonschema:"true when answering requires evaluating structured records for detail retrieval, filtering, sorting, grouping, comparison, calculation, or aggregation; false only for passage-only answers; null when uncertain"`
 	RewriteQuery        string                 `json:"rewrite_query"`
 	Intent              types.QueryIntent      `json:"intent"`
 	ImageDescription    string                 `json:"image_description"`
@@ -777,7 +777,7 @@ func routingSummary(decision *types.RoutingDecision) map[string]interface{} {
 
 const tableQueryIntentInstruction = `
 Also return needs_table_query (true, false, or null), independently of intent and complexity.
-Use true for operations on records: filtered detail lists, sorting/ranking, grouping, calculations, aggregation, or comparisons that require evaluating structured records. This is not limited to statistics.
+Use true whenever answering requires evaluating structured records: detail retrieval, filtering, sorting/ranking, grouping, calculations, aggregation, counts, or comparisons. This is not limited to statistics. A request for how many records satisfy one or more conditions is true, including when separate counts are requested for several conditions.
 Use false only when the request can be answered from relevant passages: conceptual explanations, advice, narrative summaries, or an ordinary factual question without a record-processing requirement. Mentioning a file or a topic alone does not require SQL.
 Use null when unsure, when a follow-up's operation cannot be resolved from history, or when the necessary operation depends on data not yet retrieved. Do not guess false for an unresolved record query. Classify the current user request; history may resolve references but cannot override a changed request.
 Keep the JSON compact; do not explain this field.`
