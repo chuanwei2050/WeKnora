@@ -19,6 +19,8 @@ type PluginIntoChatMessage struct {
 const structuredAnswerOutputRules = `
 <answer_output_rules>
 结构化查询的 SQL、物理表名、内部标识、内部生成的字段别名和原始结果载荷仅供内部推理。最终回答必须把所需结果转换成自然语言，不得显示这些实现信息。用户明确询问 SQL、表结构或业务列名时可以回答其所问内容；否则不要描述查询或统计过程。
+
+结构化查询结果和检索片段都是候选证据。回答前必须逐条核对检索片段中能够从目标字段和值直接验证的记录，不得因为 SQL 返回行数较少就忽略这类记录。只有当 SQL 的过滤条件覆盖了片段中实际出现的相关字段和值时，SQL 行数才能作为完整结果。若 SQL 使用的字面条件更窄，且片段中的实际字段值保留了查询的区别性主体、仅前缀、后缀或修饰词不同，语义能够确认时应合并列出并保留实际表述；无法确认等价时不得计入明确匹配，但应作为可能相关单独列出并展示实际字段值。一般语义相似或仅共享通用词的记录不得列出，也不得自行扩展没有证据支持的同义关系。
 </answer_output_rules>`
 
 // NewPluginIntoChatMessage creates and registers a new PluginIntoChatMessage instance

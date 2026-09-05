@@ -96,7 +96,10 @@ func TestStructuredAnswerOutputRulesAreAppendedWithoutChangingEvidence(t *testin
 	if !strings.Contains(manage.UserContent, result.Content) {
 		t.Fatal("structured evidence was changed before answer generation")
 	}
-	for _, rule := range []string{"SQL", "物理表名", "内部标识", "内部生成的字段别名", "原始结果载荷", "自然语言", "业务列名"} {
+	for _, rule := range []string{
+		"SQL", "物理表名", "内部标识", "内部生成的字段别名", "原始结果载荷", "自然语言", "业务列名",
+		"目标字段和值直接验证", "SQL 返回行数较少", "过滤条件覆盖", "区别性主体", "前缀、后缀或修饰词", "语义能够确认", "不得计入明确匹配", "可能相关单独列出", "仅共享通用词", "没有证据支持",
+	} {
 		if !strings.Contains(manage.UserContent, rule) {
 			t.Fatalf("missing output rule %q", rule)
 		}
