@@ -210,6 +210,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	}
 	searchutil.SortSearchResults(reranked)
 	final := applyMMR(ctx, reranked, chatManage, min(len(reranked), max(1, chatManage.RerankTopK)), 0.7)
+	final = ensureAcceptedKeywordLeader(final, reranked, chatManage.RerankTopK)
 	chatManage.RerankResult = final
 
 	// Log composite top scores and MMR selection summary
@@ -242,6 +243,33 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	})
 	emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "相关内容筛选完成", stageStarted, true, map[string]interface{}{"status": "completed", "input_count": len(chatManage.SearchResult), "output_count": len(chatManage.RerankResult)})
 	return next()
+}
+
+// ensureAcceptedKeywordLeader keeps one lexical anchor when it passed the
+// rerank threshold but MMR removed every lexical result for diversity.
+// Rejected lexical results never reach this function, and scores are unchanged.
+func ensureAcceptedKeywordLeader(selected, accepted []*types.SearchResult, limit int) []*types.SearchResult {
+	if limit <= 0 || len(accepted) == 0 {
+		return selected
+	}
+	for _, result := range selected {
+		if result != nil && result.KeywordLeader {
+			return selected
+		}
+	}
+	for _, result := range accepted {
+		if result == nil || !result.KeywordLeader {
+			continue
+		}
+		kept := min(len(selected), limit)
+		final := append([]*types.SearchResult(nil), selected[:kept]...)
+		if kept < limit {
+			return append(final, result)
+		}
+		final[kept-1] = result
+		return final
+	}
+	return selected
 }
 
 func normalizeRerankBaseScores(groups ...[]*types.SearchResult) map[*types.SearchResult]float64 {

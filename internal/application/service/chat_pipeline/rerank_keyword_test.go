@@ -32,3 +32,51 @@ func TestRerankKeywordLeaderCannotOverrideModelRejection(t *testing.T) {
 		})
 	}
 }
+
+func TestPreserveAcceptedKeywordLeaderAfterMMR(t *testing.T) {
+	semantic := &types.SearchResult{ID: "semantic", Score: 0.95}
+	leader := &types.SearchResult{ID: "leader", Score: 0.8, KeywordLeader: true}
+	diverse := &types.SearchResult{ID: "diverse", Score: 0.7}
+
+	got := ensureAcceptedKeywordLeader(
+		[]*types.SearchResult{semantic, diverse},
+		[]*types.SearchResult{semantic, leader, diverse},
+		2,
+	)
+	if len(got) != 2 || got[0].ID != "semantic" || got[1].ID != "leader" {
+		t.Fatalf("accepted keyword leader was not retained: %+v", got)
+	}
+	if leader.Score != 0.8 {
+		t.Fatalf("keyword leader score changed: %v", leader.Score)
+	}
+}
+
+func TestPreserveAcceptedKeywordLeaderDoesNotAddRejectedCandidate(t *testing.T) {
+	semantic := &types.SearchResult{ID: "semantic", Score: 0.95}
+	rejected := &types.SearchResult{ID: "rejected", Score: 0.1, KeywordLeader: true}
+
+	got := ensureAcceptedKeywordLeader(
+		[]*types.SearchResult{semantic},
+		[]*types.SearchResult{semantic},
+		2,
+	)
+	if len(got) != 1 || got[0].ID != "semantic" || rejected.Score != 0.1 {
+		t.Fatalf("rejected keyword candidate was restored: %+v", got)
+	}
+}
+
+func TestEnsureAcceptedKeywordLeaderDoesNotDisplaceAllMMRResults(t *testing.T) {
+	semantic := &types.SearchResult{ID: "semantic", Score: 0.95}
+	diverse := &types.SearchResult{ID: "diverse", Score: 0.9}
+	leader1 := &types.SearchResult{ID: "leader-1", Score: 0.8, KeywordLeader: true}
+	leader2 := &types.SearchResult{ID: "leader-2", Score: 0.7, KeywordLeader: true}
+
+	got := ensureAcceptedKeywordLeader(
+		[]*types.SearchResult{semantic, diverse},
+		[]*types.SearchResult{semantic, diverse, leader1, leader2},
+		2,
+	)
+	if len(got) != 2 || got[0].ID != "semantic" || got[1].ID != "leader-1" {
+		t.Fatalf("keyword leaders displaced all MMR results: %+v", got)
+	}
+}
