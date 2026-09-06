@@ -43,6 +43,13 @@ type dataAnalysisModelResponse struct {
 	err     error
 }
 
+type dataAnalysisCandidate struct {
+	target    *types.SearchResult
+	knowledge *types.Knowledge
+	err       error
+	fallbacks []dataAnalysisCandidate
+}
+
 type PluginDataAnalysis struct {
 	modelService         interfaces.ModelService
 	knowledgeBaseService interfaces.KnowledgeBaseService
@@ -189,10 +196,32 @@ func (p *PluginDataAnalysis) analyze(
 	}
 
 	retrievedResults := chatManage.MergeResult
-	targets := selectDataAnalysisTargets(retrievedResults, chatManage.KnowledgeIDs, chatManage.SearchTargets, dataAnalysisMaxTables)
+	candidateTargets := selectDataAnalysisTargets(retrievedResults, chatManage.KnowledgeIDs, chatManage.SearchTargets, len(retrievedResults))
 	chatManage.MergeResult = filterOutTableChunks(chatManage.MergeResult)
-	if len(targets) == 0 {
+	if len(candidateTargets) == 0 {
 		return next()
+	}
+	candidates := make([]dataAnalysisCandidate, 0, len(candidateTargets))
+	hashIndexes := make(map[string]int, dataAnalysisMaxTables)
+	duplicateCount := 0
+	for _, target := range candidateTargets {
+		knowledge, err := p.knowledgeService.GetKnowledgeByID(ctx, target.KnowledgeID)
+		candidate := dataAnalysisCandidate{target: target, knowledge: knowledge, err: err}
+		var duplicate bool
+		candidates, duplicate = appendDataAnalysisCandidate(candidates, hashIndexes, candidate)
+		if duplicate {
+			duplicateCount++
+		}
+		if len(candidates) == dataAnalysisMaxTables {
+			break
+		}
+	}
+	targets := make([]*types.SearchResult, len(candidates))
+	for i, candidate := range candidates {
+		targets[i] = candidate.target
+	}
+	if duplicateCount > 0 {
+		pipelineInfo(ctx, "DataAnalysis", "duplicate_dataset_skip", map[string]interface{}{"duplicate_count": duplicateCount})
 	}
 	for i, target := range targets {
 		pipelineInfo(ctx, "DataAnalysis", "target_selected", map[string]interface{}{
@@ -239,18 +268,33 @@ func (p *PluginDataAnalysis) analyze(
 		index   int
 		dataset *dataAnalysisDataset
 		tool    *tools.DataAnalysisTool
-		skipped bool
 		err     error
 	}
 	loads := make(chan loadOutcome, len(targets))
-	for i, target := range targets {
-		go func(index int, target *types.SearchResult) {
+	for i, candidate := range candidates {
+		go func(index int, candidate dataAnalysisCandidate) {
 			tool := tools.NewDataAnalysisTool(p.knowledgeBaseService, p.knowledgeService, p.tenantService, p.fileService, p.db, chatManage.SessionID, authorization)
-			knowledge, err := p.knowledgeService.GetKnowledgeByID(ctx, target.KnowledgeID)
-			if err != nil {
-				loads <- loadOutcome{index: index, tool: tool, err: fmt.Errorf("无法读取表格信息: %w", err)}
+			sources := append([]dataAnalysisCandidate{candidate}, candidate.fallbacks...)
+			var schema *tools.TableSchema
+			var loadErr error
+			for _, source := range sources {
+				if source.err != nil {
+					loadErr = fmt.Errorf("无法读取表格信息: %w", source.err)
+					continue
+				}
+				schema, loadErr = tool.LoadFromKnowledge(ctx, source.knowledge)
+				if loadErr == nil {
+					candidate = source
+					break
+				}
+				loadErr = fmt.Errorf("无法加载原始表格: %w", loadErr)
+			}
+			if loadErr != nil {
+				loads <- loadOutcome{index: index, tool: tool, err: loadErr}
 				return
 			}
+			target := candidate.target
+			knowledge := candidate.knowledge
 			evidence := dataAnalysisGroundingEvidence(
 				retrievedResults,
 				chatManage.SearchResult,
@@ -258,39 +302,7 @@ func (p *PluginDataAnalysis) analyze(
 				chatManage.RewriteQuery,
 				dataAnalysisEvidenceCharsPerTable,
 			)
-			type tableLoadResult struct {
-				schema *tools.TableSchema
-				err    error
-			}
-			previewReady := make(chan *tools.TableSchema, 1)
-			loadDone := make(chan tableLoadResult, 1)
-			loadCtx, cancelLoad := context.WithCancel(ctx)
-			defer cancelLoad()
-			go func() {
-				schema, loadErr := tool.LoadFromKnowledgeWithPreview(loadCtx, knowledge, func(preview *tools.TableSchema) {
-					select {
-					case previewReady <- preview:
-					default:
-					}
-				})
-				loadDone <- tableLoadResult{schema: schema, err: loadErr}
-			}()
-
-			var load tableLoadResult
-			var planSchema *tools.TableSchema
-			loadFinished := false
-			select {
-			case planSchema = <-previewReady:
-			case load = <-loadDone:
-				loadFinished = true
-				planSchema = load.schema
-			}
-			if loadFinished && load.err != nil {
-				loads <- loadOutcome{index: index, tool: tool, err: fmt.Errorf("无法加载原始表格: %w", load.err)}
-				return
-			}
-
-			prompt := dataAnalysisPrompt(chatManage.Query, knowledge.ID, target.KnowledgeFilename, dataAnalysisSchemaForPrompt(planSchema), evidence)
+			prompt := dataAnalysisPrompt(chatManage.Query, knowledge.ID, target.KnowledgeFilename, dataAnalysisSchemaForPrompt(schema), evidence)
 			modelCtx, cancelModel := context.WithTimeout(ctx, p.llmCallTimeout())
 			thinking := false
 			response, modelErr := chatModel.Chat(modelCtx, []chat.Message{{Role: "user", Content: prompt}}, &chat.ChatOptions{Temperature: 0, Thinking: &thinking, Format: formatSchema})
@@ -301,24 +313,11 @@ func (p *PluginDataAnalysis) analyze(
 			}
 			initial := make(chan dataAnalysisModelResponse, 1)
 			initial <- dataAnalysisModelResponse{content: content, err: modelErr}
-			if !loadFinished && dataAnalysisResponseSkipsTable(content) {
-				cancelLoad()
-				<-loadDone
-				loads <- loadOutcome{index: index, tool: tool, skipped: true}
-				return
-			}
-			if !loadFinished {
-				load = <-loadDone
-			}
-			if load.err != nil {
-				loads <- loadOutcome{index: index, tool: tool, err: fmt.Errorf("无法加载原始表格: %w", load.err)}
-				return
-			}
 			loads <- loadOutcome{index: index, tool: tool, dataset: &dataAnalysisDataset{
-				target: target, knowledge: knowledge, schema: load.schema,
+				target: target, knowledge: knowledge, schema: schema,
 				evidence: evidence, tool: tool, initial: initial,
 			}}
-		}(i, target)
+		}(i, candidate)
 	}
 	loaded := make([]loadOutcome, len(targets))
 	for range targets {
@@ -327,9 +326,6 @@ func (p *PluginDataAnalysis) analyze(
 	}
 	for i, outcome := range loaded {
 		datasetTools = append(datasetTools, outcome.tool)
-		if outcome.skipped {
-			continue
-		}
 		if outcome.err != nil {
 			failedCount++
 			logger.Errorf(ctx, "Failed to load knowledge %s: %v", targets[i].KnowledgeID, outcome.err)
@@ -338,11 +334,6 @@ func (p *PluginDataAnalysis) analyze(
 			continue
 		}
 		datasets = append(datasets, *outcome.dataset)
-	}
-	var duplicateCount int
-	datasets, duplicateCount = deduplicateDataAnalysisDatasets(datasets)
-	if duplicateCount > 0 {
-		pipelineInfo(ctx, "DataAnalysis", "duplicate_dataset_skip", map[string]interface{}{"duplicate_count": duplicateCount})
 	}
 	if len(datasets) == 0 {
 		chatManage.MergeResult = append(chatManage.MergeResult, results...)
@@ -399,26 +390,22 @@ func (p *PluginDataAnalysis) analyze(
 	return next()
 }
 
-// deduplicateDataAnalysisDatasets avoids running the same physical upload more
-// than once when identical files exist in multiple authorized knowledge bases.
-// Filename similarity is intentionally insufficient: similarly named workbooks
-// may cover different organizations or reporting periods.
-func deduplicateDataAnalysisDatasets(datasets []dataAnalysisDataset) ([]dataAnalysisDataset, int) {
-	seenHashes := make(map[string]struct{}, len(datasets))
-	unique := make([]dataAnalysisDataset, 0, len(datasets))
-	duplicates := 0
-	for _, dataset := range datasets {
-		hash := strings.TrimSpace(dataset.knowledge.FileHash)
+func appendDataAnalysisCandidate(
+	candidates []dataAnalysisCandidate,
+	hashIndexes map[string]int,
+	candidate dataAnalysisCandidate,
+) ([]dataAnalysisCandidate, bool) {
+	if candidate.err == nil && candidate.knowledge != nil {
+		hash := strings.TrimSpace(candidate.knowledge.FileHash)
 		if hash != "" {
-			if _, exists := seenHashes[hash]; exists {
-				duplicates++
-				continue
+			if index, exists := hashIndexes[hash]; exists {
+				candidates[index].fallbacks = append(candidates[index].fallbacks, candidate)
+				return candidates, true
 			}
-			seenHashes[hash] = struct{}{}
+			hashIndexes[hash] = len(candidates)
 		}
-		unique = append(unique, dataset)
 	}
-	return unique, duplicates
+	return append(candidates, candidate), false
 }
 
 func (p *PluginDataAnalysis) analyzeDataset(ctx context.Context, chatModel chat.Chat, tool *tools.DataAnalysisTool, query string, dataset *dataAnalysisDataset) (*types.SearchResult, bool, error) {
@@ -583,18 +570,6 @@ func bindDataAnalysisInput(content, knowledgeID string) (json.RawMessage, error)
 	return json.Marshal(input)
 }
 
-func dataAnalysisResponseSkipsTable(content string) bool {
-	content, err := unwrapDataAnalysisJSONFence(content)
-	if err != nil {
-		return false
-	}
-	var envelope struct {
-		Action tools.DataAnalysisAction `json:"action"`
-		SQL    *string                  `json:"sql"`
-	}
-	return json.Unmarshal([]byte(content), &envelope) == nil && envelope.Action == tools.DataAnalysisActionSkip && envelope.SQL != nil && strings.TrimSpace(*envelope.SQL) == ""
-}
-
 func unwrapDataAnalysisJSONFence(content string) (string, error) {
 	trimmed := strings.TrimSpace(content)
 	if !strings.HasPrefix(trimmed, "```") {
@@ -692,9 +667,13 @@ func dataAnalysisGroundingEvidence(
 			if _, ok := seen[signature]; ok {
 				continue
 			}
+			overlap := searchutil.ContentOverlapRatio(query, content)
+			if !accepted && !hasDistinctiveQueryOverlap(query, content) {
+				continue
+			}
 			seen[signature] = struct{}{}
 			candidates = append(candidates, candidate{
-				result: result, overlap: searchutil.ContentOverlapRatio(query, content),
+				result: result, overlap: overlap,
 				accepted: accepted, order: len(candidates),
 			})
 		}
@@ -719,6 +698,24 @@ func dataAnalysisGroundingEvidence(
 		ordered = append(ordered, &copy)
 	}
 	return dataAnalysisEvidence(ordered, knowledgeID, maxChars)
+}
+
+func hasDistinctiveQueryOverlap(query, content string) bool {
+	queryTokens := searchutil.TokenizeSimple(query)
+	contentTokens := searchutil.TokenizeSimple(content)
+	if len(queryTokens) == 0 || len(contentTokens) == 0 {
+		return false
+	}
+	matches := 0
+	for token := range queryTokens {
+		if _, ok := contentTokens[token]; ok {
+			matches++
+		}
+	}
+	if len(queryTokens) == 1 {
+		return matches == 1
+	}
+	return matches >= 3
 }
 
 func recordDataAnalysisFailure(chatManage *types.ChatManage, target *types.SearchResult, reason string) {
@@ -783,20 +780,12 @@ func selectDataAnalysisTargets(results []*types.SearchResult, knowledgeIDs []str
 
 	selected := make([]*types.SearchResult, 0, limit)
 	seen := make(map[string]struct{}, limit)
-	seenLogicalFiles := make(map[string]struct{}, limit)
 	appendResult := func(result *types.SearchResult) {
 		if result == nil || len(selected) >= limit {
 			return
 		}
 		if _, ok := seen[result.KnowledgeID]; ok {
 			return
-		}
-		logicalFile := strings.ToLower(strings.TrimSpace(result.KnowledgeBaseID + "\x00" + result.KnowledgeFilename))
-		if len(explicit) == 0 && logicalFile != "" {
-			if _, ok := seenLogicalFiles[logicalFile]; ok {
-				return
-			}
-			seenLogicalFiles[logicalFile] = struct{}{}
 		}
 		seen[result.KnowledgeID] = struct{}{}
 		selected = append(selected, result)

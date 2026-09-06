@@ -28,14 +28,14 @@ func TestSelectDataAnalysisTargetUsesRankingForKnowledgeBaseScope(t *testing.T) 
 func TestSelectDataAnalysisTargetsUsesThreeDistinctRankedTables(t *testing.T) {
 	firstChunk := &types.SearchResult{ID: "a1", KnowledgeID: "first", KnowledgeFilename: "first.xlsx"}
 	duplicateFirst := &types.SearchResult{ID: "a2", KnowledgeID: "first", KnowledgeFilename: "first.xlsx"}
-	duplicateUpload := &types.SearchResult{ID: "a3", KnowledgeID: "first-copy", KnowledgeFilename: "first.xlsx"}
+	sameNameUpload := &types.SearchResult{ID: "a3", KnowledgeID: "first-copy", KnowledgeFilename: "first.xlsx"}
 	second := &types.SearchResult{KnowledgeID: "second", KnowledgeFilename: "second.csv"}
 	nonTable := &types.SearchResult{KnowledgeID: "text", KnowledgeFilename: "notes.pdf"}
 	third := &types.SearchResult{KnowledgeID: "third", KnowledgeFilename: "third.xls"}
 	fourth := &types.SearchResult{KnowledgeID: "fourth", KnowledgeFilename: "fourth.xlsx"}
 
-	got := selectDataAnalysisTargets([]*types.SearchResult{firstChunk, duplicateFirst, duplicateUpload, second, nonTable, third, fourth}, nil, nil, 3)
-	if len(got) != 3 || got[0] != firstChunk || got[1] != second || got[2] != third {
+	got := selectDataAnalysisTargets([]*types.SearchResult{firstChunk, duplicateFirst, sameNameUpload, second, nonTable, third, fourth}, nil, nil, 3)
+	if len(got) != 3 || got[0] != firstChunk || got[1] != sameNameUpload || got[2] != second {
 		t.Fatalf("expected the first three distinct ranked tables, got %#v", got)
 	}
 }

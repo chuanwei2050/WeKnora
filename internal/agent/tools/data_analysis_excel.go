@@ -19,6 +19,10 @@ func prepareAnalysisExcel(ctx context.Context, filename string) (string, func(),
 	defer book.Close()
 	changed := false
 	for _, sheet := range book.GetSheetList() {
+		rows, err := book.GetRows(sheet)
+		if err != nil {
+			return "", unchanged, err
+		}
 		merges, err := book.GetMergeCells(sheet)
 		if err != nil {
 			return "", unchanged, err
@@ -33,7 +37,12 @@ func prepareAnalysisExcel(ctx context.Context, filename string) (string, func(),
 			if err != nil {
 				return "", unchanged, err
 			}
-			if col != lastCol || first == last {
+			// read_xlsx(header=true) treats row 1 as the schema, so a merge
+			// touching it is layout rather than a value to propagate.
+			if col != lastCol || first == last || first == 1 {
+				continue
+			}
+			if !mergedRowsHaveSiblingData(rows, col, first, last) {
 				continue
 			}
 			value, err := book.GetCellValue(sheet, start, excelize.Options{RawCellValue: true})
@@ -98,4 +107,23 @@ func prepareAnalysisExcel(ctx context.Context, filename string) (string, func(),
 		return "", unchanged, err
 	}
 	return path, cleanup, nil
+}
+
+func mergedRowsHaveSiblingData(rows [][]string, mergedColumn, firstRow, lastRow int) bool {
+	for row := firstRow; row <= lastRow; row++ {
+		if row > len(rows) {
+			return false
+		}
+		hasSiblingData := false
+		for column, value := range rows[row-1] {
+			if column+1 != mergedColumn && strings.TrimSpace(value) != "" {
+				hasSiblingData = true
+				break
+			}
+		}
+		if !hasSiblingData {
+			return false
+		}
+	}
+	return true
 }

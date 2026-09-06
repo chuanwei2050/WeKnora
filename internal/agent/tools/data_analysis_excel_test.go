@@ -44,3 +44,61 @@ func TestExcelVerticalMergesPreserveRecordsAndRealBlanks(t *testing.T) {
 		t.Fatal("source workbook changed")
 	}
 }
+
+func TestExcelVerticalMergeInHeaderDoesNotCreateRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "header.xlsx")
+	book := excelize.NewFile()
+	defer book.Close()
+	for cell, value := range map[string]string{"A1": "category", "B1": "id", "B2": "a", "A3": "Alpha", "B3": "b"} {
+		if err := book.SetCellStr("Sheet1", cell, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := book.MergeCell("Sheet1", "A1", "A2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := book.SaveAs(path); err != nil {
+		t.Fatal(err)
+	}
+	db := newTestDuckDB(t)
+	tool := &DataAnalysisTool{db: db}
+	if _, err := tool.LoadFromExcel(context.Background(), path, "header_merge"); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM header_merge WHERE category IS NOT NULL`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("header merge created a data value: count=%d", count)
+	}
+}
+
+func TestExcelVerticalLayoutMergeDoesNotCreateRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "layout.xlsx")
+	book := excelize.NewFile()
+	defer book.Close()
+	for cell, value := range map[string]string{"A1": "category", "B1": "id", "A2": "第一季度", "A5": "Alpha", "B5": "a"} {
+		if err := book.SetCellStr("Sheet1", cell, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := book.MergeCell("Sheet1", "A2", "A4"); err != nil {
+		t.Fatal(err)
+	}
+	if err := book.SaveAs(path); err != nil {
+		t.Fatal(err)
+	}
+	db := newTestDuckDB(t)
+	tool := &DataAnalysisTool{db: db}
+	if _, err := tool.LoadFromExcel(context.Background(), path, "layout_merge"); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM layout_merge WHERE category='第一季度'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("layout merge created records: count=%d", count)
+	}
+}
