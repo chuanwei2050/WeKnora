@@ -663,6 +663,7 @@ func limitRetrievalCandidates(results []*types.SearchResult, configuredLimit int
 	}
 	results = removeDuplicateResults(results)
 	searchutil.SortSearchResults(results)
+	results = prioritizeReservedCandidates(results)
 	explicitIDs := make([]string, 0)
 	seenExplicit := make(map[string]struct{})
 	for _, target := range targets {
@@ -712,6 +713,19 @@ func limitRetrievalCandidates(results []*types.SearchResult, configuredLimit int
 	searchutil.SortSearchResults(remaining)
 	remainingLimit := min(limit-len(selected), len(remaining))
 	return append(selected, remaining[:remainingLimit]...)
+}
+
+func prioritizeReservedCandidates(results []*types.SearchResult) []*types.SearchResult {
+	reserved := make([]*types.SearchResult, 0, len(results))
+	regular := make([]*types.SearchResult, 0, len(results))
+	for _, result := range results {
+		if result != nil && result.RerankCandidateReserved {
+			reserved = append(reserved, result)
+		} else {
+			regular = append(regular, result)
+		}
+	}
+	return append(reserved, regular...)
 }
 
 func preserveBoundedFullDocumentResults(results []*types.SearchResult, targets []*types.SearchTarget) ([]*types.SearchResult, []*types.SearchResult) {

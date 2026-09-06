@@ -3,6 +3,7 @@ package chatpipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -90,6 +91,30 @@ func TestPrepareRerankCandidatesDeduplicatesAndLimits(t *testing.T) {
 	if got[0].ID != "chunk-1" || got[1].ID != "chunk-3" {
 		t.Fatalf("unexpected candidates after deduplication: %s, %s", got[0].ID, got[1].ID)
 	}
+}
+
+func TestGlobalRerankWindowKeepsReservedCandidateAfterAggregation(t *testing.T) {
+	results := make([]*types.SearchResult, 30)
+	for i := range results {
+		results[i] = &types.SearchResult{
+			ID:      fmt.Sprintf("candidate-%02d", i),
+			Content: fmt.Sprintf("content-%02d", i),
+			Score:   float64(30 - i),
+		}
+	}
+	results[29].RerankCandidateReserved = true
+
+	aggregated := limitRetrievalCandidates(results, 30, nil)
+	got := prepareRerankCandidates(aggregated, 20)
+	if len(got) != 20 {
+		t.Fatalf("expected global rerank window of 20 candidates, got %d", len(got))
+	}
+	for _, candidate := range got {
+		if candidate.ID == "candidate-29" {
+			return
+		}
+	}
+	t.Fatal("reserved candidate from the productive target did not reach the global rerank window")
 }
 
 func TestAdaptiveRerankCandidateLimit(t *testing.T) {

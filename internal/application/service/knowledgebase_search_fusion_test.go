@@ -25,12 +25,15 @@ func TestPreserveRetrieverLeadersKeepsKeywordOnlyExactMatch(t *testing.T) {
 	}
 	fused[30] = target
 
-	got := preserveRetrieverLeaders(fused, vectorResults, keywordResults, 20, 30)
-	if len(got) != 30 {
-		t.Fatalf("expected 30 candidates, got %d", len(got))
+	got := preserveRetrieverLeaders(t.Context(), fused, vectorResults, keywordResults, 20, 20)
+	if len(got) != 20 {
+		t.Fatalf("expected 20 candidates, got %d", len(got))
 	}
-	for i, candidate := range got[:25] {
+	for i, candidate := range got {
 		if candidate.ChunkID == target.ChunkID {
+			if !candidate.RerankCandidateReserved {
+				t.Fatalf("keyword rank-3 candidate %q was not marked for global preservation", target.ChunkID)
+			}
 			return
 		}
 		t.Logf("candidate %d: %s", i, candidate.ChunkID)
@@ -47,21 +50,28 @@ func TestPreserveRetrieverLeadersUsesRerankCandidateBudget(t *testing.T) {
 	}
 
 	got := preserveRetrieverLeaders(
+		t.Context(),
 		append(append([]*types.IndexWithScore{}, vectorResults...), keywordResults...),
 		vectorResults,
 		keywordResults,
 		20,
-		30,
+		20,
 	)
+	if len(got) != 20 {
+		t.Fatalf("expected configured rerank window of 20 candidates, got %d", len(got))
+	}
 
 	seen := make(map[string]struct{}, 20)
 	for _, candidate := range got[:20] {
 		seen[candidate.ChunkID] = struct{}{}
 	}
-	for _, expected := range []string{"vector-09", "keyword-09"} {
+	for _, expected := range []string{"vector-04", "keyword-04"} {
 		if _, ok := seen[expected]; !ok {
 			t.Fatalf("retriever leader %q was excluded from the downstream rerank budget", expected)
 		}
+	}
+	if _, ok := seen["keyword-05"]; ok {
+		t.Fatal("keyword result below the configured reserve was forced into the rerank budget")
 	}
 }
 
@@ -120,7 +130,7 @@ func TestPreserveRetrieverLeadersProtectsCandidateWindowBeforeResultLimit(t *tes
 		})
 	}
 
-	got := preserveRetrieverLeaders(fused, vectorResults, keywordResults, 20, 30)
+	got := preserveRetrieverLeaders(t.Context(), fused, vectorResults, keywordResults, 20, 30)
 	if len(got) != 30 {
 		t.Fatalf("expected result limit 30, got %d", len(got))
 	}
@@ -145,7 +155,7 @@ func TestPreserveRetrieverLeadersDeduplicatesSharedLeaders(t *testing.T) {
 		{ChunkID: "tail-2"},
 	}
 
-	got := preserveRetrieverLeaders(fused, vectorResults, keywordResults, 4, 4)
+	got := preserveRetrieverLeaders(t.Context(), fused, vectorResults, keywordResults, 4, 4)
 	seen := make(map[string]struct{}, len(got))
 	for _, candidate := range got {
 		if _, exists := seen[candidate.ChunkID]; exists {
@@ -169,7 +179,7 @@ func TestPreserveRetrieverLeadersKeepsFusedScoreDomain(t *testing.T) {
 		{ChunkID: "tail-3", Score: 0.004, ScoreDomain: types.RetrievalScoreDomainRRF},
 	}
 
-	got := preserveRetrieverLeaders(fused, []*types.IndexWithScore{vectorLeader}, []*types.IndexWithScore{keywordLeader}, 2, 4)
+	got := preserveRetrieverLeaders(t.Context(), fused, []*types.IndexWithScore{vectorLeader}, []*types.IndexWithScore{keywordLeader}, 2, 4)
 	if len(got) != 4 {
 		t.Fatalf("expected 4 candidates, got %d", len(got))
 	}

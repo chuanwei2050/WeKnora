@@ -162,6 +162,7 @@ type chunkIndex struct {
 	scoreDomains    map[string]types.RetrievalScoreDomain
 	matchTypes      map[string]types.MatchType
 	matchedContents map[string]string
+	rerankReserved  map[string]bool
 	processedIDs    map[string]bool // tracks all IDs (chunk + enrichment) to avoid duplicates
 }
 
@@ -173,6 +174,7 @@ func (s *knowledgeBaseService) buildChunkIndex(chunks []*types.IndexWithScore) *
 		scoreDomains:    make(map[string]types.RetrievalScoreDomain, len(chunks)),
 		matchTypes:      make(map[string]types.MatchType, len(chunks)),
 		matchedContents: make(map[string]string, len(chunks)),
+		rerankReserved:  make(map[string]bool, len(chunks)),
 		processedIDs:    make(map[string]bool, len(chunks)*2),
 	}
 
@@ -187,6 +189,7 @@ func (s *knowledgeBaseService) buildChunkIndex(chunks []*types.IndexWithScore) *
 		idx.scoreDomains[chunk.ChunkID] = chunk.ScoreDomain
 		idx.matchTypes[chunk.ChunkID] = chunk.MatchType
 		idx.matchedContents[chunk.ChunkID] = chunk.Content
+		idx.rerankReserved[chunk.ChunkID] = chunk.RerankCandidateReserved
 	}
 	return idx
 }
@@ -311,6 +314,7 @@ func (s *knowledgeBaseService) assembleSearchResults(
 			matchedContent := idx.matchedContents[chunk.ID]
 			result := s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent)
 			result.ScoreDomain = idx.scoreDomains[chunk.ID]
+			result.RerankCandidateReserved = idx.rerankReserved[chunk.ID]
 			searchResults = append(searchResults, result)
 			addedChunkIDs[chunk.ID] = true
 		} else {

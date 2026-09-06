@@ -83,6 +83,8 @@ type IndexWithScore struct {
 	Score float64
 	// ScoreDomain identifies the scale used by Score after retrieval fusion.
 	ScoreDomain RetrievalScoreDomain
+	// RerankCandidateReserved marks a channel leader that must reach the global rerank window.
+	RerankCandidateReserved bool
 	// Match type
 	MatchType MatchType
 	// IsEnabled

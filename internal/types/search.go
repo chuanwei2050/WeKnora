@@ -166,9 +166,10 @@ type SearchResult struct {
 	// Metadata
 	Metadata map[string]string `                              json:"metadata"`
 	// RankingSourcePrior is an internal, trusted ranking signal. It must never be populated from document metadata.
-	RankingSourcePrior     float64 `gorm:"-" json:"-"`
-	RankingSourcePriorKind string  `gorm:"-" json:"-"`
-	KeywordLeader          bool    `gorm:"-" json:"-"`
+	RankingSourcePrior      float64 `gorm:"-" json:"-"`
+	RankingSourcePriorKind  string  `gorm:"-" json:"-"`
+	KeywordLeader           bool    `gorm:"-" json:"-"`
+	RerankCandidateReserved bool    `gorm:"-" json:"-"`
 
 	// Chunk 类型
 	ChunkType string `json:"chunk_type"`

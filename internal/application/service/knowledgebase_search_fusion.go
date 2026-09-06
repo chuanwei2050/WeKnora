@@ -160,6 +160,7 @@ func fuseWithRRF(
 // them. RRF alone can otherwise bury a high-ranked single-channel match behind
 // weaker chunks that happen to occur in both channels.
 func preserveRetrieverLeaders(
+	ctx context.Context,
 	fused, vectorResults, keywordResults []*types.IndexWithScore,
 	candidateLimit, resultLimit int,
 ) []*types.IndexWithScore {
@@ -167,9 +168,14 @@ func preserveRetrieverLeaders(
 		return fused
 	}
 
-	leadersPerChannel := max(1, min(candidateLimit, resultLimit)/2)
+	// Reserve half of the configured rerank window for channel leaders, split
+	// evenly between vector and keyword retrieval. The other half remains pure
+	// RRF fill, so preservation grants rerank admission rather than final rank.
+	leadersPerChannel := max(1, min(candidateLimit, resultLimit)/4)
 	result := make([]*types.IndexWithScore, 0, resultLimit)
 	seen := make(map[string]struct{}, resultLimit)
+	vectorLeadersAdded := 0
+	keywordLeadersAdded := 0
 	fusedByChunkID := make(map[string]*types.IndexWithScore, len(fused))
 	for _, candidate := range fused {
 		if candidate != nil {
@@ -190,20 +196,34 @@ func preserveRetrieverLeaders(
 		if candidate == nil {
 			return
 		}
-		appendUnique(fusedByChunkID[candidate.ChunkID])
+		fusedCandidate := fusedByChunkID[candidate.ChunkID]
+		if fusedCandidate != nil {
+			fusedCandidate.RerankCandidateReserved = true
+		}
+		appendUnique(fusedCandidate)
 	}
 
 	for i := 0; i < leadersPerChannel; i++ {
 		if i < len(vectorResults) {
+			before := len(result)
 			appendFused(vectorResults[i])
+			vectorLeadersAdded += len(result) - before
 		}
 		if i < len(keywordResults) {
+			before := len(result)
 			appendFused(keywordResults[i])
+			keywordLeadersAdded += len(result) - before
 		}
 	}
+	rrfFillStart := len(result)
 	for _, candidate := range fused {
 		appendUnique(candidate)
 	}
+	rrfFillAdded := max(0, min(candidateLimit, len(result))-rrfFillStart)
+	logger.Infof(ctx,
+		"Rerank candidate preservation: candidate_limit=%d, vector_reserved=%d, keyword_reserved=%d, vector_leaders_added=%d, keyword_leaders_added=%d, rrf_fill_added=%d",
+		candidateLimit, leadersPerChannel, leadersPerChannel, vectorLeadersAdded, keywordLeadersAdded, rrfFillAdded,
+	)
 
 	return result
 }

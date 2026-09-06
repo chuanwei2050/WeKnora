@@ -247,6 +247,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	deduplicatedChunks := fuseOrDeduplicate(ctx, vectorResults, keywordResults, params.RRFVectorWeight)
 	if len(vectorResults) > 0 && len(keywordResults) > 0 && params.RerankCandidateCount > 0 {
 		deduplicatedChunks = preserveRetrieverLeaders(
+			ctx,
 			deduplicatedChunks,
 			vectorResults,
 			keywordResults,
