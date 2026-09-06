@@ -354,7 +354,7 @@ func (e *elasticsearchRepository) createIndexIfNotExists(ctx context.Context) er
 
 	// Create index if it doesn't exist, with optional shards/replicas settings
 	log.Infof("[Elasticsearch] Creating index: %s", e.index)
-	createReq := e.client.Indices.Create(e.index)
+	createReq := e.client.Indices.Create(e.index).Mappings(keywordIndexMapping())
 	if e.numberOfShards > 0 || e.numberOfReplicas >= 0 {
 		settings := &types.IndexSettings{}
 		if e.numberOfShards > 0 {
@@ -373,6 +373,20 @@ func (e *elasticsearchRepository) createIndexIfNotExists(ctx context.Context) er
 
 	log.Infof("[Elasticsearch] Index created successfully: %s", e.index)
 	return nil
+}
+
+// keywordIndexMapping uses IK's fine-grained index analyzer and coarse-grained
+// search analyzer. Existing indices must be rebuilt for this mapping to take effect.
+func keywordIndexMapping() *types.TypeMapping {
+	indexAnalyzer := "ik_max_word"
+	searchAnalyzer := "ik_smart"
+	return &types.TypeMapping{Properties: map[string]types.Property{
+		"content": types.TextProperty{
+			Type:           "text",
+			Analyzer:       &indexAnalyzer,
+			SearchAnalyzer: &searchAnalyzer,
+		},
+	}}
 }
 
 // Retrieve dispatches the retrieval operation to the appropriate method based on retriever type
@@ -477,7 +491,7 @@ func (e *elasticsearchRepository) KeywordsRetrieve(ctx context.Context,
 	log.Infof("[Elasticsearch] Performing keywords retrieval with query: %s, topK: %d", params.Query, params.TopK)
 
 	filter := e.getBaseConds(params)
-	// Build must conditions for content matching
+	// IK supplies meaningful Chinese terms; BM25 ranks the matching content.
 	must := []types.Query{
 		{Match: map[string]types.MatchQuery{"content": {Query: params.Query}}},
 	}

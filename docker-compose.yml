@@ -330,7 +330,11 @@ services:
     stop_grace_period: 1m
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.17
+    build:
+      context: ./elasticsearch
+      args:
+        ELASTICSEARCH_VERSION: ${ELASTICSEARCH_VERSION:-8.19.17}
+    image: weknora/elasticsearch-ik:${ELASTICSEARCH_VERSION:-8.19.17}
     container_name: WeKnora-elasticsearch
     environment:
       - discovery.type=single-node
