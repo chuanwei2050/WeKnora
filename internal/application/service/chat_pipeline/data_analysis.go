@@ -339,6 +339,11 @@ func (p *PluginDataAnalysis) analyze(
 		}
 		datasets = append(datasets, *outcome.dataset)
 	}
+	var duplicateCount int
+	datasets, duplicateCount = deduplicateDataAnalysisDatasets(datasets)
+	if duplicateCount > 0 {
+		pipelineInfo(ctx, "DataAnalysis", "duplicate_dataset_skip", map[string]interface{}{"duplicate_count": duplicateCount})
+	}
 	if len(datasets) == 0 {
 		chatManage.MergeResult = append(chatManage.MergeResult, results...)
 		finishStage(failedCount == 0, dataAnalysisStageOutput(0, failedCount), map[string]interface{}{
@@ -392,6 +397,28 @@ func (p *PluginDataAnalysis) analyze(
 		"failure_count": failedCount,
 	})
 	return next()
+}
+
+// deduplicateDataAnalysisDatasets avoids running the same physical upload more
+// than once when identical files exist in multiple authorized knowledge bases.
+// Filename similarity is intentionally insufficient: similarly named workbooks
+// may cover different organizations or reporting periods.
+func deduplicateDataAnalysisDatasets(datasets []dataAnalysisDataset) ([]dataAnalysisDataset, int) {
+	seenHashes := make(map[string]struct{}, len(datasets))
+	unique := make([]dataAnalysisDataset, 0, len(datasets))
+	duplicates := 0
+	for _, dataset := range datasets {
+		hash := strings.TrimSpace(dataset.knowledge.FileHash)
+		if hash != "" {
+			if _, exists := seenHashes[hash]; exists {
+				duplicates++
+				continue
+			}
+			seenHashes[hash] = struct{}{}
+		}
+		unique = append(unique, dataset)
+	}
+	return unique, duplicates
 }
 
 func (p *PluginDataAnalysis) analyzeDataset(ctx context.Context, chatModel chat.Chat, tool *tools.DataAnalysisTool, query string, dataset *dataAnalysisDataset) (*types.SearchResult, bool, error) {

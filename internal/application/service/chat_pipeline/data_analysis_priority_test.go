@@ -81,3 +81,20 @@ func TestRecordDataAnalysisFailureForbidsDefiniteFragmentCount(t *testing.T) {
 		t.Fatalf("failure evidence does not constrain the final answer: %q", content)
 	}
 }
+
+func TestDeduplicateDataAnalysisDatasetsUsesFileHash(t *testing.T) {
+	datasets := []dataAnalysisDataset{
+		{knowledge: &types.Knowledge{ID: "first", FileName: "people.xlsx", FileHash: "same-content"}},
+		{knowledge: &types.Knowledge{ID: "copy", FileName: "renamed.xlsx", FileHash: "same-content"}},
+		{knowledge: &types.Knowledge{ID: "other", FileName: "people.xlsx", FileHash: "different-content"}},
+		{knowledge: &types.Knowledge{ID: "legacy", FileName: "people.xlsx"}},
+	}
+
+	got, duplicates := deduplicateDataAnalysisDatasets(datasets)
+	if duplicates != 1 || len(got) != 3 {
+		t.Fatalf("duplicates=%d datasets=%#v", duplicates, got)
+	}
+	if got[0].knowledge.ID != "first" || got[1].knowledge.ID != "other" || got[2].knowledge.ID != "legacy" {
+		t.Fatalf("ranking order changed: %#v", got)
+	}
+}
