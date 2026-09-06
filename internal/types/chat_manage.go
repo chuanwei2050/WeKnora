@@ -117,6 +117,7 @@ type PipelineState struct {
 	// Nil means classification is unavailable/uncertain; retain the schema-based decision.
 	NeedsTableQuery *bool       `json:"needs_table_query,omitempty"`
 	RewriteQuery    string      `json:"rewrite_query,omitempty"`
+	KeywordQuery    string      `json:"keyword_query,omitempty"`
 	Intent          QueryIntent `json:"intent,omitempty"`
 	History         []*History  `json:"history,omitempty"`
 
@@ -280,6 +281,7 @@ func (c *ChatManage) Clone() *ChatManage {
 		PipelineState: PipelineState{
 			NeedsTableQuery:      c.NeedsTableQuery,
 			RewriteQuery:         c.RewriteQuery,
+			KeywordQuery:         c.KeywordQuery,
 			Intent:               c.Intent,
 			ImageDescription:     c.ImageDescription,
 			ImageDescriptions:    append([]string(nil), c.ImageDescriptions...),

@@ -371,8 +371,12 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	if retrieveEngine.SupportRetriever(types.KeywordsRetrieverType) && !params.DisableKeywordsMatch &&
 		kb.IsKeywordEnabled() && kb.Type != types.KnowledgeBaseTypeFAQ {
 		logger.Info(ctx, "Keyword retrieval supported, preparing keyword retrieval parameters")
+		keywordQuery := strings.TrimSpace(params.KeywordQueryText)
+		if keywordQuery == "" {
+			keywordQuery = params.QueryText
+		}
 		retrieveParams = append(retrieveParams, types.RetrieveParams{
-			Query:            params.QueryText,
+			Query:            keywordQuery,
 			KnowledgeBaseIDs: searchKBIDs,
 			TopK:             keywordMatchCount,
 			Threshold:        params.KeywordThreshold,

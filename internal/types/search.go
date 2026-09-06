@@ -208,6 +208,7 @@ type SearchResult struct {
 // SearchParams represents the search parameters
 type SearchParams struct {
 	QueryText            string    `json:"query_text"`
+	KeywordQueryText     string    `json:"keyword_query_text,omitempty"`
 	QueryEmbedding       []float32 `json:"query_embedding,omitempty"`
 	VectorThreshold      float64   `json:"vector_threshold"`
 	KeywordThreshold     float64   `json:"keyword_threshold"`

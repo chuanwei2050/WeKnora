@@ -14,3 +14,14 @@ func TestUpgradeLegacyDefaultFallbackPrompt(t *testing.T) {
 		t.Fatalf("custom prompt was overwritten: %q", got)
 	}
 }
+
+func TestChatManageClonePreservesKeywordQuery(t *testing.T) {
+	manage := &ChatManage{PipelineState: PipelineState{
+		RewriteQuery: "完整语义问题",
+		KeywordQuery: "关键词主题",
+	}}
+	clone := manage.Clone()
+	if clone.KeywordQuery != manage.KeywordQuery {
+		t.Fatalf("keyword query was lost during clone: got %q", clone.KeywordQuery)
+	}
+}

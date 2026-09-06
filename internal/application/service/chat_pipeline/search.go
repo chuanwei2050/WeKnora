@@ -104,11 +104,12 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	chatManage.SearchTargets = normalized.Targets
 
 	pipelineInfo(ctx, "Search", "input", map[string]interface{}{
-		"session_id":     chatManage.SessionID,
-		"query_bytes":    len([]byte(chatManage.RewriteQuery)),
-		"search_targets": len(chatManage.SearchTargets),
-		"tenant_id":      chatManage.TenantID,
-		"web_enabled":    chatManage.WebSearchEnabled,
+		"session_id":          chatManage.SessionID,
+		"query_bytes":         len([]byte(chatManage.RewriteQuery)),
+		"keyword_query_bytes": len([]byte(chatManage.KeywordQuery)),
+		"search_targets":      len(chatManage.SearchTargets),
+		"tenant_id":           chatManage.TenantID,
+		"web_enabled":         chatManage.WebSearchEnabled,
 	})
 
 	// Run KB search and web search concurrently
@@ -440,6 +441,10 @@ func (p *PluginSearch) searchByTargets(
 	}
 
 	queryText := strings.TrimSpace(chatManage.RewriteQuery)
+	keywordQueryText := strings.TrimSpace(chatManage.KeywordQuery)
+	if keywordQueryText == "" {
+		keywordQueryText = queryText
+	}
 
 	// Batch-fetch KB records to determine embedding model grouping.
 	// On failure, all targets fall into an empty-key group and HybridSearch
@@ -582,6 +587,7 @@ func (p *PluginSearch) searchByTargets(
 
 					params := types.SearchParams{
 						QueryText:             queryText,
+						KeywordQueryText:      keywordQueryText,
 						QueryEmbedding:        queryEmbedding,
 						KnowledgeBaseIDs:      fullKBIDs,
 						TagIDs:                fullTagIDs,
@@ -801,6 +807,10 @@ func (p *PluginSearch) searchSingleTarget(
 	results *[]*types.SearchResult,
 ) {
 	searchKnowledgeIDs := t.KnowledgeIDs
+	keywordQueryText := strings.TrimSpace(chatManage.KeywordQuery)
+	if keywordQueryText == "" {
+		keywordQueryText = queryText
+	}
 
 	if t.Type == types.SearchTargetTypeKnowledge && chatManage.Intent == types.IntentSummarize {
 		directResults, skippedIDs := p.tryDirectChunkLoading(ctx, chatManage.TenantID, t.KnowledgeBaseID, t.KnowledgeIDs, "full_document_intent", directBudget)
@@ -837,6 +847,7 @@ func (p *PluginSearch) searchSingleTarget(
 	}
 	params := types.SearchParams{
 		QueryText:             queryText,
+		KeywordQueryText:      keywordQueryText,
 		QueryEmbedding:        queryEmbedding,
 		VectorThreshold:       chatManage.VectorThreshold,
 		KeywordThreshold:      chatManage.KeywordThreshold,

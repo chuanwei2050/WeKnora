@@ -129,7 +129,7 @@ func TestBuildPromptsPreservesConfiguredDefaultTemplate(t *testing.T) {
 	}
 	plugin := &PluginQueryUnderstand{config: appCfg}
 	builtinResult, _ := plugin.buildPrompts(&types.ChatManage{}, nil)
-	if builtinResult != builtin+tableQueryIntentInstruction {
+	if builtinResult != builtin+keywordQueryInstruction+tableQueryIntentInstruction {
 		t.Fatalf("configured default prompt was replaced: %q", builtinResult)
 	}
 
@@ -137,7 +137,7 @@ func TestBuildPromptsPreservesConfiguredDefaultTemplate(t *testing.T) {
 	customChat := &types.ChatManage{}
 	customChat.RewritePromptSystem = custom
 	customResult, _ := plugin.buildPrompts(customChat, nil)
-	if customResult != custom+tableQueryIntentInstruction {
+	if customResult != custom+keywordQueryInstruction+tableQueryIntentInstruction {
 		t.Fatalf("custom prompt was replaced: %q", customResult)
 	}
 }
@@ -178,7 +178,7 @@ func TestUpdateImageCaptionsKeepsLegacyCombinedDescription(t *testing.T) {
 }
 
 func TestExplicitFactQueryUsesModelRouting(t *testing.T) {
-	model := &validationChatStub{content: `{"rewrite_query":"系统集成项目管理工程师证书","intent":"kb_search","image_description":"","complexity_level":"L1","reasoning_subtype":"explicit_fact","needs_entity_relation":false,"confidence":0.95,"rationale_summary":"单条件事实检索"}`}
+	model := &validationChatStub{content: `{"rewrite_query":"谁有系统集成项目管理工程师证书？","keyword_query":"系统集成项目管理工程师证书","intent":"kb_search","image_description":"","complexity_level":"L1","reasoning_subtype":"explicit_fact","needs_entity_relation":false,"confidence":0.95,"rationale_summary":"单条件事实检索"}`}
 	plugin := &PluginQueryUnderstand{
 		modelService: &validationModelServiceStub{chat: model},
 		config: &appconfig.Config{Conversation: &appconfig.ConversationConfig{
@@ -221,8 +221,24 @@ func TestExplicitFactQueryUsesModelRouting(t *testing.T) {
 			t.Fatalf("routing schema does not require %q: %s", field, model.opts.Format)
 		}
 	}
-	if manage.RewriteQuery != "系统集成项目管理工程师证书" || manage.RoutingDecision == nil {
-		t.Fatalf("model routing result was not applied: rewrite=%q routing=%#v", manage.RewriteQuery, manage.RoutingDecision)
+	if manage.RewriteQuery != "谁有系统集成项目管理工程师证书？" || manage.KeywordQuery != "系统集成项目管理工程师证书" || manage.RoutingDecision == nil {
+		t.Fatalf("model routing result was not applied: rewrite=%q keyword=%q routing=%#v", manage.RewriteQuery, manage.KeywordQuery, manage.RoutingDecision)
+	}
+}
+
+func TestQueryUnderstandFallsBackToRewriteForKeywordQuery(t *testing.T) {
+	manage := &types.ChatManage{}
+	applyQueryUnderstandOutput(manage, queryUnderstandOutput{RewriteQuery: "完整问题"}, false)
+	if manage.KeywordQuery != "完整问题" {
+		t.Fatalf("keyword query fallback = %q, want rewrite query", manage.KeywordQuery)
+	}
+}
+
+func TestQueryUnderstandPlainTextFallbackUpdatesKeywordQuery(t *testing.T) {
+	manage := &types.ChatManage{}
+	(&PluginQueryUnderstand{}).parseOutput(manage, "精简后的检索词")
+	if manage.RewriteQuery != "精简后的检索词" || manage.KeywordQuery != "精简后的检索词" {
+		t.Fatalf("plain text fallback was not applied to both queries: rewrite=%q keyword=%q", manage.RewriteQuery, manage.KeywordQuery)
 	}
 }
 

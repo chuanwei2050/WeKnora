@@ -30,9 +30,12 @@ var (
 	rewriteImageSepPattern = regexp.MustCompile(`(?s)^(.*?)\s*\n?---\n(.*)$`)
 )
 
+const keywordQueryInstruction = "\nAlso return keyword_query for lexical retrieval. It must contain only the content-bearing search subject, exact entities, identifiers, numbers, and technical terms. Remove conversational wording and request framing such as asking to find, list, explain, or verify. Do not invent synonyms or alter domain terms. If no shorter lexical form is appropriate, copy rewrite_query."
+
 type queryUnderstandOutput struct {
 	NeedsTableQuery     *bool                  `json:"needs_table_query" jsonschema:"true when answering requires evaluating structured records for detail retrieval, filtering, sorting, grouping, comparison, calculation, or aggregation; false only for passage-only answers; null when uncertain"`
 	RewriteQuery        string                 `json:"rewrite_query"`
+	KeywordQuery        string                 `json:"keyword_query"`
 	Intent              types.QueryIntent      `json:"intent"`
 	ImageDescription    string                 `json:"image_description"`
 	ImageDescriptions   []string               `json:"image_descriptions,omitempty"`
@@ -173,6 +176,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	chatManage.RewriteQuery = chatManage.Query
+	chatManage.KeywordQuery = chatManage.Query
 	chatManage.NeedsTableQuery = nil
 	stageID, stageStarted := emitPipelineStageStart(ctx, chatManage, "query_understand", "理解问题")
 	stageSuccess := false
@@ -355,6 +359,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	pipelineInfo(ctx, "QueryUnderstand", "output", map[string]interface{}{
 		"session_id":          chatManage.SessionID,
 		"rewrite_query":       chatManage.RewriteQuery,
+		"keyword_query":       chatManage.KeywordQuery,
 		"intent":              chatManage.Intent,
 		"has_image_desc":      chatManage.ImageDescription != "",
 		"has_prompt_override": chatManage.SystemPromptOverride != "",
@@ -521,6 +526,7 @@ func (p *PluginQueryUnderstand) buildPrompts(chatManage *types.ChatManage, histo
 		systemPrompt += "\nReturn JSON fields complexity_level (L1/L2/L3/L4), reasoning_subtype (one of explicit_fact, contextual_fact, comparison, multi_hop, causal, hypothetical, transfer, unknown), needs_entity_relation (true only when entity relations, hierarchy, or multi-hop graph reasoning is needed), confidence (0..1), and rationale_summary (one short sentence, no chain-of-thought)."
 		systemPrompt = AppendComplexityFewShotExamples(systemPrompt, chatManage.ComplexityRouting.FewShot, defaultComplexityFewShotLimit)
 	}
+	systemPrompt += keywordQueryInstruction
 	systemPrompt += tableQueryIntentInstruction
 
 	return types.RenderPromptPlaceholders(systemPrompt, vals),
@@ -576,6 +582,7 @@ func (p *PluginQueryUnderstand) parseOutput(chatManage *types.ChatManage, raw st
 	// and default to IntentKBSearch for safety.
 	if content != "" {
 		chatManage.RewriteQuery = content
+		chatManage.KeywordQuery = content
 	}
 }
 
@@ -583,6 +590,11 @@ func applyQueryUnderstandOutput(chatManage *types.ChatManage, output queryUnders
 	chatManage.NeedsTableQuery = output.NeedsTableQuery
 	if rewrite := strings.TrimSpace(output.RewriteQuery); rewrite != "" {
 		chatManage.RewriteQuery = rewrite
+	}
+	if keywordQuery := strings.TrimSpace(output.KeywordQuery); keywordQuery != "" {
+		chatManage.KeywordQuery = keywordQuery
+	} else {
+		chatManage.KeywordQuery = chatManage.RewriteQuery
 	}
 	if output.Intent != "" {
 		chatManage.Intent = output.Intent
@@ -658,6 +670,10 @@ func parseStrictRoutingOutput(raw string) (queryUnderstandOutput, error) {
 	if err != nil {
 		return queryUnderstandOutput{}, err
 	}
+	keywordQuery, err := readString("keyword_query", false)
+	if err != nil {
+		return queryUnderstandOutput{}, err
+	}
 	intent, err := readString("intent", false)
 	if err != nil {
 		return queryUnderstandOutput{}, err
@@ -682,7 +698,7 @@ func parseStrictRoutingOutput(raw string) (queryUnderstandOutput, error) {
 
 	output := queryUnderstandOutput{
 		NeedsTableQuery: optionalTableQueryIntent(fields),
-		RewriteQuery:    rewrite, Intent: types.QueryIntent(intent),
+		RewriteQuery:    rewrite, KeywordQuery: keywordQuery, Intent: types.QueryIntent(intent),
 		ComplexityLevel: types.ComplexityLevel(level), ReasoningSubtype: types.ReasoningSubtype(subtype),
 		NeedsEntityRelation: needsEntityRelation,
 		Confidence:          confidence, RationaleSummary: rationale, ImageDescription: imageDescription,
@@ -731,6 +747,7 @@ func parseStructuredQueryOutputJSON(content string) (queryUnderstandOutput, bool
 		NeedsTableQuery: optionalTableQueryIntent(obj),
 		RewriteQuery: strings.TrimSpace(firstStringField(obj,
 			"rewrite_query", "rewritten_query", "query", "question")),
+		KeywordQuery: strings.TrimSpace(firstStringField(obj, "keyword_query")),
 	}
 	if raw, ok := obj["complexity_level"]; ok {
 		_ = json.Unmarshal(raw, &out.ComplexityLevel)
