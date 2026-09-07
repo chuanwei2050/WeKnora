@@ -129,7 +129,7 @@ func TestBuildPromptsPreservesConfiguredDefaultTemplate(t *testing.T) {
 	}
 	plugin := &PluginQueryUnderstand{config: appCfg}
 	builtinResult, _ := plugin.buildPrompts(&types.ChatManage{}, nil)
-	if builtinResult != builtin+keywordQueryInstruction+tableQueryIntentInstruction {
+	if builtinResult != builtin+tableQueryIntentInstruction {
 		t.Fatalf("configured default prompt was replaced: %q", builtinResult)
 	}
 
@@ -137,7 +137,7 @@ func TestBuildPromptsPreservesConfiguredDefaultTemplate(t *testing.T) {
 	customChat := &types.ChatManage{}
 	customChat.RewritePromptSystem = custom
 	customResult, _ := plugin.buildPrompts(customChat, nil)
-	if customResult != custom+keywordQueryInstruction+tableQueryIntentInstruction {
+	if customResult != custom+tableQueryIntentInstruction {
 		t.Fatalf("custom prompt was replaced: %q", customResult)
 	}
 }
@@ -178,7 +178,7 @@ func TestUpdateImageCaptionsKeepsLegacyCombinedDescription(t *testing.T) {
 }
 
 func TestExplicitFactQueryUsesModelRouting(t *testing.T) {
-	model := &validationChatStub{content: `{"rewrite_query":"谁有系统集成项目管理工程师证书？","keyword_query":"系统集成项目管理工程师证书","intent":"kb_search","image_description":"","complexity_level":"L1","reasoning_subtype":"explicit_fact","needs_entity_relation":false,"confidence":0.95,"rationale_summary":"单条件事实检索"}`}
+	model := &validationChatStub{content: `{"rewrite_query":"谁有系统集成项目管理工程师证书？","intent":"kb_search","image_description":"","complexity_level":"L1","reasoning_subtype":"explicit_fact","needs_entity_relation":false,"confidence":0.95,"rationale_summary":"单条件事实检索"}`}
 	plugin := &PluginQueryUnderstand{
 		modelService: &validationModelServiceStub{chat: model},
 		config: &appconfig.Config{Conversation: &appconfig.ConversationConfig{
@@ -210,6 +210,9 @@ func TestExplicitFactQueryUsesModelRouting(t *testing.T) {
 	if model.opts == nil || len(model.opts.Format) == 0 {
 		t.Fatal("routing request must enforce its structured output schema")
 	}
+	if strings.Contains(string(model.opts.Format), "keyword_query") {
+		t.Fatalf("routing schema must not ask the model for keyword_query: %s", model.opts.Format)
+	}
 	var schema struct {
 		Required []string `json:"required"`
 	}
@@ -221,7 +224,7 @@ func TestExplicitFactQueryUsesModelRouting(t *testing.T) {
 			t.Fatalf("routing schema does not require %q: %s", field, model.opts.Format)
 		}
 	}
-	if manage.RewriteQuery != "谁有系统集成项目管理工程师证书？" || manage.KeywordQuery != "系统集成项目管理工程师证书" || manage.RoutingDecision == nil {
+	if manage.RewriteQuery != "谁有系统集成项目管理工程师证书？" || manage.KeywordQuery != manage.RewriteQuery || manage.RoutingDecision == nil {
 		t.Fatalf("model routing result was not applied: rewrite=%q keyword=%q routing=%#v", manage.RewriteQuery, manage.KeywordQuery, manage.RoutingDecision)
 	}
 }

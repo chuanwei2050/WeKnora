@@ -32,7 +32,6 @@ templates:
       - The rewritten question should be within 30 words
       - IMPORTANT: The rewritten question must be in {{language}}
       - CRITICAL: The rewritten question will be used for knowledge base retrieval. It MUST preserve specific entities, keywords, and core search terms. Do NOT generate meta-instructions like "请在知识库中查找..." or "请搜索..." — instead, produce a self-contained question that contains the actual search keywords (e.g. person names, concepts, technical terms)
-      - Also output `keyword_query` for lexical retrieval. Keep only the content-bearing subject, exact entities, identifiers, numbers, and technical terms. Remove conversational wording and request framing. Do not invent synonyms or alter domain terms. If no shorter form is appropriate, copy `rewrite_query`.
       - EXCEPTION to the above: when the user wants to broadly read, browse, organize, or export knowledge base content WITHOUT specifying particular search terms (e.g. "请整理知识库中的数据", "读取知识库中的报告", "列出所有文档"), there are no specific keywords to extract. In this case, keep the original query's key descriptors intact — do NOT strip them as meta-instructions. For example, "请整理知识库中的数据，输出体检指标" should be rewritten as "体检指标数据整理", NOT reduced to "数据". Preserve any mentioned content types (报告/文档), labels (标签名), or file names.
 
       ## Task 2: Intent Classification
@@ -71,7 +70,7 @@ templates:
       You MUST output ONLY a single JSON object.
       Do NOT output markdown, code fences, explanations, or any extra text.
       JSON schema:
-      {"rewrite_query":"string","keyword_query":"string","intent":"string","image_description":"string"}
+      {"rewrite_query":"string","intent":"string","image_description":"string"}
 
       ## Examples
       Input: "你好"
