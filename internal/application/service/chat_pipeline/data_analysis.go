@@ -204,24 +204,38 @@ func (p *PluginDataAnalysis) analyze(
 
 	retrievedResults := chatManage.MergeResult
 	candidateTargets := selectDataAnalysisTargets(retrievedResults, chatManage.KnowledgeIDs, chatManage.SearchTargets, len(retrievedResults))
-	candidateTargets = filterDataAnalysisCandidatesByRelativeScore(candidateTargets, chatManage.KnowledgeIDs, chatManage.SearchTargets)
 	chatManage.MergeResult = filterOutTableChunks(chatManage.MergeResult)
 	if len(candidateTargets) == 0 {
 		return next()
 	}
-	candidates := make([]dataAnalysisCandidate, 0, len(candidateTargets))
-	hashIndexes := make(map[string]int, dataAnalysisMaxTables)
+	uniqueCandidates := make([]dataAnalysisCandidate, 0, len(candidateTargets))
+	hashIndexes := make(map[string]int, len(candidateTargets))
 	duplicateCount := 0
 	for _, target := range candidateTargets {
 		knowledge, err := p.knowledgeService.GetKnowledgeByID(ctx, target.KnowledgeID)
 		candidate := dataAnalysisCandidate{target: target, knowledge: knowledge, err: err}
 		var duplicate bool
-		candidates, duplicate = appendDataAnalysisCandidate(candidates, hashIndexes, candidate)
+		uniqueCandidates, duplicate = appendDataAnalysisCandidate(uniqueCandidates, hashIndexes, candidate)
 		if duplicate {
 			duplicateCount++
 		}
-		if len(candidates) == dataAnalysisMaxTables {
-			break
+	}
+	uniqueTargets := make([]*types.SearchResult, len(uniqueCandidates))
+	for i, candidate := range uniqueCandidates {
+		uniqueTargets[i] = candidate.target
+	}
+	filteredTargets := filterDataAnalysisCandidatesByRelativeScore(uniqueTargets, chatManage.KnowledgeIDs, chatManage.SearchTargets)
+	if len(filteredTargets) > dataAnalysisMaxTables {
+		filteredTargets = filteredTargets[:dataAnalysisMaxTables]
+	}
+	allowed := make(map[string]struct{}, len(filteredTargets))
+	for _, target := range filteredTargets {
+		allowed[target.KnowledgeID] = struct{}{}
+	}
+	candidates := make([]dataAnalysisCandidate, 0, len(filteredTargets))
+	for _, candidate := range uniqueCandidates {
+		if _, ok := allowed[candidate.target.KnowledgeID]; ok {
+			candidates = append(candidates, candidate)
 		}
 	}
 	targets := make([]*types.SearchResult, len(candidates))
@@ -275,6 +289,7 @@ func (p *PluginDataAnalysis) analyze(
 		index   int
 		dataset *dataAnalysisDataset
 		tool    *tools.DataAnalysisTool
+		skipped bool
 		err     error
 	}
 	loads := make(chan loadOutcome, len(targets))
@@ -298,13 +313,14 @@ func (p *PluginDataAnalysis) analyze(
 					dataAnalysisEvidenceCharsPerTable,
 				)
 				started := time.Now()
+				loadCtx, cancelLoad := context.WithCancel(ctx)
 				type loadResult struct {
 					schema *tools.TableSchema
 					err    error
 				}
 				loadDone := make(chan loadResult, 1)
 				go func() {
-					loaded, err := tool.LoadFromKnowledge(ctx, source.knowledge)
+					loaded, err := tool.LoadFromKnowledge(loadCtx, source.knowledge)
 					loadDone <- loadResult{schema: loaded, err: err}
 				}()
 				earlySchema := p.loadDataAnalysisEarlySchema(ctx, source.knowledge, 6000)
@@ -313,14 +329,28 @@ func (p *PluginDataAnalysis) analyze(
 					go func() {
 						modelDone <- p.generateDataAnalysisSQL(ctx, chatModel, formatSchema, chatManage.Query, source, earlySchema, evidence)
 					}()
-					load := <-loadDone
 					initialResponse = <-modelDone
+					if dataAnalysisInitialAction(initialResponse.content, source.knowledge.ID) == tools.DataAnalysisActionSkip {
+						cancelStarted := time.Now()
+						cancelLoad()
+						load := <-loadDone
+						pipelineInfo(ctx, "DataAnalysis", "parallel_load_cancelled", map[string]interface{}{
+							"knowledge_id":   source.knowledge.ID,
+							"cancel_wait_ms": time.Since(cancelStarted).Milliseconds(),
+							"load_error":     load.err != nil,
+						})
+						loads <- loadOutcome{index: index, tool: tool, skipped: true}
+						return
+					}
+					load := <-loadDone
+					cancelLoad()
 					schema, loadErr = load.schema, load.err
 					pipelineInfo(ctx, "DataAnalysis", "parallel_plan_ready", map[string]interface{}{
 						"knowledge_id": source.knowledge.ID, "elapsed_ms": time.Since(started).Milliseconds(),
 					})
 				} else {
 					load := <-loadDone
+					cancelLoad()
 					schema, loadErr = load.schema, load.err
 					if loadErr == nil {
 						initialResponse = p.generateDataAnalysisSQL(ctx, chatModel, formatSchema, chatManage.Query, source, dataAnalysisSchemaForPrompt(schema), evidence)
@@ -359,6 +389,9 @@ func (p *PluginDataAnalysis) analyze(
 	}
 	for i, outcome := range loaded {
 		datasetTools = append(datasetTools, outcome.tool)
+		if outcome.skipped {
+			continue
+		}
 		if outcome.err != nil {
 			failedCount++
 			logger.Errorf(ctx, "Failed to load knowledge %s: %v", targets[i].KnowledgeID, outcome.err)
@@ -757,6 +790,18 @@ func dataAnalysisResultIsZero(result *types.ToolResult) bool {
 		}
 	}
 	return true
+}
+
+func dataAnalysisInitialAction(content, knowledgeID string) tools.DataAnalysisAction {
+	bound, err := bindDataAnalysisInput(content, knowledgeID)
+	if err != nil {
+		return ""
+	}
+	var input tools.DataAnalysisInput
+	if err := json.Unmarshal(bound, &input); err != nil {
+		return ""
+	}
+	return input.Action
 }
 
 func bindDataAnalysisInput(content, knowledgeID string) (json.RawMessage, error) {

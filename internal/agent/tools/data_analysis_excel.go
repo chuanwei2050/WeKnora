@@ -19,6 +19,9 @@ func prepareAnalysisExcel(ctx context.Context, filename string) (string, func(),
 	defer book.Close()
 	changed := false
 	for _, sheet := range book.GetSheetList() {
+		if err := ctx.Err(); err != nil {
+			return "", unchanged, err
+		}
 		merges, err := book.GetMergeCells(sheet)
 		if err != nil {
 			return "", unchanged, err
@@ -49,6 +52,9 @@ func prepareAnalysisExcel(ctx context.Context, filename string) (string, func(),
 			return "", unchanged, err
 		}
 		for _, merge := range verticalMerges {
+			if err := ctx.Err(); err != nil {
+				return "", unchanged, err
+			}
 			start, end := merge.GetStartAxis(), merge.GetEndAxis()
 			col, first, err := excelize.CellNameToCoordinates(start)
 			if err != nil {
@@ -107,6 +113,9 @@ func prepareAnalysisExcel(ctx context.Context, filename string) (string, func(),
 	}
 	if !changed {
 		return filename, unchanged, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return "", unchanged, err
 	}
 	temp, err := os.CreateTemp("", "weknora-analysis-merged-*.xlsx")
 	if err != nil {

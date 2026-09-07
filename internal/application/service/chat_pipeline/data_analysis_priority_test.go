@@ -4,8 +4,28 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func TestDataAnalysisInitialAction(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    tools.DataAnalysisAction
+	}{
+		{name: "skip", content: `{"action":"skip","knowledge_id":"model-value"}`, want: tools.DataAnalysisActionSkip},
+		{name: "execute", content: "```json\n{\"action\":\"execute\",\"sql\":\"SELECT 1\"}\n```", want: tools.DataAnalysisActionExecute},
+		{name: "invalid", content: `not-json`, want: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := dataAnalysisInitialAction(test.content, "expected-knowledge"); got != test.want {
+				t.Fatalf("dataAnalysisInitialAction() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
 
 func TestMergeDataAnalysisResultPreservesRerankedEvidenceOrder(t *testing.T) {
 	documentResult := &types.SearchResult{ID: "document", Content: "department statistics"}

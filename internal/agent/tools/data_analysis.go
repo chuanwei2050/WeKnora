@@ -585,6 +585,12 @@ func streamExcelSheetsToCSV(ctx context.Context, filename string, sheetNames []s
 		}
 		writer := csv.NewWriter(file)
 		for rows.Next() {
+			if err := ctx.Err(); err != nil {
+				_ = rows.Close()
+				_ = file.Close()
+				cleanup()
+				return nil, func() {}, err
+			}
 			values, rowErr := rows.Columns()
 			if rowErr != nil {
 				err = rowErr
@@ -647,6 +653,10 @@ func (t *DataAnalysisTool) listExcelSheets(ctx context.Context, filename string)
 		}
 		nonEmpty := false
 		for rows.Next() {
+			if err := ctx.Err(); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
 			row, rowErr := rows.Columns()
 			if rowErr != nil {
 				_ = rows.Close()
