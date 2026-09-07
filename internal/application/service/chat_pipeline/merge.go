@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -58,6 +60,7 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 
 	// Step 2: Initial dedup
 	searchResult = p.dedup(ctx, "dedup_summary", searchResult)
+	searchResult = p.attachStructuralContexts(ctx, chatManage.TenantID, searchResult)
 
 	pipelineInfo(ctx, "Merge", "candidate_ready", map[string]interface{}{
 		"chunk_cnt": len(searchResult),
@@ -93,6 +96,183 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 
 	chatManage.MergeResult = append(directResults, mergedChunks...)
 	return next()
+}
+
+const structuralContextLookback = 4
+
+// attachStructuralContexts enriches only post-rerank candidates. It walks a
+// bounded predecessor chain in batches and never changes persisted chunk text.
+func (p *PluginMerge) attachStructuralContexts(
+	ctx context.Context,
+	tenantID uint64,
+	results []*types.SearchResult,
+) []*types.SearchResult {
+	if len(results) == 0 || p.chunkRepo == nil {
+		return results
+	}
+	started := time.Now()
+	resultByID := make(map[string]*types.SearchResult, len(results))
+	ids := make([]string, 0, len(results))
+	for _, result := range results {
+		if result == nil || result.ID == "" || firstMarkdownHeadingLevel(result.Content) <= 1 {
+			continue
+		}
+		resultByID[result.ID] = result
+		ids = append(ids, result.ID)
+	}
+	if len(ids) == 0 {
+		return results
+	}
+	chunks, err := p.chunkRepo.ListChunksByID(ctx, tenantID, ids)
+	if err != nil {
+		pipelineWarn(ctx, "Merge", "structural_context_load", map[string]interface{}{"error": err.Error()})
+		return results
+	}
+	chunkMap := make(map[string]*types.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		chunkMap[chunk.ID] = chunk
+	}
+	frontier := chunks
+	loadedCount := len(chunks)
+	rounds := 0
+	for depth := 0; depth < structuralContextLookback && len(frontier) > 0; depth++ {
+		missingSet := make(map[string]struct{})
+		for _, chunk := range frontier {
+			if chunk != nil && chunk.PreChunkID != "" {
+				if _, exists := chunkMap[chunk.PreChunkID]; !exists {
+					missingSet[chunk.PreChunkID] = struct{}{}
+				}
+			}
+		}
+		if len(missingSet) == 0 {
+			break
+		}
+		missing := make([]string, 0, len(missingSet))
+		for id := range missingSet {
+			missing = append(missing, id)
+		}
+		frontier, err = p.chunkRepo.ListChunksByID(ctx, tenantID, missing)
+		if err != nil {
+			pipelineWarn(ctx, "Merge", "structural_context_load", map[string]interface{}{"error": err.Error()})
+			break
+		}
+		rounds++
+		loadedCount += len(frontier)
+		for _, chunk := range frontier {
+			chunkMap[chunk.ID] = chunk
+		}
+	}
+	attached := 0
+	for id, result := range resultByID {
+		if contextText := inferStructuralContext(chunkMap[id], chunkMap); contextText != "" {
+			result.StructuralContext = contextText
+			attached++
+		}
+	}
+	pipelineInfo(ctx, "Merge", "structural_context", map[string]interface{}{
+		"candidates": len(ids), "attached": attached, "lookback_rounds": rounds,
+		"loaded_chunks": loadedCount, "elapsed_ms": time.Since(started).Milliseconds(),
+	})
+	return results
+}
+
+func inferStructuralContext(chunk *types.Chunk, chunkMap map[string]*types.Chunk) string {
+	if chunk == nil || chunk.PreChunkID == "" {
+		return ""
+	}
+	currentLevel := firstMarkdownHeadingLevel(chunk.Content)
+	if currentLevel <= 1 {
+		return ""
+	}
+	cursorID := chunk.PreChunkID
+	for depth := 0; depth < structuralContextLookback && cursorID != ""; depth++ {
+		previous := chunkMap[cursorID]
+		if previous == nil || previous.KnowledgeID != chunk.KnowledgeID ||
+			previous.KnowledgeVersionID != chunk.KnowledgeVersionID {
+			return ""
+		}
+		path := markdownHeadingPathBeforeLevel(previous.Content, currentLevel)
+		if len(path) > 0 {
+			ancestorLevel := path[len(path)-1].level
+			if containsMarkdownHeadingAtOrAbove(chunk.Content, ancestorLevel) {
+				return ""
+			}
+			parts := make([]string, 0, len(path))
+			for _, heading := range path {
+				parts = append(parts, heading.text)
+			}
+			return strings.Join(parts, " > ")
+		}
+		cursorID = previous.PreChunkID
+	}
+	return ""
+}
+
+type markdownHeading struct {
+	level int
+	text  string
+}
+
+func parseMarkdownHeading(line string) (markdownHeading, bool) {
+	line = strings.TrimSpace(line)
+	level := 0
+	for level < len(line) && level < 6 && line[level] == '#' {
+		level++
+	}
+	if level == 0 || level >= len(line) || line[level] != ' ' {
+		return markdownHeading{}, false
+	}
+	text := strings.TrimSpace(line[level+1:])
+	if text == "" {
+		return markdownHeading{}, false
+	}
+	return markdownHeading{level: level, text: text}, true
+}
+
+func firstMarkdownHeadingLevel(content string) int {
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if heading, ok := parseMarkdownHeading(line); ok {
+			return heading.level
+		}
+		return 0
+	}
+	return 0
+}
+
+func markdownHeadingPathBeforeLevel(content string, beforeLevel int) []markdownHeading {
+	path := make([]markdownHeading, 0, beforeLevel-1)
+	for _, line := range strings.Split(content, "\n") {
+		heading, ok := parseMarkdownHeading(line)
+		if !ok || heading.level >= beforeLevel {
+			continue
+		}
+		for len(path) > 0 && path[len(path)-1].level >= heading.level {
+			path = path[:len(path)-1]
+		}
+		path = append(path, heading)
+	}
+	return path
+}
+
+func containsMarkdownHeadingAtOrAbove(content string, level int) bool {
+	first := true
+	for _, line := range strings.Split(content, "\n") {
+		heading, ok := parseMarkdownHeading(line)
+		if !ok {
+			continue
+		}
+		if first {
+			first = false
+			continue
+		}
+		if heading.level <= level {
+			return true
+		}
+	}
+	return false
 }
 
 func partitionDirectLoadResults(results []*types.SearchResult) ([]*types.SearchResult, []*types.SearchResult) {

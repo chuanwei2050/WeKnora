@@ -3,6 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -196,6 +197,11 @@ type SearchResult struct {
 	// For FAQ: this is the matched question text (standard or similar question)
 	MatchedContent string `json:"matched_content,omitempty"`
 
+	// StructuralContext is request-scoped heading context inferred from
+	// neighboring chunks. It is used for answer grounding without
+	// mutating or persisting the original chunk content.
+	StructuralContext string `gorm:"-" json:"-"`
+
 	// KnowledgeDescription is the description of the knowledge document
 	KnowledgeDescription string `json:"knowledge_description,omitempty"`
 
@@ -204,6 +210,22 @@ type SearchResult struct {
 	// DirectoryID identifies the right-hand document directory for navigation.
 	// It is display metadata only and never changes retrieval scope.
 	DirectoryID *string `json:"directory_id,omitempty"`
+}
+
+// ContextualContent returns source content with trusted structural context.
+func (r *SearchResult) ContextualContent() string {
+	if r == nil {
+		return ""
+	}
+	context := strings.TrimSpace(r.StructuralContext)
+	if context == "" {
+		return r.Content
+	}
+	content := strings.TrimSpace(r.Content)
+	if content == "" {
+		return "[所属章节] " + context
+	}
+	return "[所属章节] " + context + "\n" + content
 }
 
 // SearchParams represents the search parameters
