@@ -33,12 +33,13 @@ const (
 )
 
 type dataAnalysisDataset struct {
-	target    *types.SearchResult
-	knowledge *types.Knowledge
-	schema    *tools.TableSchema
-	evidence  string
-	tool      *tools.DataAnalysisTool
-	initial   <-chan dataAnalysisModelResponse
+	target           *types.SearchResult
+	knowledge        *types.Knowledge
+	schema           *tools.TableSchema
+	evidence         string
+	conflictEvidence []*types.SearchResult
+	tool             *tools.DataAnalysisTool
+	initial          <-chan dataAnalysisModelResponse
 }
 
 type dataAnalysisModelResponse struct {
@@ -374,11 +375,17 @@ func (p *PluginDataAnalysis) analyze(
 				chatManage.RewriteQuery,
 				dataAnalysisEvidenceCharsPerTable,
 			)
+			conflictEvidence := dataAnalysisGroundingResults(
+				retrievedResults,
+				chatManage.SearchResult,
+				knowledge.ID,
+				chatManage.RewriteQuery,
+			)
 			initial := make(chan dataAnalysisModelResponse, 1)
 			initial <- initialResponse
 			loads <- loadOutcome{index: index, tool: tool, dataset: &dataAnalysisDataset{
 				target: target, knowledge: knowledge, schema: schema,
-				evidence: evidence, tool: tool, initial: initial,
+				evidence: evidence, conflictEvidence: conflictEvidence, tool: tool, initial: initial,
 			}}
 		}(i, candidate)
 	}
@@ -647,7 +654,11 @@ func (p *PluginDataAnalysis) analyzeDataset(ctx context.Context, chatModel chat.
 			"knowledge_id": dataset.knowledge.ID, "attempt": attempt, "elapsed_ms": time.Since(executionStarted).Milliseconds(), "success": err == nil,
 		})
 		if err == nil {
-			if !zeroResultRetried && dataAnalysisZeroResultContradictsEvidence(toolResult, dataset.evidence, input.Sql) {
+			isZero := dataAnalysisResultIsZero(toolResult)
+			pipelineInfo(ctx, "DataAnalysis", "sql_result_checked", map[string]interface{}{
+				"knowledge_id": dataset.knowledge.ID, "attempt": attempt, "is_zero": isZero,
+			})
+			if !zeroResultRetried && isZero && dataAnalysisZeroResultContradictsResults(toolResult, dataset.conflictEvidence, input.Sql) {
 				pipelineInfo(ctx, "DataAnalysis", "sql_retry", map[string]interface{}{"knowledge_id": dataset.knowledge.ID, "attempt": attempt, "reason": "zero_evidence_conflict"})
 				zeroResultRetried = true
 				lastErr = fmt.Errorf("the SQL returned zero, but high-relevance table evidence contains the queried field and value; re-check for an invented or overly narrow predicate and regenerate once")
@@ -753,6 +764,29 @@ var dataAnalysisTextPredicatePattern = regexp.MustCompile(`(?i)"?([^"\s()]+)"?\s
 
 func dataAnalysisZeroResultContradictsEvidence(result *types.ToolResult, evidence, sql string) bool {
 	if !dataAnalysisResultIsZero(result) || strings.TrimSpace(evidence) == "" {
+		return false
+	}
+	return dataAnalysisEvidenceContradictsSQL(evidence, sql)
+}
+
+func dataAnalysisZeroResultContradictsResults(result *types.ToolResult, results []*types.SearchResult, sql string) bool {
+	if !dataAnalysisResultIsZero(result) {
+		return false
+	}
+	for _, result := range results {
+		if result != nil && dataAnalysisEvidenceContradictsSQL(result.Content, sql) {
+			return true
+		}
+	}
+	return false
+}
+
+// A direct field/value match for any positive predicate is intentionally
+// enough to request one retry. Requiring one snippet to satisfy every AND
+// predicate would miss invented scope predicates such as a workbook name
+// being turned into a row-level filter.
+func dataAnalysisEvidenceContradictsSQL(evidence, sql string) bool {
+	if strings.TrimSpace(evidence) == "" {
 		return false
 	}
 	for _, match := range dataAnalysisTextPredicatePattern.FindAllStringSubmatch(sql, -1) {
@@ -890,6 +924,15 @@ func dataAnalysisGroundingEvidence(
 	query string,
 	maxChars int,
 ) string {
+	return dataAnalysisEvidence(dataAnalysisGroundingResults(reranked, recalled, knowledgeID, query), knowledgeID, maxChars)
+}
+
+func dataAnalysisGroundingResults(
+	reranked []*types.SearchResult,
+	recalled []*types.SearchResult,
+	knowledgeID string,
+	query string,
+) []*types.SearchResult {
 	type candidate struct {
 		result   *types.SearchResult
 		overlap  float64
@@ -942,10 +985,13 @@ func dataAnalysisGroundingEvidence(
 	ordered := make([]*types.SearchResult, 0, len(candidates))
 	for _, item := range candidates {
 		copy := *item.result
+		if strings.TrimSpace(copy.Content) == "" {
+			copy.Content = copy.MatchedContent
+		}
 		copy.MatchedContent = ""
 		ordered = append(ordered, &copy)
 	}
-	return dataAnalysisEvidence(ordered, knowledgeID, maxChars)
+	return ordered
 }
 
 func hasDistinctiveQueryOverlap(query, content string) bool {

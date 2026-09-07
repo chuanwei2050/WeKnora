@@ -490,17 +490,8 @@ func (e *elasticsearchRepository) KeywordsRetrieve(ctx context.Context,
 	log := logger.GetLogger(ctx)
 	log.Infof("[Elasticsearch] Performing keywords retrieval with query: %s, topK: %d", params.Query, params.TopK)
 
-	filter := e.getBaseConds(params)
-	// IK supplies meaningful Chinese terms; BM25 ranks the matching content.
-	must := []types.Query{
-		{Match: map[string]types.MatchQuery{"content": {Query: params.Query}}},
-	}
-
 	log.Debugf("[Elasticsearch] Executing keyword search in index: %s", e.index)
-	response, err := e.client.Search().Index(e.index).Request(&search.Request{
-		Query: &types.Query{Bool: &types.BoolQuery{Filter: filter, Must: must}},
-		Size:  &params.TopK,
-	}).Do(ctx)
+	response, err := e.client.Search().Index(e.index).Request(e.keywordSearchRequest(params)).Do(ctx)
 	if err != nil {
 		log.Errorf("[Elasticsearch] Keywords search failed: %v", err)
 		return nil, err
@@ -535,6 +526,21 @@ func (e *elasticsearchRepository) KeywordsRetrieve(ctx context.Context,
 			Error:               nil,
 		},
 	}, nil
+}
+
+func (e *elasticsearchRepository) keywordSearchRequest(params typesLocal.RetrieveParams) *search.Request {
+	// Use the fine-grained IK analyzer at query time as well as index time. This
+	// lets related Chinese compounds share stable subterms while reranking still
+	// decides final semantic relevance.
+	analyzer := "ik_max_word"
+	must := []types.Query{
+		{Match: map[string]types.MatchQuery{"content": {Query: params.Query, Analyzer: &analyzer}}},
+	}
+	return &search.Request{
+		Query:    &types.Query{Bool: &types.BoolQuery{Filter: e.getBaseConds(params), Must: must}},
+		Size:     &params.TopK,
+		Collapse: &types.FieldCollapse{Field: e.idField("chunk_id")},
+	}
 }
 
 // CopyIndices 复制索引数据

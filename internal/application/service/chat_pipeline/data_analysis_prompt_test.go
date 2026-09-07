@@ -144,6 +144,55 @@ func TestDataAnalysisZeroResultContradictsDirectFieldValueEvidence(t *testing.T)
 	}
 }
 
+func TestDataAnalysisZeroResultConflictUsesEvidenceBeyondSQLPromptLimit(t *testing.T) {
+	filler := strings.Repeat("序号: 1,学历: 本科,姓名: 测试人员\n", 200)
+	results := []*types.SearchResult{
+		{KnowledgeID: "knowledge", Content: filler},
+		{KnowledgeID: "knowledge", Content: "序号: 201,学历: 硕士,姓名: 张三"},
+	}
+	promptEvidence := dataAnalysisGroundingEvidence(results, nil, "knowledge", "硕士学历人员数量", dataAnalysisEvidenceCharsPerTable)
+	if strings.Contains(promptEvidence, "学历: 硕士") {
+		t.Fatal("test setup must place the matching evidence beyond the SQL prompt limit")
+	}
+	conflictEvidence := dataAnalysisGroundingResults(results, nil, "knowledge", "硕士学历人员数量")
+	zero := &types.ToolResult{Data: map[string]interface{}{
+		"rows": []map[string]string{{"count_star()": "0"}},
+	}}
+	if !dataAnalysisZeroResultContradictsResults(zero, conflictEvidence, `SELECT count(*) FROM data WHERE "学历" = '硕士'`) {
+		t.Fatal("expected evidence beyond the SQL prompt limit to trigger a zero-result retry")
+	}
+}
+
+func TestDataAnalysisZeroResultFragmentCheckMatchesJoinedEvidence(t *testing.T) {
+	results := []*types.SearchResult{
+		{KnowledgeID: "knowledge", Content: "序号: 1,部门: 数字化部,学历: 本科"},
+		{KnowledgeID: "knowledge", Content: "序号: 2,部门: 质量部,学历: 硕士"},
+	}
+	zero := &types.ToolResult{Data: map[string]interface{}{
+		"rows": []map[string]string{{"count_star()": "0"}},
+	}}
+	sql := `SELECT count(*) FROM data WHERE "部门" = '数科事业部' AND "学历" = '硕士'`
+	if !dataAnalysisZeroResultContradictsResults(zero, results, sql) {
+		t.Fatal("fragment scanning must preserve the existing any-direct-predicate retry behavior")
+	}
+}
+
+func TestDataAnalysisZeroResultConflictKeepsMatchedContentFallback(t *testing.T) {
+	results := []*types.SearchResult{
+		{KnowledgeID: "knowledge", MatchedContent: "序号: 1,学历: 硕士,姓名: 张三"},
+	}
+	conflictEvidence := dataAnalysisGroundingResults(results, nil, "knowledge", "硕士学历人员数量")
+	if len(conflictEvidence) != 1 || conflictEvidence[0].Content != results[0].MatchedContent {
+		t.Fatalf("matched content was not preserved as scan content: %#v", conflictEvidence)
+	}
+	zero := &types.ToolResult{Data: map[string]interface{}{
+		"rows": []map[string]string{{"count_star()": "0"}},
+	}}
+	if !dataAnalysisZeroResultContradictsResults(zero, conflictEvidence, `SELECT count(*) FROM data WHERE "学历" = '硕士'`) {
+		t.Fatal("matched-content-only evidence must trigger a zero-result retry")
+	}
+}
+
 func TestDataAnalysisPromptDistinguishesSkipFromFailedSQLGeneration(t *testing.T) {
 	prompt := dataAnalysisPrompt("query", "knowledge-id", "people.xlsx", "schema", "sample")
 	for _, requirement := range []string{`action to "execute"`, `action to "skip"`, `action to "clarify"`, "DuckDB SQL", "detail retrieval"} {
