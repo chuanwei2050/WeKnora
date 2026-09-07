@@ -214,6 +214,7 @@ func RegisterIntegrationPublicRoutes(r *gin.Engine, h *handler.IntegrationHandle
 	integration.DELETE("/knowledge-bases/:knowledge_base_id", h.DeleteKnowledgeBase)
 	integration.GET("/knowledge-bases/:knowledge_base_id/knowledge", h.ListKnowledge)
 	integration.POST("/knowledge-bases/:knowledge_base_id/knowledge/search", h.SearchKnowledgeList)
+	integration.POST("/knowledge/read", h.ReadKnowledgeChunks)
 	integration.POST("/knowledge-bases/:knowledge_base_id/knowledge/file", h.CreateKnowledgeFromFile)
 	integration.POST("/rag/search", h.Search)
 	integration.POST("/rag/search-batch", h.SearchBatch)
