@@ -140,6 +140,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewTenantRepository))
 	must(container.Provide(repository.NewKnowledgeBaseRepository))
 	must(container.Provide(repository.NewKnowledgeRepository))
+	must(container.Provide(repository.NewKnowledgeTableSchemaRepository))
 	must(container.Provide(repository.NewKnowledgeDirectoryRepository))
 	must(container.Provide(repository.NewChunkRepository))
 	must(container.Provide(repository.NewKnowledgeTagRepository))

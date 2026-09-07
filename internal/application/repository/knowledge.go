@@ -369,12 +369,30 @@ func (r *knowledgeRepository) ClaimDirectoryDeletionStorage(ctx context.Context,
 
 // DeleteKnowledge deletes knowledge
 func (r *knowledgeRepository) DeleteKnowledge(ctx context.Context, tenantID uint64, id string) error {
-	return r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&types.Knowledge{}).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var locked types.Knowledge
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("tenant_id = ? AND id = ?", tenantID, id).First(&locked).Error; err != nil {
+			return err
+		}
+		if err := deleteKnowledgeTableSchemas(tx, "tenant_id = ? AND knowledge_id = ?", tenantID, id); err != nil {
+			return err
+		}
+		return tx.Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&types.Knowledge{}).Error
+	})
 }
 
 // DeleteKnowledge deletes knowledge
 func (r *knowledgeRepository) DeleteKnowledgeList(ctx context.Context, tenantID uint64, ids []string) error {
-	return r.db.WithContext(ctx).Where("tenant_id = ? AND id in ?", tenantID, ids).Delete(&types.Knowledge{}).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var locked []types.Knowledge
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("tenant_id = ? AND id IN ?", tenantID, ids).Find(&locked).Error; err != nil {
+			return err
+		}
+		if err := deleteKnowledgeTableSchemas(tx, "tenant_id = ? AND knowledge_id IN ?", tenantID, ids); err != nil {
+			return err
+		}
+		return tx.Where("tenant_id = ? AND id in ?", tenantID, ids).Delete(&types.Knowledge{}).Error
+	})
 }
 
 // GetKnowledgeBatch gets knowledge in batch

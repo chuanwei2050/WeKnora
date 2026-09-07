@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,11 +25,16 @@ import (
 const (
 	dataAnalysisMaxRows               = 1000
 	dataAnalysisMaxTables             = 3
+	dataAnalysisMaxConcurrentDatasets = 6
+	dataAnalysisRelativeScoreFloor    = 0.65
 	dataAnalysisEvidenceCharsPerTable = 3000
-	dataAnalysisTimeout               = 10 * time.Second
+	dataAnalysisTimeout               = 30 * time.Second
+	dataAnalysisLoadTimeout           = 2 * time.Minute
 	dataAnalysisMaxAttempts           = 3
 	defaultLLMCallTimeout             = 120 * time.Second
 )
+
+var dataAnalysisDatasetSlots = make(chan struct{}, dataAnalysisMaxConcurrentDatasets)
 
 type dataAnalysisDataset struct {
 	target    *types.SearchResult
@@ -39,8 +46,9 @@ type dataAnalysisDataset struct {
 }
 
 type dataAnalysisModelResponse struct {
-	content string
-	err     error
+	content   string
+	err       error
+	elapsedMS int64
 }
 
 type dataAnalysisCandidate struct {
@@ -58,6 +66,7 @@ type PluginDataAnalysis struct {
 	chunkRepo            interfaces.ChunkRepository
 	tenantService        interfaces.TenantService
 	governanceRepo       interfaces.KnowledgeGovernanceRepository
+	tableSchemaRepo      interfaces.KnowledgeTableSchemaRepository
 	db                   *sql.DB
 	config               *config.Config
 }
@@ -71,6 +80,7 @@ func NewPluginDataAnalysis(
 	chunkRepo interfaces.ChunkRepository,
 	tenantService interfaces.TenantService,
 	governanceRepo interfaces.KnowledgeGovernanceRepository,
+	tableSchemaRepo interfaces.KnowledgeTableSchemaRepository,
 	db *sql.DB,
 	config *config.Config,
 ) *PluginDataAnalysis {
@@ -82,6 +92,7 @@ func NewPluginDataAnalysis(
 		chunkRepo:            chunkRepo,
 		tenantService:        tenantService,
 		governanceRepo:       governanceRepo,
+		tableSchemaRepo:      tableSchemaRepo,
 		db:                   db,
 		config:               config,
 	}
@@ -197,6 +208,7 @@ func (p *PluginDataAnalysis) analyze(
 
 	retrievedResults := chatManage.MergeResult
 	candidateTargets := selectDataAnalysisTargets(retrievedResults, chatManage.KnowledgeIDs, chatManage.SearchTargets, len(retrievedResults))
+	candidateTargets = filterDataAnalysisCandidatesByRelativeScore(candidateTargets, chatManage.KnowledgeIDs, chatManage.SearchTargets)
 	chatManage.MergeResult = filterOutTableChunks(chatManage.MergeResult)
 	if len(candidateTargets) == 0 {
 		return next()
@@ -260,7 +272,6 @@ func (p *PluginDataAnalysis) analyze(
 			tool.Cleanup(cleanupCtx)
 		}
 	}()
-
 	datasets := make([]dataAnalysisDataset, 0, len(targets))
 	results := make([]*types.SearchResult, 0, len(targets))
 	failedCount := 0
@@ -273,16 +284,61 @@ func (p *PluginDataAnalysis) analyze(
 	loads := make(chan loadOutcome, len(targets))
 	for i, candidate := range candidates {
 		go func(index int, candidate dataAnalysisCandidate) {
+			select {
+			case dataAnalysisDatasetSlots <- struct{}{}:
+				defer func() { <-dataAnalysisDatasetSlots }()
+			case <-ctx.Done():
+				loads <- loadOutcome{index: index, err: ctx.Err()}
+				return
+			}
 			tool := tools.NewDataAnalysisTool(p.knowledgeBaseService, p.knowledgeService, p.tenantService, p.fileService, p.db, chatManage.SessionID, authorization)
 			sources := append([]dataAnalysisCandidate{candidate}, candidate.fallbacks...)
 			var schema *tools.TableSchema
+			var initialResponse dataAnalysisModelResponse
 			var loadErr error
 			for _, source := range sources {
 				if source.err != nil {
 					loadErr = fmt.Errorf("无法读取表格信息: %w", source.err)
 					continue
 				}
-				schema, loadErr = tool.LoadFromKnowledge(ctx, source.knowledge)
+				evidence := dataAnalysisGroundingEvidence(
+					retrievedResults,
+					chatManage.SearchResult,
+					source.knowledge.ID,
+					chatManage.RewriteQuery,
+					dataAnalysisEvidenceCharsPerTable,
+				)
+				started := time.Now()
+				type loadResult struct {
+					schema *tools.TableSchema
+					err    error
+				}
+				loadDone := make(chan loadResult, 1)
+				go func() {
+					loadCtx, cancelLoad := context.WithTimeout(ctx, dataAnalysisLoadTimeout)
+					defer cancelLoad()
+					loaded, err := tool.LoadFromKnowledge(loadCtx, source.knowledge)
+					loadDone <- loadResult{schema: loaded, err: err}
+				}()
+				earlySchema := p.loadDataAnalysisEarlySchema(ctx, source.knowledge, 6000)
+				if earlySchema != "" {
+					modelDone := make(chan dataAnalysisModelResponse, 1)
+					go func() {
+						modelDone <- p.generateDataAnalysisSQL(ctx, chatModel, formatSchema, chatManage.Query, source, earlySchema, evidence)
+					}()
+					load := <-loadDone
+					initialResponse = <-modelDone
+					schema, loadErr = load.schema, load.err
+					pipelineInfo(ctx, "DataAnalysis", "parallel_plan_ready", map[string]interface{}{
+						"knowledge_id": source.knowledge.ID, "elapsed_ms": time.Since(started).Milliseconds(),
+					})
+				} else {
+					load := <-loadDone
+					schema, loadErr = load.schema, load.err
+					if loadErr == nil {
+						initialResponse = p.generateDataAnalysisSQL(ctx, chatModel, formatSchema, chatManage.Query, source, dataAnalysisSchemaForPrompt(schema), evidence)
+					}
+				}
 				if loadErr == nil {
 					candidate = source
 					break
@@ -293,8 +349,7 @@ func (p *PluginDataAnalysis) analyze(
 				loads <- loadOutcome{index: index, tool: tool, err: loadErr}
 				return
 			}
-			target := candidate.target
-			knowledge := candidate.knowledge
+			target, knowledge := candidate.target, candidate.knowledge
 			evidence := dataAnalysisGroundingEvidence(
 				retrievedResults,
 				chatManage.SearchResult,
@@ -302,17 +357,8 @@ func (p *PluginDataAnalysis) analyze(
 				chatManage.RewriteQuery,
 				dataAnalysisEvidenceCharsPerTable,
 			)
-			prompt := dataAnalysisPrompt(chatManage.Query, knowledge.ID, target.KnowledgeFilename, dataAnalysisSchemaForPrompt(schema), evidence)
-			modelCtx, cancelModel := context.WithTimeout(ctx, p.llmCallTimeout())
-			thinking := false
-			response, modelErr := chatModel.Chat(modelCtx, []chat.Message{{Role: "user", Content: prompt}}, &chat.ChatOptions{Temperature: 0, Thinking: &thinking, Format: formatSchema})
-			cancelModel()
-			content := ""
-			if modelErr == nil {
-				content = response.Content
-			}
 			initial := make(chan dataAnalysisModelResponse, 1)
-			initial <- dataAnalysisModelResponse{content: content, err: modelErr}
+			initial <- initialResponse
 			loads <- loadOutcome{index: index, tool: tool, dataset: &dataAnalysisDataset{
 				target: target, knowledge: knowledge, schema: schema,
 				evidence: evidence, tool: tool, initial: initial,
@@ -390,6 +436,107 @@ func (p *PluginDataAnalysis) analyze(
 	return next()
 }
 
+func (p *PluginDataAnalysis) generateDataAnalysisSQL(
+	ctx context.Context,
+	chatModel chat.Chat,
+	formatSchema json.RawMessage,
+	query string,
+	source dataAnalysisCandidate,
+	schemaDescription string,
+	evidence string,
+) dataAnalysisModelResponse {
+	started := time.Now()
+	prompt := dataAnalysisPrompt(query, source.knowledge.ID, source.target.KnowledgeFilename, schemaDescription, evidence)
+	modelCtx, cancelModel := context.WithTimeout(ctx, p.llmCallTimeout())
+	defer cancelModel()
+	thinking := false
+	response, err := chatModel.Chat(modelCtx, []chat.Message{{Role: "user", Content: prompt}}, &chat.ChatOptions{Temperature: 0, Thinking: &thinking, Format: formatSchema})
+	if err != nil {
+		return dataAnalysisModelResponse{err: err, elapsedMS: time.Since(started).Milliseconds()}
+	}
+	return dataAnalysisModelResponse{content: response.Content, elapsedMS: time.Since(started).Milliseconds()}
+}
+
+func dataAnalysisEarlySchema(primary, recalled []*types.SearchResult, knowledgeID string, maxChars int) string {
+	var builder strings.Builder
+	written := 0
+	seen := make(map[string]struct{})
+	for _, results := range [][]*types.SearchResult{primary, recalled} {
+		for _, result := range results {
+			if result == nil || result.KnowledgeID != knowledgeID || !isTableMetadataChunk(result) {
+				continue
+			}
+			content := strings.TrimSpace(result.Content)
+			if content == "" {
+				content = strings.TrimSpace(result.MatchedContent)
+			}
+			if content == "" {
+				continue
+			}
+			if _, ok := seen[content]; ok {
+				continue
+			}
+			seen[content] = struct{}{}
+			remaining := maxChars - written
+			if remaining <= 0 {
+				return builder.String()
+			}
+			if builder.Len() > 0 {
+				builder.WriteString("\n")
+				remaining--
+				written++
+			}
+			runes := []rune(content)
+			if len(runes) > remaining {
+				runes = runes[:remaining]
+			}
+			builder.WriteString(string(runes))
+			written += len(runes)
+		}
+	}
+	return builder.String()
+}
+
+var dataAnalysisEvidenceFieldPattern = regexp.MustCompile(`(?:^|[,\n])\s*([^,:\n]{1,32})\s*:`)
+
+func dataAnalysisSchemaFromEvidence(evidence string) string {
+	counts := make(map[string]int)
+	for _, match := range dataAnalysisEvidenceFieldPattern.FindAllStringSubmatch(evidence, -1) {
+		name := strings.TrimSpace(match[1])
+		if name == "" || strings.Contains(name, "编号") {
+			continue
+		}
+		counts[name]++
+	}
+	columns := make([]string, 0, len(counts))
+	for name, count := range counts {
+		if count >= 2 {
+			columns = append(columns, name)
+		}
+	}
+	if len(columns) == 0 {
+		return ""
+	}
+	sort.Strings(columns)
+	return "Preliminary columns observed in indexed table rows: " + strings.Join(columns, ", ") + ". Row count and types are not available until the full table is loaded."
+}
+
+func (p *PluginDataAnalysis) loadDataAnalysisEarlySchema(ctx context.Context, knowledge *types.Knowledge, maxChars int) string {
+	if p.tableSchemaRepo != nil && knowledge != nil {
+		payload, found, err := p.tableSchemaRepo.GetCurrent(ctx, knowledge)
+		if err != nil {
+			logger.Warnf(ctx, "[DataAnalysis] Failed to load persisted table schema for knowledge %s: %v", knowledge.ID, err)
+		} else if found {
+			var schema tools.TableSchema
+			if err := json.Unmarshal(payload, &schema); err == nil {
+				return dataAnalysisSchemaForPrompt(&schema)
+			}
+			logger.Warnf(ctx, "[DataAnalysis] Ignoring invalid persisted table schema for knowledge %s", knowledge.ID)
+		}
+	}
+	return ""
+}
+
 func appendDataAnalysisCandidate(
 	candidates []dataAnalysisCandidate,
 	hashIndexes map[string]int,
@@ -414,6 +561,7 @@ func (p *PluginDataAnalysis) analyzeDataset(ctx context.Context, chatModel chat.
 	thinking := false
 	var lastErr error
 	analysisAttempted := false
+	zeroResultRetried := false
 	for attempt := 1; attempt <= dataAnalysisMaxAttempts; attempt++ {
 		prompt := basePrompt
 		if lastErr != nil {
@@ -426,20 +574,30 @@ func (p *PluginDataAnalysis) analyzeDataset(ctx context.Context, chatModel chat.
 				return nil, false, initial.err
 			}
 			content = initial.content
+			pipelineInfo(ctx, "DataAnalysis", "sql_model_ready", map[string]interface{}{
+				"knowledge_id": dataset.knowledge.ID, "attempt": attempt, "elapsed_ms": initial.elapsedMS,
+			})
 		} else {
+			modelStarted := time.Now()
 			response, err := chatModel.Chat(ctx, []chat.Message{{Role: "user", Content: prompt}}, &chat.ChatOptions{Temperature: 0, Thinking: &thinking, Format: formatSchema})
 			if err != nil {
 				return nil, false, err
 			}
 			content = response.Content
+			pipelineInfo(ctx, "DataAnalysis", "sql_model_ready", map[string]interface{}{
+				"knowledge_id": dataset.knowledge.ID, "attempt": attempt, "elapsed_ms": time.Since(modelStarted).Milliseconds(),
+			})
 		}
+		validationStarted := time.Now()
 		bound, err := bindDataAnalysisInput(content, dataset.knowledge.ID)
 		if err != nil {
+			pipelineInfo(ctx, "DataAnalysis", "sql_retry", map[string]interface{}{"knowledge_id": dataset.knowledge.ID, "attempt": attempt, "reason": "invalid_model_output"})
 			lastErr = err
 			continue
 		}
 		var input tools.DataAnalysisInput
 		if err := json.Unmarshal(bound, &input); err != nil {
+			pipelineInfo(ctx, "DataAnalysis", "sql_retry", map[string]interface{}{"knowledge_id": dataset.knowledge.ID, "attempt": attempt, "reason": "invalid_json"})
 			lastErr = err
 			continue
 		}
@@ -458,10 +616,23 @@ func (p *PluginDataAnalysis) analyzeDataset(ctx context.Context, chatModel chat.
 			lastErr = fmt.Errorf("model returned an invalid data analysis action %q", input.Action)
 			continue
 		}
+		pipelineInfo(ctx, "DataAnalysis", "sql_validation_finished", map[string]interface{}{
+			"knowledge_id": dataset.knowledge.ID, "attempt": attempt, "elapsed_ms": time.Since(validationStarted).Milliseconds(),
+		})
 		executionCtx, cancel := context.WithTimeout(ctx, dataAnalysisTimeout)
+		executionStarted := time.Now()
 		toolResult, err := tool.Execute(executionCtx, bound)
 		cancel()
+		pipelineInfo(ctx, "DataAnalysis", "sql_execution_finished", map[string]interface{}{
+			"knowledge_id": dataset.knowledge.ID, "attempt": attempt, "elapsed_ms": time.Since(executionStarted).Milliseconds(), "success": err == nil,
+		})
 		if err == nil {
+			if !zeroResultRetried && dataAnalysisZeroResultContradictsEvidence(toolResult, dataset.evidence, input.Sql) {
+				pipelineInfo(ctx, "DataAnalysis", "sql_retry", map[string]interface{}{"knowledge_id": dataset.knowledge.ID, "attempt": attempt, "reason": "zero_evidence_conflict"})
+				zeroResultRetried = true
+				lastErr = fmt.Errorf("the SQL returned zero, but high-relevance table evidence contains the queried field and value; re-check for an invented or overly narrow predicate and regenerate once")
+				continue
+			}
 			return dataAnalysisSearchResult(dataset, toolResult), false, nil
 		}
 		lastErr = err
@@ -469,6 +640,7 @@ func (p *PluginDataAnalysis) analyzeDataset(ctx context.Context, chatModel chat.
 	}
 	return nil, false, lastErr
 }
+
 func (p *PluginDataAnalysis) llmCallTimeout() time.Duration {
 	if p.config != nil && p.config.Agent != nil && p.config.Agent.LLMCallTimeout > 0 {
 		return time.Duration(p.config.Agent.LLMCallTimeout) * time.Second
@@ -548,12 +720,56 @@ When translating natural-language filters into SQL:
 - Use the schema to choose every column that can directly answer the question; do not assume the answer is confined to one text column.
 - When the same fact may appear in multiple semantically relevant text columns, combine those predicates with OR so matching rows are not omitted.
 - For multiple requested categories, apply each category independently across every semantically relevant text column before combining the categories according to the user's AND/OR meaning. Do not partition categories between columns.
+- Preserve every alternative spelling or label explicitly named by the user with words such as "or", slashes, parentheses, or equivalent punctuation. Apply each alternative across the same set of semantically relevant text columns.
 - The SQL is executed as written. Do not rely on the execution layer to broaden a predicate or search additional columns.
 - Use the evidence samples only to recognize how relevant values are actually represented in the table, including equivalent wording.
 - Before writing text predicates, compare the user's wording with observed evidence and column value examples. If they show suffix, abbreviation, or phrasing variants of the same requested concept, cover the observed variants explicitly or match their distinctive stable terms. Keep enough distinctive terms to avoid broad substring matches.
 - Select the fields needed to identify each result and include the matching source values as evidence of why it matched.
 
 Return your response in the specified JSON format.`, query, knowledgeID, quotedMetadata, quotedEvidence)
+}
+
+var dataAnalysisTextPredicatePattern = regexp.MustCompile(`(?i)"?([^"\s()]+)"?\s*(?:=|LIKE)\s*'([^']+)'`)
+
+func dataAnalysisZeroResultContradictsEvidence(result *types.ToolResult, evidence, sql string) bool {
+	if !dataAnalysisResultIsZero(result) || strings.TrimSpace(evidence) == "" {
+		return false
+	}
+	for _, match := range dataAnalysisTextPredicatePattern.FindAllStringSubmatch(sql, -1) {
+		column := strings.TrimSpace(match[1])
+		value := strings.Trim(strings.TrimSpace(match[2]), "%_")
+		if column == "" || len([]rune(value)) < 2 {
+			continue
+		}
+		fieldValue := regexp.MustCompile(regexp.QuoteMeta(column) + `\s*[:：][^,\n]*` + regexp.QuoteMeta(value))
+		if fieldValue.MatchString(evidence) {
+			return true
+		}
+	}
+	return false
+}
+
+func dataAnalysisResultIsZero(result *types.ToolResult) bool {
+	if result == nil || result.Data == nil {
+		return false
+	}
+	rows, ok := result.Data["rows"].([]map[string]string)
+	if !ok {
+		return false
+	}
+	if len(rows) == 0 {
+		return true
+	}
+	if len(rows) != 1 || len(rows[0]) == 0 {
+		return false
+	}
+	for _, value := range rows[0] {
+		number, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		if err != nil || number != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func bindDataAnalysisInput(content, knowledgeID string) (json.RawMessage, error) {
@@ -823,6 +1039,41 @@ func selectDataAnalysisTargets(results []*types.SearchResult, knowledgeIDs []str
 		}
 	}
 	return selected
+}
+
+// filterDataAnalysisCandidatesByRelativeScore compares candidates only within
+// the same reranked request. This avoids assuming that an absolute score has
+// the same meaning across queries or reranker models while dropping clearly
+// weaker tail candidates. Explicitly selected documents are never filtered.
+func filterDataAnalysisCandidatesByRelativeScore(results []*types.SearchResult, knowledgeIDs []string, targets types.SearchTargets) []*types.SearchResult {
+	if len(results) < 2 || len(knowledgeIDs) > 0 {
+		return results
+	}
+	for _, target := range targets {
+		if target != nil && target.Type == types.SearchTargetTypeKnowledge && len(target.KnowledgeIDs) > 0 {
+			return results
+		}
+	}
+	topScore := results[0].Score
+	for _, result := range results[1:] {
+		if result != nil && result.Score > topScore {
+			topScore = result.Score
+		}
+	}
+	if topScore <= 0 {
+		return results
+	}
+	minimum := topScore * dataAnalysisRelativeScoreFloor
+	filtered := make([]*types.SearchResult, 0, len(results))
+	for _, result := range results {
+		if result != nil && result.Score >= minimum {
+			filtered = append(filtered, result)
+		}
+	}
+	if len(filtered) == 0 {
+		return results[:1]
+	}
+	return filtered
 }
 
 func isTableMetadataChunk(result *types.SearchResult) bool {

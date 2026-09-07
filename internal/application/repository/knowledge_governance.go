@@ -90,9 +90,13 @@ func (r *knowledgeGovernanceRepository) CreateVersion(ctx context.Context, versi
 }
 
 func (r *knowledgeGovernanceRepository) DeleteDraftVersion(ctx context.Context, tenantID uint64, id string) error {
-	return r.db.WithContext(ctx).
-		Where("tenant_id = ? AND id = ? AND status = ?", tenantID, id, types.KnowledgeVersionDraft).
-		Delete(&types.KnowledgeVersion{}).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := deleteKnowledgeTableSchemas(tx, "tenant_id = ? AND revision = ?", tenantID, "version:"+id); err != nil {
+			return err
+		}
+		return tx.Where("tenant_id = ? AND id = ? AND status = ?", tenantID, id, types.KnowledgeVersionDraft).
+			Delete(&types.KnowledgeVersion{}).Error
+	})
 }
 
 func (r *knowledgeGovernanceRepository) GetVersion(ctx context.Context, tenantID uint64, id string) (*types.KnowledgeVersion, error) {
@@ -237,6 +241,11 @@ func (r *knowledgeGovernanceRepository) TransitionVersionWithReview(
 		if err := tx.Create(review).Error; err != nil {
 			return err
 		}
+		if review.Action == "reject" {
+			if err := deleteKnowledgeTableSchemas(tx, "tenant_id = ? AND revision = ?", tenantID, "version:"+version.ID); err != nil {
+				return err
+			}
+		}
 		if parseStatus == "" {
 			return nil
 		}
@@ -364,6 +373,11 @@ func (r *knowledgeGovernanceRepository) activateVersionDB(ctx context.Context, t
 			return err
 		}
 		if knowledge.CurrentVersionID != nil && *knowledge.CurrentVersionID != "" && *knowledge.CurrentVersionID != candidate.ID {
+			if err := deleteKnowledgeTableSchemas(tx, "tenant_id = ? AND revision = ?", tenantID, "version:"+*knowledge.CurrentVersionID); err != nil {
+				return err
+			}
+		}
+		if knowledge.CurrentVersionID != nil && *knowledge.CurrentVersionID != "" && *knowledge.CurrentVersionID != candidate.ID {
 			candidate.PreviousVersionID = *knowledge.CurrentVersionID
 		}
 		if err := tx.Model(&candidate).Updates(map[string]any{"status": types.KnowledgeVersionActive, "previous_version_id": candidate.PreviousVersionID}).Error; err != nil {
@@ -408,6 +422,9 @@ func (r *knowledgeGovernanceRepository) ActivateDueVersions(ctx context.Context,
 				return nil
 			}
 			if err := tx.Model(&current).Update("status", types.KnowledgeVersionExpired).Error; err != nil {
+				return err
+			}
+			if err := deleteKnowledgeTableSchemas(tx, "tenant_id = ? AND revision = ?", version.TenantID, "version:"+version.ID); err != nil {
 				return err
 			}
 			// Keep the expired version ID as a tombstone. An empty current

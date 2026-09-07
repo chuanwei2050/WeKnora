@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
@@ -37,13 +38,15 @@ var dataAnalysisTool = BaseTool{
 // which Excel sheet a row came from when multiple sheets are unioned together.
 const excelSheetNameColumn = "__sheet_name"
 
+const largeExcelStreamingThreshold = 32 << 20
+
 const (
 	dataSourceFileColumn      = "__source_file"
 	dataSourceKnowledgeColumn = "__source_knowledge_id"
 )
 
 const (
-	dataAnalysisQueryTimeout            = 10 * time.Second
+	dataAnalysisQueryTimeout            = 30 * time.Second
 	maxSQLIdentifierLength              = 63
 	dataAnalysisMaxCacheFileBytes int64 = 64 << 20
 	dataAnalysisDefaultRows             = 1000
@@ -109,6 +112,18 @@ type DataAnalysisInput struct {
 	KnowledgeID string             `json:"knowledge_id" jsonschema:"id of the knowledge to query"`
 	Sql         string             `json:"sql" jsonschema:"SQL to be executed on knowledge"`
 	MaxRows     int                `json:"max_rows,omitempty" jsonschema:"optional maximum rows returned by a read-only SELECT query"`
+	Plan        *DataAnalysisPlan  `json:"plan,omitempty" jsonschema:"structured interpretation used to validate that SQL preserves the user request"`
+}
+
+type DataAnalysisPlan struct {
+	DatasetScope []string                 `json:"dataset_scope,omitempty" jsonschema:"phrases that identify the selected dataset and must not become row predicates"`
+	Filters      []DataAnalysisPlanFilter `json:"filters,omitempty" jsonschema:"row-level filters explicitly requested by the user"`
+	Alternatives []string                 `json:"alternatives,omitempty" jsonschema:"exact alternative labels explicitly enumerated by the user"`
+}
+
+type DataAnalysisPlanFilter struct {
+	Column string   `json:"column" jsonschema:"exact schema column used for the row filter"`
+	Values []string `json:"values" jsonschema:"user-requested or evidence-grounded values accepted for this filter"`
 }
 
 type dataAnalysisAuthorizationMode uint8
@@ -425,6 +440,21 @@ type ColumnInfo struct {
 	Multiline     bool     `json:"multiline,omitempty"`
 }
 
+// PersistenceCopy returns the complete table structure without sampled cell
+// values. Value samples may contain personal or business data and are not
+// needed to identify columns before the source table is loaded.
+func (t *TableSchema) PersistenceCopy() *TableSchema {
+	if t == nil {
+		return nil
+	}
+	result := *t
+	result.Columns = append([]ColumnInfo(nil), t.Columns...)
+	for index := range result.Columns {
+		result.Columns[index].ValueExamples = nil
+	}
+	return &result
+}
+
 // LoadFromCSV loads data from a CSV file into a DuckDB table and returns the table schema
 // Parameters:
 //   - ctx: context for cancellation and timeout
@@ -496,6 +526,16 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 		}
 		defer cleanup()
 		createTableSQL := buildExcelCreateTableSQL(tableName, analysisPath, sheetNames)
+		streamCleanup := func() {}
+		if info, statErr := os.Stat(analysisPath); statErr == nil && info.Size() >= largeExcelStreamingThreshold {
+			csvPaths, csvCleanup, streamErr := streamExcelSheetsToCSV(ctx, analysisPath, sheetNames)
+			if streamErr != nil {
+				return nil, fmt.Errorf("stream large Excel workbook: %w", streamErr)
+			}
+			streamCleanup = csvCleanup
+			createTableSQL = buildExcelCSVCreateTableSQL(tableName, csvPaths, sheetNames)
+		}
+		defer streamCleanup()
 
 		if _, err := t.db.ExecContext(ctx, createTableSQL); err != nil {
 			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from Excel (sheets=%v): %v", sheetNames, err)
@@ -513,7 +553,80 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 	return t.profileAnalysisTable(ctx, tableName)
 }
 
-// listExcelSheets reads workbook metadata in on-disk sheet order.
+func streamExcelSheetsToCSV(ctx context.Context, filename string, sheetNames []string) ([]string, func(), error) {
+	dir, err := os.MkdirTemp("", "weknora-excel-csv-*")
+	if err != nil {
+		return nil, func() {}, err
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	book, err := excelize.OpenFile(filename)
+	if err != nil {
+		cleanup()
+		return nil, func() {}, err
+	}
+	defer book.Close()
+	paths := make([]string, 0, len(sheetNames))
+	for index, sheet := range sheetNames {
+		if err := ctx.Err(); err != nil {
+			cleanup()
+			return nil, func() {}, err
+		}
+		rows, err := book.Rows(sheet)
+		if err != nil {
+			cleanup()
+			return nil, func() {}, err
+		}
+		path := filepath.Join(dir, fmt.Sprintf("sheet-%d.csv", index))
+		file, err := os.Create(path)
+		if err != nil {
+			_ = rows.Close()
+			cleanup()
+			return nil, func() {}, err
+		}
+		writer := csv.NewWriter(file)
+		for rows.Next() {
+			values, rowErr := rows.Columns()
+			if rowErr != nil {
+				err = rowErr
+				break
+			}
+			if err = writer.Write(values); err != nil {
+				break
+			}
+		}
+		writer.Flush()
+		if err == nil {
+			err = writer.Error()
+		}
+		if closeErr := rows.Close(); err == nil {
+			err = closeErr
+		}
+		if closeErr := file.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("stream sheet %q: %w", sheet, err)
+		}
+		paths = append(paths, path)
+	}
+	return paths, cleanup, nil
+}
+
+func buildExcelCSVCreateTableSQL(tableName string, csvPaths, sheetNames []string) string {
+	parts := make([]string, 0, len(csvPaths))
+	for index, path := range csvPaths {
+		parts = append(parts, fmt.Sprintf(
+			"SELECT *, '%s' AS %s FROM read_csv_auto('%s', header=true, all_varchar=true)",
+			sqlSingleQuoteEscape(sheetNames[index]), excelSheetNameColumn, sqlSingleQuoteEscape(path),
+		))
+	}
+	return fmt.Sprintf("CREATE TABLE \"%s\" AS %s", tableName, strings.Join(parts, "\nUNION ALL BY NAME\n"))
+}
+
+// listExcelSheets returns non-empty sheets in on-disk order. DuckDB's
+// read_xlsx rejects a completely empty sheet, so including one would make an
+// otherwise valid multi-sheet workbook fail as a whole.
 func (t *DataAnalysisTool) listExcelSheets(ctx context.Context, filename string) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -523,7 +636,40 @@ func (t *DataAnalysisTool) listExcelSheets(ctx context.Context, filename string)
 		return nil, fmt.Errorf("read Excel sheet metadata: %w", err)
 	}
 	defer workbook.Close()
-	return workbook.GetSheetList(), nil
+	sheets := make([]string, 0, len(workbook.GetSheetList()))
+	for _, sheet := range workbook.GetSheetList() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		rows, err := workbook.Rows(sheet)
+		if err != nil {
+			return nil, fmt.Errorf("read Excel sheet %q: %w", sheet, err)
+		}
+		nonEmpty := false
+		for rows.Next() {
+			row, rowErr := rows.Columns()
+			if rowErr != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("read Excel sheet %q: %w", sheet, rowErr)
+			}
+			for _, value := range row {
+				if strings.TrimSpace(value) != "" {
+					nonEmpty = true
+					break
+				}
+			}
+			if nonEmpty {
+				break
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("close Excel sheet %q: %w", sheet, err)
+		}
+		if nonEmpty {
+			sheets = append(sheets, sheet)
+		}
+	}
+	return sheets, nil
 }
 
 // buildExcelCreateTableSQL assembles the CREATE TABLE statement used by

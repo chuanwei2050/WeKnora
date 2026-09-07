@@ -98,6 +98,52 @@ func TestDataAnalysisPromptRequiresSchemaDrivenSemanticFiltering(t *testing.T) {
 	}
 }
 
+func TestDataAnalysisEarlySchemaUsesOnlyTargetMetadataChunks(t *testing.T) {
+	primary := []*types.SearchResult{
+		{KnowledgeID: "target", ChunkType: string(types.ChunkTypeTableColumn), Content: "学历列：硕士、本科"},
+		{KnowledgeID: "other", ChunkType: string(types.ChunkTypeTableColumn), Content: "不得包含"},
+	}
+	recalled := []*types.SearchResult{
+		{KnowledgeID: "target", ChunkType: string(types.ChunkTypeTableSummary), Content: "人员清单表头"},
+		{KnowledgeID: "target", ChunkType: "text", Content: "普通正文"},
+	}
+
+	got := dataAnalysisEarlySchema(primary, recalled, "target", 1000)
+	if !strings.Contains(got, "学历列") || !strings.Contains(got, "人员清单表头") {
+		t.Fatalf("missing target table metadata: %q", got)
+	}
+	if strings.Contains(got, "不得包含") || strings.Contains(got, "普通正文") {
+		t.Fatalf("included unrelated content: %q", got)
+	}
+}
+
+func TestDataAnalysisSchemaFromEvidenceExtractsRepeatedColumns(t *testing.T) {
+	got := dataAnalysisSchemaFromEvidence("序号: 1,部门: 技术中心,姓名: 张三,学历: 硕士\n序号: 2,部门: 质量部,姓名: 李四,学历: 本科")
+	for _, column := range []string{"序号", "部门", "姓名", "学历"} {
+		if !strings.Contains(got, column) {
+			t.Fatalf("missing column %q from %q", column, got)
+		}
+	}
+}
+
+func TestDataAnalysisZeroResultContradictsDirectFieldValueEvidence(t *testing.T) {
+	zero := &types.ToolResult{Data: map[string]interface{}{
+		"rows": []map[string]string{{"count_star()": "0"}},
+	}}
+	if !dataAnalysisZeroResultContradictsEvidence(zero, "序号: 1,学历: 硕士,姓名: 张三", `SELECT count(*) FROM data WHERE "部门" = '数科事业部' AND "学历" = '硕士'`) {
+		t.Fatal("expected direct field/value evidence to contradict zero")
+	}
+	if dataAnalysisZeroResultContradictsEvidence(zero, "这是一份硕士培养方案", `SELECT count(*) FROM data WHERE "学历" = '硕士'`) {
+		t.Fatal("narrative keyword overlap must not contradict zero")
+	}
+	nonzero := &types.ToolResult{Data: map[string]interface{}{
+		"rows": []map[string]string{{"count_star()": "41"}},
+	}}
+	if dataAnalysisZeroResultContradictsEvidence(nonzero, "学历: 硕士", `SELECT count(*) FROM data WHERE "学历" = '硕士'`) {
+		t.Fatal("non-zero result must not trigger retry")
+	}
+}
+
 func TestDataAnalysisPromptDistinguishesSkipFromFailedSQLGeneration(t *testing.T) {
 	prompt := dataAnalysisPrompt("query", "knowledge-id", "people.xlsx", "schema", "sample")
 	for _, requirement := range []string{`action to "execute"`, `action to "skip"`, `action to "clarify"`, "DuckDB SQL", "detail retrieval"} {

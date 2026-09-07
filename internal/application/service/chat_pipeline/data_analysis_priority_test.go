@@ -112,3 +112,28 @@ func TestSelectUniqueDataAnalysisCandidatesUsesFileHashAndFillsLimit(t *testing.
 		t.Fatalf("duplicate content was not retained as a fallback: %#v", got[0].fallbacks)
 	}
 }
+
+func TestFilterDataAnalysisCandidatesUsesRequestRelativeScores(t *testing.T) {
+	results := []*types.SearchResult{
+		{KnowledgeID: "best", Score: 0.6},
+		{KnowledgeID: "close", Score: 0.4},
+		{KnowledgeID: "tail", Score: 0.2},
+	}
+	got := filterDataAnalysisCandidatesByRelativeScore(results, nil, nil)
+	if len(got) != 2 || got[0].KnowledgeID != "best" || got[1].KnowledgeID != "close" {
+		t.Fatalf("unexpected relative-score candidates: %#v", got)
+	}
+
+	lowScores := []*types.SearchResult{{KnowledgeID: "one", Score: 0.12}, {KnowledgeID: "two", Score: 0.1}}
+	if got := filterDataAnalysisCandidatesByRelativeScore(lowScores, nil, nil); len(got) != 2 {
+		t.Fatalf("close low-score candidates were dropped: %#v", got)
+	}
+}
+
+func TestFilterDataAnalysisCandidatesKeepsExplicitKnowledge(t *testing.T) {
+	results := []*types.SearchResult{{KnowledgeID: "explicit", Score: 0.9}, {KnowledgeID: "also-explicit", Score: 0.1}}
+	got := filterDataAnalysisCandidatesByRelativeScore(results, []string{"explicit", "also-explicit"}, nil)
+	if len(got) != len(results) {
+		t.Fatalf("explicit candidates were filtered: %#v", got)
+	}
+}

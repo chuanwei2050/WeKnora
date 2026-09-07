@@ -1,11 +1,38 @@
 package tools
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/xuri/excelize/v2"
 )
+
+func TestListExcelSheetsSkipsEmptySheets(t *testing.T) {
+	book := excelize.NewFile()
+	if err := book.SetCellValue("Sheet1", "A1", "姓名"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := book.NewSheet("空表"); err != nil {
+		t.Fatal(err)
+	}
+	path := t.TempDir() + "/sheets.xlsx"
+	if err := book.SaveAs(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := book.Close(); err != nil {
+		t.Fatal(err)
+	}
+	tool := &DataAnalysisTool{}
+	sheets, err := tool.listExcelSheets(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sheets) != 1 || sheets[0] != "Sheet1" {
+		t.Fatalf("unexpected non-empty sheets: %v", sheets)
+	}
+}
 
 func TestTableNameIsIsolatedBySession(t *testing.T) {
 	knowledge := &types.Knowledge{ID: "knowledge-1"}
@@ -47,6 +74,26 @@ func TestAnalysisProfileSourceIsBounded(t *testing.T) {
 	got := analysisProfileSource(`records"archive`)
 	if !strings.Contains(got, `FROM "records""archive" LIMIT 10000`) {
 		t.Fatalf("profile source is not safely bounded: %s", got)
+	}
+}
+
+func TestTableSchemaPersistenceCopyRemovesSampleValues(t *testing.T) {
+	original := &TableSchema{
+		TableName: "people",
+		RowCount:  2,
+		Columns: []ColumnInfo{{
+			Name: "姓名", Type: "VARCHAR", ValueExamples: []string{"张三"}, Multiline: true,
+		}},
+	}
+	persisted := original.PersistenceCopy()
+	if persisted.TableName != original.TableName || persisted.RowCount != original.RowCount || len(persisted.Columns) != 1 {
+		t.Fatalf("persistence copy lost schema structure: %#v", persisted)
+	}
+	if len(persisted.Columns[0].ValueExamples) != 0 {
+		t.Fatalf("persistence copy retained sampled values: %#v", persisted.Columns[0].ValueExamples)
+	}
+	if len(original.Columns[0].ValueExamples) != 1 {
+		t.Fatal("persistence copy mutated the runtime schema")
 	}
 }
 

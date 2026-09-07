@@ -19,14 +19,11 @@ func prepareAnalysisExcel(ctx context.Context, filename string) (string, func(),
 	defer book.Close()
 	changed := false
 	for _, sheet := range book.GetSheetList() {
-		rows, err := book.GetRows(sheet)
-		if err != nil {
-			return "", unchanged, err
-		}
 		merges, err := book.GetMergeCells(sheet)
 		if err != nil {
 			return "", unchanged, err
 		}
+		verticalMerges := make([]excelize.MergeCell, 0, len(merges))
 		for _, merge := range merges {
 			start, end := merge.GetStartAxis(), merge.GetEndAxis()
 			col, first, err := excelize.CellNameToCoordinates(start)
@@ -41,6 +38,25 @@ func prepareAnalysisExcel(ctx context.Context, filename string) (string, func(),
 			// touching it is layout rather than a value to propagate.
 			if col != lastCol || first == last || first == 1 {
 				continue
+			}
+			verticalMerges = append(verticalMerges, merge)
+		}
+		if len(verticalMerges) == 0 {
+			continue
+		}
+		rows, err := book.GetRows(sheet)
+		if err != nil {
+			return "", unchanged, err
+		}
+		for _, merge := range verticalMerges {
+			start, end := merge.GetStartAxis(), merge.GetEndAxis()
+			col, first, err := excelize.CellNameToCoordinates(start)
+			if err != nil {
+				return "", unchanged, err
+			}
+			_, last, err := excelize.CellNameToCoordinates(end)
+			if err != nil {
+				return "", unchanged, err
 			}
 			if !mergedRowsHaveSiblingData(rows, col, first, last) {
 				continue

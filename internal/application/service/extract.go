@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
@@ -402,6 +403,7 @@ type DataTableSummaryService struct {
 	chunkService         interfaces.ChunkService
 	tenantService        interfaces.TenantService
 	retrieveEngine       interfaces.RetrieveEngineRegistry
+	tableSchemaRepo      interfaces.KnowledgeTableSchemaRepository
 	sqlDB                *sql.DB
 }
 
@@ -414,6 +416,7 @@ func NewDataTableSummaryService(
 	chunkService interfaces.ChunkService,
 	tenantService interfaces.TenantService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
+	tableSchemaRepo interfaces.KnowledgeTableSchemaRepository,
 	sqlDB *sql.DB,
 ) interfaces.TaskHandler {
 	return &DataTableSummaryService{
@@ -424,6 +427,7 @@ func NewDataTableSummaryService(
 		chunkService:         chunkService,
 		tenantService:        tenantService,
 		retrieveEngine:       retrieveEngine,
+		tableSchemaRepo:      tableSchemaRepo,
 		sqlDB:                sqlDB,
 	}
 }
@@ -580,6 +584,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	}
 
 	logger.Infof(ctx, "Loaded table %s with %d columns and %d rows", tableSchema.TableName, len(tableSchema.Columns), tableSchema.RowCount)
+	s.persistTableSchemaAsync(ctx, resources.knowledge, tableSchema)
 
 	// 获取样本数据用于生成摘要
 	input := tools.DataAnalysisInput{
@@ -619,6 +624,25 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	// 构建chunks：一个表格摘要chunk + 多个列描述chunks
 	chunks := s.buildChunks(resources, tableDescription, columnDescription)
 	return chunks, nil
+}
+
+func (s *DataTableSummaryService) persistTableSchemaAsync(ctx context.Context, knowledge *types.Knowledge, schema *tools.TableSchema) {
+	if s.tableSchemaRepo == nil || knowledge == nil || schema == nil {
+		return
+	}
+	payload, err := json.Marshal(schema.PersistenceCopy())
+	if err != nil {
+		logger.Warnf(ctx, "[TableSummary] Failed to encode schema for knowledge=%s: %v", knowledge.ID, err)
+		return
+	}
+	knowledgeCopy := *knowledge
+	go func() {
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if err := s.tableSchemaRepo.Upsert(persistCtx, &knowledgeCopy, payload); err != nil {
+			logger.Warnf(persistCtx, "[TableSummary] Failed to persist schema for knowledge=%s: %v", knowledgeCopy.ID, err)
+		}
+	}()
 }
 
 // buildChunks 构建chunk对象
@@ -714,6 +738,11 @@ func (s *DataTableSummaryService) cleanupOnFailure(ctx context.Context, resource
 		logger.Errorf(ctx, "Failed to update knowledge status: %v", err)
 	} else {
 		logger.Infof(ctx, "Updated knowledge %s status to failed", resources.knowledge.ID)
+	}
+	if s.tableSchemaRepo != nil {
+		if err := s.tableSchemaRepo.DeleteKnowledge(ctx, resources.knowledge.TenantID, resources.knowledge.ID); err != nil {
+			logger.Errorf(ctx, "Failed to delete table schema: %v", err)
+		}
 	}
 
 	// 提取chunk IDs
