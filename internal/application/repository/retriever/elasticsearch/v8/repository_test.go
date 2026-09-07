@@ -34,4 +34,15 @@ func TestKeywordSearchCollapsesDuplicateChunkIDs(t *testing.T) {
 	payload, err := json.Marshal(request)
 	assert.NoError(t, err)
 	assert.Contains(t, string(payload), `"analyzer":"ik_smart"`)
+	assert.Contains(t, string(payload), `doc['source_id.keyword'].value == doc['chunk_id.keyword'].value`)
+	assert.NotContains(t, string(payload), `"wildcard"`)
+}
+
+func TestKeywordGeneratedQuestionFilterDoesNotAffectVectorBaseConditions(t *testing.T) {
+	repository := &elasticsearchRepository{useKeywordSuffix: true}
+	params := types.RetrieveParams{KnowledgeBaseIDs: []string{"kb-1"}}
+
+	payload, err := json.Marshal(repository.getBaseConds(params))
+	assert.NoError(t, err)
+	assert.NotContains(t, string(payload), "source_id")
 }

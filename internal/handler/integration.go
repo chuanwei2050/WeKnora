@@ -108,6 +108,20 @@ func (h *IntegrationHandler) retrievalResponseLimit(ctx context.Context, tenantI
 	return limit
 }
 
+func (h *IntegrationHandler) batchRetrievalResponseLimit(ctx context.Context, tenantID uint64, requested int) int {
+	platformLimit := types.DefaultBatchRerankTopK
+	if h.tenant != nil {
+		if tenant, err := h.tenant.GetTenantByID(ctx, tenantID); err == nil && tenant != nil {
+			platformLimit = tenant.RetrievalConfig.GetEffectiveBatchRerankTopK()
+		}
+	}
+	limit := effectiveIntegrationResponseLimit(requested, platformLimit)
+	if h.limits.maxTopK > 0 && limit > h.limits.maxTopK {
+		return h.limits.maxTopK
+	}
+	return limit
+}
+
 func effectiveIntegrationResponseLimit(requested, platformLimit int) int {
 	if platformLimit <= 0 {
 		platformLimit = types.DefaultRerankTopK
@@ -153,6 +167,14 @@ type integrationSearchableFolderProvider interface {
 
 type folderSearchSession interface {
 	SearchKnowledgeWithFolders(context.Context, []string, []string, []string, bool, string) ([]*types.SearchResult, error)
+}
+
+type batchRerankSearchSession interface {
+	SearchKnowledgeWithRerankTopK(context.Context, []string, []string, bool, string, int) ([]*types.SearchResult, error)
+}
+
+type batchRerankFolderSearchSession interface {
+	SearchKnowledgeWithFoldersAndRerankTopK(context.Context, []string, []string, []string, bool, string, int) ([]*types.SearchResult, error)
 }
 
 func validIntegrationKnowledgeIDs(ids []string, limit int) bool {
@@ -1234,13 +1256,17 @@ func (h *IntegrationHandler) runIntegrationSearchBatch(ctx context.Context, know
 			}
 			var found []*types.SearchResult
 			var err error
+			limit := h.batchRetrievalResponseLimit(ctx, tenantID, query.TopK)
 			if len(folderIDsByQuery) > 0 && folderIDsByQuery[0][index] != nil {
-				searcher, ok := h.sessions.(folderSearchSession)
-				if !ok {
-					err = errors.New("folder search is unavailable")
-				} else {
+				if searcher, ok := h.sessions.(batchRerankFolderSearchSession); ok {
+					found, err = searcher.SearchKnowledgeWithFoldersAndRerankTopK(ctx, knowledgeBaseIDs, knowledgeIDs, folderIDsByQuery[0][index], query.FilterDisabledFolders, query.Query, limit)
+				} else if searcher, ok := h.sessions.(folderSearchSession); ok {
 					found, err = searcher.SearchKnowledgeWithFolders(ctx, knowledgeBaseIDs, knowledgeIDs, folderIDsByQuery[0][index], query.FilterDisabledFolders, query.Query)
+				} else {
+					err = errors.New("folder search is unavailable")
 				}
+			} else if searcher, ok := h.sessions.(batchRerankSearchSession); ok {
+				found, err = searcher.SearchKnowledgeWithRerankTopK(ctx, knowledgeBaseIDs, knowledgeIDs, query.FilterDisabledFolders, query.Query, limit)
 			} else {
 				found, err = h.sessions.SearchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, query.FilterDisabledFolders, query.Query)
 			}
@@ -1253,7 +1279,6 @@ func (h *IntegrationHandler) runIntegrationSearchBatch(ctx context.Context, know
 				results[index] = integrationBatchSearchResult{ID: query.ID, Status: "failed", Results: []gin.H{}, Error: "search_failed"}
 				return
 			}
-			limit := h.retrievalResponseLimit(ctx, tenantID, query.TopK)
 			results[index] = integrationBatchSearchResult{ID: query.ID, Status: "completed", Results: integrationPublicSearchResults(found, knowledgeBaseNames, limit)}
 		}()
 	}

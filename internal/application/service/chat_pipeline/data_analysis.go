@@ -25,8 +25,8 @@ import (
 const (
 	dataAnalysisMaxRows               = 1000
 	dataAnalysisMaxTables             = 3
-	dataAnalysisSecondTableScoreRatio = 0.95
-	dataAnalysisThirdTableScoreRatio  = 0.98
+	dataAnalysisSecondTableScoreRatio = 0.78
+	dataAnalysisThirdTableScoreRatio  = 0.95
 	dataAnalysisEvidenceCharsPerTable = 3000
 	dataAnalysisTimeout               = 30 * time.Second
 	dataAnalysisMaxAttempts           = 3
@@ -1148,12 +1148,13 @@ func filterDataAnalysisCandidatesByRelativeScore(results []*types.SearchResult, 
 		return nil
 	}
 	filtered := make([]*types.SearchResult, 0, min(len(results), dataAnalysisMaxTables))
+	allowCoverageExpansion := dataAnalysisHasMultipleRequestedTargets(query)
 	for _, result := range results {
 		if result == nil {
 			continue
 		}
 		ratio := result.Score / topScore
-		expandsCoverage := dataAnalysisAddsDistinctiveQueryCoverage(query, filtered, result)
+		expandsCoverage := allowCoverageExpansion && dataAnalysisAddsDistinctiveQueryCoverage(query, filtered, result)
 		switch len(filtered) {
 		case 0:
 			filtered = append(filtered, result)
@@ -1172,6 +1173,12 @@ func filterDataAnalysisCandidatesByRelativeScore(results []*types.SearchResult, 
 	}
 	return filtered
 }
+
+func dataAnalysisHasMultipleRequestedTargets(query string) bool {
+	return dataAnalysisTargetSeparatorPattern.MatchString(query)
+}
+
+var dataAnalysisTargetSeparatorPattern = regexp.MustCompile(`(?i)(分别|以及|或者|和|与|及|、|[/／,，;；]|(^|\s)(and|or)(\s|$))`)
 
 func dataAnalysisAddsDistinctiveQueryCoverage(query string, selected []*types.SearchResult, candidate *types.SearchResult) bool {
 	queryTokens := searchutil.TokenizeSimple(query)

@@ -653,14 +653,29 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	return s.searchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, nil, filterDisabledFolders, query)
 }
 
+// SearchKnowledgeWithRerankTopK performs retrieval with a request-scoped
+// rerank output budget. It is used by bounded batch integrations without
+// changing the tenant's normal interactive retrieval configuration.
+func (s *sessionService) SearchKnowledgeWithRerankTopK(ctx context.Context,
+	knowledgeBaseIDs []string, knowledgeIDs []string, filterDisabledFolders bool, query string, rerankTopK int,
+) ([]*types.SearchResult, error) {
+	return s.searchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, nil, filterDisabledFolders, query, rerankTopK)
+}
+
 func (s *sessionService) SearchKnowledgeWithFolders(ctx context.Context,
 	knowledgeBaseIDs []string, knowledgeIDs []string, folderIDs []string, filterDisabledFolders bool, query string,
 ) ([]*types.SearchResult, error) {
 	return s.searchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, folderIDs, filterDisabledFolders, query)
 }
 
+func (s *sessionService) SearchKnowledgeWithFoldersAndRerankTopK(ctx context.Context,
+	knowledgeBaseIDs []string, knowledgeIDs []string, folderIDs []string, filterDisabledFolders bool, query string, rerankTopK int,
+) ([]*types.SearchResult, error) {
+	return s.searchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, folderIDs, filterDisabledFolders, query, rerankTopK)
+}
+
 func (s *sessionService) searchKnowledge(ctx context.Context,
-	knowledgeBaseIDs []string, knowledgeIDs []string, folderIDs []string, filterDisabledFolders bool, query string,
+	knowledgeBaseIDs []string, knowledgeIDs []string, folderIDs []string, filterDisabledFolders bool, query string, rerankTopK ...int,
 ) ([]*types.SearchResult, error) {
 	logger.Info(ctx, "Start knowledge base search without LLM summary")
 	logger.Infof(ctx, "Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, query: %s",
@@ -695,6 +710,9 @@ func (s *sessionService) searchKnowledge(ctx context.Context,
 	userID, _ := types.UserIDFromContext(ctx)
 
 	rc := s.effectiveRetrievalConfig(ctx, tenantID)
+	if len(rerankTopK) > 0 {
+		rc.RerankTopK = rerankTopK[0]
+	}
 
 	chatManage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{

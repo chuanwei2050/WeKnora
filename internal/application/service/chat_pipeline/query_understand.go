@@ -578,7 +578,7 @@ func (p *PluginQueryUnderstand) parseOutput(chatManage *types.ChatManage, raw st
 	// and default to IntentKBSearch for safety.
 	if content != "" {
 		chatManage.RewriteQuery = content
-		chatManage.KeywordQuery = content
+		chatManage.KeywordQuery = keywordRetrievalQuery(chatManage)
 	}
 }
 
@@ -587,7 +587,7 @@ func applyQueryUnderstandOutput(chatManage *types.ChatManage, output queryUnders
 	if rewrite := strings.TrimSpace(output.RewriteQuery); rewrite != "" {
 		chatManage.RewriteQuery = rewrite
 	}
-	chatManage.KeywordQuery = chatManage.RewriteQuery
+	chatManage.KeywordQuery = keywordRetrievalQuery(chatManage)
 	if output.Intent != "" {
 		chatManage.Intent = output.Intent
 	}
@@ -605,6 +605,17 @@ func applyQueryUnderstandOutput(chatManage *types.ChatManage, output queryUnders
 		chatManage.RoutingDecision = &decision
 		chatManage.ApplyRoutingDecision()
 	}
+}
+
+// keywordRetrievalQuery keeps lexical retrieval anchored to the user's exact
+// wording. Model rewrites remain useful for semantic/vector retrieval, but can
+// introduce common terms that distort BM25 ranking. Image-only requests have
+// no original text, so they fall back to the model-derived rewrite.
+func keywordRetrievalQuery(chatManage *types.ChatManage) string {
+	if query := strings.TrimSpace(chatManage.Query); query != "" {
+		return query
+	}
+	return strings.TrimSpace(chatManage.RewriteQuery)
 }
 
 // parseStrictRoutingOutput accepts only a single JSON object with validated

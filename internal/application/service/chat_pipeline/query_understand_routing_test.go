@@ -237,6 +237,21 @@ func TestQueryUnderstandFallsBackToRewriteForKeywordQuery(t *testing.T) {
 	}
 }
 
+func TestQueryUnderstandKeepsOriginalQueryForKeywordRetrieval(t *testing.T) {
+	manage := &types.ChatManage{PipelineRequest: types.PipelineRequest{
+		Query: "请重新核对并列出持有系统集成项目管理工程师证书的人员。",
+	}}
+	applyQueryUnderstandOutput(manage, queryUnderstandOutput{
+		RewriteQuery: "持有系统集成项目管理工程师证书的人员名单",
+	}, false)
+	if manage.RewriteQuery == manage.KeywordQuery {
+		t.Fatalf("keyword retrieval unexpectedly used model rewrite: %q", manage.KeywordQuery)
+	}
+	if manage.KeywordQuery != manage.Query {
+		t.Fatalf("keyword query = %q, want original query %q", manage.KeywordQuery, manage.Query)
+	}
+}
+
 func TestQueryUnderstandPlainTextFallbackUpdatesKeywordQuery(t *testing.T) {
 	manage := &types.ChatManage{}
 	(&PluginQueryUnderstand{}).parseOutput(manage, "精简后的检索词")

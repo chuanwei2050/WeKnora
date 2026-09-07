@@ -535,8 +535,18 @@ func (e *elasticsearchRepository) keywordSearchRequest(params typesLocal.Retriev
 	must := []types.Query{
 		{Match: map[string]types.MatchQuery{"content": {Query: params.Query, Analyzer: &analyzer}}},
 	}
+	originalChunkScript := fmt.Sprintf(
+		"doc['%s'].size()!=0 && doc['%s'].size()!=0 && doc['%s'].value == doc['%s'].value",
+		e.idField("source_id"), e.idField("chunk_id"), e.idField("source_id"), e.idField("chunk_id"),
+	)
+	filter := append(e.getBaseConds(params), types.Query{Script: &types.ScriptQuery{
+		Script: types.Script{Source: &originalChunkScript},
+	}})
 	return &search.Request{
-		Query:    &types.Query{Bool: &types.BoolQuery{Filter: e.getBaseConds(params), Must: must}},
+		Query: &types.Query{Bool: &types.BoolQuery{
+			Filter: filter,
+			Must:   must,
+		}},
 		Size:     &params.TopK,
 		Collapse: &types.FieldCollapse{Field: e.idField("chunk_id")},
 	}

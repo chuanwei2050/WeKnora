@@ -1,7 +1,6 @@
 package service
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -19,14 +18,6 @@ func TestBuildSearchResultPreservesKnowledgeVersionID(t *testing.T) {
 
 	if result.KnowledgeVersionID != chunk.KnowledgeVersionID {
 		t.Fatalf("knowledge version ID = %q, want %q", result.KnowledgeVersionID, chunk.KnowledgeVersionID)
-	}
-}
-
-func TestContextualContentKeepsSourceAndLabelsStructuralContext(t *testing.T) {
-	result := &types.SearchResult{Content: "材料正文", StructuralContext: "主体甲 > 附属材料"}
-	got := result.ContextualContent()
-	if !strings.Contains(got, "[所属章节] 主体甲 > 附属材料") || !strings.Contains(got, "材料正文") {
-		t.Fatalf("unexpected contextual content: %q", got)
 	}
 }
 

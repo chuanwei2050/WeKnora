@@ -144,7 +144,7 @@ func TestFilterDataAnalysisCandidatesUsesRequestRelativeScores(t *testing.T) {
 		t.Fatalf("unexpected relative-score candidates: %#v", got)
 	}
 
-	lowScores := []*types.SearchResult{{KnowledgeID: "one", Score: 0.12}, {KnowledgeID: "two", Score: 0.1}}
+	lowScores := []*types.SearchResult{{KnowledgeID: "one", Score: 0.12}, {KnowledgeID: "two", Score: 0.09}}
 	if got := filterDataAnalysisCandidatesByRelativeScore(lowScores, nil, nil, "普通统计问题"); len(got) != 1 {
 		t.Fatalf("weak second candidate was retained: %#v", got)
 	}
@@ -174,8 +174,8 @@ func TestFilterDataAnalysisCandidatesLimitsObservedThreeTableSelections(t *testi
 		scores []float64
 		want   int
 	}{
-		{name: "only a near-tied runner-up expands", scores: []float64{0.6354179212, 0.6232272959, 0.5577818713}, want: 2},
-		{name: "ordinary score gaps stay on one table", scores: []float64{0.6948359011, 0.6403284500, 0.6151196010}, want: 1},
+		{name: "a strong runner-up expands without admitting the third", scores: []float64{0.6354179212, 0.5232272959, 0.5577818713}, want: 2},
+		{name: "ordinary score gaps stay on one table", scores: []float64{0.6948359011, 0.5403284500, 0.5151196010}, want: 1},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -203,16 +203,40 @@ func TestFilterDataAnalysisCandidatesExpandsForDistinctQueryCoverage(t *testing.
 	}
 }
 
+func TestDataAnalysisHasMultipleRequestedTargetsRecognizesCommonSeparators(t *testing.T) {
+	for _, query := range []string{"统计A和B人数", "统计A与B人数", "A, B", "A and B", "A or B"} {
+		if !dataAnalysisHasMultipleRequestedTargets(query) {
+			t.Fatalf("multi-target query was not recognized: %q", query)
+		}
+	}
+	if dataAnalysisHasMultipleRequestedTargets("系统集成项目管理工程师证书人员") {
+		t.Fatal("single-target query was recognized as multi-target")
+	}
+}
+
 func TestFilterDataAnalysisCandidatesDoesNotExpandWithoutCoverageGain(t *testing.T) {
 	query := "系统架构设计师证书人员是谁"
 	results := []*types.SearchResult{
 		{KnowledgeID: "first", Score: 0.8, Content: "系统架构设计师：麦伟华"},
-		{KnowledgeID: "second", Score: 0.65, Content: "软件测试人员清单"},
+		{KnowledgeID: "second", Score: 0.61, Content: "软件测试人员清单"},
 		{KnowledgeID: "third", Score: 0.6, Content: "项目管理人员清单"},
 	}
 	got := filterDataAnalysisCandidatesByRelativeScore(results, nil, nil, query)
 	if len(got) != 1 {
 		t.Fatalf("candidates without new query coverage were retained: %#v", got)
+	}
+}
+
+func TestFilterDataAnalysisCandidatesDoesNotUseCoverageForSingleTarget(t *testing.T) {
+	query := "请重新核对并列出持有系统集成项目管理工程师证书的人员"
+	results := []*types.SearchResult{
+		{KnowledgeID: "first", Score: 0.7, Content: "专业证书：系统集成项目管理工程师"},
+		{KnowledgeID: "second", Score: 0.67, Content: "职称专业：系统集成项目管理工程师"},
+		{KnowledgeID: "third", Score: 0.59, Content: "系统集成项目管理工程师证书人员名单"},
+	}
+	got := filterDataAnalysisCandidatesByRelativeScore(results, nil, nil, query)
+	if len(got) != 2 {
+		t.Fatalf("single-target query selected %d candidates, want 2: %#v", len(got), got)
 	}
 }
 

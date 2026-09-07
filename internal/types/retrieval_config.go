@@ -15,6 +15,7 @@ const (
 	DefaultKeywordThreshold     = 0.3
 	DefaultRerankCandidateTopK  = 20
 	DefaultRerankTopK           = 10
+	DefaultBatchRerankTopK      = 5
 	DefaultRerankThreshold      = 0.3
 	DefaultBatchMaxResults      = 200
 	DefaultBatchMaxContentChars = 200000
@@ -43,6 +44,8 @@ type RetrievalConfig struct {
 	KeywordThreshold float64 `json:"keyword_threshold"`
 	// RerankTopK is the maximum number of results after reranking (default: 10)
 	RerankTopK int `json:"rerank_top_k"`
+	// BatchRerankTopK is the per-query result limit for Integration batch search.
+	BatchRerankTopK int `json:"batch_rerank_top_k"`
 	// RerankCandidateTopK is the maximum number of fused candidates sent to reranking.
 	RerankCandidateTopK int `json:"rerank_candidate_top_k"`
 	// RerankThreshold is the minimum rerank score (-10 to 10, default: 0.3)
@@ -74,6 +77,7 @@ type RetrievalConfigUpdate struct {
 	KeywordThreshold     *float64 `json:"keyword_threshold"`
 	RerankCandidateTopK  *int     `json:"rerank_candidate_top_k"`
 	RerankTopK           *int     `json:"rerank_top_k"`
+	BatchRerankTopK      *int     `json:"batch_rerank_top_k"`
 	RerankThreshold      *float64 `json:"rerank_threshold"`
 	EnableQueryExpansion *bool    `json:"enable_query_expansion"`
 	BatchMaxResults      *int     `json:"batch_max_results"`
@@ -110,6 +114,9 @@ func ApplyRetrievalConfigUpdate(current *RetrievalConfig, update RetrievalConfig
 	if update.RerankTopK != nil {
 		result.RerankTopK = *update.RerankTopK
 	}
+	if update.BatchRerankTopK != nil {
+		result.BatchRerankTopK = *update.BatchRerankTopK
+	}
 	if update.RerankThreshold != nil {
 		result.RerankThreshold = *update.RerankThreshold
 		result.rerankThresholdSet = true
@@ -139,6 +146,7 @@ func DefaultRetrievalConfig() RetrievalConfig {
 		KeywordThreshold:     DefaultKeywordThreshold,
 		RerankCandidateTopK:  DefaultRerankCandidateTopK,
 		RerankTopK:           DefaultRerankTopK,
+		BatchRerankTopK:      DefaultBatchRerankTopK,
 		RerankThreshold:      DefaultRerankThreshold,
 		EnableQueryExpansion: true,
 		BatchMaxResults:      DefaultBatchMaxResults,
@@ -170,6 +178,9 @@ func NormalizeRetrievalConfig(config *RetrievalConfig) RetrievalConfig {
 	}
 	if result.RerankTopK <= 0 {
 		result.RerankTopK = min(DefaultRerankTopK, result.RerankCandidateTopK)
+	}
+	if result.BatchRerankTopK <= 0 {
+		result.BatchRerankTopK = min(DefaultBatchRerankTopK, result.RerankCandidateTopK)
 	}
 	// Legacy rows store zero for absent thresholds.
 	if result.VectorThreshold == 0 && !result.vectorThresholdSet {
@@ -220,6 +231,9 @@ func ValidateRetrievalConfig(config RetrievalConfig) error {
 	if config.RerankTopK < 1 || config.RerankTopK > config.RerankCandidateTopK {
 		return fmt.Errorf("rerank_top_k must be between 1 and rerank_candidate_top_k")
 	}
+	if config.BatchRerankTopK < 1 || config.BatchRerankTopK > config.RerankCandidateTopK {
+		return fmt.Errorf("batch_rerank_top_k must be between 1 and rerank_candidate_top_k")
+	}
 	if config.RerankThreshold < -10 || config.RerankThreshold > 10 {
 		return fmt.Errorf("rerank_threshold must be between -10 and 10")
 	}
@@ -262,6 +276,10 @@ func (c *RetrievalConfig) GetEffectiveKeywordThreshold() float64 {
 // GetEffectiveRerankTopK returns RerankTopK with a fallback default.
 func (c *RetrievalConfig) GetEffectiveRerankTopK() int {
 	return NormalizeRetrievalConfig(c).RerankTopK
+}
+
+func (c *RetrievalConfig) GetEffectiveBatchRerankTopK() int {
+	return NormalizeRetrievalConfig(c).BatchRerankTopK
 }
 
 func (c *RetrievalConfig) GetEffectiveRerankCandidateTopK() int {

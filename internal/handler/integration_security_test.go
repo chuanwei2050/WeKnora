@@ -29,12 +29,27 @@ type integrationContextKey string
 
 type batchSearchSessionService struct {
 	interfaces.SessionService
-	mu        sync.Mutex
-	active    int
-	maxActive int
-	folderIDs []string
-	filters   []bool
-	calls     int
+	mu          sync.Mutex
+	active      int
+	maxActive   int
+	folderIDs   []string
+	filters     []bool
+	rerankTopKs []int
+	calls       int
+}
+
+func (s *batchSearchSessionService) SearchKnowledgeWithRerankTopK(ctx context.Context, knowledgeBaseIDs []string, knowledgeIDs []string, filterDisabledFolders bool, query string, rerankTopK int) ([]*types.SearchResult, error) {
+	s.mu.Lock()
+	s.rerankTopKs = append(s.rerankTopKs, rerankTopK)
+	s.mu.Unlock()
+	return s.SearchKnowledge(ctx, knowledgeBaseIDs, knowledgeIDs, filterDisabledFolders, query)
+}
+
+func (s *batchSearchSessionService) SearchKnowledgeWithFoldersAndRerankTopK(ctx context.Context, knowledgeBaseIDs []string, knowledgeIDs []string, folderIDs []string, filterDisabledFolders bool, query string, rerankTopK int) ([]*types.SearchResult, error) {
+	s.mu.Lock()
+	s.folderIDs = append([]string(nil), folderIDs...)
+	s.mu.Unlock()
+	return s.SearchKnowledgeWithRerankTopK(ctx, knowledgeBaseIDs, knowledgeIDs, filterDisabledFolders, query, rerankTopK)
 }
 
 type duplicateBatchSearchSessionService struct {
@@ -175,6 +190,15 @@ func TestIntegrationResponseLimitHonorsOperationalMaximum(t *testing.T) {
 
 	require.Equal(t, 5, handler.retrievalResponseLimit(context.Background(), 1, 0))
 	require.Equal(t, 3, handler.retrievalResponseLimit(context.Background(), 1, 3))
+}
+
+func TestIntegrationBatchResponseLimitHasIndependentDefault(t *testing.T) {
+	handler := &IntegrationHandler{limits: integrationLimits{maxTopK: 50}}
+
+	require.Equal(t, types.DefaultRerankTopK, handler.retrievalResponseLimit(context.Background(), 1, 0))
+	require.Equal(t, types.DefaultBatchRerankTopK, handler.batchRetrievalResponseLimit(context.Background(), 1, 0))
+	require.Equal(t, 3, handler.batchRetrievalResponseLimit(context.Background(), 1, 3))
+	require.Equal(t, types.DefaultBatchRerankTopK, handler.batchRetrievalResponseLimit(context.Background(), 1, 10))
 }
 
 func TestIntegrationReferencesAcceptsEventPayloadShapes(t *testing.T) {
@@ -486,6 +510,7 @@ func TestIntegrationBatchSearchPreservesQueryOrderAndBoundsConcurrency(t *testin
 	require.Equal(t, "chunk-first", results[0].Results[0]["chunk_id"])
 	require.Equal(t, "authorized", results[0].Results[0]["knowledge_base_name"])
 	require.Equal(t, 2, sessions.maxActive)
+	require.Equal(t, []int{types.DefaultBatchRerankTopK, types.DefaultBatchRerankTopK, types.DefaultBatchRerankTopK}, sessions.rerankTopKs)
 }
 
 func TestEffectiveIntegrationResponseLimitOnlyNarrowsPlatformLimit(t *testing.T) {
@@ -629,6 +654,7 @@ func TestIntegrationBatchSearchUsesResolvedFolders(t *testing.T) {
 	require.Equal(t, "completed", results[0].Status)
 	require.Equal(t, resolved[0], sessions.folderIDs)
 	require.Equal(t, []bool{true}, sessions.filters)
+	require.Equal(t, []int{types.DefaultBatchRerankTopK}, sessions.rerankTopKs)
 }
 
 func TestIntegrationBatchSearchUsesPerQueryFolderFilter(t *testing.T) {

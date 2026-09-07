@@ -12,6 +12,7 @@ export interface RetrievalConfig {
   keyword_threshold: number
   rerank_candidate_top_k: number
   rerank_top_k: number
+  batch_rerank_top_k: number
   rerank_threshold: number
   batch_max_results: number
   batch_max_content_chars: number
