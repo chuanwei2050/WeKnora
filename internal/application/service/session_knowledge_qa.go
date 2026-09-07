@@ -73,8 +73,7 @@ func (s *sessionService) KnowledgeQA(
 
 	// Resolve retrieval tenant scope using shared helper
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
-	retrievalConfig := s.effectiveRetrievalConfig(ctx, retrievalTenantID)
-	conversationConfig := s.effectiveConversationConfig(ctx, retrievalTenantID)
+	retrievalConfig, conversationConfig := s.effectiveQAConfigs(ctx, retrievalTenantID)
 	fallbackStrategy := types.FallbackStrategy(s.cfg.Conversation.FallbackStrategy)
 	fallbackResponse := s.cfg.Conversation.FallbackResponse
 	fallbackPrompt := s.cfg.Conversation.FallbackPrompt

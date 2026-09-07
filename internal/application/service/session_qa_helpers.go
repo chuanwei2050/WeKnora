@@ -16,25 +16,48 @@ func (s *sessionService) effectiveRetrievalConfig(ctx context.Context, tenantID 
 	return types.DefaultRetrievalConfig()
 }
 
+// effectiveQAConfigs loads the tenant once and derives both request-scoped QA
+// configurations from the same snapshot.
+func (s *sessionService) effectiveQAConfigs(ctx context.Context, tenantID uint64) (types.RetrievalConfig, *types.ConversationConfig) {
+	retrievalConfig := types.DefaultRetrievalConfig()
+	if s.tenantService == nil {
+		return retrievalConfig, nil
+	}
+
+	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
+	if err != nil || tenant == nil {
+		return retrievalConfig, nil
+	}
+
+	return types.NormalizeRetrievalConfig(tenant.RetrievalConfig), s.conversationConfigWithDefaults(tenant.ConversationConfig)
+}
+
 func (s *sessionService) effectiveConversationConfig(ctx context.Context, tenantID uint64) *types.ConversationConfig {
 	if s.tenantService != nil {
 		if tenant, err := s.tenantService.GetTenantByID(ctx, tenantID); err == nil && tenant != nil && tenant.ConversationConfig != nil {
-			result := *tenant.ConversationConfig
-			if result.FallbackStrategy == "" {
-				result.FallbackStrategy = s.cfg.Conversation.FallbackStrategy
-			}
-			if result.FallbackResponse == "" {
-				result.FallbackResponse = s.cfg.Conversation.FallbackResponse
-			}
-			if result.FallbackPrompt == "" {
-				result.FallbackPrompt = s.cfg.Conversation.FallbackPrompt
-			} else {
-				result.FallbackPrompt = types.UpgradeLegacyDefaultFallbackPrompt(result.FallbackPrompt, s.cfg.Conversation.FallbackPrompt)
-			}
-			return &result
+			return s.conversationConfigWithDefaults(tenant.ConversationConfig)
 		}
 	}
 	return nil
+}
+
+func (s *sessionService) conversationConfigWithDefaults(config *types.ConversationConfig) *types.ConversationConfig {
+	if config == nil {
+		return nil
+	}
+	result := *config
+	if result.FallbackStrategy == "" {
+		result.FallbackStrategy = s.cfg.Conversation.FallbackStrategy
+	}
+	if result.FallbackResponse == "" {
+		result.FallbackResponse = s.cfg.Conversation.FallbackResponse
+	}
+	if result.FallbackPrompt == "" {
+		result.FallbackPrompt = s.cfg.Conversation.FallbackPrompt
+	} else {
+		result.FallbackPrompt = types.UpgradeLegacyDefaultFallbackPrompt(result.FallbackPrompt, s.cfg.Conversation.FallbackPrompt)
+	}
+	return &result
 }
 
 // ---------------------------------------------------------------------------
