@@ -28,7 +28,6 @@ const (
 	dataAnalysisRelativeScoreFloor    = 0.65
 	dataAnalysisEvidenceCharsPerTable = 3000
 	dataAnalysisTimeout               = 30 * time.Second
-	dataAnalysisLoadTimeout           = 2 * time.Minute
 	dataAnalysisMaxAttempts           = 3
 	defaultLLMCallTimeout             = 120 * time.Second
 )
@@ -305,9 +304,7 @@ func (p *PluginDataAnalysis) analyze(
 				}
 				loadDone := make(chan loadResult, 1)
 				go func() {
-					loadCtx, cancelLoad := context.WithTimeout(ctx, dataAnalysisLoadTimeout)
-					defer cancelLoad()
-					loaded, err := tool.LoadFromKnowledge(loadCtx, source.knowledge)
+					loaded, err := tool.LoadFromKnowledge(ctx, source.knowledge)
 					loadDone <- loadResult{schema: loaded, err: err}
 				}()
 				earlySchema := p.loadDataAnalysisEarlySchema(ctx, source.knowledge, 6000)
