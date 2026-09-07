@@ -119,10 +119,16 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 	if chatManage.SystemPromptOverride != "" {
 		base = chatManage.SystemPromptOverride
 	}
+	contexts := chatManage.RenderedContexts
+	if contexts != "" && strings.Contains(chatManage.UserContent, contexts) {
+		// ContextTemplate already placed the complete evidence in the current user
+		// message. Avoid sending the same potentially large block a second time.
+		contexts = ""
+	}
 	systemPrompt := types.RenderPromptPlaceholders(base, types.PlaceholderValues{
 		"query":    chatManage.Query,
 		"language": chatManage.Language,
-		"contexts": chatManage.RenderedContexts,
+		"contexts": contexts,
 	})
 
 	chatMessages := []chat.Message{

@@ -32,6 +32,47 @@ func TestPrepareMessagesUsesOriginalHistoryQueryWithoutPersistedRAGContext(t *te
 	}
 }
 
+func TestPrepareMessagesDoesNotDuplicateCurrentRenderedContexts(t *testing.T) {
+	manage := &types.ChatManage{}
+	manage.SummaryConfig.Prompt = "system {{contexts}}"
+	manage.RenderedContexts = "<context>current evidence</context>"
+	manage.UserContent = "question\n<context>current evidence</context>"
+
+	messages := prepareMessagesWithHistory(manage)
+	if strings.Contains(messages[0].Content, manage.RenderedContexts) {
+		t.Fatalf("current evidence duplicated in system prompt: %q", messages[0].Content)
+	}
+	if !strings.Contains(messages[1].Content, manage.RenderedContexts) {
+		t.Fatalf("current evidence missing from user message: %q", messages[1].Content)
+	}
+}
+
+func TestPrepareMessagesKeepsSystemContextsWhenUserMessageDoesNotContainThem(t *testing.T) {
+	manage := &types.ChatManage{}
+	manage.SummaryConfig.Prompt = "system {{contexts}}"
+	manage.RenderedContexts = "<context>current evidence</context>"
+	manage.UserContent = "question only"
+
+	messages := prepareMessagesWithHistory(manage)
+	if !strings.Contains(messages[0].Content, manage.RenderedContexts) {
+		t.Fatalf("system prompt lost its only copy of current evidence: %q", messages[0].Content)
+	}
+}
+
+func TestFormatConversationHistoryUsesOriginalQueryWithoutPersistedRAGContext(t *testing.T) {
+	history := formatConversationHistory([]*types.History{{
+		Query:         "question\n<context>old retrieved evidence</context>",
+		OriginalQuery: "question",
+		Answer:        "answer",
+	}})
+	if !strings.Contains(history, "User question: question\n") || !strings.Contains(history, "Assistant answer: answer") {
+		t.Fatalf("conversation history lost the original exchange: %q", history)
+	}
+	if strings.Contains(history, "old retrieved evidence") {
+		t.Fatalf("persisted RAG context leaked into query understanding history: %q", history)
+	}
+}
+
 func TestHistoricalUserContentKeepsNonRAGContext(t *testing.T) {
 	message := &types.Message{
 		Content: "question",

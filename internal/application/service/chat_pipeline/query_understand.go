@@ -905,9 +905,13 @@ func formatConversationHistory(historyList []*types.History) string {
 
 	var builder strings.Builder
 	for _, h := range historyList {
+		query := h.Query
+		if h.OriginalQuery != "" {
+			query = h.OriginalQuery
+		}
 		builder.WriteString("------BEGIN------\n")
 		builder.WriteString("User question: ")
-		builder.WriteString(h.Query)
+		builder.WriteString(query)
 		builder.WriteString("\nAssistant answer: ")
 		builder.WriteString(h.Answer)
 		builder.WriteString("\n------END------\n")
