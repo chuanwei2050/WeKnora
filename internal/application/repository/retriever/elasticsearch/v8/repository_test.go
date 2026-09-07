@@ -33,5 +33,5 @@ func TestKeywordSearchCollapsesDuplicateChunkIDs(t *testing.T) {
 	assert.Equal(t, "chunk_id.keyword", request.Collapse.Field)
 	payload, err := json.Marshal(request)
 	assert.NoError(t, err)
-	assert.Contains(t, string(payload), `"analyzer":"ik_max_word"`)
+	assert.Contains(t, string(payload), `"analyzer":"ik_smart"`)
 }

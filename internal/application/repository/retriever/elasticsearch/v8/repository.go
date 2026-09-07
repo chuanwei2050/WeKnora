@@ -529,10 +529,9 @@ func (e *elasticsearchRepository) KeywordsRetrieve(ctx context.Context,
 }
 
 func (e *elasticsearchRepository) keywordSearchRequest(params typesLocal.RetrieveParams) *search.Request {
-	// Use the fine-grained IK analyzer at query time as well as index time. This
-	// lets related Chinese compounds share stable subterms while reranking still
-	// decides final semantic relevance.
-	analyzer := "ik_max_word"
+	// Keep query-time tokenization coarse to avoid broad matches caused by
+	// fine-grained index terms. The index remains on ik_max_word for recall.
+	analyzer := "ik_smart"
 	must := []types.Query{
 		{Match: map[string]types.MatchQuery{"content": {Query: params.Query, Analyzer: &analyzer}}},
 	}
