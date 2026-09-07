@@ -25,7 +25,8 @@ import (
 const (
 	dataAnalysisMaxRows               = 1000
 	dataAnalysisMaxTables             = 3
-	dataAnalysisRelativeScoreFloor    = 0.65
+	dataAnalysisSecondTableScoreRatio = 0.95
+	dataAnalysisThirdTableScoreRatio  = 0.98
 	dataAnalysisEvidenceCharsPerTable = 3000
 	dataAnalysisTimeout               = 30 * time.Second
 	dataAnalysisMaxAttempts           = 3
@@ -225,7 +226,7 @@ func (p *PluginDataAnalysis) analyze(
 	for i, candidate := range uniqueCandidates {
 		uniqueTargets[i] = candidate.target
 	}
-	filteredTargets := filterDataAnalysisCandidatesByRelativeScore(uniqueTargets, chatManage.KnowledgeIDs, chatManage.SearchTargets)
+	filteredTargets := filterDataAnalysisCandidatesByRelativeScore(uniqueTargets, chatManage.KnowledgeIDs, chatManage.SearchTargets, chatManage.RewriteQuery)
 	if len(filteredTargets) > dataAnalysisMaxTables {
 		filteredTargets = filteredTargets[:dataAnalysisMaxTables]
 	}
@@ -1119,11 +1120,11 @@ func selectDataAnalysisTargets(results []*types.SearchResult, knowledgeIDs []str
 	return selected
 }
 
-// filterDataAnalysisCandidatesByRelativeScore compares candidates only within
-// the same reranked request. This avoids assuming that an absolute score has
-// the same meaning across queries or reranker models while dropping clearly
-// weaker tail candidates. Explicitly selected documents are never filtered.
-func filterDataAnalysisCandidatesByRelativeScore(results []*types.SearchResult, knowledgeIDs []string, targets types.SearchTargets) []*types.SearchResult {
+// filterDataAnalysisCandidatesByRelativeScore defaults to the strongest table
+// and expands only for increasingly strong near-ties. Comparing scores within
+// one request avoids assuming that absolute reranker scores are comparable
+// across queries or models. Explicitly selected documents are never filtered.
+func filterDataAnalysisCandidatesByRelativeScore(results []*types.SearchResult, knowledgeIDs []string, targets types.SearchTargets, query string) []*types.SearchResult {
 	if len(results) < 2 || len(knowledgeIDs) > 0 {
 		return results
 	}
@@ -1139,19 +1140,86 @@ func filterDataAnalysisCandidatesByRelativeScore(results []*types.SearchResult, 
 		}
 	}
 	if topScore <= 0 {
-		return results
+		for _, result := range results {
+			if result != nil {
+				return []*types.SearchResult{result}
+			}
+		}
+		return nil
 	}
-	minimum := topScore * dataAnalysisRelativeScoreFloor
-	filtered := make([]*types.SearchResult, 0, len(results))
+	filtered := make([]*types.SearchResult, 0, min(len(results), dataAnalysisMaxTables))
 	for _, result := range results {
-		if result != nil && result.Score >= minimum {
+		if result == nil {
+			continue
+		}
+		ratio := result.Score / topScore
+		expandsCoverage := dataAnalysisAddsDistinctiveQueryCoverage(query, filtered, result)
+		switch len(filtered) {
+		case 0:
 			filtered = append(filtered, result)
+		case 1:
+			if ratio >= dataAnalysisSecondTableScoreRatio || expandsCoverage {
+				filtered = append(filtered, result)
+			}
+		default:
+			if ratio >= dataAnalysisThirdTableScoreRatio || expandsCoverage {
+				filtered = append(filtered, result)
+			}
+		}
+		if len(filtered) == dataAnalysisMaxTables {
+			break
 		}
 	}
-	if len(filtered) == 0 {
-		return results[:1]
-	}
 	return filtered
+}
+
+func dataAnalysisAddsDistinctiveQueryCoverage(query string, selected []*types.SearchResult, candidate *types.SearchResult) bool {
+	queryTokens := searchutil.TokenizeSimple(query)
+	if len(queryTokens) == 0 || candidate == nil {
+		return false
+	}
+	covered := make(map[string]struct{}, len(queryTokens))
+	for _, result := range selected {
+		for token := range dataAnalysisCandidateTokens(result) {
+			covered[token] = struct{}{}
+		}
+	}
+	for token := range dataAnalysisCandidateTokens(candidate) {
+		if _, requested := queryTokens[token]; !requested {
+			continue
+		}
+		if _, alreadyCovered := covered[token]; alreadyCovered {
+			continue
+		}
+		if len([]rune(token)) >= 3 || (len(token) >= 4 && isASCIIText(token)) {
+			return true
+		}
+	}
+	return false
+}
+
+func dataAnalysisCandidateTokens(result *types.SearchResult) map[string]struct{} {
+	if result == nil {
+		return nil
+	}
+	return searchutil.TokenizeSimple(strings.Join([]string{
+		result.Content,
+		result.MatchedContent,
+		result.KnowledgeTitle,
+		result.KnowledgeFilename,
+	}, "\n"))
+}
+
+func isASCIIText(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r > 127 {
+			return false
+		}
+	}
+	return true
 }
 
 func isTableMetadataChunk(result *types.SearchResult) bool {

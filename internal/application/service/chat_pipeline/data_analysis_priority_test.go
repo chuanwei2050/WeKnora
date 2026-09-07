@@ -139,21 +139,92 @@ func TestFilterDataAnalysisCandidatesUsesRequestRelativeScores(t *testing.T) {
 		{KnowledgeID: "close", Score: 0.4},
 		{KnowledgeID: "tail", Score: 0.2},
 	}
-	got := filterDataAnalysisCandidatesByRelativeScore(results, nil, nil)
-	if len(got) != 2 || got[0].KnowledgeID != "best" || got[1].KnowledgeID != "close" {
+	got := filterDataAnalysisCandidatesByRelativeScore(results, nil, nil, "普通统计问题")
+	if len(got) != 1 || got[0].KnowledgeID != "best" {
 		t.Fatalf("unexpected relative-score candidates: %#v", got)
 	}
 
 	lowScores := []*types.SearchResult{{KnowledgeID: "one", Score: 0.12}, {KnowledgeID: "two", Score: 0.1}}
-	if got := filterDataAnalysisCandidatesByRelativeScore(lowScores, nil, nil); len(got) != 2 {
-		t.Fatalf("close low-score candidates were dropped: %#v", got)
+	if got := filterDataAnalysisCandidatesByRelativeScore(lowScores, nil, nil, "普通统计问题"); len(got) != 1 {
+		t.Fatalf("weak second candidate was retained: %#v", got)
+	}
+
+	nearTie := []*types.SearchResult{{KnowledgeID: "one", Score: 0.6}, {KnowledgeID: "two", Score: 0.58}}
+	if got := filterDataAnalysisCandidatesByRelativeScore(nearTie, nil, nil, "普通统计问题"); len(got) != 2 {
+		t.Fatalf("strong second candidate was dropped: %#v", got)
+	}
+
+	threeWayTie := []*types.SearchResult{{KnowledgeID: "one", Score: 0.6}, {KnowledgeID: "two", Score: 0.59}, {KnowledgeID: "three", Score: 0.588}}
+	if got := filterDataAnalysisCandidatesByRelativeScore(threeWayTie, nil, nil, "普通统计问题"); len(got) != 3 {
+		t.Fatalf("strong third candidate was dropped: %#v", got)
 	}
 }
 
 func TestFilterDataAnalysisCandidatesKeepsExplicitKnowledge(t *testing.T) {
 	results := []*types.SearchResult{{KnowledgeID: "explicit", Score: 0.9}, {KnowledgeID: "also-explicit", Score: 0.1}}
-	got := filterDataAnalysisCandidatesByRelativeScore(results, []string{"explicit", "also-explicit"}, nil)
+	got := filterDataAnalysisCandidatesByRelativeScore(results, []string{"explicit", "also-explicit"}, nil, "query")
 	if len(got) != len(results) {
 		t.Fatalf("explicit candidates were filtered: %#v", got)
+	}
+}
+
+func TestFilterDataAnalysisCandidatesLimitsObservedThreeTableSelections(t *testing.T) {
+	tests := []struct {
+		name   string
+		scores []float64
+		want   int
+	}{
+		{name: "only a near-tied runner-up expands", scores: []float64{0.6354179212, 0.6232272959, 0.5577818713}, want: 2},
+		{name: "ordinary score gaps stay on one table", scores: []float64{0.6948359011, 0.6403284500, 0.6151196010}, want: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			results := make([]*types.SearchResult, 0, len(test.scores))
+			for index, score := range test.scores {
+				results = append(results, &types.SearchResult{KnowledgeID: string(rune('a' + index)), Score: score})
+			}
+			if got := filterDataAnalysisCandidatesByRelativeScore(results, nil, nil, "普通统计问题"); len(got) != test.want {
+				t.Fatalf("selected %d candidates, want %d: %#v", len(got), test.want, got)
+			}
+		})
+	}
+}
+
+func TestFilterDataAnalysisCandidatesExpandsForDistinctQueryCoverage(t *testing.T) {
+	query := "软件评测师、计算机软件产品检验员或ISTQB证书分别多少人"
+	results := []*types.SearchResult{
+		{KnowledgeID: "first", Score: 0.8, Content: "专业证书：软件评测师"},
+		{KnowledgeID: "second", Score: 0.4, Content: "证书名称：计算机软件产品检验员"},
+		{KnowledgeID: "third", Score: 0.2, Content: "认证类型：ISTQB"},
+	}
+	got := filterDataAnalysisCandidatesByRelativeScore(results, nil, nil, query)
+	if len(got) != 3 {
+		t.Fatalf("distinct requested categories were dropped: %#v", got)
+	}
+}
+
+func TestFilterDataAnalysisCandidatesDoesNotExpandWithoutCoverageGain(t *testing.T) {
+	query := "系统架构设计师证书人员是谁"
+	results := []*types.SearchResult{
+		{KnowledgeID: "first", Score: 0.8, Content: "系统架构设计师：麦伟华"},
+		{KnowledgeID: "second", Score: 0.65, Content: "软件测试人员清单"},
+		{KnowledgeID: "third", Score: 0.6, Content: "项目管理人员清单"},
+	}
+	got := filterDataAnalysisCandidatesByRelativeScore(results, nil, nil, query)
+	if len(got) != 1 {
+		t.Fatalf("candidates without new query coverage were retained: %#v", got)
+	}
+}
+
+func TestFilterDataAnalysisCandidatesKeepsOneForNonPositiveScores(t *testing.T) {
+	for _, scores := range [][]float64{{0, 0, 0}, {-0.1, -0.2, -0.3}} {
+		results := make([]*types.SearchResult, 0, len(scores))
+		for index, score := range scores {
+			results = append(results, &types.SearchResult{KnowledgeID: string(rune('a' + index)), Score: score})
+		}
+		got := filterDataAnalysisCandidatesByRelativeScore(results, nil, nil, "query")
+		if len(got) != 1 || got[0].KnowledgeID != "a" {
+			t.Fatalf("scores=%v selected unexpected candidates: %#v", scores, got)
+		}
 	}
 }
