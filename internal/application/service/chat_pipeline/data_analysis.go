@@ -1175,10 +1175,18 @@ func filterDataAnalysisCandidatesByRelativeScore(results []*types.SearchResult, 
 }
 
 func dataAnalysisHasMultipleRequestedTargets(query string) bool {
-	return dataAnalysisTargetSeparatorPattern.MatchString(query)
+	if dataAnalysisExplicitTargetSeparatorPattern.MatchString(query) {
+		return true
+	}
+	return dataAnalysisGenericTargetSeparatorPattern.MatchString(query) &&
+		dataAnalysisAggregateTargetPattern.MatchString(query)
 }
 
-var dataAnalysisTargetSeparatorPattern = regexp.MustCompile(`(?i)(分别|以及|或者|和|与|及|、|[/／,，;；]|(^|\s)(and|or)(\s|$))`)
+var (
+	dataAnalysisExplicitTargetSeparatorPattern = regexp.MustCompile(`(?i)(分别|以及|或者|或|、|[/／]|(^|\s)(and|or)(\s|$))`)
+	dataAnalysisGenericTargetSeparatorPattern  = regexp.MustCompile(`[和与及,，;；]`)
+	dataAnalysisAggregateTargetPattern         = regexp.MustCompile(`(人数|数量|多少|几人|名单)`)
+)
 
 func dataAnalysisAddsDistinctiveQueryCoverage(query string, selected []*types.SearchResult, candidate *types.SearchResult) bool {
 	queryTokens := searchutil.TokenizeSimple(query)

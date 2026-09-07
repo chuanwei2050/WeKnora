@@ -18,9 +18,10 @@ func TestKeywordIndexMappingUsesIKChineseAnalyzer(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Contains(t, string(payload), `"content":{"analyzer":"ik_max_word","search_analyzer":"ik_smart","type":"text"}`)
+	assert.Contains(t, string(payload), `"is_generated_question":{"type":"boolean"}`)
 }
 
-func TestKeywordSearchCollapsesDuplicateChunkIDs(t *testing.T) {
+func TestKeywordSearchUsesGeneratedQuestionTermFilter(t *testing.T) {
 	repository := &elasticsearchRepository{useKeywordSuffix: true}
 	topK := 50
 
@@ -34,7 +35,8 @@ func TestKeywordSearchCollapsesDuplicateChunkIDs(t *testing.T) {
 	payload, err := json.Marshal(request)
 	assert.NoError(t, err)
 	assert.Contains(t, string(payload), `"analyzer":"ik_smart"`)
-	assert.Contains(t, string(payload), `doc['source_id.keyword'].value == doc['chunk_id.keyword'].value`)
+	assert.Contains(t, string(payload), `"is_generated_question":{"value":false}`)
+	assert.NotContains(t, string(payload), `doc['source_id.keyword']`)
 	assert.NotContains(t, string(payload), `"wildcard"`)
 }
 

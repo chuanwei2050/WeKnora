@@ -204,13 +204,15 @@ func TestFilterDataAnalysisCandidatesExpandsForDistinctQueryCoverage(t *testing.
 }
 
 func TestDataAnalysisHasMultipleRequestedTargetsRecognizesCommonSeparators(t *testing.T) {
-	for _, query := range []string{"统计A和B人数", "统计A与B人数", "A, B", "A and B", "A or B"} {
+	for _, query := range []string{"分别统计A和B人数", "软件测评师, ISTQB证书人数", "A与B人数", "A或B", "A、B", "A/B", "A and B", "A or B"} {
 		if !dataAnalysisHasMultipleRequestedTargets(query) {
 			t.Fatalf("multi-target query was not recognized: %q", query)
 		}
 	}
-	if dataAnalysisHasMultipleRequestedTargets("系统集成项目管理工程师证书人员") {
-		t.Fatal("single-target query was recognized as multi-target")
+	for _, query := range []string{"系统集成项目管理工程师证书人员", "查询人员姓名和证书编号", "输出姓名,工号"} {
+		if dataAnalysisHasMultipleRequestedTargets(query) {
+			t.Fatalf("single-dataset query was recognized as multi-target: %q", query)
+		}
 	}
 }
 

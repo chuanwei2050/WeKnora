@@ -386,6 +386,7 @@ func keywordIndexMapping() *types.TypeMapping {
 			Analyzer:       &indexAnalyzer,
 			SearchAnalyzer: &searchAnalyzer,
 		},
+		"is_generated_question": types.BooleanProperty{Type: "boolean"},
 	}}
 }
 
@@ -535,12 +536,9 @@ func (e *elasticsearchRepository) keywordSearchRequest(params typesLocal.Retriev
 	must := []types.Query{
 		{Match: map[string]types.MatchQuery{"content": {Query: params.Query, Analyzer: &analyzer}}},
 	}
-	originalChunkScript := fmt.Sprintf(
-		"doc['%s'].size()!=0 && doc['%s'].size()!=0 && doc['%s'].value == doc['%s'].value",
-		e.idField("source_id"), e.idField("chunk_id"), e.idField("source_id"), e.idField("chunk_id"),
-	)
-	filter := append(e.getBaseConds(params), types.Query{Script: &types.ScriptQuery{
-		Script: types.Script{Source: &originalChunkScript},
+	filter := e.getBaseConds(params)
+	filter = append(filter, types.Query{Term: map[string]types.TermQuery{
+		"is_generated_question": {Value: false},
 	}})
 	return &search.Request{
 		Query: &types.Query{Bool: &types.BoolQuery{

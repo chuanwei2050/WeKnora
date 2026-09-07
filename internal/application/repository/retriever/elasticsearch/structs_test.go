@@ -20,3 +20,18 @@ func TestKeywordDocumentOmitsEmbedding(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), `"embedding"`)
 }
+
+func TestKeywordDocumentUsesExplicitGeneratedQuestionFlag(t *testing.T) {
+	derivedSource := ToDBVectorEmbedding(&types.IndexInfo{
+		SourceID: "derived-source",
+		ChunkID:  "chunk-1",
+	}, nil)
+	assert.False(t, derivedSource.IsGeneratedQuestion)
+
+	generatedQuestion := ToDBVectorEmbedding(&types.IndexInfo{
+		SourceID:            "chunk-1-chunk-1-q0",
+		ChunkID:             "chunk-1",
+		IsGeneratedQuestion: true,
+	}, nil)
+	assert.True(t, generatedQuestion.IsGeneratedQuestion)
+}

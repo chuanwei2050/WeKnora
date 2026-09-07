@@ -742,7 +742,7 @@ func (e *elasticsearchRepository) buildKeywordSearchQuery(ctx context.Context,
 
 	filter := e.getBaseConds(params)
 	query := fmt.Sprintf(
-		`{"query": {"bool": {"must": [{"match": {"content": %s}}], "filter": [%s]}}}`,
+		`{"query": {"bool": {"must": [{"match": {"content": %s}}], "filter": [%s, {"term": {"is_generated_question": false}}]}}}`,
 		string(content), filter,
 	)
 

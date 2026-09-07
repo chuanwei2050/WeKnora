@@ -4059,7 +4059,9 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 			chunkIndexEntries := make([]*types.IndexInfo, 0, len(generatedQuestions))
 			for _, gq := range generatedQuestions {
 				sourceID := fmt.Sprintf("%s-%s", chunk.ID, gq.ID)
-				chunkIndexEntries = append(chunkIndexEntries, documentChunkIndexInfo(chunk, gq.Question, sourceID))
+				entry := documentChunkIndexInfo(chunk, gq.Question, sourceID)
+				entry.IsGeneratedQuestion = true
+				chunkIndexEntries = append(chunkIndexEntries, entry)
 			}
 
 			statsMu.Lock()
