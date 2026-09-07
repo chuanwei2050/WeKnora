@@ -36,6 +36,31 @@ func TestMoveChunksByKnowledgeIDClearsFolderTag(t *testing.T) {
 	require.Empty(t, moved.TagID)
 }
 
+func TestListPagedChunksByKnowledgeVersionIDExcludesDisabledChunksFromPagination(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := &chunkRepository{db: db}
+
+	disabled := makeChunk("kb-1", "knowledge-1", types.ChunkTypeText)
+	disabled.KnowledgeVersionID = "version-1"
+	disabled.ChunkIndex = 0
+	disabled.IsEnabled = false
+	enabled := makeChunk("kb-1", "knowledge-1", types.ChunkTypeText)
+	enabled.KnowledgeVersionID = "version-1"
+	enabled.ChunkIndex = 1
+	require.NoError(t, db.Create([]*types.Chunk{disabled, enabled}).Error)
+	require.NoError(t, db.Model(&types.Chunk{}).Where("id = ?", disabled.ID).Update("is_enabled", false).Error)
+
+	chunks, total, err := repo.ListPagedChunksByKnowledgeVersionID(
+		t.Context(), 1, "knowledge-1", "version-1", &types.Pagination{Page: 1, PageSize: 1},
+		[]types.ChunkType{types.ChunkTypeText}, "", "", "", "asc", "manual",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, chunks, 1)
+	require.Equal(t, enabled.ID, chunks[0].ID)
+}
+
 func TestReconcileDocumentChunkTagsUsesOwningDocumentFolder(t *testing.T) {
 	db := setupChunkTestDB(t)
 	repo := NewChunkRepository(db)

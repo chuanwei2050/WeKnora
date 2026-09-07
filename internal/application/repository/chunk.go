@@ -193,7 +193,7 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	sortOrder string,
 	knowledgeType string,
 ) ([]*types.Chunk, int64, error) {
-	return r.listPagedChunksByKnowledgeID(ctx, tenantID, knowledgeID, "", page, chunkType, tagID, keyword, searchField, sortOrder, knowledgeType)
+	return r.listPagedChunksByKnowledgeID(ctx, tenantID, knowledgeID, "", false, page, chunkType, tagID, keyword, searchField, sortOrder, knowledgeType)
 }
 
 // ListPagedChunksByKnowledgeVersionID lists chunks from one governed version.
@@ -212,7 +212,7 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeVersionID(
 	sortOrder string,
 	knowledgeType string,
 ) ([]*types.Chunk, int64, error) {
-	return r.listPagedChunksByKnowledgeID(ctx, tenantID, knowledgeID, versionID, page, chunkType, tagID, keyword, searchField, sortOrder, knowledgeType)
+	return r.listPagedChunksByKnowledgeID(ctx, tenantID, knowledgeID, versionID, true, page, chunkType, tagID, keyword, searchField, sortOrder, knowledgeType)
 }
 
 func (r *chunkRepository) listPagedChunksByKnowledgeID(
@@ -220,6 +220,7 @@ func (r *chunkRepository) listPagedChunksByKnowledgeID(
 	tenantID uint64,
 	knowledgeID string,
 	versionID string,
+	enabledOnly bool,
 	page *types.Pagination,
 	chunkType []types.ChunkType,
 	tagID string,
@@ -237,6 +238,9 @@ func (r *chunkRepository) listPagedChunksByKnowledgeID(
 			tenantID, knowledgeID, chunkType, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)})
 		if versionID != "" {
 			db = db.Where("knowledge_version_id = ?", versionID)
+		}
+		if enabledOnly {
+			db = db.Where("is_enabled = ?", true)
 		}
 		if tagID != "" {
 			db = db.Where("tag_id = ?", tagID)
