@@ -25,7 +25,6 @@ import (
 const (
 	dataAnalysisMaxRows               = 1000
 	dataAnalysisMaxTables             = 3
-	dataAnalysisMaxConcurrentDatasets = 6
 	dataAnalysisRelativeScoreFloor    = 0.65
 	dataAnalysisEvidenceCharsPerTable = 3000
 	dataAnalysisTimeout               = 30 * time.Second
@@ -33,8 +32,6 @@ const (
 	dataAnalysisMaxAttempts           = 3
 	defaultLLMCallTimeout             = 120 * time.Second
 )
-
-var dataAnalysisDatasetSlots = make(chan struct{}, dataAnalysisMaxConcurrentDatasets)
 
 type dataAnalysisDataset struct {
 	target    *types.SearchResult
@@ -284,13 +281,6 @@ func (p *PluginDataAnalysis) analyze(
 	loads := make(chan loadOutcome, len(targets))
 	for i, candidate := range candidates {
 		go func(index int, candidate dataAnalysisCandidate) {
-			select {
-			case dataAnalysisDatasetSlots <- struct{}{}:
-				defer func() { <-dataAnalysisDatasetSlots }()
-			case <-ctx.Done():
-				loads <- loadOutcome{index: index, err: ctx.Err()}
-				return
-			}
 			tool := tools.NewDataAnalysisTool(p.knowledgeBaseService, p.knowledgeService, p.tenantService, p.fileService, p.db, chatManage.SessionID, authorization)
 			sources := append([]dataAnalysisCandidate{candidate}, candidate.fallbacks...)
 			var schema *tools.TableSchema
