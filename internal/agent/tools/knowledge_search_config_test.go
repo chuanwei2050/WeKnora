@@ -87,8 +87,8 @@ func TestKnowledgeSearchParamsUseEffectiveDefaultsWithoutAgentConfig(t *testing.
 	if params.topK != 30 || params.vectorRecallTopK != 50 || params.keywordRecallTopK != 50 {
 		t.Fatalf("default retrieval counts = fusion:%d vector:%d keyword:%d, want 30/50/50", params.topK, params.vectorRecallTopK, params.keywordRecallTopK)
 	}
-	if params.rrfVectorWeight != 0.7 {
-		t.Fatalf("default RRF vector weight = %v, want 0.7", params.rrfVectorWeight)
+	if params.rrfVectorWeight != types.DefaultRRFVectorWeight {
+		t.Fatalf("default RRF vector weight = %v, want %v", params.rrfVectorWeight, types.DefaultRRFVectorWeight)
 	}
 }
 

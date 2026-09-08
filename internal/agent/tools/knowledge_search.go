@@ -480,7 +480,7 @@ func (t *KnowledgeSearchTool) filterGovernedResults(ctx context.Context, results
 // resolveSearchParams uses the request-scoped platform retrieval snapshot and
 // retains built-in defaults only when no tenant snapshot is available.
 func (t *KnowledgeSearchTool) resolveSearchParams(ctx context.Context) knowledgeSearchParams {
-	params := knowledgeSearchParams{minScore: 0.3, rrfVectorWeight: 0.7}
+	params := knowledgeSearchParams{minScore: 0.3, rrfVectorWeight: types.DefaultRRFVectorWeight}
 	if t.config != nil {
 		params.topK = t.config.Conversation.EmbeddingTopK
 		params.vectorThreshold = t.config.Conversation.VectorThreshold

@@ -16,8 +16,8 @@ func TestCustomAgentRetrievalDefaultsPreserveLegacyBehavior(t *testing.T) {
 			agent.Config.KeywordRecallTopK,
 		)
 	}
-	if agent.Config.RRFVectorWeight != 0.7 {
-		t.Fatalf("RRF vector weight = %v, want 0.7", agent.Config.RRFVectorWeight)
+	if agent.Config.RRFVectorWeight != DefaultRRFVectorWeight {
+		t.Fatalf("RRF vector weight = %v, want %v", agent.Config.RRFVectorWeight, DefaultRRFVectorWeight)
 	}
 	if agent.Config.EmbeddingTopK != 30 || agent.Config.RerankCandidateTopK != 20 {
 		t.Fatalf("fusion/rerank candidate counts = %d/%d, want 30/20", agent.Config.EmbeddingTopK, agent.Config.RerankCandidateTopK)

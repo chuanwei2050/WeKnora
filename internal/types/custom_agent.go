@@ -352,7 +352,7 @@ func (a *CustomAgent) EnsureDefaults() {
 		a.Config.KeywordRecallTopK = 50
 	}
 	if a.Config.RRFVectorWeight == 0 {
-		a.Config.RRFVectorWeight = 0.7
+		a.Config.RRFVectorWeight = DefaultRRFVectorWeight
 	}
 	if a.Config.KeywordThreshold == 0 && !a.Config.keywordThresholdSet {
 		a.Config.KeywordThreshold = 0.3
@@ -369,7 +369,7 @@ func (a *CustomAgent) EnsureDefaults() {
 	usesPreviousRetrievalDefaults := a.Config.EmbeddingTopK == 10 &&
 		a.Config.VectorRecallTopK == 50 &&
 		a.Config.KeywordRecallTopK == 50 &&
-		a.Config.RRFVectorWeight == 0.7 &&
+		(a.Config.RRFVectorWeight == 0.7 || a.Config.RRFVectorWeight == DefaultRRFVectorWeight) &&
 		a.Config.RerankCandidateTopK == 10 &&
 		(a.Config.RerankTopK == 5 || a.Config.RerankTopK == 10)
 	if usesPreviousRetrievalDefaults {

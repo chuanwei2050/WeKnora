@@ -43,6 +43,11 @@ func TestDefaultRetrievalConfigUsesRecallSafeVectorThreshold(t *testing.T) {
 	require.Equal(t, 0.3, NormalizeRetrievalConfig(nil).VectorThreshold)
 }
 
+func TestDefaultRetrievalConfigUsesBalancedRRFWeights(t *testing.T) {
+	require.Equal(t, 0.5, DefaultRetrievalConfig().RRFVectorWeight)
+	require.Equal(t, 0.5, NormalizeRetrievalConfig(nil).RRFVectorWeight)
+}
+
 func TestApplyRetrievalConfigUpdatePreservesExplicitZeroThresholds(t *testing.T) {
 	zero := 0.0
 	disabled := false

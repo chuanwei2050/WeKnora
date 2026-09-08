@@ -10,7 +10,7 @@ const (
 	DefaultEmbeddingTopK        = 30
 	DefaultVectorRecallTopK     = 50
 	DefaultKeywordRecallTopK    = 50
-	DefaultRRFVectorWeight      = 0.7
+	DefaultRRFVectorWeight      = 0.5
 	DefaultVectorThreshold      = 0.3
 	DefaultKeywordThreshold     = 0.3
 	DefaultRerankCandidateTopK  = 20

@@ -91,7 +91,7 @@ func fuseWithRRF(
 ) []*types.IndexWithScore {
 	const rrfK = 60
 	if vectorWeight <= 0 || vectorWeight >= 1 {
-		vectorWeight = 0.7
+		vectorWeight = types.DefaultRRFVectorWeight
 	}
 	keywordWeight := 1 - vectorWeight
 

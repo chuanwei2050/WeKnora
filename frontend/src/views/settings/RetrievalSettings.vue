@@ -244,7 +244,7 @@ const defaultConfig: RetrievalConfig = {
   embedding_top_k: 30,
   vector_recall_top_k: 50,
   keyword_recall_top_k: 50,
-  rrf_vector_weight: 0.7,
+  rrf_vector_weight: 0.5,
   vector_threshold: 0.3,
   keyword_threshold: 0.3,
   rerank_candidate_top_k: 20,
