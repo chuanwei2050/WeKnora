@@ -19,7 +19,15 @@ const (
 	TypeManualProcess        = "manual:process"         // 手工知识更新任务（cleanup + 重新索引）
 	TypeDataSourceSync       = "datasource:sync"        // 数据源同步任务
 	TypeWikiIngest           = "wiki:ingest"            // Wiki 页面同步任务
+	TypeDocumentPreview      = "document:preview"       // 大文档完整预览异步转换
 )
+
+type DocumentPreviewPayload struct {
+	TenantID    uint64 `json:"tenant_id"`
+	KnowledgeID string `json:"knowledge_id"`
+	FileHash    string `json:"file_hash"`
+	Full        bool   `json:"full"`
+}
 
 const (
 	LargeDocumentThresholdBytes int64 = 256 * 1024 * 1024

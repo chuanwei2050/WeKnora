@@ -3,12 +3,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DocumentPreview from '../src/components/document-preview.vue';
 import { buildPreviewCacheKey, buildPreviewContentRevision } from '../src/utils/documentPreviewCache';
 
-const { previewKnowledgeFile } = vi.hoisted(() => ({
+const { previewKnowledgeFile, requestDocumentPreviewGeneration, getDocumentPreviewGenerationStatus, getGeneratedDocumentPreview } = vi.hoisted(() => ({
   previewKnowledgeFile: vi.fn(),
+  requestDocumentPreviewGeneration: vi.fn(),
+  getDocumentPreviewGenerationStatus: vi.fn(),
+  getGeneratedDocumentPreview: vi.fn(),
 }));
 
 vi.mock('@/api/knowledge-base/index', () => ({
   previewKnowledgeFile,
+  requestDocumentPreviewGeneration,
+  getDocumentPreviewGenerationStatus,
+  getGeneratedDocumentPreview,
 }));
 
 vi.mock('vue-i18n', () => ({
@@ -42,6 +48,8 @@ describe('DocumentPreview', () => {
   beforeEach(() => {
     previewKnowledgeFile.mockReset();
     previewKnowledgeFile.mockResolvedValue(new Blob(['preview'], { type: 'application/pdf' }));
+    requestDocumentPreviewGeneration.mockResolvedValue({ data: { status: 'pending', error: '' } });
+    getDocumentPreviewGenerationStatus.mockResolvedValue({ data: { status: 'failed', error: 'conversion stopped' } });
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:preview') });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
   });
@@ -78,7 +86,8 @@ describe('DocumentPreview', () => {
         fileName: 'large.docx',
         fileSize: 504.7 * 1024 * 1024,
         parseStatus: 'failed',
-        parseError: 'Task interrupted due to application restart',
+        parseError: '',
+        previewScope: 'partial',
         contentRevision: 'hash-large',
         active: true,
       },
@@ -87,7 +96,31 @@ describe('DocumentPreview', () => {
     await flushPromises();
 
     expect(previewKnowledgeFile).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain('Task interrupted due to application restart');
+    expect(wrapper.text()).toContain('preview.originalPartialPreviewHint');
+    expect(requestDocumentPreviewGeneration).toHaveBeenCalledWith('knowledge-large', false);
+    expect(getDocumentPreviewGenerationStatus).toHaveBeenCalledWith('knowledge-large', false);
+
+    await wrapper.setProps({ previewScope: 'full' });
+    await flushPromises();
+    expect(requestDocumentPreviewGeneration).toHaveBeenCalledWith('knowledge-large', true);
+    expect(getDocumentPreviewGenerationStatus).toHaveBeenCalledWith('knowledge-large', true);
+    wrapper.unmount();
+  });
+
+  it('loads the generated partial PDF when the background task completes', async () => {
+    getDocumentPreviewGenerationStatus.mockResolvedValue({ data: { status: 'completed', error: '' } });
+    getGeneratedDocumentPreview.mockResolvedValue(new Blob(['pdf'], { type: 'application/pdf' }));
+    const wrapper = mount(DocumentPreview, {
+      props: {
+        knowledgeId: 'knowledge-generated', fileType: 'docx', fileName: 'large.docx',
+        fileSize: 300 * 1024 * 1024, previewScope: 'partial', contentRevision: 'hash-generated', active: true,
+      },
+      global: { mocks: { $t: (key: string) => key } },
+    });
+    await flushPromises();
+
+    expect(getGeneratedDocumentPreview).toHaveBeenCalledWith('knowledge-generated', false);
+    expect(wrapper.find('iframe').attributes('src')).toBe('blob:preview');
     wrapper.unmount();
   });
 });

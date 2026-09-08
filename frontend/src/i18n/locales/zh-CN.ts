@@ -3509,6 +3509,12 @@ export default {
     textTruncated: "文本内容较大，为保证页面流畅仅展示部分内容，请下载文件查看完整内容。",
     largeFileBlocked: "该文档体积较大，已停止完整在线渲染",
     largeFileHint: "为避免页面无响应，请查看已解析的分块内容，或下载原文件查看。",
+    fullPreview: "完整预览",
+    originalPartialPreviewHint: "当前展示原文前 30 页；完整预览将在后台生成，关闭面板不会中断任务。",
+    fullPreviewHint: "正在准备完整原文预览，关闭面板不会中断后台任务。",
+    partialPreviewGenerating: "正在后台生成前 30 页原文预览…",
+    fullPreviewGenerating: "正在后台生成完整 PDF 预览，关闭此面板不会中断任务…",
+    fullPreviewFailed: "完整预览生成失败",
   },
   knowledgeSearch: {
     title: "搜索",

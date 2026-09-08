@@ -399,6 +399,13 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		return
 	}
 
+	// Reject oversized requests before multipart parsing can consume temporary
+	// disk or memory. Keep a small allowance for multipart headers/metadata.
+	maxSize := secutils.GetMaxFileSize()
+	if maxSize > 0 {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSize+(1<<20))
+	}
+
 	// Get the uploaded file
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -407,8 +414,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		return
 	}
 
-	// Validate file size (configurable via MAX_FILE_SIZE_MB, default 2047 MB)
-	maxSize := secutils.GetMaxFileSize()
+	// Validate the actual file size (configurable via MAX_FILE_SIZE_MB, default 2047 MB).
 	if maxSize > 0 && file.Size > maxSize {
 		logger.Error(ctx, "File size too large")
 		c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", secutils.GetMaxFileSizeMB())))
@@ -1314,6 +1320,64 @@ func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
 			logger.Errorf(ctx, "Failed to stream preview: %v", err)
 			return false
 		}
+		return false
+	})
+}
+
+func (h *KnowledgeHandler) RequestDocumentPreview(c *gin.Context) {
+	id := secutils.SanitizeForLog(c.Param("id"))
+	full := c.Query("full") == "true"
+	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	knowledge, err = h.kgService.RequestDocumentPreview(effCtx, knowledge.ID, full)
+	if err != nil {
+		c.Error(errors.NewInternalServerError("Failed to request document preview").WithDetails(err.Error()))
+		return
+	}
+	status, previewError := knowledge.PreviewStatus, knowledge.PreviewError
+	if full {
+		status, previewError = knowledge.FullPreviewStatus, knowledge.FullPreviewError
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": gin.H{"status": status, "error": previewError}})
+}
+
+func (h *KnowledgeHandler) GetDocumentPreviewStatus(c *gin.Context) {
+	id := secutils.SanitizeForLog(c.Param("id"))
+	full := c.Query("full") == "true"
+	knowledge, _, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	status, previewError := knowledge.PreviewStatus, knowledge.PreviewError
+	if full {
+		status, previewError = knowledge.FullPreviewStatus, knowledge.FullPreviewError
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"status": status, "error": previewError}})
+}
+
+func (h *KnowledgeHandler) GetGeneratedDocumentPreview(c *gin.Context) {
+	id := secutils.SanitizeForLog(c.Param("id"))
+	full := c.Query("full") == "true"
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	file, err := h.kgService.GetDocumentPreviewFile(effCtx, id, full)
+	if err != nil {
+		c.Error(errors.NewBadRequestError("Document preview is not ready").WithDetails(err.Error()))
+		return
+	}
+	defer file.Close()
+	c.Header("Content-Type", "application/pdf")
+	c.Header("Content-Disposition", "inline")
+	c.Header("Cache-Control", "no-store")
+	c.Stream(func(w io.Writer) bool {
+		_, _ = io.Copy(w, file)
 		return false
 	})
 }

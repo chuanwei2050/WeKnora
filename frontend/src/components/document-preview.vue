@@ -1,7 +1,13 @@
 // @ts-nocheck
 <script setup lang="ts">
-import { ref, shallowRef, watch, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
-import { previewKnowledgeFile } from '@/api/knowledge-base/index';
+import { computed, ref, shallowRef, watch, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
+import {
+  getDocumentPreviewGenerationStatus,
+  getGeneratedDocumentPreview,
+  previewKnowledgeFile,
+  requestDocumentPreviewGeneration,
+  type DocumentPreviewGenerationStatus,
+} from '@/api/knowledge-base/index';
 import 'highlight.js/styles/github.css';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
@@ -20,13 +26,20 @@ const props = defineProps<{
   fileSize: number | string;
   parseStatus?: string;
   parseError?: string;
+  previewScope?: 'partial' | 'full';
+  forceFullPreview?: boolean;
   contentRevision: string;
   active: boolean;
 }>();
-const emit = defineEmits<{ switchToChunks: [] }>();
+const emit = defineEmits<{
+  switchToChunks: [];
+  fullPreviewStatus: [status: DocumentPreviewGenerationStatus['status']];
+  previewTruncated: [truncated: boolean];
+}>();
 
 const MAX_TEXT_PREVIEW_BYTES = 2 * 1024 * 1024;
-const LARGE_FILE_PARTIAL_PREVIEW_BYTES = 256 * 1024 * 1024;
+const LARGE_FILE_PARTIAL_PREVIEW_BYTES = 100 * 1024 * 1024;
+const LARGE_FILE_FULL_PREVIEW_BYTES = 100 * 1024 * 1024;
 
 const loading = ref(false);
 const error = ref('');
@@ -39,6 +52,13 @@ const excelHtml = ref('');
 const excelPreviewTruncated = ref(false);
 const textPreviewTruncated = ref(false);
 const largeFileBlocked = ref(false);
+const partialPreviewStatus = ref<DocumentPreviewGenerationStatus['status']>('none');
+const partialPreviewError = ref('');
+const fullPreviewStatus = ref<DocumentPreviewGenerationStatus['status']>('none');
+const fullPreviewError = ref('');
+const activeGeneratedStatus = computed(() => props.previewScope === 'full' ? fullPreviewStatus.value : partialPreviewStatus.value);
+const activeGeneratedError = computed(() => props.previewScope === 'full' ? fullPreviewError.value : partialPreviewError.value);
+let previewStatusTimer: ReturnType<typeof setTimeout> | null = null;
 const pptxData = shallowRef<ArrayBuffer | null>(null);
 const docxContainer = ref<HTMLElement | null>(null);
 const imageNaturalWidth = ref(0);
@@ -53,6 +73,11 @@ let cancelOfficeSafetyCheck: (() => void) | null = null;
 let previewLoadVersion = 0;
 
 const isFullscreen = ref(false);
+
+watch(fullPreviewStatus, status => emit('fullPreviewStatus', status));
+watch(excelPreviewTruncated, truncated => {
+  if (truncated) emit('previewTruncated', true);
+});
 
 function toggleFullscreen() {
   isFullscreen.value = !isFullscreen.value;
@@ -109,6 +134,73 @@ function ensureBlobType(blob: Blob, ft: string): Blob {
 
 function resolvePreviewType(ft: string): typeof previewType.value {
   return fileTypeMap[ft?.toLowerCase()] || 'unsupported';
+}
+
+async function loadGeneratedPreview(full: boolean, expectedVersion: number) {
+  const pdf = await getGeneratedDocumentPreview(props.knowledgeId, full);
+  if (expectedVersion !== previewLoadVersion) return;
+  if (blobUrl.value) URL.revokeObjectURL(blobUrl.value);
+  blobUrl.value = URL.createObjectURL(ensureBlobType(pdf, 'pdf'));
+  previewType.value = 'pdf';
+  largeFileBlocked.value = !full;
+}
+
+async function pollGeneratedPreview(full: boolean, expectedVersion: number) {
+  if (!props.active || expectedVersion !== previewLoadVersion) return;
+  try {
+    const response = await getDocumentPreviewGenerationStatus(props.knowledgeId, full);
+    if (expectedVersion !== previewLoadVersion) return;
+    if (full) {
+      fullPreviewStatus.value = response.data.status;
+      fullPreviewError.value = response.data.error || '';
+    } else {
+      partialPreviewStatus.value = response.data.status;
+      partialPreviewError.value = response.data.error || '';
+    }
+    if (response.data.status === 'completed') {
+      await loadGeneratedPreview(full, expectedVersion);
+      return;
+    }
+    if (response.data.status === 'failed') return;
+    previewStatusTimer = setTimeout(() => pollGeneratedPreview(full, expectedVersion), 2000);
+  } catch (err: unknown) {
+    if (expectedVersion !== previewLoadVersion) return;
+    const message = err instanceof Error ? err.message : t('preview.fullPreviewFailed');
+    if (full) {
+      fullPreviewStatus.value = 'failed';
+      fullPreviewError.value = message;
+    } else {
+      partialPreviewStatus.value = 'failed';
+      partialPreviewError.value = message;
+    }
+  }
+}
+
+async function requestGeneratedPreview(full: boolean, expectedVersion = previewLoadVersion) {
+  if (full) {
+    fullPreviewError.value = '';
+    fullPreviewStatus.value = 'pending';
+  } else {
+    partialPreviewError.value = '';
+    partialPreviewStatus.value = 'pending';
+  }
+  try {
+    const response = await requestDocumentPreviewGeneration(props.knowledgeId, full);
+    if (expectedVersion !== previewLoadVersion) return;
+    if (full) fullPreviewStatus.value = response.data.status;
+    else partialPreviewStatus.value = response.data.status;
+    await pollGeneratedPreview(full, expectedVersion);
+  } catch (err: unknown) {
+    if (expectedVersion !== previewLoadVersion) return;
+    const message = err instanceof Error ? err.message : t('preview.fullPreviewFailed');
+    if (full) {
+      fullPreviewStatus.value = 'failed';
+      fullPreviewError.value = message;
+    } else {
+      partialPreviewStatus.value = 'failed';
+      partialPreviewError.value = message;
+    }
+  }
 }
 
 async function renderDocx(blob: Blob) {
@@ -229,7 +321,13 @@ async function loadPreview() {
   const id = props.knowledgeId;
   const ft = props.fileType;
   if (!id || !ft) return;
-  const cacheKey = buildPreviewCacheKey(id, ft, props.contentRevision);
+  const baseCacheKey = buildPreviewCacheKey(id, ft, props.contentRevision);
+  const isOffice = ['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'].includes(ft.toLowerCase());
+  const isServerGeneratedPreview = isOffice && (
+    Number(props.fileSize || 0) > LARGE_FILE_PARTIAL_PREVIEW_BYTES
+    || (props.previewScope === 'full' && (Number(props.fileSize || 0) > LARGE_FILE_FULL_PREVIEW_BYTES || props.forceFullPreview))
+  );
+  const cacheKey = isServerGeneratedPreview ? `${baseCacheKey}:${props.previewScope || 'partial'}` : baseCacheKey;
   if (loadedForKey === cacheKey) return;
 
   cleanup();
@@ -244,16 +342,13 @@ async function loadPreview() {
     return;
   }
 
-  // Never fetch a large Office file into the browser just to discover that it
-  // is unsafe to render. Parsed chunks are the lightweight preview path and
-  // the original file remains available through the download action.
-  if (
-    Number(props.fileSize || 0) > LARGE_FILE_PARTIAL_PREVIEW_BYTES &&
-    (previewType.value === 'docx' || previewType.value === 'pptx' || previewType.value === 'excel')
-  ) {
+  // Large Office files are rendered to bounded PDFs on the background queue;
+  // the browser never loads the original archive into memory.
+  if (isServerGeneratedPreview) {
     largeFileBlocked.value = true;
     loadedForKey = cacheKey;
     loading.value = false;
+    await requestGeneratedPreview(props.previewScope === 'full', loadVersion);
     return;
   }
 
@@ -387,6 +482,8 @@ async function loadPreview() {
 
 function cleanup() {
   previewLoadVersion += 1;
+  if (previewStatusTimer) clearTimeout(previewStatusTimer);
+  previewStatusTimer = null;
   cancelOfficeSafetyCheck?.();
   cancelOfficeSafetyCheck = null;
   officeSafetyWorker?.terminate();
@@ -412,6 +509,10 @@ function cleanup() {
   excelPreviewTruncated.value = false;
   textPreviewTruncated.value = false;
   largeFileBlocked.value = false;
+  partialPreviewStatus.value = 'none';
+  partialPreviewError.value = '';
+  fullPreviewStatus.value = 'none';
+  fullPreviewError.value = '';
   pptxData.value = null;
   imageNaturalWidth.value = 0;
   imageNaturalHeight.value = 0;
@@ -422,7 +523,7 @@ function cleanup() {
 }
 
 watch(
-  () => [props.active, props.knowledgeId, props.fileType, props.contentRevision],
+  () => [props.active, props.knowledgeId, props.fileType, props.contentRevision, props.previewScope],
   ([active]) => {
     if (active && props.knowledgeId) {
       loadPreview();
@@ -465,14 +566,17 @@ onUnmounted(() => {
       </t-button>
     </div>
 
-    <div v-else-if="largeFileBlocked" class="preview-unsupported">
-      <t-icon name="info-circle" size="48px" />
-      <p>{{ $t('preview.largeFileBlocked') }}</p>
-      <p v-if="parseError" class="unsupported-hint">{{ parseError }}</p>
-      <p v-else class="unsupported-hint">{{ $t('preview.largeFileHint') }}</p>
-      <t-button theme="primary" size="small" @click="emit('switchToChunks')">
-        {{ $t('knowledgeBase.viewChunks') }}
-      </t-button>
+    <div v-else-if="largeFileBlocked" class="large-preview">
+      <div class="large-preview-notice">
+        <t-icon name="info-circle" />
+        <span>{{ previewScope === 'full' ? $t('preview.fullPreviewHint') : $t('preview.originalPartialPreviewHint') }}</span>
+      </div>
+      <div v-if="activeGeneratedStatus === 'pending' || activeGeneratedStatus === 'processing'" class="preview-loading compact"><t-loading size="small" /><span>{{ previewScope === 'full' ? $t('preview.fullPreviewGenerating') : $t('preview.partialPreviewGenerating') }}</span></div>
+      <div v-else-if="activeGeneratedError" class="preview-task-error">
+        <span>{{ activeGeneratedError }}</span>
+        <t-button size="small" variant="text" @click="requestGeneratedPreview(previewScope === 'full')">{{ $t('preview.retry') }}</t-button>
+      </div>
+      <div v-if="blobUrl" class="preview-pdf"><iframe :src="blobUrl" class="pdf-iframe" /></div>
     </div>
 
     <!-- Unsupported -->
@@ -940,4 +1044,26 @@ onUnmounted(() => {
     }
   }
 }
+
+.large-preview {
+  height: 100%;
+  padding: 12px 0 0;
+}
+.large-preview-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  color: @text-secondary;
+  font-size: 12px;
+  background: #fff8e8;
+  border: 1px solid #edb66b;
+  border-radius: 6px;
+}
+.large-preview-notice span,
+.preview-task-status { color: @text-secondary; font-size: 12px; }
+.preview-task-error { color: @error-color; padding: 12px; }
+.large-preview .preview-pdf { height: calc(100% - 48px); }
+.preview-loading.compact { min-height: 160px; }
 </style>

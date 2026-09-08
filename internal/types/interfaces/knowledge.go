@@ -86,6 +86,9 @@ type KnowledgeService interface {
 	GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error)
 	// GetKnowledgeFileURL returns a storage-backed direct URL when available.
 	GetKnowledgeFileURL(ctx context.Context, id string) (string, string, int64, error)
+	RequestDocumentPreview(ctx context.Context, id string, full bool) (*types.Knowledge, error)
+	GetDocumentPreviewFile(ctx context.Context, id string, full bool) (io.ReadCloser, error)
+	ProcessDocumentPreview(ctx context.Context, task *asynq.Task) error
 	// UpdateKnowledge updates knowledge information.
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
 	// UpdateManualKnowledge updates manual Markdown knowledge content.

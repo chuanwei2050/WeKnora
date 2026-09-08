@@ -225,6 +225,23 @@ export function previewKnowledgeFile(id: string) {
   return getDown(`/api/v1/knowledge/${id}/preview`, { timeout: 0 });
 }
 
+export interface DocumentPreviewGenerationStatus {
+  status: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
+  error: string;
+}
+
+export function requestDocumentPreviewGeneration(id: string, full = false) {
+  return post<{ success: boolean; data: DocumentPreviewGenerationStatus }>(`/api/v1/knowledge/${id}/preview-generation?full=${full}`);
+}
+
+export function getDocumentPreviewGenerationStatus(id: string, full = false) {
+  return get<{ success: boolean; data: DocumentPreviewGenerationStatus }>(`/api/v1/knowledge/${id}/preview-generation?full=${full}`);
+}
+
+export function getGeneratedDocumentPreview(id: string, full = false) {
+  return getDown(`/api/v1/knowledge/${id}/preview-generated?full=${full}`, { timeout: 0 });
+}
+
 export interface DocumentDirectory {
   id: string;
   tag_id: string;

@@ -77,6 +77,18 @@ let url = ref('')
 // 视图模式：chunks / merged / preview
 // file 类型默认「预览」，URL / 手动创建 默认「全文」
 const viewMode = ref<'chunks' | 'merged' | 'preview'>('merged');
+const previewScope = ref<'partial' | 'full'>('partial');
+const fullPreviewStatus = ref<'none' | 'pending' | 'processing' | 'completed' | 'failed'>('none');
+const previewTruncated = ref(false);
+const isLargeOfficeFile = computed(() => {
+  const type = String(props.details?.file_type || '').toLowerCase();
+  const isOffice = ['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'].includes(type);
+  return isOffice && (Number(props.details?.file_size || 0) > 100 * 1024 * 1024 || previewTruncated.value);
+});
+watch(() => props.details?.id, () => {
+  previewTruncated.value = false;
+  previewScope.value = 'partial';
+});
 
 // 合并后的文档内容（在下方通过 computed 定义）
 
@@ -250,6 +262,7 @@ const mergedContent = computed(() => {
   }
   return '';
 });
+
 
 // 计算处理后的分块数据，避免在模板中频繁调用方法和 JSON.parse
 interface ProcessedChunk {
@@ -881,12 +894,23 @@ const handleDetailsScroll = () => {
               <t-button 
                 v-if="canPreview()"
                 size="small" 
-                :variant="viewMode === 'preview' ? 'base' : 'outline'" 
-                :theme="viewMode === 'preview' ? 'primary' : 'default'"
-                @click="viewMode = 'preview'"
+                :variant="viewMode === 'preview' && (!isLargeOfficeFile || previewScope === 'partial') ? 'base' : 'outline'"
+                :theme="viewMode === 'preview' && (!isLargeOfficeFile || previewScope === 'partial') ? 'primary' : 'default'"
+                @click="viewMode = 'preview'; previewScope = 'partial'"
                 class="view-mode-btn"
               >
                 {{ $t('preview.tab') }}
+              </t-button>
+              <t-button
+                v-if="isLargeOfficeFile"
+                size="small"
+                :variant="viewMode === 'preview' && previewScope === 'full' ? 'base' : 'outline'"
+                :theme="viewMode === 'preview' && previewScope === 'full' ? 'primary' : 'default'"
+                :loading="fullPreviewStatus === 'pending' || fullPreviewStatus === 'processing'"
+                @click="viewMode = 'preview'; previewScope = 'full'"
+                class="view-mode-btn"
+              >
+                {{ $t('preview.fullPreview') }}
               </t-button>
               <t-button 
                 v-if="!canPreview()"
@@ -1017,9 +1041,13 @@ const handleDetailsScroll = () => {
           :fileSize="details.file_size"
           :parseStatus="details.parse_status"
           :parseError="details.error_message"
+          :previewScope="previewScope"
+          :forceFullPreview="previewTruncated"
           :contentRevision="details.content_revision"
           :active="viewMode === 'preview'"
           @switchToChunks="viewMode = 'chunks'"
+          @fullPreviewStatus="fullPreviewStatus = $event"
+          @previewTruncated="previewTruncated = $event"
         />
       </div>
       

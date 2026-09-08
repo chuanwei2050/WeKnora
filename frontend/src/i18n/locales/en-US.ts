@@ -3503,6 +3503,12 @@ export default {
     textTruncated: 'This text file is large. Only part of it is shown to keep the page responsive; download it to view all content.',
     largeFileBlocked: 'Full online rendering was skipped because this document is large',
     largeFileHint: 'To keep the page responsive, view the parsed chunks or download the original file.',
+    fullPreview: 'Full preview',
+    originalPartialPreviewHint: 'Showing the first 30 original pages. Full preview generation continues after closing this panel.',
+    fullPreviewHint: 'Preparing the full original preview. Closing this panel will not cancel the background task.',
+    partialPreviewGenerating: 'Generating the first 30 original pages in the background…',
+    fullPreviewGenerating: 'Generating the full PDF preview in the background. Closing this panel will not cancel it…',
+    fullPreviewFailed: 'Failed to generate full preview',
   },
   knowledgeSearch: {
     title: 'Search',

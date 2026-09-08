@@ -19,11 +19,13 @@ import (
 type SyncTaskExecutor struct {
 	mu       sync.RWMutex
 	handlers map[string]func(context.Context, *asynq.Task) error
+	largeSem chan struct{}
 }
 
 func NewSyncTaskExecutor() *SyncTaskExecutor {
 	return &SyncTaskExecutor{
 		handlers: make(map[string]func(context.Context, *asynq.Task) error),
+		largeSem: make(chan struct{}, 1),
 	}
 }
 
@@ -50,6 +52,7 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 	var timeout time.Duration
 	maxRetry := 25 // asynq default
 	maxRetrySet := false
+	queue := "sync"
 	for _, opt := range opts {
 		switch opt.Type() {
 		case asynq.ProcessInOpt:
@@ -65,6 +68,10 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 			if d, ok := opt.Value().(time.Duration); ok {
 				timeout = d
 			}
+		case asynq.QueueOpt:
+			if value, ok := opt.Value().(string); ok {
+				queue = value
+			}
 		}
 	}
 	// Callers that explicitly pass MaxRetry(0) want no retries.
@@ -76,13 +83,17 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 	taskID := uuid.New().String()
 	info := &asynq.TaskInfo{
 		ID:    taskID,
-		Queue: "sync",
+		Queue: queue,
 		Type:  task.Type(),
 	}
 
 	go func() {
 		if delay > 0 {
 			time.Sleep(delay)
+		}
+		if queue == types.LargeDocumentQueue {
+			e.largeSem <- struct{}{}
+			defer func() { <-e.largeSem }()
 		}
 
 		ctx := context.Background()
@@ -147,6 +158,7 @@ func RegisterSyncHandlers(params SyncTaskParams) {
 	params.Executor.RegisterHandler(types.TypeChunkExtract, params.ChunkExtractor.Handle)
 	params.Executor.RegisterHandler(types.TypeDataTableSummary, params.DataTableSummary.Handle)
 	params.Executor.RegisterHandler(types.TypeDocumentProcess, params.KnowledgeService.ProcessDocument)
+	params.Executor.RegisterHandler(types.TypeDocumentPreview, params.KnowledgeService.ProcessDocumentPreview)
 	params.Executor.RegisterHandler(types.TypeManualProcess, params.KnowledgeService.ProcessManualUpdate)
 	params.Executor.RegisterHandler(types.TypeFAQImport, params.KnowledgeService.ProcessFAQImport)
 	params.Executor.RegisterHandler(types.TypeQuestionGeneration, params.KnowledgeService.ProcessQuestionGeneration)

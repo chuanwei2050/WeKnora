@@ -12,7 +12,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"sort"
@@ -4238,6 +4240,207 @@ func (s *knowledgeService) GetKnowledgeFileURL(ctx context.Context, id string) (
 	return fileURL, knowledge.FileName, knowledge.FileSize, nil
 }
 
+func (s *knowledgeService) RequestDocumentPreview(ctx context.Context, id string, full bool) (*types.Knowledge, error) {
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	supported := map[string]bool{"doc": true, "docx": true, "ppt": true, "pptx": true, "xls": true, "xlsx": true}
+	if !supported[strings.ToLower(knowledge.FileType)] {
+		return nil, fmt.Errorf("full preview is not supported for %s files", knowledge.FileType)
+	}
+	statusColumn, errorColumn := "preview_status", "preview_error"
+	status := knowledge.PreviewStatus
+	requestRevision := knowledge.UpdatedAt.UnixNano()
+	if full {
+		statusColumn, errorColumn = "full_preview_status", "full_preview_error"
+		status = knowledge.FullPreviewStatus
+	}
+	if status == "completed" {
+		return knowledge, nil
+	}
+	if (status == "pending" || status == "processing") && time.Since(knowledge.UpdatedAt) < 65*time.Minute {
+		return knowledge, nil
+	}
+	if err := s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, statusColumn, "pending"); err != nil {
+		return nil, err
+	}
+	if err := s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, errorColumn, ""); err != nil {
+		return nil, err
+	}
+	if full {
+		knowledge.FullPreviewStatus, knowledge.FullPreviewError = "pending", ""
+	} else {
+		knowledge.PreviewStatus, knowledge.PreviewError = "pending", ""
+	}
+	payload, err := json.Marshal(types.DocumentPreviewPayload{
+		TenantID: tenantID, KnowledgeID: id, FileHash: knowledge.FileHash, Full: full,
+	})
+	if err != nil {
+		return nil, err
+	}
+	task := asynq.NewTask(types.TypeDocumentPreview, payload,
+		asynq.Queue(types.LargeDocumentQueue), asynq.MaxRetry(0), asynq.Timeout(60*time.Minute),
+		asynq.TaskID(fmt.Sprintf("document-preview-%s-%t-%d", id, full, requestRevision)))
+	if _, err := s.task.Enqueue(task); err != nil {
+		if errors.Is(err, asynq.ErrTaskIDConflict) {
+			return knowledge, nil
+		}
+		_ = s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, statusColumn, "failed")
+		_ = s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, errorColumn, "预览任务提交失败，请稍后重试")
+		return nil, err
+	}
+	return knowledge, nil
+}
+
+func (s *knowledgeService) GetDocumentPreviewFile(ctx context.Context, id string, full bool) (io.ReadCloser, error) {
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	status, previewPath := knowledge.PreviewStatus, knowledge.PreviewFilePath
+	if full {
+		status, previewPath = knowledge.FullPreviewStatus, knowledge.FullPreviewFilePath
+	}
+	if status != "completed" || previewPath == "" {
+		return nil, fmt.Errorf("document preview is not ready")
+	}
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+	if err != nil {
+		return nil, err
+	}
+	return s.resolveFileServiceForPath(ctx, kb, previewPath).GetFile(ctx, previewPath)
+}
+
+func (s *knowledgeService) ProcessDocumentPreview(ctx context.Context, task *asynq.Task) error {
+	var payload types.DocumentPreviewPayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return err
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
+	if err != nil {
+		return err
+	}
+	statusColumn, pathColumn, errorColumn := "preview_status", "preview_file_path", "preview_error"
+	if payload.Full {
+		statusColumn, pathColumn, errorColumn = "full_preview_status", "full_preview_file_path", "full_preview_error"
+	}
+	fail := func(cause error, userMessage string) error {
+		latest, lookupErr := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
+		if lookupErr == nil && latest.FileHash == payload.FileHash {
+			_ = s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, statusColumn, "failed")
+			_ = s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, errorColumn, userMessage)
+		}
+		logger.Errorf(ctx, "Document preview generation failed: knowledge_id=%s error=%v", knowledge.ID, cause)
+		return cause
+	}
+	if knowledge.FileHash != payload.FileHash {
+		return nil
+	}
+	if err := s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, statusColumn, "processing"); err != nil {
+		return err
+	}
+	_ = s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, errorColumn, "")
+
+	tempDir, err := os.MkdirTemp("", "weknora-preview-*")
+	if err != nil {
+		return fail(err, "创建完整预览临时目录失败，请稍后重试")
+	}
+	defer os.RemoveAll(tempDir)
+	input, _, err := s.GetKnowledgeFile(ctx, knowledge.ID)
+	if err != nil {
+		return fail(err, "读取原始文档失败，请稍后重试")
+	}
+	defer input.Close()
+	ext := strings.ToLower(filepath.Ext(knowledge.FileName))
+	inputPath := filepath.Join(tempDir, "source"+ext)
+	inputFile, err := os.OpenFile(inputPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	if err != nil {
+		return fail(err, "准备完整预览文件失败，请稍后重试")
+	}
+	_, copyErr := io.Copy(inputFile, input)
+	closeErr := inputFile.Close()
+	if copyErr != nil {
+		return fail(copyErr, "读取原始文档失败，请稍后重试")
+	}
+	if closeErr != nil {
+		return fail(closeErr, "准备完整预览文件失败，请稍后重试")
+	}
+	soffice, err := exec.LookPath("soffice")
+	if err != nil {
+		return fail(fmt.Errorf("LibreOffice is not installed: %w", err), "完整预览转换服务暂不可用，请联系管理员")
+	}
+	profile := filepath.Join(tempDir, "profile")
+	profileURL := (&url.URL{Scheme: "file", Path: filepath.ToSlash(profile)}).String()
+	exportFilter := "writer_pdf_Export"
+	switch strings.ToLower(knowledge.FileType) {
+	case "ppt", "pptx":
+		exportFilter = "impress_pdf_Export"
+	case "xls", "xlsx":
+		exportFilter = "calc_pdf_Export"
+	}
+	pageRange := "1-30"
+	if payload.Full {
+		pageRange = "1-2000"
+	}
+	pdfFilter := `pdf:` + exportFilter + `:{"PageRange":{"type":"string","value":"` + pageRange + `"}}`
+	args := []string{"-env:UserInstallation=" + profileURL,
+		"--headless", "--convert-to", pdfFilter, "--outdir", tempDir, inputPath}
+	command := soffice
+	if prlimit, lookupErr := exec.LookPath("prlimit"); lookupErr == nil {
+		command = prlimit
+		args = append([]string{"--as=6442450944", "--", soffice}, args...)
+	}
+	cmd := exec.CommandContext(ctx, command, args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fail(fmt.Errorf("preview conversion failed: %w: %s", err, strings.TrimSpace(string(output))), "完整预览转换失败，请稍后重试")
+	}
+	outputPath := filepath.Join(tempDir, "source.pdf")
+	info, err := os.Stat(outputPath)
+	if err != nil {
+		return fail(fmt.Errorf("preview PDF was not generated: %w", err), "完整预览转换失败，请稍后重试")
+	}
+	const maxPreviewBytes int64 = 256 * 1024 * 1024
+	if info.Size() > maxPreviewBytes {
+		return fail(fmt.Errorf("preview PDF exceeds the 256 MiB output limit"), "生成的完整预览超过 256 MiB 安全上限，请使用部分预览或下载原文件")
+	}
+	pdf, err := os.ReadFile(outputPath)
+	if err != nil {
+		return fail(err, "读取完整预览结果失败，请稍后重试")
+	}
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+	if err != nil {
+		return fail(err, "读取知识库配置失败，请稍后重试")
+	}
+	fileService := s.resolveFileServiceForPath(ctx, kb, knowledge.FilePath)
+	suffix := "-preview-partial.pdf"
+	if payload.Full {
+		suffix = "-preview-full.pdf"
+	}
+	previewPath, err := fileService.SaveBytes(ctx, pdf, payload.TenantID, knowledge.ID+suffix, false)
+	if err != nil {
+		return fail(err, "保存完整预览失败，请稍后重试")
+	}
+	latest, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
+	if err != nil {
+		return err
+	}
+	if latest.FileHash != payload.FileHash {
+		_ = fileService.DeleteFile(ctx, previewPath)
+		return nil
+	}
+	if err := s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, pathColumn, previewPath); err != nil {
+		return err
+	}
+	if err := s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, errorColumn, ""); err != nil {
+		return err
+	}
+	return s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, statusColumn, "completed")
+}
+
 func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
 	record, err := s.repo.GetKnowledgeByID(ctx, ctx.Value(types.TenantIDContextKey).(uint64), knowledge.ID)
 	if err != nil {
@@ -4614,6 +4817,12 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 	// Step 2: Update knowledge status and metadata
 	existing.ParseStatus = "pending"
 	existing.ErrorMessage = ""
+	existing.PreviewStatus = "none"
+	existing.PreviewFilePath = ""
+	existing.PreviewError = ""
+	existing.FullPreviewStatus = "none"
+	existing.FullPreviewFilePath = ""
+	existing.FullPreviewError = ""
 	if !kb.Governance.Enabled || strings.TrimSpace(existing.PendingVersionID) == "" {
 		existing.EnableStatus = "disabled"
 	}

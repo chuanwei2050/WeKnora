@@ -140,6 +140,13 @@ type Knowledge struct {
 	ProcessedAt *time.Time `json:"processed_at"`
 	// Error message of the knowledge
 	ErrorMessage string `json:"error_message"`
+	// Preview fields track asynchronous server-side Office-to-PDF rendering.
+	PreviewStatus       string `json:"preview_status" gorm:"type:varchar(32);default:none"`
+	PreviewFilePath     string `json:"preview_file_path,omitempty"`
+	PreviewError        string `json:"preview_error,omitempty"`
+	FullPreviewStatus   string `json:"full_preview_status" gorm:"type:varchar(32);default:none"`
+	FullPreviewFilePath string `json:"full_preview_file_path,omitempty"`
+	FullPreviewError    string `json:"full_preview_error,omitempty"`
 	// Deletion time of the knowledge
 	DeletedAt gorm.DeletedAt `json:"deleted_at"         gorm:"index"`
 	// Knowledge base name (not stored in database, populated on query)
