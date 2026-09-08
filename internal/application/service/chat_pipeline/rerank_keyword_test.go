@@ -33,7 +33,7 @@ func TestRerankKeywordLeaderCannotOverrideModelRejection(t *testing.T) {
 	}
 }
 
-func TestPreserveAcceptedKeywordLeaderAfterMMR(t *testing.T) {
+func TestPreserveAcceptedKeywordLeaderAfterTopK(t *testing.T) {
 	semantic := &types.SearchResult{ID: "semantic", Score: 0.95}
 	leader := &types.SearchResult{ID: "leader", Score: 0.8, KeywordLeader: true}
 	diverse := &types.SearchResult{ID: "diverse", Score: 0.7}
@@ -65,7 +65,7 @@ func TestPreserveAcceptedKeywordLeaderDoesNotAddRejectedCandidate(t *testing.T) 
 	}
 }
 
-func TestEnsureAcceptedKeywordLeaderDoesNotDisplaceStrongerMMRResult(t *testing.T) {
+func TestEnsureAcceptedKeywordLeaderDisplacesLastTopKResult(t *testing.T) {
 	semantic := &types.SearchResult{ID: "semantic", Score: 0.95}
 	diverse := &types.SearchResult{ID: "diverse", Score: 0.9}
 	leader1 := &types.SearchResult{ID: "leader-1", Score: 0.8, KeywordLeader: true}
@@ -76,8 +76,8 @@ func TestEnsureAcceptedKeywordLeaderDoesNotDisplaceStrongerMMRResult(t *testing.
 		[]*types.SearchResult{semantic, diverse, leader1, leader2},
 		2,
 	)
-	if len(got) != 2 || got[0].ID != "semantic" || got[1].ID != "diverse" {
-		t.Fatalf("keyword leader displaced a stronger MMR result: %+v", got)
+	if len(got) != 2 || got[0].ID != "semantic" || got[1].ID != "leader-1" {
+		t.Fatalf("accepted keyword leader did not occupy the final slot: %+v", got)
 	}
 }
 

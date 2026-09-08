@@ -89,3 +89,21 @@ func TestBoundedSourcePriorClampsFinalScore(t *testing.T) {
 		t.Fatalf("final score escaped normalized range: %v", result.Score)
 	}
 }
+
+func TestConfiguredRerankPriorOnlyChangesNearTies(t *testing.T) {
+	manage := &types.ChatManage{PipelineRequest: types.PipelineRequest{FAQPriorityEnabled: true, FAQScoreBoost: 2}}
+	faq := &types.SearchResult{Score: 0.8, ChunkType: string(types.ChunkTypeFAQ)}
+	applyConfiguredRerankPrior(faq, manage)
+	if faq.Score <= 0.8 || faq.Score >= 0.81 {
+		t.Fatalf("FAQ prior should be positive and capped below one point: %.4f", faq.Score)
+	}
+	if faq.Score >= 0.82 {
+		t.Fatalf("FAQ prior overturned a materially stronger result: %.4f", faq.Score)
+	}
+
+	wiki := &types.SearchResult{Score: 0.8, RankingSourcePrior: wikiSourcePrior, RankingSourcePriorKind: "wiki"}
+	applyConfiguredRerankPrior(wiki, &types.ChatManage{})
+	if wiki.Score != faq.Score {
+		t.Fatalf("configured priors should share the same cap: wiki=%.4f faq=%.4f", wiki.Score, faq.Score)
+	}
+}

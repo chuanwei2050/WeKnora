@@ -174,7 +174,8 @@ func TestFilterDataAnalysisCandidatesLimitsObservedThreeTableSelections(t *testi
 		scores []float64
 		want   int
 	}{
-		{name: "a strong runner-up expands without admitting the third", scores: []float64{0.6354179212, 0.5232272959, 0.5577818713}, want: 2},
+		{name: "a runner-up above ninety percent expands without admitting the third", scores: []float64{0.6354179212, 0.5232272959, 0.58}, want: 2},
+		{name: "a runner-up below ninety percent stays on one table", scores: []float64{0.6, 0.539, 0.3}, want: 1},
 		{name: "ordinary score gaps stay on one table", scores: []float64{0.6948359011, 0.5403284500, 0.5151196010}, want: 1},
 	}
 	for _, test := range tests {

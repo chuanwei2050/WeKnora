@@ -22,8 +22,8 @@ import (
 )
 
 const (
-	rerankCacheTTL     = 10 * time.Minute
-	mmrRelevanceWeight = 0.90
+	rerankCacheTTL       = 10 * time.Minute
+	maxRerankSourcePrior = 0.01
 )
 
 type rerankRedisCache interface {
@@ -173,7 +173,6 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		chatManage.SearchResult[i].Metadata = ensureMetadata(chatManage.SearchResult[i].Metadata)
 	}
 	reranked := make([]*types.SearchResult, 0, len(rerankResp)+len(directLoadResults))
-	normalizedBaseScores := normalizeRerankBaseScores(candidatesToRerank, directLoadResults)
 
 	// Process reranked results
 	for _, rr := range rerankResp {
@@ -183,21 +182,8 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		sr := candidatesToRerank[rr.Index]
 		base := sr.Score
 		sr.Metadata["base_score"] = fmt.Sprintf("%.4f", base)
-		modelScore := rr.RelevanceScore
-		sr.Score = searchutil.CompositeSearchScore(sr, modelScore, normalizedBaseScores[sr], sr.StartAt >= 0)
-
-		prior := sr.RankingSourcePrior
-		priorKind := sr.RankingSourcePriorKind
-		// Apply at most one bounded source prior before MMR.
-		if chatManage.FAQPriorityEnabled && chatManage.FAQScoreBoost > 1.0 &&
-			sr.ChunkType == string(types.ChunkTypeFAQ) {
-			faqPrior := min(0.08, (chatManage.FAQScoreBoost-1)*0.1)
-			if faqPrior > prior {
-				prior = faqPrior
-				priorKind = "faq"
-			}
-		}
-		applyBoundedSourcePrior(sr, prior, priorKind)
+		sr.Score = rr.RelevanceScore
+		applyConfiguredRerankPrior(sr, chatManage)
 
 		reranked = append(reranked, sr)
 	}
@@ -206,25 +192,24 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	for _, sr := range directLoadResults {
 		base := sr.Score
 		sr.Metadata["base_score"] = fmt.Sprintf("%.4f", base)
-		// Assign high model score for direct load items
-		modelScore := 1.0
-		sr.Score = searchutil.CompositeSearchScore(sr, modelScore, normalizedBaseScores[sr], sr.StartAt >= 0)
+		sr.Score = 1.0
+		applyConfiguredRerankPrior(sr, chatManage)
 		reranked = append(reranked, sr)
 	}
 	searchutil.SortSearchResults(reranked)
 	chatManage.RerankScoredResult = append([]*types.SearchResult(nil), reranked...)
-	final := applyMMR(ctx, reranked, chatManage, min(len(reranked), max(1, chatManage.RerankTopK)), mmrRelevanceWeight)
+	final := append([]*types.SearchResult(nil), reranked[:min(len(reranked), max(1, chatManage.RerankTopK))]...)
 	final = ensureAcceptedKeywordLeader(final, reranked, chatManage.RerankTopK)
 	chatManage.RerankResult = final
 
-	// Log composite top scores and MMR selection summary
+	// Log the model-ranked results that are eligible for final TopK selection.
 	topN := min(3, len(reranked))
 	for i := 0; i < topN; i++ {
-		pipelineInfo(ctx, "Rerank", "composite_top", map[string]interface{}{
+		pipelineInfo(ctx, "Rerank", "model_top", map[string]interface{}{
 			"rank":        i + 1,
 			"chunk_id":    reranked[i].ID,
 			"base_score":  reranked[i].Metadata["base_score"],
-			"final_score": fmt.Sprintf("%.4f", reranked[i].Score),
+			"model_score": fmt.Sprintf("%.4f", reranked[i].Score),
 		})
 	}
 
@@ -249,9 +234,9 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	return next()
 }
 
-// ensureAcceptedKeywordLeader keeps one lexical anchor when it passed the
-// rerank threshold but MMR removed every lexical result for diversity.
-// Rejected lexical results never reach this function, and scores are unchanged.
+// ensureAcceptedKeywordLeader keeps the global ES winner when it passed the
+// rerank threshold but later TopK selection removed it. Rejected results
+// never reach this function, and the rerank score is left unchanged.
 func ensureAcceptedKeywordLeader(selected, accepted []*types.SearchResult, limit int) []*types.SearchResult {
 	if limit <= 0 || len(accepted) == 0 {
 		return selected
@@ -269,11 +254,6 @@ func ensureAcceptedKeywordLeader(selected, accepted []*types.SearchResult, limit
 		final := append([]*types.SearchResult(nil), selected[:kept]...)
 		if kept < limit {
 			return append(final, result)
-		}
-		// A lexical channel winner is not an automatic relevance override.
-		// Preserve the MMR result when replacing it would lower relevance.
-		if final[kept-1] == nil || result.Score < final[kept-1].Score {
-			return final
 		}
 		final[kept-1] = result
 		return final
@@ -325,6 +305,23 @@ func applyBoundedSourcePrior(result *types.SearchResult, prior float64, source s
 	result.Metadata["ranking_source_prior"] = fmt.Sprintf("%.4f", prior)
 	result.Metadata["ranking_source_prior_kind"] = source
 	result.Metadata["final_ranking_score"] = fmt.Sprintf("%.4f", result.Score)
+}
+
+func applyConfiguredRerankPrior(result *types.SearchResult, chatManage *types.ChatManage) {
+	if result == nil || chatManage == nil {
+		return
+	}
+	prior := min(result.RankingSourcePrior, maxRerankSourcePrior)
+	priorKind := result.RankingSourcePriorKind
+	if chatManage.FAQPriorityEnabled && chatManage.FAQScoreBoost > 1 &&
+		result.ChunkType == string(types.ChunkTypeFAQ) {
+		faqPrior := min(maxRerankSourcePrior, (chatManage.FAQScoreBoost-1)*0.1)
+		if faqPrior > prior {
+			prior = faqPrior
+			priorKind = "faq"
+		}
+	}
+	applyBoundedSourcePrior(result, prior, priorKind)
 }
 
 // prepareRerankCandidates removes duplicate chunks/content before model inference
@@ -638,89 +635,6 @@ func safeTopScore(results []rerank.RankResult) float64 {
 		return 0
 	}
 	return results[0].RelevanceScore
-}
-
-// applyMMR applies the MMR algorithm to the search results with pre-computed token sets
-func applyMMR(
-	ctx context.Context,
-	results []*types.SearchResult,
-	chatManage *types.ChatManage,
-	k int,
-	lambda float64,
-) []*types.SearchResult {
-	if k <= 0 || len(results) == 0 {
-		return nil
-	}
-	pipelineInfo(ctx, "Rerank", "mmr_start", map[string]interface{}{
-		"lambda":     lambda,
-		"k":          k,
-		"candidates": len(results),
-	})
-
-	// Pre-compute all token sets concurrently (CPU-bound tokenization)
-	allTokenSets := ParallelMap(results, 0, func(i int, r *types.SearchResult) map[string]struct{} {
-		return searchutil.TokenizeSimple(getEnrichedPassage(ctx, r))
-	})
-
-	selected := make([]*types.SearchResult, 0, k)
-	selectedTokenSets := make([]map[string]struct{}, 0, k)
-	selectedIndices := make(map[int]struct{})
-
-	for len(selected) < k && len(selectedIndices) < len(results) {
-		bestIdx := -1
-		bestScore := -1.0
-
-		for i, r := range results {
-			if _, isSelected := selectedIndices[i]; isSelected {
-				continue
-			}
-
-			relevance := r.Score
-			redundancy := 0.0
-
-			// Use pre-computed token sets for redundancy calculation
-			for _, selTokens := range selectedTokenSets {
-				sim := searchutil.Jaccard(allTokenSets[i], selTokens)
-				if sim > redundancy {
-					redundancy = sim
-				}
-			}
-
-			mmr := lambda*relevance - (1.0-lambda)*redundancy
-			if mmr > bestScore {
-				bestScore = mmr
-				bestIdx = i
-			}
-		}
-
-		if bestIdx < 0 {
-			break
-		}
-
-		selected = append(selected, results[bestIdx])
-		selectedTokenSets = append(selectedTokenSets, allTokenSets[bestIdx])
-		selectedIndices[bestIdx] = struct{}{}
-	}
-
-	// Compute average redundancy among selected using pre-computed token sets
-	avgRed := 0.0
-	if len(selected) > 1 {
-		pairs := 0
-		for i := 0; i < len(selectedTokenSets); i++ {
-			for j := i + 1; j < len(selectedTokenSets); j++ {
-				avgRed += searchutil.Jaccard(selectedTokenSets[i], selectedTokenSets[j])
-				pairs++
-			}
-		}
-		if pairs > 0 {
-			avgRed /= float64(pairs)
-		}
-	}
-	pipelineInfo(ctx, "Rerank", "mmr_done", map[string]interface{}{
-		"selected":       len(selected),
-		"avg_redundancy": fmt.Sprintf("%.4f", avgRed),
-	})
-	return selected
 }
 
 // --- Passage cleaning for rerank ---

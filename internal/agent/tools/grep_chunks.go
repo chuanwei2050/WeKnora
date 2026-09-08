@@ -219,19 +219,6 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	scoredResults := t.scoreChunks(ctx, deduplicatedResults, compiled)
 
 	finalResults := scoredResults
-	if len(scoredResults) > 10 {
-		mmrK := len(scoredResults)
-		if limit > 0 && mmrK > limit {
-			mmrK = limit
-		}
-		logger.Debugf(ctx, "[Tool][GrepChunks] Applying MMR: k=%d, lambda=0.7, input=%d results",
-			mmrK, len(scoredResults))
-		mmrResults := t.applyMMR(ctx, scoredResults, mmrK, 0.7)
-		if len(mmrResults) > 0 {
-			finalResults = mmrResults
-			logger.Infof(ctx, "[Tool][GrepChunks] MMR completed: %d results selected", len(finalResults))
-		}
-	}
 
 	sort.Slice(finalResults, func(i, j int) bool {
 		if finalResults[i].MatchedPatterns != finalResults[j].MatchedPatterns {
@@ -785,69 +772,4 @@ func (t *GrepChunksTool) calculateMatchScore(content string, compiled []*regexp.
 	}
 
 	return math.Min(baseScore+positionBonus, 1.0), matchCount
-}
-
-// applyMMR applies Maximal Marginal Relevance algorithm to reduce redundancy
-func (t *GrepChunksTool) applyMMR(
-	ctx context.Context,
-	results []chunkWithTitle,
-	k int,
-	lambda float64,
-) []chunkWithTitle {
-	if k <= 0 || len(results) == 0 {
-		return nil
-	}
-
-	logger.Debugf(ctx, "[Tool][GrepChunks] Applying MMR: lambda=%.2f, k=%d, candidates=%d",
-		lambda, k, len(results))
-
-	selected := make([]chunkWithTitle, 0, k)
-	selectedTokenSets := make([]map[string]struct{}, 0, k)
-
-	candidates := make([]chunkWithTitle, len(results))
-	copy(candidates, results)
-
-	tokenSets := make([]map[string]struct{}, len(candidates))
-	for i, r := range candidates {
-		tokenSets[i] = t.tokenizeSimple(r.Content)
-	}
-
-	for len(selected) < k && len(candidates) > 0 {
-		bestIdx := 0
-		bestScore := -1.0
-
-		for i, r := range candidates {
-			relevance := r.MatchScore
-			redundancy := 0.0
-			for _, selectedTS := range selectedTokenSets {
-				redundancy = math.Max(redundancy, t.jaccard(tokenSets[i], selectedTS))
-			}
-			mmr := lambda*relevance - (1.0-lambda)*redundancy
-			if mmr > bestScore {
-				bestScore = mmr
-				bestIdx = i
-			}
-		}
-
-		selected = append(selected, candidates[bestIdx])
-		selectedTokenSets = append(selectedTokenSets, tokenSets[bestIdx])
-
-		last := len(candidates) - 1
-		candidates[bestIdx] = candidates[last]
-		tokenSets[bestIdx] = tokenSets[last]
-		candidates = candidates[:last]
-		tokenSets = tokenSets[:last]
-	}
-
-	return selected
-}
-
-// tokenizeSimple tokenizes text into a set of words (simple whitespace-based)
-func (t *GrepChunksTool) tokenizeSimple(text string) map[string]struct{} {
-	return searchutil.TokenizeSimple(text)
-}
-
-// jaccard calculates Jaccard similarity between two token sets
-func (t *GrepChunksTool) jaccard(a, b map[string]struct{}) float64 {
-	return searchutil.Jaccard(a, b)
 }

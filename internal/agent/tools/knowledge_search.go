@@ -358,7 +358,7 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		}
 	}
 
-	// Variable to hold results through reranking and MMR stages
+	// Variable to hold results through reranking and final deduplication.
 	var filteredResults []*searchResultWithMeta
 
 	if (t.rerankModel != nil || t.chatModel != nil) && len(deduplicatedBeforeRerank) > 0 && rerankQuery != "" {
@@ -382,27 +382,6 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		filteredResults = deduplicatedBeforeRerank
 	}
 
-	// Apply MMR (Maximal Marginal Relevance) to reduce redundancy and improve diversity
-	// Note: composite scoring is already applied inside rerankResults
-	if len(filteredResults) > 0 {
-		// Calculate k for MMR using the configured post-rerank result limit.
-		mmrK := t.rerankResultLimit(len(filteredResults))
-		// Apply MMR with lambda=0.7 (balance between relevance and diversity)
-		logger.Debugf(
-			ctx,
-			"[Tool][KnowledgeSearch] Applying MMR: k=%d, lambda=0.7, input=%d results",
-			mmrK,
-			len(filteredResults),
-		)
-		mmrResults := t.applyMMR(ctx, filteredResults, mmrK, 0.7)
-		if len(mmrResults) > 0 {
-			filteredResults = mmrResults
-			logger.Infof(ctx, "[Tool][KnowledgeSearch] MMR completed: %d results selected", len(filteredResults))
-		} else {
-			logger.Warnf(ctx, "[Tool][KnowledgeSearch] MMR returned no results, using original results")
-		}
-	}
-
 	// Note: minScore filter is skipped because HybridSearch now uses RRF scores
 	// RRF scores are in range [0, ~0.033], not [0, 1], so old thresholds don't apply
 	// Threshold filtering is already done inside HybridSearch before RRF fusion
@@ -421,6 +400,9 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		// If scores are equal, sort by knowledge ID for consistency
 		return deduplicatedResults[i].KnowledgeID < deduplicatedResults[j].KnowledgeID
 	})
+	if limit := t.rerankResultLimit(len(deduplicatedResults)); len(deduplicatedResults) > limit {
+		deduplicatedResults = deduplicatedResults[:limit]
+	}
 
 	// Log top results
 	if len(deduplicatedResults) > 0 {
@@ -1628,88 +1610,6 @@ func (t *KnowledgeSearchTool) getEnrichedPassage(ctx context.Context, result *ty
 	return combinedText
 }
 
-// applyMMR applies Maximal Marginal Relevance algorithm to reduce redundancy
-func (t *KnowledgeSearchTool) applyMMR(
-	ctx context.Context,
-	results []*searchResultWithMeta,
-	k int,
-	lambda float64,
-) []*searchResultWithMeta {
-	if k <= 0 || len(results) == 0 {
-		return nil
-	}
-
-	logger.Infof(ctx, "[Tool][KnowledgeSearch] Applying MMR: lambda=%.2f, k=%d, candidates=%d",
-		lambda, k, len(results))
-
-	selected := make([]*searchResultWithMeta, 0, k)
-	candidates := make([]*searchResultWithMeta, len(results))
-	copy(candidates, results)
-
-	// Pre-compute token sets for all candidates
-	tokenSets := make([]map[string]struct{}, len(candidates))
-	for i, r := range candidates {
-		tokenSets[i] = t.tokenizeSimple(t.getEnrichedPassage(ctx, r.SearchResult))
-	}
-
-	// MMR selection loop
-	for len(selected) < k && len(candidates) > 0 {
-		bestIdx := 0
-		bestScore := -1.0
-
-		for i, r := range candidates {
-			relevance := r.Score
-			redundancy := 0.0
-
-			// Calculate maximum redundancy with already selected results
-			for _, s := range selected {
-				selectedTokens := t.tokenizeSimple(t.getEnrichedPassage(ctx, s.SearchResult))
-				redundancy = math.Max(redundancy, t.jaccard(tokenSets[i], selectedTokens))
-			}
-
-			// MMR score: balance relevance and diversity
-			mmr := lambda*relevance - (1.0-lambda)*redundancy
-			if mmr > bestScore {
-				bestScore = mmr
-				bestIdx = i
-			}
-		}
-
-		// Add best candidate to selected and remove from candidates
-		selected = append(selected, candidates[bestIdx])
-		candidates = append(candidates[:bestIdx], candidates[bestIdx+1:]...)
-		// Remove corresponding token set
-		tokenSets = append(tokenSets[:bestIdx], tokenSets[bestIdx+1:]...)
-	}
-
-	// Compute average redundancy among selected results
-	avgRed := 0.0
-	if len(selected) > 1 {
-		pairs := 0
-		for i := 0; i < len(selected); i++ {
-			for j := i + 1; j < len(selected); j++ {
-				si := t.tokenizeSimple(t.getEnrichedPassage(ctx, selected[i].SearchResult))
-				sj := t.tokenizeSimple(t.getEnrichedPassage(ctx, selected[j].SearchResult))
-				avgRed += t.jaccard(si, sj)
-				pairs++
-			}
-		}
-		if pairs > 0 {
-			avgRed /= float64(pairs)
-		}
-	}
-
-	logger.Infof(ctx, "[Tool][KnowledgeSearch] MMR completed: selected=%d, avg_redundancy=%.4f",
-		len(selected), avgRed)
-
-	return selected
-}
-
-// tokenizeSimple tokenizes text into a set of words (simple whitespace-based)
-func (t *KnowledgeSearchTool) tokenizeSimple(text string) map[string]struct{} {
-	return searchutil.TokenizeSimple(text)
-}
-
 // extractSnippetForQueries tries to produce a short contextual snippet around
 // the first occurrence of any token extracted from the provided queries.
 // When no token matches (common for fully paraphrased semantic queries) it
@@ -1791,9 +1691,4 @@ func extractSnippetForQueries(content string, queries []string) string {
 		snippet = strings.ReplaceAll(snippet, "  ", " ")
 	}
 	return "... " + strings.TrimSpace(snippet) + " ..."
-}
-
-// jaccard calculates Jaccard similarity between two token sets
-func (t *KnowledgeSearchTool) jaccard(a, b map[string]struct{}) float64 {
-	return searchutil.Jaccard(a, b)
 }

@@ -25,7 +25,7 @@ import (
 const (
 	dataAnalysisMaxRows               = 1000
 	dataAnalysisMaxTables             = 3
-	dataAnalysisSecondTableScoreRatio = 0.78
+	dataAnalysisSecondTableScoreRatio = 0.90
 	dataAnalysisThirdTableScoreRatio  = 0.95
 	dataAnalysisEvidenceCharsPerTable = 3000
 	dataAnalysisTimeout               = 30 * time.Second
@@ -680,7 +680,7 @@ func (p *PluginDataAnalysis) llmCallTimeout() time.Duration {
 	return defaultLLMCallTimeout
 }
 
-const dataAnalysisEvidenceInstruction = "结构化查询结果：这是对原始表格执行 SQL 得到的一条候选证据。请将其与 ES、向量检索的局部检索证据共同判断，不要机械地优先采用任一来源。检索证据由 rerank 决定相关性和候选资格，MMR 仅作低权重去重补充，不提高证据的相关性、可信度或完整性。检索证据入选只表示相关，不表示覆盖完整；判断时核对每条证据的查询条件、语义匹配程度和数据覆盖范围。涉及完整名单、总数或聚合时，只有过滤条件覆盖目标字段和值的结构化结果才能证明完整性；若证据冲突，请指出冲突及采用结论的理由。"
+const dataAnalysisEvidenceInstruction = "结构化查询结果：这是对原始表格执行 SQL 得到的一条候选证据。请将其与 ES、向量检索的局部检索证据共同判断，不要机械地优先采用任一来源。检索证据由 rerank 决定相关性、候选资格和最终顺序。检索证据入选只表示相关，不表示覆盖完整；判断时核对每条证据的查询条件、语义匹配程度和数据覆盖范围。涉及完整名单、总数或聚合时，只有过滤条件覆盖目标字段和值的结构化结果才能证明完整性；若证据冲突，请指出冲突及采用结论的理由。"
 
 const dataAnalysisFailureInstruction = "结构化表格查询未完成：%s。不得根据检索片段补全缺失的查询结果；必须明确说明本次表格查询未完成。"
 

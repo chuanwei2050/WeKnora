@@ -284,17 +284,13 @@ func markKeywordLeader(results []*types.SearchResult, keywordResults []*types.In
 	for _, result := range results {
 		byID[result.ID] = result
 	}
-	markedKBs := make(map[string]struct{})
 	for _, keywordResult := range keywordResults {
-		if _, marked := markedKBs[keywordResult.KnowledgeBaseID]; marked {
-			continue
-		}
 		result, found := byID[keywordResult.ChunkID]
 		if !found {
 			continue
 		}
 		result.KeywordLeader = true
-		markedKBs[keywordResult.KnowledgeBaseID] = struct{}{}
+		return
 	}
 }
 

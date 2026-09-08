@@ -91,7 +91,7 @@ func TestMarkKeywordLeaderUsesPerSearchRankInsteadOfRawScore(t *testing.T) {
 	}
 }
 
-func TestMarkKeywordLeaderKeepsOneLeaderPerKnowledgeBase(t *testing.T) {
+func TestMarkKeywordLeaderKeepsOnlyGlobalLeader(t *testing.T) {
 	results := []*types.SearchResult{
 		{ID: "kb-a-first"},
 		{ID: "kb-a-second"},
@@ -106,13 +106,13 @@ func TestMarkKeywordLeaderKeepsOneLeaderPerKnowledgeBase(t *testing.T) {
 	markKeywordLeader(results, keyword)
 
 	if !results[0].KeywordLeader {
-		t.Fatal("expected first knowledge base leader to be marked")
+		t.Fatal("expected global keyword leader to be marked")
 	}
 	if results[1].KeywordLeader {
-		t.Fatal("expected only one keyword leader per knowledge base")
+		t.Fatal("expected only the global keyword leader to be marked")
 	}
-	if !results[2].KeywordLeader {
-		t.Fatal("expected second knowledge base leader to be marked")
+	if results[2].KeywordLeader {
+		t.Fatal("expected later knowledge base result not to be marked")
 	}
 }
 

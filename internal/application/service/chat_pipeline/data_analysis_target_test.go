@@ -86,17 +86,17 @@ func TestDataAnalysisCandidatesUseRerankResults(t *testing.T) {
 
 	got := dataAnalysisCandidatesAfterRerank(manage)
 	if len(got) != 1 || got[0] != scored {
-		t.Fatalf("expected pre-MMR scored candidates, got %#v", got)
+		t.Fatalf("expected rerank-scored candidates, got %#v", got)
 	}
 }
 
-func TestDataAnalysisCandidatesUseMMRResultsWhenScoredResultsUnavailable(t *testing.T) {
+func TestDataAnalysisCandidatesUseFinalRerankResultsWhenScoredResultsUnavailable(t *testing.T) {
 	reranked := &types.SearchResult{KnowledgeID: "reranked", KnowledgeFilename: "relevant.xlsx"}
 	manage := &types.ChatManage{PipelineState: types.PipelineState{RerankResult: []*types.SearchResult{reranked}}}
 
 	got := dataAnalysisCandidatesAfterRerank(manage)
 	if len(got) != 1 || got[0] != reranked {
-		t.Fatalf("expected MMR candidates, got %#v", got)
+		t.Fatalf("expected final rerank candidates, got %#v", got)
 	}
 }
 
