@@ -20,6 +20,7 @@ type AsynqTaskParams struct {
 	dig.In
 
 	Server               *asynq.Server
+	LargeDocumentServer  *LargeDocumentServer
 	KnowledgeService     interfaces.KnowledgeService
 	KnowledgeBaseService interfaces.KnowledgeBaseService
 	TagService           interfaces.KnowledgeTagService
@@ -31,6 +32,8 @@ type AsynqTaskParams struct {
 	KnowledgePublish     interfaces.TaskHandler `name:"knowledgePublish"`
 	WikiIngest           interfaces.TaskHandler `name:"wikiIngest"`
 }
+
+type LargeDocumentServer struct{ *asynq.Server }
 
 func getAsynqRedisClientOpt() *asynq.RedisClientOpt {
 	db := 0
@@ -100,6 +103,18 @@ func NewAsynqServer() *asynq.Server {
 	return srv
 }
 
+func NewLargeDocumentAsynqServer() *LargeDocumentServer {
+	return &LargeDocumentServer{Server: asynq.NewServer(
+		getAsynqRedisClientOpt(),
+		asynq.Config{
+			Concurrency:    1,
+			Queues:         map[string]int{types.LargeDocumentQueue: 1},
+			StrictPriority: true,
+			RetryDelayFunc: asynqRetryDelayFunc,
+		},
+	)}
+}
+
 func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// Create a new mux and register all handlers
 	mux := asynq.NewServeMux()
@@ -164,6 +179,11 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 		// Start the server
 		if err := params.Server.Run(mux); err != nil {
 			log.Fatalf("could not run server: %v", err)
+		}
+	}()
+	go func() {
+		if err := params.LargeDocumentServer.Run(mux); err != nil {
+			log.Fatalf("could not run large document server: %v", err)
 		}
 	}()
 	return mux

@@ -417,6 +417,7 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.POST("/:id/reparse", handler.ReparseKnowledge)
 		// 获取知识文件
 		k.GET("/:id/download", handler.DownloadKnowledgeFile)
+		k.GET("/:id/download-url", handler.GetKnowledgeDownloadURL)
 		// 预览知识文件（内联显示，返回正确 Content-Type）
 		k.GET("/:id/preview", handler.PreviewKnowledgeFile)
 		// 更新图像分块信息

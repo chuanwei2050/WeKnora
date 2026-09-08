@@ -58,6 +58,24 @@ var (
 	ErrImageNotParse = errors.New("image not parse without enable multimodel")
 )
 
+func documentProcessQueue(fileSize int64) string {
+	if fileSize > types.LargeDocumentThresholdBytes {
+		return types.LargeDocumentQueue
+	}
+	return "default"
+}
+
+func newDocumentProcessTask(payload []byte, fileSize int64, maxRetry int) *asynq.Task {
+	options := []asynq.Option{
+		asynq.Queue(documentProcessQueue(fileSize)),
+		asynq.MaxRetry(maxRetry),
+	}
+	if fileSize > types.LargeDocumentThresholdBytes {
+		options = append(options, asynq.Timeout(30*time.Minute))
+	}
+	return asynq.NewTask(types.TypeDocumentProcess, payload, options...)
+}
+
 // ListIntegrationFolders returns ordinary folders and one virtual public folder.
 func (s *knowledgeService) ListIntegrationFolders(ctx context.Context, tenantID uint64, kbID string) ([]*types.KnowledgeTag, error) {
 	tags, err := s.listAllIntegrationTags(ctx, tenantID, kbID)
@@ -1117,7 +1135,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return knowledge, nil
 	}
 
-	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+	task := newDocumentProcessTask(payloadBytes, file.Size, 3)
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue document process task: %v", err)
@@ -2747,6 +2765,7 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 ) {
 	// Update status to processing
 	knowledge.ParseStatus = "processing"
+	knowledge.ErrorMessage = ""
 	knowledge.UpdatedAt = time.Now()
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		return
@@ -4200,6 +4219,25 @@ func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.
 	return file, knowledge.FileName, nil
 }
 
+// GetKnowledgeFileURL returns a provider URL for direct browser downloads.
+// Callers must perform document authorization before exposing the result.
+func (s *knowledgeService) GetKnowledgeFileURL(ctx context.Context, id string) (string, string, int64, error) {
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, id)
+	if err != nil {
+		return "", "", 0, err
+	}
+	if knowledge.IsManual() {
+		return "", sanitizeManualDownloadFilename(knowledge.Title), knowledge.FileSize, nil
+	}
+	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+	fileURL, err := s.resolveFileServiceForPath(ctx, kb, knowledge.FilePath).GetFileURL(ctx, knowledge.FilePath)
+	if err != nil {
+		return "", "", 0, err
+	}
+	return fileURL, knowledge.FileName, knowledge.FileSize, nil
+}
+
 func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
 	record, err := s.repo.GetKnowledgeByID(ctx, ctx.Value(types.TenantIDContextKey).(uint64), knowledge.ID)
 	if err != nil {
@@ -4575,6 +4613,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 
 	// Step 2: Update knowledge status and metadata
 	existing.ParseStatus = "pending"
+	existing.ErrorMessage = ""
 	if !kb.Governance.Enabled || strings.TrimSpace(existing.PendingVersionID) == "" {
 		existing.EnableStatus = "disabled"
 	}
@@ -4629,7 +4668,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return existing, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+		task := newDocumentProcessTask(payloadBytes, existing.FileSize, 3)
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue reparse task: %v", err)
@@ -9683,6 +9722,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	}
 
 	knowledge.ParseStatus = "processing"
+	knowledge.ErrorMessage = ""
 	knowledge.UpdatedAt = time.Now()
 	if !persistDocumentState() {
 		logger.Errorf(ctx, "failed to update knowledge status to processing")
@@ -11415,7 +11455,7 @@ func (s *knowledgeService) moveKnowledgeReparse(
 			return fmt.Errorf("failed to marshal document process payload: %w", err)
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+		task := newDocumentProcessTask(payloadBytes, knowledge.FileSize, 3)
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			return fmt.Errorf("failed to enqueue document process task: %w", err)

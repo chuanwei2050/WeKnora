@@ -21,6 +21,11 @@ const (
 	TypeWikiIngest           = "wiki:ingest"            // Wiki 页面同步任务
 )
 
+const (
+	LargeDocumentThresholdBytes int64 = 256 * 1024 * 1024
+	LargeDocumentQueue                = "document-large"
+)
+
 // ExtractChunkPayload represents the extract chunk task payload
 type ExtractChunkPayload struct {
 	TracingContext

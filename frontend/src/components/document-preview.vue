@@ -17,12 +17,16 @@ const props = defineProps<{
   knowledgeId: string;
   fileType: string;
   fileName: string;
+  fileSize: number | string;
+  parseStatus?: string;
+  parseError?: string;
   contentRevision: string;
   active: boolean;
 }>();
 const emit = defineEmits<{ switchToChunks: [] }>();
 
 const MAX_TEXT_PREVIEW_BYTES = 2 * 1024 * 1024;
+const LARGE_FILE_PARTIAL_PREVIEW_BYTES = 256 * 1024 * 1024;
 
 const loading = ref(false);
 const error = ref('');
@@ -240,6 +244,19 @@ async function loadPreview() {
     return;
   }
 
+  // Never fetch a large Office file into the browser just to discover that it
+  // is unsafe to render. Parsed chunks are the lightweight preview path and
+  // the original file remains available through the download action.
+  if (
+    Number(props.fileSize || 0) > LARGE_FILE_PARTIAL_PREVIEW_BYTES &&
+    (previewType.value === 'docx' || previewType.value === 'pptx' || previewType.value === 'excel')
+  ) {
+    largeFileBlocked.value = true;
+    loadedForKey = cacheKey;
+    loading.value = false;
+    return;
+  }
+
   try {
     const cached = getCachedPreview(cacheKey);
     if (cached) {
@@ -451,7 +468,8 @@ onUnmounted(() => {
     <div v-else-if="largeFileBlocked" class="preview-unsupported">
       <t-icon name="info-circle" size="48px" />
       <p>{{ $t('preview.largeFileBlocked') }}</p>
-      <p class="unsupported-hint">{{ $t('preview.largeFileHint') }}</p>
+      <p v-if="parseError" class="unsupported-hint">{{ parseError }}</p>
+      <p v-else class="unsupported-hint">{{ $t('preview.largeFileHint') }}</p>
       <t-button theme="primary" size="small" @click="emit('switchToChunks')">
         {{ $t('knowledgeBase.viewChunks') }}
       </t-button>

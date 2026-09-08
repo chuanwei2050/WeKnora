@@ -207,7 +207,18 @@ export function batchDeleteKnowledge(kbId: string, ids: string[]) {
 }
 
 export function downKnowledgeDetails(id: string) {
-  return getDown(`/api/v1/knowledge/${id}/download`);
+  return getDown(`/api/v1/knowledge/${id}/download`, { timeout: 0 });
+}
+
+export interface KnowledgeDownloadTarget {
+  url: string;
+  filename: string;
+  file_size: number;
+  direct: boolean;
+}
+
+export function getKnowledgeDownloadTarget(id: string) {
+  return get<{ success: boolean; data: KnowledgeDownloadTarget }>(`/api/v1/knowledge/${id}/download-url`);
 }
 
 export function previewKnowledgeFile(id: string) {

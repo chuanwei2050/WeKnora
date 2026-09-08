@@ -243,6 +243,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	if redisAvailable {
 		must(container.Provide(router.NewAsyncqClient, dig.As(new(interfaces.TaskEnqueuer))))
 		must(container.Provide(router.NewAsynqServer))
+		must(container.Provide(router.NewLargeDocumentAsynqServer))
 	} else {
 		syncExec := router.NewSyncTaskExecutor()
 		must(container.Provide(func() interfaces.TaskEnqueuer { return syncExec }))
@@ -596,6 +597,11 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		logger.Infof(context.Background(), "Auto-migration is disabled (AUTO_MIGRATE=false)")
 	}
 
+	// Lite mode has no durable queue. Always reconcile tasks interrupted by a
+	// previous process, even when schema auto-migration is disabled.
+	reconcileInterruptedKnowledgeTasks(db)
+	resetPendingTasks(db)
+
 	// Get underlying SQL DB object
 	sqlDB, err := db.DB()
 	if err != nil {
@@ -641,8 +647,6 @@ func resolveStorageProviderPending(db *gorm.DB) {
 	// code, which could push values past the DB sequence counter.
 	syncSequences(db)
 
-	// Reset any pending tasks left over from previous aborted runs (Lite App mode)
-	resetPendingTasks(db)
 }
 
 // syncSequences ensures PostgreSQL sequences for auto-increment columns (seq_id)
@@ -715,6 +719,22 @@ func resetPendingTasks(db *gorm.DB) {
 		logger.Warnf(context.Background(), "Failed to reset pending data source sync tasks: %v", resultSync.Error)
 	} else if resultSync.RowsAffected > 0 {
 		logger.Infof(context.Background(), "Reset %d stuck data source sync tasks to failed state", resultSync.RowsAffected)
+	}
+}
+
+// reconcileInterruptedKnowledgeTasks repairs records left in an impossible
+// state by an earlier Lite-mode restart: the error proves that the in-memory
+// task was lost, so a "processing" status can no longer become complete. This
+// is safe in Redis mode as it only targets the exact terminal interruption
+// marker written by resetPendingTasks.
+func reconcileInterruptedKnowledgeTasks(db *gorm.DB) {
+	result := db.Model(&types.Knowledge{}).
+		Where("parse_status = ? AND error_message = ?", types.ParseStatusProcessing, "Task interrupted due to application restart").
+		Update("parse_status", types.ParseStatusFailed)
+	if result.Error != nil {
+		logger.Warnf(context.Background(), "Failed to reconcile interrupted knowledge tasks: %v", result.Error)
+	} else if result.RowsAffected > 0 {
+		logger.Infof(context.Background(), "Reconciled %d interrupted knowledge tasks to failed state", result.RowsAffected)
 	}
 }
 

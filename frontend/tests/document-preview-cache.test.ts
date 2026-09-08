@@ -52,6 +52,7 @@ describe('DocumentPreview', () => {
         knowledgeId: 'knowledge-reloaded',
         fileType: 'pdf',
         fileName: 'report.pdf',
+        fileSize: 7,
         contentRevision: 'hash-1',
         active: true,
       },
@@ -66,6 +67,27 @@ describe('DocumentPreview', () => {
     await flushPromises();
     expect(previewKnowledgeFile).toHaveBeenCalledTimes(2);
 
+    wrapper.unmount();
+  });
+
+  it('does not download a large Office file into the browser', async () => {
+    const wrapper = mount(DocumentPreview, {
+      props: {
+        knowledgeId: 'knowledge-large',
+        fileType: 'docx',
+        fileName: 'large.docx',
+        fileSize: 504.7 * 1024 * 1024,
+        parseStatus: 'failed',
+        parseError: 'Task interrupted due to application restart',
+        contentRevision: 'hash-large',
+        active: true,
+      },
+      global: { mocks: { $t: (key: string) => key } },
+    });
+    await flushPromises();
+
+    expect(previewKnowledgeFile).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain('Task interrupted due to application restart');
     wrapper.unmount();
   });
 });

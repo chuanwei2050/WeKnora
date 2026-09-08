@@ -47,6 +47,7 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 	}
 
 	var delay time.Duration
+	var timeout time.Duration
 	maxRetry := 25 // asynq default
 	maxRetrySet := false
 	for _, opt := range opts {
@@ -59,6 +60,10 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 			if n, ok := opt.Value().(int); ok {
 				maxRetry = n
 				maxRetrySet = true
+			}
+		case asynq.TimeoutOpt:
+			if d, ok := opt.Value().(time.Duration); ok {
+				timeout = d
 			}
 		}
 	}
@@ -81,6 +86,11 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 		}
 
 		ctx := context.Background()
+		if timeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, timeout)
+			defer cancel()
+		}
 		start := time.Now()
 		logger.Infof(ctx, "[SyncTask] Executing task type=%s id=%s", task.Type(), taskID)
 
@@ -101,6 +111,10 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 				logger.Infof(ctx, "[SyncTask] Task completed type=%s id=%s elapsed=%v",
 					task.Type(), taskID, time.Since(start))
 				return
+			}
+			if ctx.Err() != nil {
+				lastErr = ctx.Err()
+				break
 			}
 		}
 

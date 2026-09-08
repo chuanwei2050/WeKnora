@@ -1,11 +1,17 @@
 import logging
+import os
 from typing import Any, Optional
 
 from docreader.models.document import Document
+from docreader.parser.large_docx_parser import LargeDocxTextParser
 from docreader.parser.registry import registry
 from docreader.parser.web_parser import WebParser
 
 logger = logging.getLogger(__name__)
+
+LARGE_DOCX_TEXT_ONLY_BYTES = int(
+    os.getenv("DOCREADER_LARGE_DOCX_TEXT_ONLY_MB", "256")
+) * 1024 * 1024
 
 
 class Parser:
@@ -40,7 +46,14 @@ class Parser:
             engine or "builtin",
         )
 
-        cls = self.registry.get_parser_class(engine, file_type)
+        if file_type.lower() == "docx" and len(content) > LARGE_DOCX_TEXT_ONLY_BYTES:
+            cls = LargeDocxTextParser
+            logger.info(
+                "Large DOCX detected (%d bytes); using text-only parser to bound memory",
+                len(content),
+            )
+        else:
+            cls = self.registry.get_parser_class(engine, file_type)
         logger.info(
             "Creating %s parser instance for %s file",
             cls.__name__,

@@ -84,6 +84,8 @@ type KnowledgeService interface {
 	DeleteKnowledgeList(ctx context.Context, ids []string) error
 	// GetKnowledgeFile retrieves the file associated with the knowledge.
 	GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error)
+	// GetKnowledgeFileURL returns a storage-backed direct URL when available.
+	GetKnowledgeFileURL(ctx context.Context, id string) (string, string, int64, error)
 	// UpdateKnowledge updates knowledge information.
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
 	// UpdateManualKnowledge updates manual Markdown knowledge content.

@@ -8,7 +8,7 @@ import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import mermaid from "mermaid";
 import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
-import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile } from "@/api/knowledge-base/index";
+import { downKnowledgeDetails, getKnowledgeDownloadTarget, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile } from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
@@ -730,7 +730,26 @@ watch(() => props.details?.description, () => {
 });
 watch(summaryRef, () => checkSummaryOverflow());
 
-const downloadFile = () => {
+const LARGE_FILE_DIRECT_DOWNLOAD_BYTES = 256 * 1024 * 1024;
+
+const downloadFile = async () => {
+  const fileSize = Number(props.details?.file_size || 0);
+  if (fileSize > LARGE_FILE_DIRECT_DOWNLOAD_BYTES) {
+    try {
+      const response = await getKnowledgeDownloadTarget(props.details.id);
+      if (response.data.direct && response.data.url) {
+        window.location.assign(response.data.url);
+        return;
+      }
+    } catch (err: unknown) {
+      const message = typeof err === 'object' && err !== null && 'message' in err
+        && typeof err.message === 'string' && err.message
+        ? err.message
+        : t('file.downloadFailed');
+      MessagePlugin.error(message);
+      return;
+    }
+  }
   downKnowledgeDetails(props.details.id)
     .then((result) => {
       if (result) {
@@ -752,8 +771,12 @@ const downloadFile = () => {
         })
       }
     })
-    .catch((err) => {
-      MessagePlugin.error(t('file.downloadFailed'));
+    .catch((err: unknown) => {
+      const message = typeof err === 'object' && err !== null && 'message' in err
+        && typeof err.message === 'string' && err.message
+        ? err.message
+        : t('file.downloadFailed');
+      MessagePlugin.error(message);
     });
 };
 const handleDetailsScroll = () => {
@@ -991,6 +1014,9 @@ const handleDetailsScroll = () => {
           :knowledgeId="details.id"
           :fileType="details.file_type"
           :fileName="details.title"
+          :fileSize="details.file_size"
+          :parseStatus="details.parse_status"
+          :parseError="details.error_message"
           :contentRevision="details.content_revision"
           :active="viewMode === 'preview'"
           @switchToChunks="viewMode = 'chunks'"

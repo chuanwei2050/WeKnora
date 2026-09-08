@@ -182,6 +182,7 @@ services:
       - docreader-tmp-dev:/tmp/docreader
     environment:
       - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
+      - DOCREADER_LARGE_DOCX_TEXT_ONLY_MB=${DOCREADER_LARGE_DOCX_TEXT_ONLY_MB:-256}
       - MINERU_ENDPOINT=${MINERU_ENDPOINT:-}
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-2047}
     healthcheck:

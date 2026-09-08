@@ -1192,6 +1192,36 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 	})
 }
 
+// GetKnowledgeDownloadURL returns a direct storage URL for large downloads.
+// @Summary 获取知识文件直链
+// @Tags 知识管理
+// @Produce json
+// @Param id path string true "知识ID"
+// @Success 200 {object} map[string]interface{}
+// @Security Bearer
+// @Router /knowledge/{id}/download-url [get]
+func (h *KnowledgeHandler) GetKnowledgeDownloadURL(c *gin.Context) {
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	fileURL, filename, size, err := h.kgService.GetKnowledgeFileURL(effCtx, id)
+	if err != nil {
+		c.Error(errors.NewInternalServerError("Failed to generate download URL").WithDetails(err.Error()))
+		return
+	}
+	direct := strings.HasPrefix(fileURL, "http://") || strings.HasPrefix(fileURL, "https://")
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"url": fileURL, "filename": filename, "file_size": size, "direct": direct,
+	}})
+}
+
 // mimeTypeByExt returns the MIME type for a given file extension.
 func mimeTypeByExt(filename string) string {
 	ext := strings.ToLower(filename)

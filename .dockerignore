@@ -19,6 +19,7 @@
 .venv_proto/
 **/.python-version
 **/__pycache__/
+**/.pytest_cache/
 **/*.pyc
 
 # Node / 前端
