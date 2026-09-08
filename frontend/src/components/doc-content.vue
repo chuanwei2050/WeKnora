@@ -8,12 +8,13 @@ import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import mermaid from "mermaid";
 import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
-import { downKnowledgeDetails, getKnowledgeDownloadTarget, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile } from "@/api/knowledge-base/index";
+import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile } from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { useI18n } from 'vue-i18n';
 import DocumentPreview from '@/components/document-preview.vue';
+import { streamAuthenticatedFileToDisk } from '@/utils/stream-download';
 
 const { t } = useI18n();
 
@@ -77,19 +78,6 @@ let url = ref('')
 // 视图模式：chunks / merged / preview
 // file 类型默认「预览」，URL / 手动创建 默认「全文」
 const viewMode = ref<'chunks' | 'merged' | 'preview'>('merged');
-const previewScope = ref<'partial' | 'full'>('partial');
-const fullPreviewStatus = ref<'none' | 'pending' | 'processing' | 'completed' | 'failed'>('none');
-const previewTruncated = ref(false);
-const isLargeOfficeFile = computed(() => {
-  const type = String(props.details?.file_type || '').toLowerCase();
-  const isOffice = ['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'].includes(type);
-  return isOffice && (Number(props.details?.file_size || 0) > 100 * 1024 * 1024 || previewTruncated.value);
-});
-watch(() => props.details?.id, () => {
-  previewTruncated.value = false;
-  previewScope.value = 'partial';
-});
-
 // 合并后的文档内容（在下方通过 computed 定义）
 
 /**
@@ -744,23 +732,39 @@ watch(() => props.details?.description, () => {
 watch(summaryRef, () => checkSummaryOverflow());
 
 const LARGE_FILE_DIRECT_DOWNLOAD_BYTES = 256 * 1024 * 1024;
+const largeDownloadProgress = ref<number | null>(null);
+
+const largeDownloadLabel = computed(() => {
+  if (largeDownloadProgress.value === null) return t('file.download');
+  return t('file.downloading', { progress: largeDownloadProgress.value });
+});
 
 const downloadFile = async () => {
+  if (largeDownloadProgress.value !== null) return;
   const fileSize = Number(props.details?.file_size || 0);
   if (fileSize > LARGE_FILE_DIRECT_DOWNLOAD_BYTES) {
+    const downloadUrl = `/api/v1/knowledge/${encodeURIComponent(props.details.id)}/download`;
     try {
-      const response = await getKnowledgeDownloadTarget(props.details.id);
-      if (response.data.direct && response.data.url) {
-        window.location.assign(response.data.url);
+      largeDownloadProgress.value = 0;
+      const streamed = await streamAuthenticatedFileToDisk(
+        downloadUrl,
+        props.details.title,
+        ({ loaded, total }) => {
+          if (total) largeDownloadProgress.value = Math.min(99, Math.floor((loaded / total) * 100));
+        },
+      );
+      if (streamed) {
+        largeDownloadProgress.value = 100;
+        MessagePlugin.success(t('file.downloadSuccess'));
         return;
       }
-    } catch (err: unknown) {
-      const message = typeof err === 'object' && err !== null && 'message' in err
-        && typeof err.message === 'string' && err.message
-        ? err.message
-        : t('file.downloadFailed');
-      MessagePlugin.error(message);
+    } catch (error) {
+      if ((error as DOMException)?.name === 'AbortError') return;
+      console.error('Large file streaming download failed', error);
+      MessagePlugin.error(t('file.downloadFailed'));
       return;
+    } finally {
+      largeDownloadProgress.value = null;
     }
   }
   downKnowledgeDetails(props.details.id)
@@ -826,8 +830,9 @@ const handleDetailsScroll = () => {
         <span class="label">{{ $t('knowledgeBase.fileName') }}</span>
         <div class="download_box">
           <span class="doc_t">{{ details.title }}</span>
-          <div class="icon_box" @click="downloadFile()" aria-label="Download">
-            <img class="download_box" src="@/assets/img/download.svg" alt="">
+          <div class="icon_box" @click="downloadFile()" aria-label="Download" :title="largeDownloadLabel">
+            <t-loading v-if="largeDownloadProgress !== null" size="small" />
+            <img v-else class="download_box" src="@/assets/img/download.svg" alt="">
           </div>
         </div>
       </div>
@@ -894,23 +899,12 @@ const handleDetailsScroll = () => {
               <t-button 
                 v-if="canPreview()"
                 size="small" 
-                :variant="viewMode === 'preview' && (!isLargeOfficeFile || previewScope === 'partial') ? 'base' : 'outline'"
-                :theme="viewMode === 'preview' && (!isLargeOfficeFile || previewScope === 'partial') ? 'primary' : 'default'"
-                @click="viewMode = 'preview'; previewScope = 'partial'"
+                :variant="viewMode === 'preview' ? 'base' : 'outline'"
+                :theme="viewMode === 'preview' ? 'primary' : 'default'"
+                @click="viewMode = 'preview'"
                 class="view-mode-btn"
               >
                 {{ $t('preview.tab') }}
-              </t-button>
-              <t-button
-                v-if="isLargeOfficeFile"
-                size="small"
-                :variant="viewMode === 'preview' && previewScope === 'full' ? 'base' : 'outline'"
-                :theme="viewMode === 'preview' && previewScope === 'full' ? 'primary' : 'default'"
-                :loading="fullPreviewStatus === 'pending' || fullPreviewStatus === 'processing'"
-                @click="viewMode = 'preview'; previewScope = 'full'"
-                class="view-mode-btn"
-              >
-                {{ $t('preview.fullPreview') }}
               </t-button>
               <t-button 
                 v-if="!canPreview()"
@@ -1041,13 +1035,9 @@ const handleDetailsScroll = () => {
           :fileSize="details.file_size"
           :parseStatus="details.parse_status"
           :parseError="details.error_message"
-          :previewScope="previewScope"
-          :forceFullPreview="previewTruncated"
           :contentRevision="details.content_revision"
           :active="viewMode === 'preview'"
           @switchToChunks="viewMode = 'chunks'"
-          @fullPreviewStatus="fullPreviewStatus = $event"
-          @previewTruncated="previewTruncated = $event"
         />
       </div>
       
@@ -1058,8 +1048,8 @@ const handleDetailsScroll = () => {
 @import "./css/markdown.less";
 
 :deep(.t-drawer .t-drawer__content-wrapper) {
-  width: min(654px, 85vw) !important; // 减少到85%视口宽度，给左侧留更多空间
-  max-width: 654px !important;
+  width: min(1100px, 82vw) !important;
+  max-width: 1100px !important;
 }
 
 // 在小屏幕上进一步调整

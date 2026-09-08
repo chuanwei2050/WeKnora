@@ -4250,17 +4250,16 @@ func (s *knowledgeService) RequestDocumentPreview(ctx context.Context, id string
 	if !supported[strings.ToLower(knowledge.FileType)] {
 		return nil, fmt.Errorf("full preview is not supported for %s files", knowledge.FileType)
 	}
-	statusColumn, errorColumn := "preview_status", "preview_error"
+	if full {
+		return nil, fmt.Errorf("full document preview is disabled; download the original file")
+	}
+	const statusColumn, errorColumn = "preview_status", "preview_error"
 	status := knowledge.PreviewStatus
 	requestRevision := knowledge.UpdatedAt.UnixNano()
-	if full {
-		statusColumn, errorColumn = "full_preview_status", "full_preview_error"
-		status = knowledge.FullPreviewStatus
-	}
 	if status == "completed" {
 		return knowledge, nil
 	}
-	if (status == "pending" || status == "processing") && time.Since(knowledge.UpdatedAt) < 65*time.Minute {
+	if (status == "pending" || status == "processing") && time.Since(knowledge.UpdatedAt) < 2*time.Minute {
 		return knowledge, nil
 	}
 	if err := s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, statusColumn, "pending"); err != nil {
@@ -4269,20 +4268,16 @@ func (s *knowledgeService) RequestDocumentPreview(ctx context.Context, id string
 	if err := s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, errorColumn, ""); err != nil {
 		return nil, err
 	}
-	if full {
-		knowledge.FullPreviewStatus, knowledge.FullPreviewError = "pending", ""
-	} else {
-		knowledge.PreviewStatus, knowledge.PreviewError = "pending", ""
-	}
+	knowledge.PreviewStatus, knowledge.PreviewError = "pending", ""
 	payload, err := json.Marshal(types.DocumentPreviewPayload{
-		TenantID: tenantID, KnowledgeID: id, FileHash: knowledge.FileHash, Full: full,
+		TenantID: tenantID, KnowledgeID: id, FileHash: knowledge.FileHash, Full: false,
 	})
 	if err != nil {
 		return nil, err
 	}
 	task := asynq.NewTask(types.TypeDocumentPreview, payload,
 		asynq.Queue(types.LargeDocumentQueue), asynq.MaxRetry(0), asynq.Timeout(60*time.Minute),
-		asynq.TaskID(fmt.Sprintf("document-preview-%s-%t-%d", id, full, requestRevision)))
+		asynq.TaskID(fmt.Sprintf("document-preview-%s-partial-%d", id, requestRevision)))
 	if _, err := s.task.Enqueue(task); err != nil {
 		if errors.Is(err, asynq.ErrTaskIDConflict) {
 			return knowledge, nil
@@ -4319,15 +4314,17 @@ func (s *knowledgeService) ProcessDocumentPreview(ctx context.Context, task *asy
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return err
 	}
+	// Ignore legacy full-preview jobs that may still be present after an upgrade.
+	// Large Office documents now expose only a bounded first-30-page preview.
+	if payload.Full {
+		return nil
+	}
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
 	if err != nil {
 		return err
 	}
-	statusColumn, pathColumn, errorColumn := "preview_status", "preview_file_path", "preview_error"
-	if payload.Full {
-		statusColumn, pathColumn, errorColumn = "full_preview_status", "full_preview_file_path", "full_preview_error"
-	}
+	const statusColumn, pathColumn, errorColumn = "preview_status", "preview_file_path", "preview_error"
 	fail := func(cause error, userMessage string) error {
 		latest, lookupErr := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
 		if lookupErr == nil && latest.FileHash == payload.FileHash {
@@ -4344,10 +4341,28 @@ func (s *knowledgeService) ProcessDocumentPreview(ctx context.Context, task *asy
 		return err
 	}
 	_ = s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, errorColumn, "")
+	heartbeatDone := make(chan struct{})
+	defer close(heartbeatDone)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatDone:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, statusColumn, "processing"); err != nil {
+					logger.Warnf(ctx, "Document preview heartbeat failed: knowledge_id=%s error=%v", knowledge.ID, err)
+				}
+			}
+		}
+	}()
 
 	tempDir, err := os.MkdirTemp("", "weknora-preview-*")
 	if err != nil {
-		return fail(err, "创建完整预览临时目录失败，请稍后重试")
+		return fail(err, "创建部分预览临时目录失败，请稍后重试")
 	}
 	defer os.RemoveAll(tempDir)
 	input, _, err := s.GetKnowledgeFile(ctx, knowledge.ID)
@@ -4359,7 +4374,7 @@ func (s *knowledgeService) ProcessDocumentPreview(ctx context.Context, task *asy
 	inputPath := filepath.Join(tempDir, "source"+ext)
 	inputFile, err := os.OpenFile(inputPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 	if err != nil {
-		return fail(err, "准备完整预览文件失败，请稍后重试")
+		return fail(err, "准备部分预览文件失败，请稍后重试")
 	}
 	_, copyErr := io.Copy(inputFile, input)
 	closeErr := inputFile.Close()
@@ -4367,11 +4382,11 @@ func (s *knowledgeService) ProcessDocumentPreview(ctx context.Context, task *asy
 		return fail(copyErr, "读取原始文档失败，请稍后重试")
 	}
 	if closeErr != nil {
-		return fail(closeErr, "准备完整预览文件失败，请稍后重试")
+		return fail(closeErr, "准备部分预览文件失败，请稍后重试")
 	}
 	soffice, err := exec.LookPath("soffice")
 	if err != nil {
-		return fail(fmt.Errorf("LibreOffice is not installed: %w", err), "完整预览转换服务暂不可用，请联系管理员")
+		return fail(fmt.Errorf("LibreOffice is not installed: %w", err), "部分预览转换服务暂不可用，请联系管理员")
 	}
 	profile := filepath.Join(tempDir, "profile")
 	profileURL := (&url.URL{Scheme: "file", Path: filepath.ToSlash(profile)}).String()
@@ -4382,10 +4397,7 @@ func (s *knowledgeService) ProcessDocumentPreview(ctx context.Context, task *asy
 	case "xls", "xlsx":
 		exportFilter = "calc_pdf_Export"
 	}
-	pageRange := "1-30"
-	if payload.Full {
-		pageRange = "1-2000"
-	}
+	const pageRange = "1-30"
 	pdfFilter := `pdf:` + exportFilter + `:{"PageRange":{"type":"string","value":"` + pageRange + `"}}`
 	args := []string{"-env:UserInstallation=" + profileURL,
 		"--headless", "--convert-to", pdfFilter, "--outdir", tempDir, inputPath}
@@ -4396,33 +4408,30 @@ func (s *knowledgeService) ProcessDocumentPreview(ctx context.Context, task *asy
 	}
 	cmd := exec.CommandContext(ctx, command, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fail(fmt.Errorf("preview conversion failed: %w: %s", err, strings.TrimSpace(string(output))), "完整预览转换失败，请稍后重试")
+		return fail(fmt.Errorf("preview conversion failed: %w: %s", err, strings.TrimSpace(string(output))), "部分预览转换失败，请稍后重试")
 	}
 	outputPath := filepath.Join(tempDir, "source.pdf")
 	info, err := os.Stat(outputPath)
 	if err != nil {
-		return fail(fmt.Errorf("preview PDF was not generated: %w", err), "完整预览转换失败，请稍后重试")
+		return fail(fmt.Errorf("preview PDF was not generated: %w", err), "部分预览转换失败，请稍后重试")
 	}
 	const maxPreviewBytes int64 = 256 * 1024 * 1024
 	if info.Size() > maxPreviewBytes {
-		return fail(fmt.Errorf("preview PDF exceeds the 256 MiB output limit"), "生成的完整预览超过 256 MiB 安全上限，请使用部分预览或下载原文件")
+		return fail(fmt.Errorf("preview PDF exceeds the 256 MiB output limit"), "生成的部分预览超过 256 MiB 安全上限，请下载原文件")
 	}
 	pdf, err := os.ReadFile(outputPath)
 	if err != nil {
-		return fail(err, "读取完整预览结果失败，请稍后重试")
+		return fail(err, "读取部分预览结果失败，请稍后重试")
 	}
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
 	if err != nil {
 		return fail(err, "读取知识库配置失败，请稍后重试")
 	}
 	fileService := s.resolveFileServiceForPath(ctx, kb, knowledge.FilePath)
-	suffix := "-preview-partial.pdf"
-	if payload.Full {
-		suffix = "-preview-full.pdf"
-	}
+	const suffix = "-preview-partial.pdf"
 	previewPath, err := fileService.SaveBytes(ctx, pdf, payload.TenantID, knowledge.ID+suffix, false)
 	if err != nil {
-		return fail(err, "保存完整预览失败，请稍后重试")
+		return fail(err, "保存部分预览失败，请稍后重试")
 	}
 	latest, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
 	if err != nil {
@@ -10227,8 +10236,26 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
 	s.processChunks(ctx, kb, knowledge, chunks, processOpts)
+	s.prewarmLargeOfficePreviews(ctx, knowledge)
 
 	return nil
+}
+
+// prewarmLargeOfficePreviews moves the expensive first render off the user's
+// click path. The dedicated document-large queue serializes these jobs, so
+// normal document processing is not starved by a very large Office file.
+func (s *knowledgeService) prewarmLargeOfficePreviews(ctx context.Context, knowledge *types.Knowledge) {
+	const threshold int64 = 100 * 1024 * 1024
+	if knowledge == nil || knowledge.FileSize <= threshold {
+		return
+	}
+	supported := map[string]bool{"doc": true, "docx": true, "ppt": true, "pptx": true, "xls": true, "xlsx": true}
+	if !supported[strings.ToLower(knowledge.FileType)] {
+		return
+	}
+	if _, err := s.RequestDocumentPreview(ctx, knowledge.ID, false); err != nil {
+		logger.Warnf(ctx, "failed to prewarm partial preview for %s: %v", knowledge.ID, err)
+	}
 }
 
 // convert handles both file and URL reading using a unified ReadRequest.

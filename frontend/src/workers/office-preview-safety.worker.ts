@@ -2,9 +2,11 @@ type OfficeSafetyResponse =
   | { ok: true; safe: boolean }
   | { ok: false; message: string };
 
-const MAX_EXPANDED_BYTES = 20 * 1024 * 1024;
-const MAX_ARCHIVE_ENTRIES = 1000;
-const MAX_COMPRESSION_RATIO = 20;
+// Files up to 100 MiB stay on the existing browser renderer. Reject hard
+// archive hazards here instead of reapplying the former 20 MiB soft limit.
+const MAX_EXPANDED_BYTES = 1024 * 1024 * 1024;
+const MAX_ARCHIVE_ENTRIES = 50_000;
+const MAX_COMPRESSION_RATIO = 100;
 const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_FILE_SIGNATURE = 0x02014b50;
 

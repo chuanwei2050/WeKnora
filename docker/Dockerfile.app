@@ -79,6 +79,8 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
     apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
+COPY docker/fonts-weknora-cjk.conf /etc/fonts/conf.d/64-weknora-cjk.conf
+
 # Then switch to mirror if specified and install other packages
 RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         sed -i -E "s@https?://(deb|security).debian.org@http://${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
@@ -93,7 +95,8 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         python3 python3-pip python3-dev libffi-dev libssl-dev \
         nodejs npm \
         gosu \
-        ffmpeg libreoffice-calc libreoffice-writer && \
+        ffmpeg fonts-noto-cjk libreoffice-calc libreoffice-impress libreoffice-writer && \
+    fc-cache -f && \
     python3 -m pip install --break-system-packages --upgrade pip setuptools wheel && \
     chown -R appuser:appuser /home/appuser && \
     apt-get clean && \

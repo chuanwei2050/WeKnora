@@ -26,37 +26,35 @@ function getCurrentLanguage(): string {
   return i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN'
 }
 
+export function getAuthenticatedRequestHeaders(url = ''): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Accept-Language': getCurrentLanguage(),
+    'X-Request-ID': generateRandomString(12),
+  };
+  const embedded = isCookieEmbeddedMode();
+  const token = embedded ? getEmbeddedSessionToken() : localStorage.getItem('weknora_token');
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const selectedTenantId = embedded ? null : localStorage.getItem('weknora_selected_tenant_id');
+  const defaultTenantRaw = localStorage.getItem('weknora_tenant');
+  if (selectedTenantId && !url.includes('/api/v1/admin/')) {
+    try {
+      const defaultTenant = defaultTenantRaw ? JSON.parse(defaultTenantRaw) : null;
+      const defaultId = defaultTenant?.id ? String(defaultTenant.id) : null;
+      if (selectedTenantId !== defaultId) headers['X-Tenant-ID'] = selectedTenantId;
+    } catch (error) {
+      console.error('Failed to parse tenant info', error);
+    }
+  }
+  return headers;
+}
+
 
 instance.interceptors.request.use(
   (config) => {
     const embedded = isCookieEmbeddedMode();
     config.withCredentials = embedded;
-    // Embedded hosts may block third-party cookies; prefer in-memory session_token.
-    const token = embedded ? getEmbeddedSessionToken() : localStorage.getItem('weknora_token');
-    if (token) {
-      config.headers["Authorization"] = `Bearer ${token}`;
-    }
-    
-    // 添加用户语言偏好
-    config.headers["Accept-Language"] = getCurrentLanguage();
-    
-    // 添加跨租户访问请求头（如果选择了其他租户）
-    const selectedTenantId = embedded ? null : localStorage.getItem('weknora_selected_tenant_id');
-    const defaultTenantId = localStorage.getItem('weknora_tenant');
-    if (selectedTenantId && !config.url?.includes('/api/v1/admin/')) {
-      try {
-        const defaultTenant = defaultTenantId ? JSON.parse(defaultTenantId) : null;
-        const defaultId = defaultTenant?.id ? String(defaultTenant.id) : null;
-        // 如果选择的租户ID与默认租户ID不同，添加请求头
-        if (selectedTenantId !== defaultId) {
-          config.headers["X-Tenant-ID"] = selectedTenantId;
-        }
-      } catch (e) {
-        console.error('Failed to parse tenant info', e);
-      }
-    }
-    
-    config.headers["X-Request-ID"] = `${generateRandomString(12)}`;
+    Object.assign(config.headers, getAuthenticatedRequestHeaders(config.url || ''));
     if (embedded && !['get', 'head', 'options'].includes((config.method || 'get').toLowerCase())) {
       const csrf = getEmbeddedCSRFToken();
       if (csrf) config.headers['X-CSRF-Token'] = csrf;

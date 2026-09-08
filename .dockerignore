@@ -20,6 +20,7 @@
 **/.python-version
 **/__pycache__/
 **/.pytest_cache/
+/docreader/.pytest_cache/
 **/*.pyc
 
 # Node / 前端

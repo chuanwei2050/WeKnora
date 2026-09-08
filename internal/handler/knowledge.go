@@ -1155,7 +1155,7 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 		return
 	}
 
-	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
 	if err != nil {
 		c.Error(err)
 		return
@@ -1177,23 +1177,38 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 		secutils.SanitizeForLog(filename),
 	)
 
+	serveKnowledgeDownload(c, file, filename, knowledge.FileSize, knowledge.UpdatedAt)
+}
+
+func serveKnowledgeDownload(c *gin.Context, file io.ReadCloser, filename string, size int64, modifiedAt time.Time) {
 	// Set response headers for file download
 	c.Header("Content-Description", "File Transfer")
 	c.Header("Content-Transfer-Encoding", "binary")
 	cd := mime.FormatMediaType("attachment", map[string]string{"filename": filename})
 	c.Header("Content-Disposition", cd)
 	c.Header("Content-Type", "application/octet-stream")
+	if size > 0 {
+		c.Header("Content-Length", strconv.FormatInt(size, 10))
+	}
 	c.Header("Expires", "0")
 	c.Header("Cache-Control", "must-revalidate")
 	c.Header("Pragma", "public")
 
+	// Local files and MinIO objects implement io.ReadSeeker. ServeContent adds
+	// standards-compliant Range/If-Range handling so interrupted large downloads
+	// can resume instead of restarting from byte zero.
+	if seeker, ok := file.(io.ReadSeeker); ok {
+		http.ServeContent(c.Writer, c.Request, filename, modifiedAt, seeker)
+		return
+	}
+
 	// Stream file content to response
 	c.Stream(func(w io.Writer) bool {
 		if _, err := io.Copy(w, file); err != nil {
-			logger.Errorf(ctx, "Failed to send file: %v", err)
+			logger.Errorf(c.Request.Context(), "Failed to send file: %v", err)
 			return false
 		}
-		logger.Debug(ctx, "File sending completed")
+		logger.Debug(c.Request.Context(), "File sending completed")
 		return false
 	})
 }
