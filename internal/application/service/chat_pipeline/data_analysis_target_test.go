@@ -52,13 +52,13 @@ func TestSelectDataAnalysisTargetsPrefersExplicitTablesWithoutExceedingLimit(t *
 	}
 }
 
-func TestSelectDataAnalysisTargetsPrefersRerankedTableMetadata(t *testing.T) {
+func TestSelectDataAnalysisTargetsPreservesRerankOrderAcrossChunkTypes(t *testing.T) {
 	row := &types.SearchResult{KnowledgeID: "row", KnowledgeFilename: "large.xlsx", ChunkType: string(types.ChunkTypeText)}
 	column := &types.SearchResult{KnowledgeID: "column", KnowledgeFilename: "relevant.xlsx", ChunkType: string(types.ChunkTypeTableColumn)}
 
 	got := selectDataAnalysisTargets([]*types.SearchResult{row, column}, nil, nil, 3)
-	if len(got) != 2 || got[0] != column || got[1] != row {
-		t.Fatalf("expected metadata first and remaining table candidates as fallback, got %#v", got)
+	if len(got) != 2 || got[0] != row || got[1] != column {
+		t.Fatalf("expected rerank order to win over chunk type, got %#v", got)
 	}
 }
 
@@ -74,8 +74,23 @@ func TestExplicitDataAnalysisTargetDoesNotOverrideNonTableIntent(t *testing.T) {
 	}
 }
 
+func TestUncertainTableIntentDoesNotAttemptDataAnalysis(t *testing.T) {
+	manage := &types.ChatManage{}
+	if shouldAttemptDataAnalysis(manage) {
+		t.Fatal("nil table intent should not trigger data analysis")
+	}
+}
+
+func TestConfirmedTableIntentAttemptsDataAnalysis(t *testing.T) {
+	yes := true
+	manage := &types.ChatManage{PipelineState: types.PipelineState{NeedsTableQuery: &yes}}
+	if !shouldAttemptDataAnalysis(manage) {
+		t.Fatal("confirmed table intent should trigger data analysis")
+	}
+}
+
 func TestDataAnalysisCandidatesUseRerankResults(t *testing.T) {
-	search := &types.SearchResult{KnowledgeID: "search", KnowledgeFilename: "large.xlsx"}
+	search := &types.SearchResult{KnowledgeID: "search", KnowledgeFilename: "large.docx"}
 	reranked := &types.SearchResult{KnowledgeID: "reranked", KnowledgeFilename: "relevant.xlsx"}
 	scored := &types.SearchResult{KnowledgeID: "scored", KnowledgeFilename: "best.xlsx"}
 	manage := &types.ChatManage{PipelineState: types.PipelineState{
@@ -87,6 +102,58 @@ func TestDataAnalysisCandidatesUseRerankResults(t *testing.T) {
 	got := dataAnalysisCandidatesAfterRerank(manage)
 	if len(got) != 1 || got[0] != scored {
 		t.Fatalf("expected rerank-scored candidates, got %#v", got)
+	}
+}
+
+func TestDataAnalysisCandidatesRetainRecalledTableRejectedByRerank(t *testing.T) {
+	text := &types.SearchResult{ID: "text", KnowledgeID: "doc", KnowledgeFilename: "人员.docx"}
+	table := &types.SearchResult{ID: "table", KnowledgeID: "sheet", KnowledgeFilename: "人员.xlsx"}
+	manage := &types.ChatManage{
+		PipelineState: types.PipelineState{
+			SearchResult:               []*types.SearchResult{text},
+			IndependentTableCandidates: []*types.SearchResult{table},
+			RerankScoredResult:         []*types.SearchResult{text},
+		},
+	}
+
+	got := dataAnalysisCandidatesAfterRerank(manage)
+	if len(got) != 2 || got[0] != text || got[1] != table {
+		t.Fatalf("recalled table was not retained for SQL analysis: %#v", got)
+	}
+}
+
+func TestDataAnalysisCandidatesDoNotUseIndependentRecallWhenRerankHasThreeTables(t *testing.T) {
+	rankedA := &types.SearchResult{KnowledgeID: "ranked-a", KnowledgeFilename: "a.xlsx"}
+	rankedB := &types.SearchResult{KnowledgeID: "ranked-b", KnowledgeFilename: "b.xlsx"}
+	rankedC := &types.SearchResult{KnowledgeID: "ranked-c", KnowledgeFilename: "c.csv"}
+	independent := &types.SearchResult{KnowledgeID: "independent", KnowledgeFilename: "fallback.xlsx"}
+	manage := &types.ChatManage{PipelineState: types.PipelineState{
+		SearchResult:               []*types.SearchResult{rankedA, rankedB, rankedC},
+		IndependentTableCandidates: []*types.SearchResult{independent},
+		RerankScoredResult:         []*types.SearchResult{rankedA, rankedB, rankedC},
+	}}
+
+	got := dataAnalysisCandidatesAfterRerank(manage)
+	if len(got) != 3 || got[0] != rankedA || got[1] != rankedB || got[2] != rankedC {
+		t.Fatalf("independent recall competed with three reranked tables: %#v", got)
+	}
+}
+
+func TestDataAnalysisCandidatesUseIndependentRecallOnlyToFillThreeTables(t *testing.T) {
+	ranked := &types.SearchResult{KnowledgeID: "ranked", KnowledgeFilename: "ranked.xlsx"}
+	text := &types.SearchResult{KnowledgeID: "doc", KnowledgeFilename: "notes.docx"}
+	fallbackA := &types.SearchResult{KnowledgeID: "fallback-a", KnowledgeFilename: "a.xlsx"}
+	fallbackB := &types.SearchResult{KnowledgeID: "fallback-b", KnowledgeFilename: "b.xlsx"}
+	fallbackC := &types.SearchResult{KnowledgeID: "fallback-c", KnowledgeFilename: "c.xlsx"}
+	manage := &types.ChatManage{PipelineState: types.PipelineState{
+		SearchResult:               []*types.SearchResult{text, ranked},
+		IndependentTableCandidates: []*types.SearchResult{fallbackA, fallbackB, fallbackC},
+		RerankScoredResult:         []*types.SearchResult{text, ranked},
+	}}
+
+	got := dataAnalysisCandidatesAfterRerank(manage)
+	if len(got) != 4 || got[0] != text || got[1] != ranked || got[2] != fallbackA || got[3] != fallbackB {
+		t.Fatalf("expected independent recall to fill only two missing table slots: %#v", got)
 	}
 }
 

@@ -134,6 +134,11 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 		defer wg.Done()
 		kbResults := p.searchByTargets(ctx, chatManage, limiter)
 		kbResults = p.governAndLimitResults(ctx, chatManage, kbResults)
+		if shouldAttemptDataAnalysis(chatManage) {
+			// Keep independent table recall out of the ordinary rerank route. Data
+			// analysis uses it only to fill table slots that rerank did not supply.
+			chatManage.IndependentTableCandidates = p.searchDataFileCandidates(ctx, chatManage, limiter)
+		}
 		if len(kbResults) > 0 {
 			mu.Lock()
 			allResults = append(allResults, kbResults...)
@@ -192,6 +197,178 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 		"result_count": 0,
 	})
 	return ErrSearchNothing
+}
+
+// searchDataFileCandidates runs a bounded, table-only indexed recall when the
+// query requires structured operations. Its results stay outside the ordinary
+// rerank route and are used only as data-analysis fallbacks.
+func (p *PluginSearch) searchDataFileCandidates(
+	ctx context.Context,
+	chatManage *types.ChatManage,
+	limiter *retrievalkernel.Limiter,
+) []*types.SearchResult {
+	queryText := strings.TrimSpace(chatManage.RewriteQuery)
+	keywordQueryText := strings.TrimSpace(chatManage.KeywordQuery)
+	if keywordQueryText == "" {
+		keywordQueryText = queryText
+	}
+	const tableCandidateLimit = 10
+	results := make([]*types.SearchResult, 0, tableCandidateLimit)
+	seenKB := make(map[string]struct{}, len(chatManage.SearchTargets))
+	for _, target := range chatManage.SearchTargets {
+		if target == nil || target.Type != types.SearchTargetTypeKnowledgeBase {
+			continue
+		}
+		if _, exists := seenKB[target.KnowledgeBaseID]; exists {
+			continue
+		}
+		seenKB[target.KnowledgeBaseID] = struct{}{}
+		knowledges, err := p.knowledgeService.ListKnowledgeByKnowledgeBaseID(ctx, target.KnowledgeBaseID)
+		if err != nil {
+			pipelineWarn(ctx, "Search", "table_candidate_list_error", map[string]interface{}{
+				"kb_id": target.KnowledgeBaseID, "error": err.Error(),
+			})
+			continue
+		}
+		knowledgeIDs := dataFileKnowledgeIDs(knowledges, target.TagIDs)
+		if len(knowledgeIDs) == 0 || !limiter.Acquire(ctx) {
+			continue
+		}
+		params := types.SearchParams{
+			QueryText:             queryText,
+			KeywordQueryText:      keywordQueryText,
+			KnowledgeIDs:          knowledgeIDs,
+			TagIDs:                target.TagIDs,
+			VectorThreshold:       chatManage.VectorThreshold,
+			KeywordThreshold:      chatManage.KeywordThreshold,
+			MatchCount:            tableCandidateLimit,
+			VectorMatchCount:      max(tableCandidateLimit, chatManage.VectorRecallTopK),
+			KeywordMatchCount:     max(tableCandidateLimit, chatManage.KeywordRecallTopK),
+			RerankCandidateCount:  tableCandidateLimit,
+			RRFVectorWeight:       chatManage.RRFVectorWeight,
+			SkipContextEnrichment: true,
+		}
+		found, searchErr := p.knowledgeBaseService.HybridSearch(ctx, target.KnowledgeBaseID, params)
+		limiter.Release()
+		if searchErr != nil {
+			pipelineWarn(ctx, "Search", "table_candidate_search_error", map[string]interface{}{
+				"kb_id": target.KnowledgeBaseID, "error": searchErr.Error(),
+			})
+			continue
+		}
+		for _, result := range found {
+			if result == nil {
+				continue
+			}
+			results = append(results, result)
+		}
+		metadataFound := p.loadIndependentTableMetadataCandidates(ctx, target, knowledges, queryText, tableCandidateLimit)
+		results = append(results, metadataFound...)
+		pipelineInfo(ctx, "Search", "table_candidate_result", map[string]interface{}{
+			"kb_id": target.KnowledgeBaseID, "data_files": len(knowledgeIDs),
+			"indexed_hit_count": len(found), "metadata_hit_count": len(metadataFound),
+		})
+	}
+	return results
+}
+
+// loadIndependentTableMetadataCandidates makes completed data files available
+// to the independent fallback route when they have no searchable table chunks.
+// These candidates are never appended to SearchResult and never enter rerank.
+func (p *PluginSearch) loadIndependentTableMetadataCandidates(
+	ctx context.Context,
+	target *types.SearchTarget,
+	knowledges []*types.Knowledge,
+	query string,
+	limit int,
+) []*types.SearchResult {
+	if target == nil || limit <= 0 || p.chunkService == nil {
+		return nil
+	}
+	allowedIDs := make(map[string]struct{})
+	for _, id := range dataFileKnowledgeIDs(knowledges, target.TagIDs) {
+		allowedIDs[id] = struct{}{}
+	}
+	candidates := make([]*types.SearchResult, 0, len(allowedIDs))
+	for _, knowledge := range knowledges {
+		if knowledge == nil {
+			continue
+		}
+		if _, allowed := allowedIDs[knowledge.ID]; !allowed {
+			continue
+		}
+		chunks, _, _ := p.chunkService.GetRepository().ListPagedChunksByKnowledgeID(
+			ctx,
+			target.TenantID,
+			knowledge.ID,
+			&types.Pagination{Page: 1, PageSize: 10},
+			[]types.ChunkType{types.ChunkTypeTableSummary, types.ChunkTypeTableColumn},
+			knowledge.TagID,
+			"",
+			"",
+			"asc",
+			knowledge.Type,
+		)
+		var best *types.Chunk
+		if len(chunks) > 0 {
+			best = chunks[0]
+		}
+		content := knowledge.FileName
+		chunkID := "independent-table:" + knowledge.ID
+		chunkType := string(types.ChunkTypeText)
+		chunkIndex, startAt, endAt := 0, -1, -1
+		knowledgeVersionID := knowledge.CurrentVersionID
+		if best != nil {
+			content = strings.TrimSpace(best.Content)
+			chunkID = best.ID
+			chunkType = string(best.ChunkType)
+			chunkIndex, startAt, endAt = best.ChunkIndex, best.StartAt, best.EndAt
+			knowledgeVersionID = best.KnowledgeVersionID
+		}
+		score := searchutil.Jaccard(
+			searchutil.TokenizeSimple(query),
+			searchutil.TokenizeSimple(strings.Join([]string{knowledge.Title, knowledge.FileName, content}, "\n")),
+		)
+		if score <= 0 {
+			continue
+		}
+		candidates = append(candidates, &types.SearchResult{
+			ID: chunkID, Content: content, KnowledgeID: knowledge.ID,
+			KnowledgeVersionID: knowledgeVersionID, KnowledgeTitle: knowledge.Title,
+			KnowledgeFilename: knowledge.FileName, KnowledgeSource: knowledge.Source,
+			KnowledgeChannel: knowledge.Channel, KnowledgeDescription: knowledge.Description,
+			KnowledgeBaseID: knowledge.KnowledgeBaseID, ChunkType: chunkType,
+			ChunkIndex: chunkIndex, StartAt: startAt, EndAt: endAt,
+			Score: score, ScoreDomain: types.RetrievalScoreDomainRelevance,
+			Metadata: map[string]string{"table_candidate_source": "independent_metadata"},
+		})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].Score > candidates[j].Score })
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	return candidates
+}
+
+func dataFileKnowledgeIDs(knowledges []*types.Knowledge, tagIDs []string) []string {
+	allowedTags := make(map[string]struct{}, len(tagIDs))
+	for _, tagID := range tagIDs {
+		allowedTags[tagID] = struct{}{}
+	}
+	ids := make([]string, 0)
+	for _, knowledge := range knowledges {
+		if knowledge == nil || knowledge.ParseStatus != types.ParseStatusCompleted ||
+			!strings.EqualFold(knowledge.EnableStatus, "enabled") || !isDataFile(knowledge.FileName) {
+			continue
+		}
+		if len(allowedTags) > 0 {
+			if _, allowed := allowedTags[knowledge.TagID]; !allowed {
+				continue
+			}
+		}
+		ids = append(ids, knowledge.ID)
+	}
+	return ids
 }
 
 func logCandidateTruncation(ctx context.Context, before, after, limit int) {

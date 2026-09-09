@@ -174,6 +174,7 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	// Merge results from both searches
 	chatManage.SearchResult = interleaveSearchResults(chunkCM.SearchResult, entityCM.SearchResult)
 	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
+	chatManage.IndependentTableCandidates = chunkCM.IndependentTableCandidates
 	chatManage.GraphResult = entityCM.GraphResult
 	chatManage.GraphSearchResult = entityCM.GraphSearchResult
 	chatManage.GraphContext = entityCM.GraphContext

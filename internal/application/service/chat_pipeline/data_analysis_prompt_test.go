@@ -195,7 +195,7 @@ func TestDataAnalysisZeroResultConflictKeepsMatchedContentFallback(t *testing.T)
 
 func TestDataAnalysisPromptDistinguishesSkipFromFailedSQLGeneration(t *testing.T) {
 	prompt := dataAnalysisPrompt("query", "knowledge-id", "people.xlsx", "schema", "sample")
-	for _, requirement := range []string{`action to "execute"`, `action to "skip"`, `action to "clarify"`, "DuckDB SQL", "detail retrieval"} {
+	for _, requirement := range []string{`action to "execute"`, `action to "skip"`, `action to "clarify"`, "DuckDB SQL", "detail retrieval", "lacks columns or values", "relevant"} {
 		if !strings.Contains(prompt, requirement) {
 			t.Fatalf("expected prompt to contain %q", requirement)
 		}

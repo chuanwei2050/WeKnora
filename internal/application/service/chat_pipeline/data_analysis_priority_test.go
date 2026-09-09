@@ -150,12 +150,12 @@ func TestFilterDataAnalysisCandidatesUsesRequestRelativeScores(t *testing.T) {
 	}
 
 	nearTie := []*types.SearchResult{{KnowledgeID: "one", Score: 0.6}, {KnowledgeID: "two", Score: 0.58}}
-	if got := filterDataAnalysisCandidatesByRelativeScore(nearTie, nil, nil, "普通统计问题"); len(got) != 2 {
+	if got := filterDataAnalysisCandidatesByRelativeScore(nearTie, nil, nil, "分别统计A和B人数"); len(got) != 2 {
 		t.Fatalf("strong second candidate was dropped: %#v", got)
 	}
 
 	threeWayTie := []*types.SearchResult{{KnowledgeID: "one", Score: 0.6}, {KnowledgeID: "two", Score: 0.59}, {KnowledgeID: "three", Score: 0.588}}
-	if got := filterDataAnalysisCandidatesByRelativeScore(threeWayTie, nil, nil, "普通统计问题"); len(got) != 3 {
+	if got := filterDataAnalysisCandidatesByRelativeScore(threeWayTie, nil, nil, "分别统计A、B、C人数"); len(got) != 3 {
 		t.Fatalf("strong third candidate was dropped: %#v", got)
 	}
 }
@@ -174,7 +174,7 @@ func TestFilterDataAnalysisCandidatesLimitsObservedThreeTableSelections(t *testi
 		scores []float64
 		want   int
 	}{
-		{name: "a runner-up above ninety percent expands without admitting the third", scores: []float64{0.6354179212, 0.5232272959, 0.58}, want: 2},
+		{name: "a single-target query keeps only the strongest table", scores: []float64{0.6354179212, 0.5232272959, 0.58}, want: 1},
 		{name: "a runner-up below ninety percent stays on one table", scores: []float64{0.6, 0.539, 0.3}, want: 1},
 		{name: "ordinary score gaps stay on one table", scores: []float64{0.6948359011, 0.5403284500, 0.5151196010}, want: 1},
 	}
@@ -238,8 +238,8 @@ func TestFilterDataAnalysisCandidatesDoesNotUseCoverageForSingleTarget(t *testin
 		{KnowledgeID: "third", Score: 0.59, Content: "系统集成项目管理工程师证书人员名单"},
 	}
 	got := filterDataAnalysisCandidatesByRelativeScore(results, nil, nil, query)
-	if len(got) != 2 {
-		t.Fatalf("single-target query selected %d candidates, want 2: %#v", len(got), got)
+	if len(got) != 1 {
+		t.Fatalf("single-target query selected %d candidates, want 1: %#v", len(got), got)
 	}
 }
 
