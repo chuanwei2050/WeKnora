@@ -139,6 +139,12 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	normalizedAliases, err := types.NormalizeQualificationAliases(req.QualificationAliases)
+	if err != nil {
+		c.Error(apperrors.NewBadRequestError("Invalid qualification aliases").WithDetails(err.Error()))
+		return
+	}
+	req.QualificationAliases = normalizedAliases
 
 	logger.Infof(ctx, "Creating knowledge base, name: %s", secutils.SanitizeForLog(req.Name))
 	// Create knowledge base using the service
@@ -513,6 +519,14 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
+	}
+	if req.Config != nil && req.Config.QualificationAliases != nil {
+		normalizedAliases, err := types.NormalizeQualificationAliases(*req.Config.QualificationAliases)
+		if err != nil {
+			c.Error(apperrors.NewBadRequestError("Invalid qualification aliases").WithDetails(err.Error()))
+			return
+		}
+		req.Config.QualificationAliases = &normalizedAliases
 	}
 
 	logger.Infof(ctx, "Updating knowledge base, ID: %s, name: %s",

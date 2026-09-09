@@ -115,11 +115,15 @@ func (i QueryIntent) NeedsKBRetrieval() bool {
 // as the pipeline progresses.
 type PipelineState struct {
 	// Nil means classification is unavailable/uncertain; retain the schema-based decision.
-	NeedsTableQuery *bool       `json:"needs_table_query,omitempty"`
-	RewriteQuery    string      `json:"rewrite_query,omitempty"`
-	KeywordQuery    string      `json:"keyword_query,omitempty"`
-	Intent          QueryIntent `json:"intent,omitempty"`
-	History         []*History  `json:"history,omitempty"`
+	NeedsTableQuery *bool  `json:"needs_table_query,omitempty"`
+	RewriteQuery    string `json:"rewrite_query,omitempty"`
+	KeywordQuery    string `json:"keyword_query,omitempty"`
+	// WebQuery preserves the pre-alias query because KB-specific aliases must not affect web search.
+	WebQuery                    string      `json:"web_query,omitempty"`
+	QualificationAliasesApplied bool        `json:"qualification_aliases_applied,omitempty"`
+	QualificationStandardNames  []string    `json:"qualification_standard_names,omitempty"`
+	Intent                      QueryIntent `json:"intent,omitempty"`
+	History                     []*History  `json:"history,omitempty"`
 
 	SearchResult               []*SearchResult    `json:"-"`
 	IndependentTableCandidates []*SearchResult    `json:"-"`
@@ -231,6 +235,7 @@ func (c *ChatManage) Clone() *ChatManage {
 
 	entityKnowledge := make(map[string]string)
 	maps.Copy(entityKnowledge, c.EntityKnowledge)
+	qualificationStandardNames := append([]string(nil), c.QualificationStandardNames...)
 
 	return &ChatManage{
 		PipelineRequest: PipelineRequest{
@@ -280,21 +285,24 @@ func (c *ChatManage) Clone() *ChatManage {
 			VerifiedAnswer:           c.VerifiedAnswer,
 		},
 		PipelineState: PipelineState{
-			NeedsTableQuery:      c.NeedsTableQuery,
-			RewriteQuery:         c.RewriteQuery,
-			KeywordQuery:         c.KeywordQuery,
-			Intent:               c.Intent,
-			ImageDescription:     c.ImageDescription,
-			ImageDescriptions:    append([]string(nil), c.ImageDescriptions...),
-			QuotedContext:        c.QuotedContext,
-			SystemPromptOverride: c.SystemPromptOverride,
-			RoutingDecision:      c.RoutingDecision,
-			GraphSearchResult:    c.GraphSearchResult,
-			VerifiedResult:       c.VerifiedResult,
-			RenderedContexts:     c.RenderedContexts,
-			Entity:               entity,
-			EntityKBIDs:          entityKBIDs,
-			EntityKnowledge:      entityKnowledge,
+			NeedsTableQuery:             c.NeedsTableQuery,
+			RewriteQuery:                c.RewriteQuery,
+			KeywordQuery:                c.KeywordQuery,
+			WebQuery:                    c.WebQuery,
+			QualificationAliasesApplied: c.QualificationAliasesApplied,
+			QualificationStandardNames:  qualificationStandardNames,
+			Intent:                      c.Intent,
+			ImageDescription:            c.ImageDescription,
+			ImageDescriptions:           append([]string(nil), c.ImageDescriptions...),
+			QuotedContext:               c.QuotedContext,
+			SystemPromptOverride:        c.SystemPromptOverride,
+			RoutingDecision:             c.RoutingDecision,
+			GraphSearchResult:           c.GraphSearchResult,
+			VerifiedResult:              c.VerifiedResult,
+			RenderedContexts:            c.RenderedContexts,
+			Entity:                      entity,
+			EntityKBIDs:                 entityKBIDs,
+			EntityKnowledge:             entityKnowledge,
 		},
 	}
 }

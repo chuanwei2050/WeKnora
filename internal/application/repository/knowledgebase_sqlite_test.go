@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     question_generation_config TEXT NULL,
     wiki_config TEXT,
     indexing_strategy TEXT,
+	qualification_aliases TEXT NOT NULL DEFAULT '[]',
     is_temporary BOOLEAN NOT NULL DEFAULT 0,
     is_pinned INTEGER NOT NULL DEFAULT 0,
     pinned_at DATETIME NULL,

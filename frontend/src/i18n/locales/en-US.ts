@@ -1776,6 +1776,7 @@ export default {
       datasource: 'Data Sources',
       share: 'Sharing',
       indexing: 'Indexing Strategy',
+			aliases: 'Qualification Aliases',
     },
     basic: {
       title: 'Basic Information',
@@ -1789,6 +1790,19 @@ export default {
       descriptionLabel: 'Knowledge Base Description',
       descriptionPlaceholder: 'Enter knowledge base description (optional)'
     },
+		aliases: {
+			title: 'Special Qualification Aliases',
+			description: 'Map business abbreviations to standard qualification names before knowledge-base retrieval.',
+			empty: 'No aliases configured. Add an abbreviation and its standard name.',
+			aliasLabel: 'Alias',
+			aliasPlaceholder: 'e.g. Class-A Build',
+			standardNameLabel: 'Standard name',
+			standardNamePlaceholder: 'Enter the complete qualification name',
+			actionLabel: 'Actions',
+			add: 'Add alias',
+			delete: 'Delete',
+			tip: 'Up to 100 mappings. Aliases must be unique within this knowledge base.',
+		},
     wiki: {
       title: 'Wiki Settings',
       description: 'Configure Wiki auto-generation preferences',
@@ -1905,6 +1919,8 @@ export default {
       buildDataFailed: 'Failed to construct submission data',
       updateSuccess: 'Configuration saved successfully',
       indexModeRequired: 'Please select an indexing mode for FAQ knowledge bases',
+			aliasRequired: 'Alias and standard name are required',
+			aliasDuplicate: 'Alias “{alias}” is duplicated',
       storageChangeConfirm: 'This knowledge base already has files. Changing the storage engine may make old files inaccessible. Do you want to proceed?'
     },
     document: {

@@ -102,6 +102,7 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 		return next()
 	}
 	stageID, stageStarted := emitPipelineStageStart(ctx, chatManage, "knowledge_search", "检索知识库")
+	p.searchPlugin.applyQualificationAliases(ctx, chatManage)
 
 	pipelineInfo(ctx, "SearchParallel", "start", map[string]interface{}{
 		"session_id":   chatManage.SessionID,

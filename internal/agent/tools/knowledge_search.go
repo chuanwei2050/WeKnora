@@ -298,6 +298,19 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 	queries = normalized.Queries
 	searchTargets = normalized.Targets
+	if kbs, aliasErr := t.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, searchTargets.GetAllKnowledgeBaseIDs()); aliasErr != nil {
+		logger.Warnf(ctx, "[Tool][KnowledgeSearch] Qualification alias expansion unavailable: %v", aliasErr)
+	} else {
+		mappings := make([]types.QualificationAliasMappings, 0, len(kbs))
+		for _, kb := range kbs {
+			if kb != nil && len(kb.QualificationAliases) > 0 {
+				mappings = append(mappings, kb.QualificationAliases)
+			}
+		}
+		for i, query := range queries {
+			queries[i] = types.ExpandQueryWithQualificationAliases(query, mappings...)
+		}
+	}
 	params.topK = normalized.CandidateLimit
 	params.vectorRecallTopK = normalized.VectorRecallLimit
 	params.keywordRecallTopK = normalized.KeywordRecallLimit

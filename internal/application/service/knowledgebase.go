@@ -109,6 +109,11 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	if err := kb.ValidateContributionPolicy(); err != nil {
 		return nil, err
 	}
+	normalizedAliases, err := types.NormalizeQualificationAliases(kb.QualificationAliases)
+	if err != nil {
+		return nil, err
+	}
+	kb.QualificationAliases = normalizedAliases
 	// Generate UUID and set creation timestamps
 	if kb.ID == "" {
 		kb.ID = uuid.New().String()
@@ -427,6 +432,13 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		}
 		if config.ReviewerIDs != nil {
 			kb.ReviewerIDs = *config.ReviewerIDs
+		}
+		if config.QualificationAliases != nil {
+			normalizedAliases, err := types.NormalizeQualificationAliases(*config.QualificationAliases)
+			if err != nil {
+				return nil, err
+			}
+			kb.QualificationAliases = normalizedAliases
 		}
 		// Update indexing strategy — syncs to ExtractConfig for backward compat
 		if config.IndexingStrategy != nil {

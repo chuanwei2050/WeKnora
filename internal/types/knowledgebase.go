@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -121,6 +122,8 @@ type KnowledgeBase struct {
 	// IndexingStrategy controls which indexing pipelines are active for this knowledge base.
 	// Pipelines: vector search, keyword search, wiki generation, knowledge graph extraction.
 	IndexingStrategy IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"       gorm:"column:indexing_strategy;type:json"`
+	// QualificationAliases expands business-specific qualification abbreviations before KB retrieval routing.
+	QualificationAliases QualificationAliasMappings `yaml:"qualification_aliases" json:"qualification_aliases" gorm:"column:qualification_aliases;type:json"`
 	// Whether this knowledge base is pinned to the top of the list
 	IsPinned bool `yaml:"is_pinned"               json:"is_pinned"               gorm:"default:false"`
 	// Time when the knowledge base was pinned (nil if not pinned)
@@ -161,6 +164,144 @@ type KnowledgeBaseConfig struct {
 	ContributionMode *ContributionMode          `yaml:"contribution_mode" json:"contribution_mode"`
 	ContributorIDs   *StringArray               `yaml:"contributor_ids" json:"contributor_ids"`
 	ReviewerIDs      *StringArray               `yaml:"reviewer_ids" json:"reviewer_ids"`
+	// QualificationAliases is nil when an update should preserve the existing mappings.
+	QualificationAliases *QualificationAliasMappings `yaml:"qualification_aliases" json:"qualification_aliases"`
+}
+
+const (
+	MaxQualificationAliasMappings = 100
+	MaxQualificationAliasLength   = 64
+	MaxQualificationNameLength    = 256
+	MaxExpandedQueryBytes         = 4096
+)
+
+// QualificationAlias maps one knowledge-base-specific abbreviation to its standard name.
+type QualificationAlias struct {
+	Alias        string `yaml:"alias" json:"alias"`
+	StandardName string `yaml:"standard_name" json:"standard_name"`
+}
+
+// QualificationAliasMappings is persisted as a JSON array on a knowledge base.
+type QualificationAliasMappings []QualificationAlias
+
+func (m QualificationAliasMappings) Value() (driver.Value, error) {
+	if m == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(m)
+}
+
+func (m *QualificationAliasMappings) Scan(value interface{}) error {
+	if value == nil {
+		*m = QualificationAliasMappings{}
+		return nil
+	}
+	var data []byte
+	switch typed := value.(type) {
+	case []byte:
+		data = typed
+	case string:
+		data = []byte(typed)
+	default:
+		return fmt.Errorf("unsupported qualification aliases value type %T", value)
+	}
+	if len(data) == 0 {
+		*m = QualificationAliasMappings{}
+		return nil
+	}
+	return json.Unmarshal(data, m)
+}
+
+// NormalizeQualificationAliases validates untrusted API input and returns its canonical form.
+func NormalizeQualificationAliases(input QualificationAliasMappings) (QualificationAliasMappings, error) {
+	if len(input) > MaxQualificationAliasMappings {
+		return nil, fmt.Errorf("qualification_aliases must contain at most %d mappings", MaxQualificationAliasMappings)
+	}
+	result := make(QualificationAliasMappings, 0, len(input))
+	seen := make(map[string]struct{}, len(input))
+	for i, item := range input {
+		alias := strings.TrimSpace(item.Alias)
+		standardName := strings.TrimSpace(item.StandardName)
+		if alias == "" || standardName == "" {
+			return nil, fmt.Errorf("qualification_aliases[%d] alias and standard_name are required", i)
+		}
+		if len([]rune(alias)) > MaxQualificationAliasLength {
+			return nil, fmt.Errorf("qualification_aliases[%d].alias must contain at most %d characters", i, MaxQualificationAliasLength)
+		}
+		if len([]rune(standardName)) > MaxQualificationNameLength {
+			return nil, fmt.Errorf("qualification_aliases[%d].standard_name must contain at most %d characters", i, MaxQualificationNameLength)
+		}
+		key := strings.ToLower(alias)
+		if _, ok := seen[key]; ok {
+			return nil, fmt.Errorf("qualification_aliases contains duplicate alias %q", alias)
+		}
+		seen[key] = struct{}{}
+		result = append(result, QualificationAlias{Alias: alias, StandardName: standardName})
+	}
+	return result, nil
+}
+
+// ExpandQueryWithQualificationAliases appends matching standard names while preserving the full original query.
+func ExpandQueryWithQualificationAliases(query string, mappings ...QualificationAliasMappings) string {
+	original := strings.TrimSpace(query)
+	if original == "" {
+		return original
+	}
+	standardNames := MatchingQualificationStandardNames(original, mappings...)
+	expanded := original
+	for _, standardName := range standardNames {
+		addition := " " + standardName
+		if len([]byte(expanded))+len([]byte(addition)) > MaxExpandedQueryBytes {
+			break
+		}
+		expanded += addition
+	}
+	return expanded
+}
+
+// MatchingQualificationStandardNames returns deterministic, de-duplicated matches for diagnostics and graph lookup.
+func MatchingQualificationStandardNames(query string, mappings ...QualificationAliasMappings) []string {
+	original := strings.TrimSpace(query)
+	if original == "" {
+		return nil
+	}
+	all := make(QualificationAliasMappings, 0)
+	for _, group := range mappings {
+		all = append(all, group...)
+	}
+	sort.SliceStable(all, func(i, j int) bool {
+		return len([]rune(all[i].Alias)) > len([]rune(all[j].Alias))
+	})
+	lowerQuery := strings.ToLower(original)
+	seenNames := make(map[string]struct{})
+	matchedAliases := make([]string, 0)
+	result := make([]string, 0)
+	for _, item := range all {
+		alias := strings.TrimSpace(item.Alias)
+		standardName := strings.TrimSpace(item.StandardName)
+		standardKey := strings.ToLower(standardName)
+		if alias == "" || standardName == "" || !strings.Contains(lowerQuery, strings.ToLower(alias)) || strings.Contains(lowerQuery, standardKey) {
+			continue
+		}
+		shadowed := false
+		for _, matchedAlias := range matchedAliases {
+			if !strings.EqualFold(matchedAlias, alias) && strings.Contains(strings.ToLower(matchedAlias), strings.ToLower(alias)) {
+				shadowed = true
+				break
+			}
+		}
+		if shadowed {
+			continue
+		}
+		key := standardKey
+		if _, ok := seenNames[key]; ok {
+			continue
+		}
+		seenNames[key] = struct{}{}
+		matchedAliases = append(matchedAliases, alias)
+		result = append(result, standardName)
+	}
+	return result
 }
 
 // ParserEngineRule decodes legacy knowledge-base parser configuration.

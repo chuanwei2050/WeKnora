@@ -138,6 +138,73 @@
                   </div>
                 </div>
 
+                <!-- 特殊资质简称 -->
+                <div v-if="formData" v-show="currentSection === 'aliases'" class="section">
+                  <div class="section-content">
+                    <div class="section-header">
+                      <div class="alias-title-row">
+                        <h3 class="section-title">{{ $t('knowledgeEditor.aliases.title') }}</h3>
+                        <t-button
+                          theme="primary"
+                          size="medium"
+                          class="alias-add"
+                          :disabled="formData.qualificationAliases.length >= 100"
+                          @click="addQualificationAlias"
+                        >
+                          {{ $t('knowledgeEditor.aliases.add') }}
+                        </t-button>
+                      </div>
+                      <p class="section-desc">{{ $t('knowledgeEditor.aliases.description') }}</p>
+                    </div>
+                    <div class="section-body">
+                      <div class="alias-list-card">
+                        <div v-if="formData.qualificationAliases.length === 0" class="alias-empty">
+                          {{ $t('knowledgeEditor.aliases.empty') }}
+                        </div>
+                        <template v-else>
+                          <div class="alias-list-header" aria-hidden="true">
+                            <span class="alias-header-short">{{ $t('knowledgeEditor.aliases.aliasLabel') }}</span>
+                            <span class="alias-header-standard">{{ $t('knowledgeEditor.aliases.standardNameLabel') }}</span>
+                            <span class="alias-header-action">{{ $t('knowledgeEditor.aliases.actionLabel') }}</span>
+                          </div>
+                          <div
+                            v-for="(mapping, index) in formData.qualificationAliases"
+                            :key="index"
+                            class="alias-row"
+                          >
+                            <div class="alias-field">
+                              <t-input
+                                v-model="mapping.alias"
+                                :maxlength="64"
+                                :aria-label="$t('knowledgeEditor.aliases.aliasLabel')"
+                                :placeholder="$t('knowledgeEditor.aliases.aliasPlaceholder')"
+                              />
+                            </div>
+                            <div class="alias-field alias-standard-name">
+                              <t-input
+                                v-model="mapping.standard_name"
+                                :maxlength="256"
+                                :aria-label="$t('knowledgeEditor.aliases.standardNameLabel')"
+                                :placeholder="$t('knowledgeEditor.aliases.standardNamePlaceholder')"
+                              />
+                            </div>
+                            <t-button
+                              theme="danger"
+                              variant="text"
+                              class="alias-delete"
+                              :aria-label="$t('knowledgeEditor.aliases.delete')"
+                              @click="removeQualificationAlias(index)"
+                            >
+                              {{ $t('knowledgeEditor.aliases.delete') }}
+                            </t-button>
+                          </div>
+                        </template>
+                      </div>
+                      <p class="form-tip">{{ $t('knowledgeEditor.aliases.tip') }}</p>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- FAQ 配置 -->
                 <div v-if="isFAQ && formData" v-show="currentSection === 'faq'" class="section">
                   <div class="section-content">
@@ -326,6 +393,7 @@ import DataSourceSettings from './settings/DataSourceSettings.vue'
 import { createEmptyGraphExtractDefaults, restoreKnownPresetSchema } from '@/constants/software-testing-graph-preset'
 import { useI18n } from 'vue-i18n'
 import { listTenantUsers, type AdminUser } from '@/api/admin'
+import { validateQualificationAliases } from './qualification-aliases'
 
 const uiStore = useUIStore()
 const { t } = useI18n()
@@ -379,7 +447,8 @@ const DEFAULT_CHUNKING_PRESET = {
 
 const navItems = computed(() => {
   const items: { key: string; icon: string; label: string; badge?: number }[] = [
-    { key: 'basic', icon: 'info-circle', label: t('knowledgeEditor.sidebar.basic') }
+    { key: 'basic', icon: 'info-circle', label: t('knowledgeEditor.sidebar.basic') },
+    { key: 'aliases', icon: 'translate', label: t('knowledgeEditor.sidebar.aliases') }
   ]
   if (formData.value?.type === 'faq') {
     items.push({ key: 'faq', icon: 'help-circle', label: t('knowledgeEditor.sidebar.faq') })
@@ -405,6 +474,15 @@ const advancedSettingsRef = ref<InstanceType<typeof KBAdvancedSettings>>()
 const formData = ref<any>(null)
 const graphConfigDraft = ref<any>(null)
 const isFAQ = computed(() => formData.value?.type === 'faq')
+
+const addQualificationAlias = () => {
+  if (!formData.value || formData.value.qualificationAliases.length >= 100) return
+  formData.value.qualificationAliases.unshift({ alias: '', standard_name: '' })
+}
+
+const removeQualificationAlias = (index: string | number) => {
+  formData.value?.qualificationAliases.splice(Number(index), 1)
+}
 const tenantUsers = ref<AdminUser[]>([])
 const memberOptions = computed(() => tenantUsers.value.filter(user => user.is_active && user.role === 'member').map(user => ({ label: `${user.username}（${user.email}）`, value: user.id })))
 const reviewerOptions = computed(() => tenantUsers.value.filter(user => user.is_active).map(user => ({ label: `${user.username}（${user.role === 'tenant_admin' ? '租户管理员' : '普通用户'}）`, value: user.id })))
@@ -501,6 +579,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     contributionMode: 'members' as 'closed' | 'members' | 'allowlist',
     contributorIds: [] as string[],
     reviewerIds: [] as string[],
+		qualificationAliases: [] as Array<{ alias: string; standard_name: string }>,
   }
 }
 
@@ -606,11 +685,15 @@ const loadKBData = async () => {
       contributionMode: kb.contribution_mode || 'closed',
       contributorIds: kb.contributor_ids || [],
       reviewerIds: kb.reviewer_ids || [],
+			qualificationAliases: (kb.qualification_aliases || []).map((mapping: { alias: string; standard_name: string }) => ({ ...mapping })),
     }
     graphConfigDraft.value = JSON.parse(JSON.stringify(formData.value.nodeExtractConfig))
     await loadTenantUsers(Number(kb.tenant_id))
     initialIndexingStrategy.value = { ...formData.value.indexingStrategy }
-    initialGraphFingerprint.value = graphFingerprint(kb.extract_config)
+    // Compare the same normalized form shape on load and save. Comparing the
+    // raw API payload with form defaults made unrelated changes look like a
+    // graph configuration change and incorrectly prompted for a rebuild.
+    initialGraphFingerprint.value = graphFingerprint(formData.value.nodeExtractConfig)
   } catch (error) {
     console.error('Failed to load knowledge base data:', error)
     MessagePlugin.error(t('knowledgeEditor.messages.loadDataFailed'))
@@ -767,6 +850,18 @@ const validateForm = (): boolean => {
     return false
   }
 
+  const aliases = validateQualificationAliases(formData.value.qualificationAliases)
+  if (aliases.kind === 'empty-field') {
+    MessagePlugin.warning(t('knowledgeEditor.messages.aliasRequired'))
+    currentSection.value = 'aliases'
+    return false
+  }
+  if (aliases.kind === 'duplicate') {
+    MessagePlugin.warning(t('knowledgeEditor.messages.aliasDuplicate', { alias: aliases.alias }))
+    currentSection.value = 'aliases'
+    return false
+  }
+
   if (formData.value.type !== 'faq' && formData.value.contributionMode !== 'closed') {
     if (!formData.value.governance?.enabled) {
       MessagePlugin.warning('开放投稿必须启用知识版本治理')
@@ -803,6 +898,8 @@ const buildSubmitData = () => {
     embedding_model_id: '',
     summary_model_id: ''
   }
+	const aliases = validateQualificationAliases(formData.value.qualificationAliases)
+	data.qualification_aliases = aliases.kind === 'valid' ? aliases.mappings : []
 
   // 添加多模态配置
   data.vlm_config = {
@@ -934,6 +1031,7 @@ const doSubmit = async () => {
 
       // 1. 更新基本信息（名称、描述）和 FAQ/Wiki 配置
       const updateConfig: any = {}
+			updateConfig.qualification_aliases = data.qualification_aliases
       if (formData.value.type === 'faq' && formData.value.faqConfig) {
         updateConfig.faq_config = {
           index_mode: formData.value.faqConfig.indexMode || 'question_only',
@@ -1200,6 +1298,101 @@ watch(() => props.visible, async (newVal) => {
   flex: 1;
   padding: 12px 8px;
   overflow-y: auto;
+}
+
+.alias-list-card {
+  padding: 12px;
+  margin-bottom: 16px;
+  background: var(--td-bg-color-container-hover);
+  border-radius: 8px;
+}
+
+.alias-empty {
+  padding: 8px 0;
+  color: var(--td-text-color-secondary);
+  text-align: center;
+}
+
+.alias-title-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.alias-title-row .section-title {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.alias-add {
+  min-width: 92px;
+}
+
+.alias-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 2px 0;
+  margin-bottom: 4px;
+}
+
+.alias-row:last-child {
+  margin-bottom: 0;
+}
+
+.alias-list-header {
+  display: flex;
+  gap: 12px;
+  padding: 0 0 8px;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.alias-header-short {
+  flex: 0 0 220px;
+}
+
+.alias-header-standard {
+  flex: 1;
+  min-width: 260px;
+}
+
+.alias-header-action {
+  flex: 0 0 48px;
+  text-align: center;
+}
+
+.alias-field {
+  flex: 0 0 220px;
+}
+
+.alias-standard-name {
+  flex: 1;
+  min-width: 260px;
+}
+
+.alias-delete {
+  flex: 0 0 auto;
+  min-height: 40px;
+}
+
+@media (max-width: 900px) {
+	.alias-list-header {
+		display: none;
+	}
+
+  .alias-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .alias-field,
+  .alias-standard-name {
+    flex-basis: auto;
+    min-width: 0;
+  }
 }
 
 .nav-item {

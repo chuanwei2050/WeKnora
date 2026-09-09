@@ -168,6 +168,19 @@ func (s *sessionService) AgentQA(
 	if req.QuotedContext != "" {
 		agentQuery += "\n\n" + req.QuotedContext
 	}
+	// Expand KB-specific qualification aliases once before the agent routes to
+	// vector, keyword, graph, wiki, FAQ, or structured-data tools.
+	if kbs, aliasErr := s.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, agentConfig.KnowledgeBases); aliasErr != nil {
+		logger.Warnf(ctx, "Agent qualification alias expansion unavailable: %v", aliasErr)
+	} else {
+		mappings := make([]types.QualificationAliasMappings, 0, len(kbs))
+		for _, kb := range kbs {
+			if kb != nil && len(kb.QualificationAliases) > 0 {
+				mappings = append(mappings, kb.QualificationAliases)
+			}
+		}
+		agentQuery = types.ExpandQueryWithQualificationAliases(agentQuery, mappings...)
+	}
 
 	// AgentQA must use the same complexity classifier as normal RAG. The
 	// decision is request-scoped and only narrows the agent's existing budgets;

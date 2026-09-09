@@ -2326,6 +2326,7 @@ export default {
       datasource: "数据源",
       share: "共享管理",
       indexing: "索引策略",
+			aliases: "资质简称",
     },
     basic: {
       title: "基本信息",
@@ -2339,6 +2340,19 @@ export default {
       descriptionLabel: "知识库描述",
       descriptionPlaceholder: "请输入知识库描述（可选）",
     },
+		aliases: {
+			title: "特殊资质简称",
+			description: "配置业务简称与标准资质名称。检索前会自动保留简称并补充标准名称。",
+			empty: "暂未配置简称，可添加一组简称与标准名称。",
+			aliasLabel: "简称",
+			aliasPlaceholder: "例如：建工一级",
+			standardNameLabel: "标准名称",
+			standardNamePlaceholder: "例如：建筑工程施工总承包一级资质",
+			actionLabel: "操作",
+			add: "添加简称",
+			delete: "删除",
+			tip: "最多 100 组；同一知识库内简称不能重复。",
+		},
     wiki: {
       title: "Wiki 设置",
       description: "配置 Wiki 知识库的自动生成偏好",
@@ -2455,6 +2469,8 @@ export default {
       buildDataFailed: "数据构建失败",
       updateSuccess: "配置保存成功",
       indexModeRequired: "请选择 FAQ 的索引方式",
+			aliasRequired: "简称和标准名称不能为空",
+			aliasDuplicate: "简称“{alias}”重复，请修改后保存",
       storageChangeConfirm: "知识库中已有文件，更改存储引擎后旧文件可能无法正常访问。是否确认更改？",
     },
     document: {

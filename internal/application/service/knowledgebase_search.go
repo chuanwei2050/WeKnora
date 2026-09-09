@@ -162,6 +162,14 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	if len(requested) > 0 {
 		return nil, ErrKnowledgeBaseAccessDenied
 	}
+	mappings := make([]types.QualificationAliasMappings, 0, len(visibleKBs))
+	for _, visibleKB := range visibleKBs {
+		if visibleKB != nil && len(visibleKB.QualificationAliases) > 0 {
+			mappings = append(mappings, visibleKB.QualificationAliases)
+		}
+	}
+	params.QueryText = types.ExpandQueryWithQualificationAliases(params.QueryText, mappings...)
+	params.KeywordQueryText = types.ExpandQueryWithQualificationAliases(params.KeywordQueryText, mappings...)
 
 	logger.Infof(ctx, "Hybrid search parameters, knowledge base count: %d, query bytes: %d", len(searchKBIDs), len([]byte(params.QueryText)))
 

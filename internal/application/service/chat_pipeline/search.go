@@ -81,10 +81,64 @@ func normalizePipelineRetrievalRequest(chatManage *types.ChatManage) (retrievalk
 	})
 }
 
+func (p *PluginSearch) applyQualificationAliases(ctx context.Context, chatManage *types.ChatManage) {
+	if chatManage == nil || chatManage.QualificationAliasesApplied || p.knowledgeBaseService == nil {
+		return
+	}
+	chatManage.QualificationAliasesApplied = true
+	chatManage.WebQuery = chatManage.RewriteQuery
+	kbIDs := chatManage.SearchTargets.GetAllKnowledgeBaseIDs()
+	if len(kbIDs) == 0 {
+		kbIDs = chatManage.KnowledgeBaseIDs
+	}
+	kbs, err := p.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, kbIDs)
+	if err != nil {
+		pipelineWarn(ctx, "Search", "qualification_aliases_unavailable", map[string]interface{}{"error": err.Error()})
+		return
+	}
+	mappings := make([]types.QualificationAliasMappings, 0, len(kbs))
+	for _, kb := range kbs {
+		if kb != nil && len(kb.QualificationAliases) > 0 {
+			mappings = append(mappings, kb.QualificationAliases)
+		}
+	}
+	if len(mappings) == 0 {
+		return
+	}
+	originalRewrite := chatManage.RewriteQuery
+	standardNames := types.MatchingQualificationStandardNames(originalRewrite, mappings...)
+	chatManage.RewriteQuery = types.ExpandQueryWithQualificationAliases(chatManage.RewriteQuery, mappings...)
+	chatManage.KeywordQuery = types.ExpandQueryWithQualificationAliases(chatManage.KeywordQuery, mappings...)
+	if chatManage.RewriteQuery == originalRewrite {
+		return
+	}
+	chatManage.QualificationStandardNames = standardNames
+	chatManage.Entity = appendUniqueStrings(chatManage.Entity, standardNames...)
+}
+
+func appendUniqueStrings(values []string, additions ...string) []string {
+	seen := make(map[string]struct{}, len(values)+len(additions))
+	result := make([]string, 0, len(values)+len(additions))
+	for _, value := range append(append([]string(nil), values...), additions...) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
 // OnEvent handles search events in the chat pipeline
 func (p *PluginSearch) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
+	p.applyQualificationAliases(ctx, chatManage)
 	// Check if we have search targets or web search enabled
 	hasKBTargets := len(chatManage.SearchTargets) > 0 || len(chatManage.KnowledgeBaseIDs) > 0 || len(chatManage.KnowledgeIDs) > 0
 	if !hasKBTargets && !chatManage.WebSearchEnabled {
@@ -149,7 +203,12 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	// Goroutine 2: Web search (if enabled)
 	go func() {
 		defer wg.Done()
-		webResults := p.searchWebIfEnabled(ctx, chatManage, limiter)
+		webManage := chatManage.Clone()
+		if strings.TrimSpace(chatManage.WebQuery) != "" {
+			webManage.RewriteQuery = chatManage.WebQuery
+			webManage.KeywordQuery = chatManage.WebQuery
+		}
+		webResults := p.searchWebIfEnabled(ctx, webManage, limiter)
 		if len(webResults) > 0 {
 			mu.Lock()
 			allResults = append(allResults, webResults...)

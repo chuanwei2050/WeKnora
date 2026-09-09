@@ -1,6 +1,11 @@
 import { get, post, put, del, postUpload, getDown } from "../../utils/request";
 import { calculateFileMD5 } from "../../utils/file-hash";
 
+export interface QualificationAliasMapping {
+  alias: string;
+  standard_name: string;
+}
+
 // 知识库管理 API（列表、创建、获取、更新、删除、复制）
 export function listKnowledgeBases(params?: { agent_id?: string }) {
   const query = new URLSearchParams();
@@ -45,6 +50,7 @@ export function createKnowledgeBase(data: {
   contribution_mode?: 'closed' | 'members' | 'allowlist';
   contributor_ids?: string[];
   reviewer_ids?: string[];
+	qualification_aliases?: QualificationAliasMapping[];
 }) {
   return post(`/api/v1/knowledge-bases`, data);
 }
@@ -79,6 +85,7 @@ export function updateKnowledgeBase(id: string, data: {
     contribution_mode?: 'closed' | 'members' | 'allowlist';
     contributor_ids?: string[];
     reviewer_ids?: string[];
+		qualification_aliases?: QualificationAliasMapping[];
   }
 }) {
   return put(`/api/v1/knowledge-bases/${id}` , data);
