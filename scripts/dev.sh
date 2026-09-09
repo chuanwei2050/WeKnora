@@ -239,6 +239,11 @@ start_services() {
         shift
     done
     
+    # DocReader is built from the local source tree. Rebuilding here is cheap
+    # when the Docker cache is warm and prevents quick-dev from silently using
+    # an older pulled image after parser changes.
+    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f "$DOCKER_COMPOSE_FILE" build docreader || return 1
+
     # 启动服务
     "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f "$DOCKER_COMPOSE_FILE" $PROFILES up -d
     
@@ -437,8 +442,15 @@ start_app_container() {
     network_name="$(resolve_dev_network)"
     host_project_root="$(docker_host_path "$PROJECT_ROOT")"
 
+    local rebuild_dev_image=false
     if ! "$DOCKER_CLI_BIN" image inspect "$DEV_APP_IMAGE" > /dev/null 2>&1; then
-        log_info "构建后端开发镜像（首次启动仅需一次）..."
+        rebuild_dev_image=true
+    elif ! "$DOCKER_CLI_BIN" run --rm "$DEV_APP_IMAGE" sh -c 'command -v soffice >/dev/null 2>&1'; then
+        log_info "后端开发镜像缺少 Office 预览依赖，将自动重建..."
+        rebuild_dev_image=true
+    fi
+    if [ "$rebuild_dev_image" = "true" ]; then
+        log_info "构建后端开发镜像..."
         MSYS_NO_PATHCONV=1 "$DOCKER_CLI_BIN" build \
             -t "$DEV_APP_IMAGE" \
             -f "$host_project_root/docker/Dockerfile.dev" \

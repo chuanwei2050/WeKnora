@@ -153,6 +153,14 @@ async function pollGeneratedPreview(expectedVersion: number, attempt = 0) {
     previewStatusTimer = setTimeout(() => pollGeneratedPreview(expectedVersion, attempt + 1), delay);
   } catch (err: unknown) {
     if (expectedVersion !== previewLoadVersion) return;
+    // Token refreshes and short network interruptions can race with a
+    // completed background conversion. Keep polling before presenting a
+    // terminal failure so an already-generated PDF can still be loaded.
+    if (attempt < 6) {
+      const delay = Math.min(30_000, 2_000 * (2 ** attempt));
+      previewStatusTimer = setTimeout(() => pollGeneratedPreview(expectedVersion, attempt + 1), delay);
+      return;
+    }
     const message = err instanceof Error ? err.message : t('preview.partialPreviewFailed');
     partialPreviewStatus.value = 'failed';
     partialPreviewError.value = message;

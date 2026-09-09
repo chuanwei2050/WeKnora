@@ -1,11 +1,19 @@
 FROM golang:1.24-bookworm
 
-# sqlite-vec 的 CGO 绑定依赖系统 SQLite 头文件。
+# sqlite-vec 的 CGO 绑定依赖系统 SQLite 头文件；异步 Office 预览在应用
+# worker 内调用 soffice，因此开发镜像必须和生产应用镜像具备相同转换能力。
 RUN for attempt in 1 2 3; do \
-        apt-get update && break || { \
-            if [ "$attempt" = 3 ]; then exit 1; fi; \
-            sleep 3; \
-        }; \
+        if apt-get update \
+            && apt-get install -y --no-install-recommends --fix-missing \
+                libsqlite3-dev \
+                fonts-noto-cjk \
+                libreoffice-calc \
+                libreoffice-impress \
+                libreoffice-writer; then \
+            break; \
+        fi; \
+        if [ "$attempt" = 3 ]; then exit 1; fi; \
+        sleep 3; \
     done \
-    && apt-get install -y --no-install-recommends libsqlite3-dev \
+    && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*

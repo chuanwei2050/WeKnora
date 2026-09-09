@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DocumentPreview from '../src/components/document-preview.vue';
 import { buildPreviewCacheKey, buildPreviewContentRevision } from '../src/utils/documentPreviewCache';
 
@@ -47,11 +47,18 @@ describe('buildPreviewContentRevision', () => {
 describe('DocumentPreview', () => {
   beforeEach(() => {
     previewKnowledgeFile.mockReset();
+    requestDocumentPreviewGeneration.mockReset();
+    getDocumentPreviewGenerationStatus.mockReset();
+    getGeneratedDocumentPreview.mockReset();
     previewKnowledgeFile.mockResolvedValue(new Blob(['preview'], { type: 'application/pdf' }));
     requestDocumentPreviewGeneration.mockResolvedValue({ data: { status: 'pending', error: '' } });
     getDocumentPreviewGenerationStatus.mockResolvedValue({ data: { status: 'failed', error: 'conversion stopped' } });
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:preview') });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('reloads the same knowledge when its content revision changes', async () => {
@@ -115,6 +122,31 @@ describe('DocumentPreview', () => {
 
     expect(getGeneratedDocumentPreview).toHaveBeenCalledWith('knowledge-generated', false);
     expect(wrapper.find('iframe').attributes('src')).toBe('blob:preview');
+    wrapper.unmount();
+  });
+
+  it('recovers when loading a completed preview hits a transient request error', async () => {
+    vi.useFakeTimers();
+    getDocumentPreviewGenerationStatus.mockResolvedValue({ data: { status: 'completed', error: '' } });
+    getGeneratedDocumentPreview
+      .mockRejectedValueOnce(new Error('temporary unauthorized'))
+      .mockResolvedValueOnce(new Blob(['pdf'], { type: 'application/pdf' }));
+
+    const wrapper = mount(DocumentPreview, {
+      props: {
+        knowledgeId: 'knowledge-transient', fileType: 'docx', fileName: 'large.docx',
+        fileSize: 300 * 1024 * 1024, contentRevision: 'hash-transient', active: true,
+      },
+      global: { mocks: { $t: (key: string) => key } },
+    });
+    await flushPromises();
+    expect(getGeneratedDocumentPreview).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(getGeneratedDocumentPreview).toHaveBeenCalledTimes(2);
+    expect(wrapper.find('iframe').attributes('src')).toBe('blob:preview');
+
     wrapper.unmount();
   });
 });
