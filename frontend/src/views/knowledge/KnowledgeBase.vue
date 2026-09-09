@@ -1944,10 +1944,11 @@ const openDuplicateDialog = (value: any) => {
 };
 
 const locateDuplicateKnowledge = async (existing = duplicateKnowledge.value) => {
-  if (!existing?.tag_id) return;
+  if (!existing) return;
+  const targetTagId = existing.tag_id || untaggedTag.value?.id || '__untagged__';
   duplicateDialogVisible.value = false;
   batchDuplicateDialogVisible.value = false;
-  handleTagFilterChange(existing.tag_id);
+  handleTagFilterChange(targetTagId);
   await nextTick();
   await enterDocumentDirectory(existing.directory_id || undefined);
 };

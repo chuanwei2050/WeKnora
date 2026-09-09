@@ -172,7 +172,8 @@ describe('document directory category scope', () => {
 
   it('locates duplicate uploads in their original category and directory', () => {
     const view = source('../src/views/knowledge/KnowledgeBase.vue')
-    expect(view).toContain('handleTagFilterChange(existing.tag_id)')
+    expect(view).toContain("existing.tag_id || untaggedTag.value?.id || '__untagged__'")
+    expect(view).toContain('handleTagFilterChange(targetTagId)')
     expect(view).toContain('enterDocumentDirectory(existing.directory_id || undefined)')
     expect(view).toContain('existing.directory_breadcrumb')
   })
