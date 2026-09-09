@@ -70,10 +70,15 @@ rollback() {
   if $app_changed; then
     docker tag weknora-ci/app:rollback "wechatopenai/weknora-app:$WEKNORA_VERSION"
     "${compose[@]}" up -d --no-deps --force-recreate app
+    # The rollback container keeps running by image ID. Remove the failed
+    # revision tag so the previous image cannot masquerade as a successful
+    # build of the new commit.
+    docker image rm "wechatopenai/weknora-app:$WEKNORA_VERSION" >/dev/null 2>&1 || true
   fi
   if $frontend_changed; then
     docker tag weknora-ci/frontend:rollback "wechatopenai/weknora-ui:$WEKNORA_VERSION"
     "${compose[@]}" up -d --no-deps --force-recreate frontend
+    docker image rm "wechatopenai/weknora-ui:$WEKNORA_VERSION" >/dev/null 2>&1 || true
   fi
 }
 trap rollback ERR
