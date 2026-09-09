@@ -50,6 +50,7 @@ const textPreviewTruncated = ref(false);
 const largeFileBlocked = ref(false);
 const partialPreviewStatus = ref<DocumentPreviewGenerationStatus['status']>('none');
 const partialPreviewError = ref('');
+const previewFallbackOnly = ref(false);
 let previewStatusTimer: ReturnType<typeof setTimeout> | null = null;
 const pptxData = shallowRef<ArrayBuffer | null>(null);
 const docxContainer = ref<HTMLElement | null>(null);
@@ -136,7 +137,7 @@ async function loadGeneratedPreview(expectedVersion: number) {
   largeFileBlocked.value = true;
 }
 
-async function pollGeneratedPreview(expectedVersion: number) {
+async function pollGeneratedPreview(expectedVersion: number, attempt = 0) {
   if (!props.active || expectedVersion !== previewLoadVersion) return;
   try {
     const response = await getDocumentPreviewGenerationStatus(props.knowledgeId, false);
@@ -148,7 +149,8 @@ async function pollGeneratedPreview(expectedVersion: number) {
       return;
     }
     if (response.data.status === 'failed') return;
-    previewStatusTimer = setTimeout(() => pollGeneratedPreview(expectedVersion), 2000);
+    const delay = Math.min(30_000, 2_000 * (2 ** attempt));
+    previewStatusTimer = setTimeout(() => pollGeneratedPreview(expectedVersion, attempt + 1), delay);
   } catch (err: unknown) {
     if (expectedVersion !== previewLoadVersion) return;
     const message = err instanceof Error ? err.message : t('preview.partialPreviewFailed');
@@ -313,6 +315,7 @@ async function loadPreview() {
   // the browser never loads the original archive into memory.
   if (isServerGeneratedPreview) {
     largeFileBlocked.value = true;
+    previewFallbackOnly.value = false;
     loadedForKey = cacheKey;
     loading.value = false;
     await requestGeneratedPreview(loadVersion);
@@ -330,6 +333,7 @@ async function loadPreview() {
       excelPreviewTruncated.value = Boolean(cached.excelPreviewTruncated);
       textPreviewTruncated.value = Boolean(cached.textPreviewTruncated);
       largeFileBlocked.value = Boolean(cached.largeFileBlocked);
+      previewFallbackOnly.value = Boolean(cached.previewFallbackOnly);
       pptxData.value = cached.pptxData || null;
       loadedForKey = cacheKey;
 
@@ -355,7 +359,13 @@ async function loadPreview() {
       if (!isCurrent()) return;
       if (!safe) {
         largeFileBlocked.value = true;
-        setCachedPreview(cacheKey, { previewType: previewType.value, largeFileBlocked: true, size: 1 });
+        previewFallbackOnly.value = true;
+        setCachedPreview(cacheKey, {
+          previewType: previewType.value,
+          largeFileBlocked: true,
+          previewFallbackOnly: true,
+          size: 1,
+        });
         return;
       }
     }
@@ -478,6 +488,7 @@ function cleanup() {
   largeFileBlocked.value = false;
   partialPreviewStatus.value = 'none';
   partialPreviewError.value = '';
+  previewFallbackOnly.value = false;
   pptxData.value = null;
   imageNaturalWidth.value = 0;
   imageNaturalHeight.value = 0;
@@ -532,6 +543,17 @@ onUnmounted(() => {
     </div>
 
     <div v-else-if="largeFileBlocked" class="large-preview">
+      <template v-if="previewFallbackOnly">
+        <div class="preview-unsupported">
+          <t-icon name="info-circle" size="48px" />
+          <p>{{ $t('preview.largeFileBlocked') }}</p>
+          <p class="unsupported-hint">{{ $t('preview.largeFileHint') }}</p>
+          <t-button theme="primary" size="small" @click="emit('switchToChunks')">
+            {{ $t('knowledgeBase.viewChunks') }}
+          </t-button>
+        </div>
+      </template>
+      <template v-else>
       <div class="large-preview-notice">
         <t-icon name="info-circle" />
         <span>{{ $t('preview.originalPartialPreviewHint') }}</span>
@@ -542,6 +564,7 @@ onUnmounted(() => {
         <t-button size="small" variant="text" @click="requestGeneratedPreview()">{{ $t('preview.retry') }}</t-button>
       </div>
       <div v-if="blobUrl" class="preview-pdf"><iframe :src="blobUrl" class="pdf-iframe" /></div>
+      </template>
     </div>
 
     <!-- Unsupported -->

@@ -8,7 +8,13 @@ import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import mermaid from "mermaid";
 import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
-import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile } from "@/api/knowledge-base/index";
+import {
+  downKnowledgeDetails,
+  deleteGeneratedQuestion,
+  getChunkByIdOnly,
+  getKnowledgeDownloadTarget,
+  previewKnowledgeFile,
+} from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
@@ -739,6 +745,17 @@ const largeDownloadLabel = computed(() => {
   return t('file.downloading', { progress: largeDownloadProgress.value });
 });
 
+function triggerBrowserDownload(url: string, filename: string) {
+  const link = document.createElement('a');
+  link.style.display = 'none';
+  link.href = url;
+  link.download = filename;
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 const downloadFile = async () => {
   if (largeDownloadProgress.value !== null) return;
   const fileSize = Number(props.details?.file_size || 0);
@@ -755,6 +772,12 @@ const downloadFile = async () => {
       );
       if (streamed) {
         largeDownloadProgress.value = 100;
+        MessagePlugin.success(t('file.downloadSuccess'));
+        return;
+      }
+      const target = await getKnowledgeDownloadTarget(props.details.id);
+      if (target.data.direct) {
+        triggerBrowserDownload(target.data.url, target.data.filename || props.details.title);
         MessagePlugin.success(t('file.downloadSuccess'));
         return;
       }

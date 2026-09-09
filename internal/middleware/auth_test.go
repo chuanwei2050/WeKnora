@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,6 +14,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const invalidTargetTenantCode = "INVALID_TARGET_TENANT_ID"
+
 type missingTenantService struct {
 	interfaces.TenantService
 }
@@ -20,6 +23,18 @@ type missingTenantService struct {
 type staticTenantService struct {
 	interfaces.TenantService
 	tenant *types.Tenant
+}
+
+type ownTenantOnlyService struct {
+	interfaces.TenantService
+	tenant *types.Tenant
+}
+
+func (s ownTenantOnlyService) GetTenantByID(_ context.Context, tenantID uint64) (*types.Tenant, error) {
+	if tenantID == s.tenant.ID {
+		return s.tenant, nil
+	}
+	return nil, nil
 }
 
 func (s staticTenantService) GetTenantByID(context.Context, uint64) (*types.Tenant, error) {
@@ -95,6 +110,43 @@ func TestAuthPrefersBearerTokenOverIntegrationCookie(t *testing.T) {
 
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusNoContent)
+	}
+}
+
+func TestAuthReturnsStableCodeForMissingTargetTenant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tenantService := ownTenantOnlyService{tenant: &types.Tenant{ID: 1, Status: string(types.TenantStatusActive)}}
+	userService := bearerUserService{user: &types.User{
+		ID:       "platform-admin",
+		TenantID: 1,
+		IsActive: true,
+		Role:     types.UserRolePlatformAdmin,
+	}}
+	router := gin.New()
+	router.Use(Auth(
+		tenantService,
+		userService,
+		&config.Config{Tenant: &config.TenantConfig{EnableCrossTenantAccess: true}},
+	))
+	router.GET("/protected", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	request := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	request.Header.Set("Authorization", "Bearer admin-token")
+	request.Header.Set("X-Tenant-ID", "10483")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != invalidTargetTenantCode {
+		t.Fatalf("code = %q, want %q", body.Code, invalidTargetTenantCode)
 	}
 }
 

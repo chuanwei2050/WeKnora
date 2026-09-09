@@ -366,17 +366,6 @@ func (a *CustomAgent) EnsureDefaults() {
 	if a.Config.RerankCandidateTopK == 0 {
 		a.Config.RerankCandidateTopK = min(20, a.Config.EmbeddingTopK)
 	}
-	usesPreviousRetrievalDefaults := a.Config.EmbeddingTopK == 10 &&
-		a.Config.VectorRecallTopK == 50 &&
-		a.Config.KeywordRecallTopK == 50 &&
-		(a.Config.RRFVectorWeight == 0.7 || a.Config.RRFVectorWeight == DefaultRRFVectorWeight) &&
-		a.Config.RerankCandidateTopK == 10 &&
-		(a.Config.RerankTopK == 5 || a.Config.RerankTopK == 10)
-	if usesPreviousRetrievalDefaults {
-		a.Config.EmbeddingTopK = 30
-		a.Config.RerankCandidateTopK = 20
-		a.Config.RerankTopK = 5
-	}
 	// Advanced settings defaults
 	if a.Config.FallbackStrategy == "" {
 		a.Config.FallbackStrategy = "model"

@@ -66,6 +66,7 @@ const persistOIDCLoginResponse = async (response: any) => {
     throw new Error(response.message || 'OIDC login failed')
   }
 
+  authStore.resetWorkspaceContext()
   authStore.setToken(response.token)
   if (response.refresh_token) {
     authStore.setRefreshToken(response.refresh_token)

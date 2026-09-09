@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -20,17 +21,23 @@ import (
 
 // minioFileService MinIO file service implementation
 type minioFileService struct {
-	client     *minio.Client
-	bucketName string
+	client        *minio.Client
+	presignClient *minio.Client
+	bucketName    string
 }
 
 // newMinioClient creates a bare minioFileService with just the SDK client initialised.
 // Shared by NewMinioFileService (which also ensures the bucket exists) and
 // CheckMinioConnectivity (read-only probe).
 func newMinioClient(endpoint, accessKeyID, secretAccessKey, bucketName string, useSSL bool, httpClients ...*http.Client) (*minioFileService, error) {
+	region := strings.TrimSpace(os.Getenv("MINIO_REGION"))
+	if region == "" {
+		region = "us-east-1"
+	}
 	options := &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
 		Secure: useSSL,
+		Region: region,
 	}
 	if len(httpClients) > 0 && httpClients[0] != nil {
 		options.Transport = httpClients[0].Transport
@@ -39,7 +46,20 @@ func newMinioClient(endpoint, accessKeyID, secretAccessKey, bucketName string, u
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize MinIO client: %w", err)
 	}
-	return &minioFileService{client: client, bucketName: bucketName}, nil
+	presignClient := client
+	if publicEndpoint := strings.TrimSpace(os.Getenv("MINIO_PUBLIC_ENDPOINT")); publicEndpoint != "" {
+		publicHost, publicUseSSL := normalizeMinioClientEndpoint(publicEndpoint, nil, useSSL)
+		presignOptions := &minio.Options{
+			Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
+			Secure: publicUseSSL,
+			Region: region,
+		}
+		presignClient, err = minio.New(publicHost, presignOptions)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize public MinIO client: %w", err)
+		}
+	}
+	return &minioFileService{client: client, presignClient: presignClient, bucketName: bucketName}, nil
 }
 
 // NewMinioFileService creates a MinIO file service.
@@ -198,7 +218,7 @@ func (s *minioFileService) GetFileURL(ctx context.Context, filePath string) (str
 	if err != nil {
 		return "", err
 	}
-	presignedURL, err := s.client.PresignedGetObject(ctx, s.bucketName, objectName, 24*time.Hour, nil)
+	presignedURL, err := s.presignClient.PresignedGetObject(ctx, s.bucketName, objectName, 24*time.Hour, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate presigned URL: %w", err)
 	}

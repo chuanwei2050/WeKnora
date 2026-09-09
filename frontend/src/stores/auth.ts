@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type { UserInfo, TenantInfo, KnowledgeBaseInfo } from '@/api/auth'
 import type { TenantInfo as TenantInfoFromAPI } from '@/api/tenant'
 import i18n from '@/i18n'
+import { clearStoredWorkspaceContext } from '@/utils/workspace-context'
 
 export const useAuthStore = defineStore('auth', () => {
   // 状态
@@ -120,6 +121,20 @@ export const useAuthStore = defineStore('auth', () => {
     } else {
       localStorage.removeItem('weknora_lite_mode')
     }
+  }
+
+  // A tenant selection and knowledge-base selection only belong to the
+  // authenticated session that created them. Clear them before accepting a
+  // new login so a rebuilt database or a different account cannot inherit a
+  // stale X-Tenant-ID header.
+  const resetWorkspaceContext = () => {
+    knowledgeBases.value = []
+    currentKnowledgeBase.value = null
+    selectedTenantId.value = null
+    selectedTenantName.value = null
+    allTenants.value = []
+
+    clearStoredWorkspaceContext()
   }
 
   const logout = () => {
@@ -260,6 +275,7 @@ export const useAuthStore = defineStore('auth', () => {
     setAllTenants,
     getSelectedTenant,
     setLiteMode,
+    resetWorkspaceContext,
     logout,
     initFromStorage
   }

@@ -20,10 +20,16 @@ fi
 
 # 容器通过 Compose 开发网络访问基础设施。
 export DB_HOST=postgres
+export DB_PORT="${DB_PORT:-5432}"
 export REDIS_ADDR=redis:6379
 export DOCREADER_ADDR=docreader:50051
 export DOCREADER_TRANSPORT=grpc
 export MINIO_ENDPOINT=minio:9000
+export MINIO_PUBLIC_ENDPOINT="${MINIO_PUBLIC_ENDPOINT:-localhost:9000}"
+export MINIO_ACCESS_KEY_ID="${MINIO_ACCESS_KEY_ID:-minioadmin}"
+export MINIO_SECRET_ACCESS_KEY="${MINIO_SECRET_ACCESS_KEY:-minioadmin}"
+export MINIO_BUCKET_NAME="${MINIO_BUCKET_NAME:-weknora}"
+export MINIO_USE_SSL="${MINIO_USE_SSL:-false}"
 export MILVUS_ADDRESS=milvus:19530
 export OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
 export NEO4J_URI=bolt://neo4j:7687

@@ -195,6 +195,7 @@ func Auth(
 							} else {
 								log.Printf("Error getting target tenant by ID: %v, tenantID: %d", err, parsedTenantID)
 								c.JSON(http.StatusBadRequest, gin.H{
+									"code":  "INVALID_TARGET_TENANT_ID",
 									"error": "Invalid target tenant ID",
 								})
 								c.Abort()

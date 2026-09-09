@@ -78,6 +78,20 @@ func newDocumentProcessTask(payload []byte, fileSize int64, maxRetry int) *asynq
 	return asynq.NewTask(types.TypeDocumentProcess, payload, options...)
 }
 
+func documentPreviewQueue(fileSize int64) string {
+	if fileSize > types.LargeDocumentThresholdBytes {
+		return types.LargeDocumentQueue
+	}
+	return "default"
+}
+
+func documentPreviewTimeout(fileSize int64) time.Duration {
+	if fileSize > types.LargeDocumentThresholdBytes {
+		return 15 * time.Minute
+	}
+	return 5 * time.Minute
+}
+
 // ListIntegrationFolders returns ordinary folders and one virtual public folder.
 func (s *knowledgeService) ListIntegrationFolders(ctx context.Context, tenantID uint64, kbID string) ([]*types.KnowledgeTag, error) {
 	tags, err := s.listAllIntegrationTags(ctx, tenantID, kbID)
@@ -2076,6 +2090,9 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 			if err := kbFileSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
 				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete file failed")
 			}
+		}
+		if err := s.deleteDocumentPreviewFiles(ctx, kb, knowledge); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete preview files failed")
 		}
 		deleteExtractedImages(ctx, kbFileSvc, imageURLs)
 		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
@@ -4276,7 +4293,8 @@ func (s *knowledgeService) RequestDocumentPreview(ctx context.Context, id string
 		return nil, err
 	}
 	task := asynq.NewTask(types.TypeDocumentPreview, payload,
-		asynq.Queue(types.LargeDocumentQueue), asynq.MaxRetry(0), asynq.Timeout(60*time.Minute),
+		asynq.Queue(documentPreviewQueue(knowledge.FileSize)), asynq.MaxRetry(0),
+		asynq.Timeout(documentPreviewTimeout(knowledge.FileSize)),
 		asynq.TaskID(fmt.Sprintf("document-preview-%s-partial-%d", id, requestRevision)))
 	if _, err := s.task.Enqueue(task); err != nil {
 		if errors.Is(err, asynq.ErrTaskIDConflict) {
@@ -4326,10 +4344,15 @@ func (s *knowledgeService) ProcessDocumentPreview(ctx context.Context, task *asy
 	}
 	const statusColumn, pathColumn, errorColumn = "preview_status", "preview_file_path", "preview_error"
 	fail := func(cause error, userMessage string) error {
-		latest, lookupErr := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
+		cleanupCtx, cancel := context.WithTimeout(
+			context.WithValue(context.Background(), types.TenantIDContextKey, payload.TenantID),
+			5*time.Second,
+		)
+		defer cancel()
+		latest, lookupErr := s.repo.GetKnowledgeByID(cleanupCtx, payload.TenantID, payload.KnowledgeID)
 		if lookupErr == nil && latest.FileHash == payload.FileHash {
-			_ = s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, statusColumn, "failed")
-			_ = s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, errorColumn, userMessage)
+			_ = s.repo.UpdateKnowledgeColumn(cleanupCtx, knowledge.ID, statusColumn, "failed")
+			_ = s.repo.UpdateKnowledgeColumn(cleanupCtx, knowledge.ID, errorColumn, userMessage)
 		}
 		logger.Errorf(ctx, "Document preview generation failed: knowledge_id=%s error=%v", knowledge.ID, cause)
 		return cause
@@ -4415,9 +4438,12 @@ func (s *knowledgeService) ProcessDocumentPreview(ctx context.Context, task *asy
 	if err != nil {
 		return fail(fmt.Errorf("preview PDF was not generated: %w", err), "部分预览转换失败，请稍后重试")
 	}
-	const maxPreviewBytes int64 = 256 * 1024 * 1024
+	maxPreviewBytes := int64(200 * 1024 * 1024)
+	if knowledge.FileSize > types.LargeDocumentThresholdBytes {
+		maxPreviewBytes = 256 * 1024 * 1024
+	}
 	if info.Size() > maxPreviewBytes {
-		return fail(fmt.Errorf("preview PDF exceeds the 256 MiB output limit"), "生成的部分预览超过 256 MiB 安全上限，请下载原文件")
+		return fail(fmt.Errorf("preview PDF exceeds the %d MiB output limit", maxPreviewBytes/(1024*1024)), "生成的部分预览超过安全上限，请下载原文件")
 	}
 	pdf, err := os.ReadFile(outputPath)
 	if err != nil {
@@ -4435,19 +4461,23 @@ func (s *knowledgeService) ProcessDocumentPreview(ctx context.Context, task *asy
 	}
 	latest, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
 	if err != nil {
-		return err
+		return fail(err, "确认部分预览版本失败，请稍后重试")
 	}
 	if latest.FileHash != payload.FileHash {
 		_ = fileService.DeleteFile(ctx, previewPath)
 		return nil
 	}
 	if err := s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, pathColumn, previewPath); err != nil {
-		return err
+		_ = fileService.DeleteFile(ctx, previewPath)
+		return fail(err, "保存部分预览状态失败，请稍后重试")
 	}
 	if err := s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, errorColumn, ""); err != nil {
-		return err
+		return fail(err, "保存部分预览状态失败，请稍后重试")
 	}
-	return s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, statusColumn, "completed")
+	if err := s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, statusColumn, "completed"); err != nil {
+		return fail(err, "保存部分预览状态失败，请稍后重试")
+	}
+	return nil
 }
 
 func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
@@ -9460,6 +9490,10 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 	// Collect image URLs before chunks are deleted
 	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
 	fileSvc := s.resolveFileService(ctx, kb)
+	if err := s.deleteDocumentPreviewFiles(ctx, kb, knowledge); err != nil {
+		logger.GetLogger(ctx).WithField("error", err).Error("Failed to delete generated document previews")
+		cleanupErr = errors.Join(cleanupErr, err)
+	}
 	chunkImageInfos, imgErr := s.chunkService.GetRepository().ListImageInfoByKnowledgeIDs(ctx, tenantInfo.ID, []string{knowledge.ID})
 	if imgErr != nil {
 		logger.GetLogger(ctx).WithField("error", imgErr).Error("Failed to collect image URLs for cleanup")
@@ -9496,6 +9530,33 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 		knowledge.StorageSize = 0
 	}
 
+	return cleanupErr
+}
+
+func (s *knowledgeService) deleteDocumentPreviewFiles(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	knowledge *types.Knowledge,
+) error {
+	if knowledge == nil {
+		return nil
+	}
+	paths := []string{knowledge.PreviewFilePath, knowledge.FullPreviewFilePath}
+	seen := make(map[string]struct{}, len(paths))
+	var cleanupErr error
+	for _, previewPath := range paths {
+		previewPath = strings.TrimSpace(previewPath)
+		if previewPath == "" {
+			continue
+		}
+		if _, exists := seen[previewPath]; exists {
+			continue
+		}
+		seen[previewPath] = struct{}{}
+		if err := s.resolveFileServiceForPath(ctx, kb, previewPath).DeleteFile(ctx, previewPath); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete preview %q: %w", previewPath, err))
+		}
+	}
 	return cleanupErr
 }
 
@@ -9626,16 +9687,22 @@ func (s *knowledgeService) resolveFileServiceForPath(ctx context.Context, kb *ty
 		return svc
 	}
 
-	configured := platformStorageProvider(ctx)
-	if configured == "" {
-		configured = strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
+	var storageConfig *types.StorageEngineConfig
+	if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil {
+		storageConfig = tenant.StorageEngineConfig
 	}
-
-	if configured != "" && configured != inferred {
-		logger.Warnf(ctx, "[storage] FilePath format mismatch: configured=%s inferred=%s filePath=%s, using global fallback",
-			configured, inferred, filePath)
-		return s.fileSvc
+	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+	inferredSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(inferred, storageConfig, baseDir)
+	if err == nil {
+		kbID := ""
+		if kb != nil {
+			kbID = kb.ID
+		}
+		logger.Infof(ctx, "[storage] resolveFileServiceForPath selected inferred provider: kb=%s provider=%s", kbID, resolvedProvider)
+		return inferredSvc
 	}
+	logger.Warnf(ctx, "[storage] Failed to resolve inferred provider=%s filePath=%s, using configured service: %v",
+		inferred, filePath, err)
 	return svc
 }
 

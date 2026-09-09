@@ -87,7 +87,6 @@ describe('DocumentPreview', () => {
         fileSize: 504.7 * 1024 * 1024,
         parseStatus: 'failed',
         parseError: '',
-        previewScope: 'partial',
         contentRevision: 'hash-large',
         active: true,
       },
@@ -99,11 +98,6 @@ describe('DocumentPreview', () => {
     expect(wrapper.text()).toContain('preview.originalPartialPreviewHint');
     expect(requestDocumentPreviewGeneration).toHaveBeenCalledWith('knowledge-large', false);
     expect(getDocumentPreviewGenerationStatus).toHaveBeenCalledWith('knowledge-large', false);
-
-    await wrapper.setProps({ previewScope: 'full' });
-    await flushPromises();
-    expect(requestDocumentPreviewGeneration).toHaveBeenCalledWith('knowledge-large', true);
-    expect(getDocumentPreviewGenerationStatus).toHaveBeenCalledWith('knowledge-large', true);
     wrapper.unmount();
   });
 
@@ -113,7 +107,7 @@ describe('DocumentPreview', () => {
     const wrapper = mount(DocumentPreview, {
       props: {
         knowledgeId: 'knowledge-generated', fileType: 'docx', fileName: 'large.docx',
-        fileSize: 300 * 1024 * 1024, previewScope: 'partial', contentRevision: 'hash-generated', active: true,
+        fileSize: 300 * 1024 * 1024, contentRevision: 'hash-generated', active: true,
       },
       global: { mocks: { $t: (key: string) => key } },
     });

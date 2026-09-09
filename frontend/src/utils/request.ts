@@ -4,6 +4,7 @@ import { generateRandomString } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
 import { getEmbeddedCSRFToken, getEmbeddedSessionToken, isCookieEmbeddedMode, clearEmbeddedAuth, notifyEmbeddedHost } from './embedded-runtime';
+import { clearStoredWorkspaceContext } from './workspace-context';
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -110,6 +111,21 @@ instance.interceptors.response.use(
   },
   async (error: any) => {
     const originalRequest = error.config;
+
+    if (error.response?.status === 400
+      && error.response?.data?.code === 'INVALID_TARGET_TENANT_ID'
+      && originalRequest
+      && !originalRequest._tenantRetry) {
+      originalRequest._tenantRetry = true;
+      clearStoredWorkspaceContext();
+      if (typeof originalRequest.headers?.delete === 'function') {
+        originalRequest.headers.delete('X-Tenant-ID');
+      } else if (originalRequest.headers) {
+        delete originalRequest.headers['X-Tenant-ID'];
+      }
+      return instance(originalRequest);
+    }
+
     if (error.response?.status === 401 && isCookieEmbeddedMode()) {
       clearEmbeddedAuth();
       notifyEmbeddedHost('unauthorized');

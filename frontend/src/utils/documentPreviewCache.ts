@@ -10,6 +10,7 @@ export interface PreviewCacheEntry {
   excelPreviewTruncated?: boolean;
   textPreviewTruncated?: boolean;
   largeFileBlocked?: boolean;
+  previewFallbackOnly?: boolean;
   pptxData?: ArrayBuffer;
   size: number;
   lastAccessedAt: number;

@@ -55,47 +55,55 @@ func NewFileServiceFromStorageConfig(
 		return NewLocalFileService(baseDir), p, nil
 
 	case "minio":
-		if sec == nil || sec.MinIO == nil {
-			return nil, p, fmt.Errorf("missing minio config")
+		var minioConfig *types.MinIOEngineConfig
+		if sec != nil {
+			minioConfig = sec.MinIO
+		}
+		// Historical minio:// paths can outlive a tenant storage-config
+		// migration. Docker deployments still have the original MinIO
+		// connection in environment variables, so allow path-based recovery
+		// without pretending the tenant's current default is MinIO.
+		if minioConfig == nil {
+			minioConfig = &types.MinIOEngineConfig{Mode: "docker"}
 		}
 		var endpoint, accessKeyID, secretAccessKey string
-		if sec.MinIO.Mode == "remote" {
-			endpoint = strings.TrimSpace(sec.MinIO.Endpoint)
-			accessKeyID = strings.TrimSpace(sec.MinIO.AccessKeyID)
-			secretAccessKey = strings.TrimSpace(sec.MinIO.SecretAccessKey)
+		if minioConfig.Mode == "remote" {
+			endpoint = strings.TrimSpace(minioConfig.Endpoint)
+			accessKeyID = strings.TrimSpace(minioConfig.AccessKeyID)
+			secretAccessKey = strings.TrimSpace(minioConfig.SecretAccessKey)
 		} else {
 			endpoint = strings.TrimSpace(os.Getenv("MINIO_ENDPOINT"))
 			if endpoint == "" {
-				endpoint = strings.TrimSpace(sec.MinIO.Endpoint)
+				endpoint = strings.TrimSpace(minioConfig.Endpoint)
 			}
 			accessKeyID = strings.TrimSpace(os.Getenv("MINIO_ACCESS_KEY_ID"))
 			secretAccessKey = strings.TrimSpace(os.Getenv("MINIO_SECRET_ACCESS_KEY"))
 		}
-		bucketName := strings.TrimSpace(sec.MinIO.BucketName)
+		bucketName := strings.TrimSpace(minioConfig.BucketName)
 		if bucketName == "" {
 			bucketName = strings.TrimSpace(os.Getenv("MINIO_BUCKET_NAME"))
 		}
 		if endpoint == "" || accessKeyID == "" || secretAccessKey == "" || bucketName == "" {
 			return nil, p, fmt.Errorf("incomplete minio config")
 		}
-		if strictAirGappedMode() && strings.TrimSpace(sec.MinIO.ApprovedEndpointID) == "" {
+		if strictAirGappedMode() && strings.TrimSpace(minioConfig.ApprovedEndpointID) == "" {
 			return nil, p, fmt.Errorf("strict air-gapped minio storage requires approved_endpoint_id")
 		}
 		validatedEndpoint := endpoint
-		if sec.MinIO.ApprovedEndpoint != nil && !strings.Contains(validatedEndpoint, "://") {
-			validatedEndpoint = fmt.Sprintf("%s://%s", sec.MinIO.ApprovedEndpoint.Scheme, validatedEndpoint)
+		if minioConfig.ApprovedEndpoint != nil && !strings.Contains(validatedEndpoint, "://") {
+			validatedEndpoint = fmt.Sprintf("%s://%s", minioConfig.ApprovedEndpoint.Scheme, validatedEndpoint)
 		}
-		if err := validateApprovedStorageEndpoint(sec.MinIO.ApprovedEndpoint, validatedEndpoint, p); err != nil {
+		if err := validateApprovedStorageEndpoint(minioConfig.ApprovedEndpoint, validatedEndpoint, p); err != nil {
 			return nil, p, err
 		}
 		if err := validateAirGappedStorageEndpoint(validatedEndpoint, p); err != nil {
 			return nil, p, err
 		}
-		httpClient, err := newApprovedStorageHTTPClient(sec.MinIO.ApprovedEndpoint)
+		httpClient, err := newApprovedStorageHTTPClient(minioConfig.ApprovedEndpoint)
 		if err != nil {
 			return nil, p, err
 		}
-		minioEndpoint, minioUseSSL := normalizeMinioClientEndpoint(endpoint, sec.MinIO.ApprovedEndpoint, sec.MinIO.UseSSL)
+		minioEndpoint, minioUseSSL := normalizeMinioClientEndpoint(endpoint, minioConfig.ApprovedEndpoint, minioConfig.UseSSL)
 		svc, err := NewMinioFileService(minioEndpoint, accessKeyID, secretAccessKey, bucketName, minioUseSSL, httpClient)
 		return svc, p, err
 

@@ -42,7 +42,7 @@ func TestCustomAgentRetrievalConfigRejectsInvalidStageOrder(t *testing.T) {
 	}
 }
 
-func TestCustomAgentMigratesPreviousRetrievalDefaults(t *testing.T) {
+func TestCustomAgentPreservesExplicitRetrievalValues(t *testing.T) {
 	agent := &CustomAgent{Config: CustomAgentConfig{
 		EmbeddingTopK:       10,
 		VectorRecallTopK:    50,
@@ -54,9 +54,9 @@ func TestCustomAgentMigratesPreviousRetrievalDefaults(t *testing.T) {
 
 	agent.EnsureDefaults()
 
-	if agent.Config.EmbeddingTopK != 30 || agent.Config.RerankCandidateTopK != 20 || agent.Config.RerankTopK != 5 {
+	if agent.Config.EmbeddingTopK != 10 || agent.Config.RerankCandidateTopK != 10 || agent.Config.RerankTopK != 10 {
 		t.Fatalf(
-			"migrated retrieval stages = %d/%d/%d, want 30/20/5",
+			"retrieval stages = %d/%d/%d, want explicit 10/10/10",
 			agent.Config.EmbeddingTopK,
 			agent.Config.RerankCandidateTopK,
 			agent.Config.RerankTopK,
@@ -64,7 +64,7 @@ func TestCustomAgentMigratesPreviousRetrievalDefaults(t *testing.T) {
 	}
 }
 
-func TestCustomAgentMigratesPersistedLegacyZeroShape(t *testing.T) {
+func TestCustomAgentDefaultsOnlyMissingRetrievalValues(t *testing.T) {
 	agent := &CustomAgent{Config: CustomAgentConfig{
 		EmbeddingTopK: 10,
 		RerankTopK:    5,
@@ -72,9 +72,9 @@ func TestCustomAgentMigratesPersistedLegacyZeroShape(t *testing.T) {
 
 	agent.EnsureDefaults()
 
-	if agent.Config.EmbeddingTopK != 30 || agent.Config.RerankCandidateTopK != 20 || agent.Config.RerankTopK != 5 {
+	if agent.Config.EmbeddingTopK != 10 || agent.Config.RerankCandidateTopK != 10 || agent.Config.RerankTopK != 5 {
 		t.Fatalf(
-			"migrated zero-shape retrieval stages = %d/%d/%d, want 30/20/5",
+			"retrieval stages = %d/%d/%d, want 10/10/5",
 			agent.Config.EmbeddingTopK,
 			agent.Config.RerankCandidateTopK,
 			agent.Config.RerankTopK,

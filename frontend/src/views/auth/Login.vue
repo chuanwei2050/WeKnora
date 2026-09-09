@@ -154,6 +154,7 @@ const formRules = computed(() => ({
 const persistLoginResponse = async (response: LoginResponse) => {
   if (!response.user || !response.tenant || !response.token) return
 
+  authStore.resetWorkspaceContext()
   localStorage.removeItem('weknora_bidreview_embedded')
   localStorage.removeItem('weknora_bidreview_role')
   authStore.setLiteMode(false)

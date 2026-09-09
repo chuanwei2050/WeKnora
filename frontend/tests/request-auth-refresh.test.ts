@@ -107,3 +107,30 @@ it.each([true, false])('preserves a new login when an older refresh completes (s
   expect(localStorage.getItem('weknora_token')).toBe('new-login')
   expect(localStorage.getItem('weknora_refresh_token')).toBe('new-login-refresh')
 })
+
+it('clears a stale tenant selection and retries once without its header', async () => {
+  localStorage.setItem('weknora_selected_tenant_id', '10483')
+  localStorage.setItem('weknora_selected_tenant_name', 'stale tenant')
+  localStorage.setItem('weknora_tenant', JSON.stringify({ id: 10000 }))
+  let calls = 0
+  const { get } = await client(async config => {
+    calls += 1
+    if (calls === 1) {
+      expect(config.headers['X-Tenant-ID']).toBe('10483')
+      throw new AxiosError('Bad Request', 'ERR_BAD_REQUEST', config, undefined, {
+        config,
+        status: 400,
+        statusText: 'Bad Request',
+        headers: {},
+        data: { code: 'INVALID_TARGET_TENANT_ID', error: 'Invalid target tenant ID' },
+      })
+    }
+    expect(config.headers['X-Tenant-ID']).toBeUndefined()
+    return { config, status: 200, statusText: 'OK', headers: {}, data: { success: true } }
+  })
+
+  await expect(get('/knowledge-bases')).resolves.toEqual({ success: true })
+  expect(calls).toBe(2)
+  expect(localStorage.getItem('weknora_selected_tenant_id')).toBeNull()
+  expect(localStorage.getItem('weknora_selected_tenant_name')).toBeNull()
+})

@@ -169,6 +169,7 @@ const router = createRouter({
 // 持久化 auto-setup / login 返回的认证信息到 store
 function persistLoginResponse(authStore: ReturnType<typeof useAuthStore>, response: any) {
   if (response.user && response.tenant && response.token) {
+    authStore.resetWorkspaceContext()
     authStore.setUser({
       id: response.user.id || '',
       username: response.user.username || '',

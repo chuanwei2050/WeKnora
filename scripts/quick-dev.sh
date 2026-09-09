@@ -13,6 +13,21 @@ NC='\033[0m' # 无颜色
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 
+# Docker Compose reads COMPOSE_PROJECT_NAME from .env automatically, while
+# child shell scripts only see exported environment variables. Keep both on
+# the same project so app-container joins the network backed by the same data
+# volumes.
+if [ -z "${COMPOSE_PROJECT_NAME:-}" ] && [ -f "$PROJECT_ROOT/.env" ]; then
+    configured_project_name="$(sed -n 's/^[[:space:]]*COMPOSE_PROJECT_NAME[[:space:]]*=[[:space:]]*//p' "$PROJECT_ROOT/.env" | tail -n 1 | tr -d '\r')"
+    configured_project_name="${configured_project_name%\"}"
+    configured_project_name="${configured_project_name#\"}"
+    configured_project_name="${configured_project_name%\'}"
+    configured_project_name="${configured_project_name#\'}"
+    if [[ "$configured_project_name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
+        export COMPOSE_PROJECT_NAME="$configured_project_name"
+    fi
+fi
+
 log_info() {
     printf "%b\n" "${BLUE}[INFO]${NC} $1"
 }
