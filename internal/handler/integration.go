@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -17,14 +16,14 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/config"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	integrationauth "github.com/Tencent/WeKnora/internal/integration"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/structuredquery"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -42,7 +41,7 @@ type IntegrationHandler struct {
 	agents         interfaces.CustomAgentService
 	tenant         interfaces.TenantService
 	files          interfaces.FileService
-	duckdb         *sql.DB
+	config         *config.Config
 	governanceRepo interfaces.KnowledgeGovernanceRepository
 	streams        interfaces.StreamManager
 	attachments    *session.AttachmentProcessor
@@ -56,9 +55,9 @@ type IntegrationHandler struct {
 // reverse-proxy deployments.
 const integrationBrowserCookiePath = "/"
 
-func NewIntegrationHandler(service *integrationauth.Service, kbs interfaces.KnowledgeBaseService, knowledges interfaces.KnowledgeService, sessions interfaces.SessionService, messages interfaces.MessageService, streams interfaces.StreamManager, files interfaces.FileService, models interfaces.ModelService, agents interfaces.CustomAgentService, tenant interfaces.TenantService, duckdb *sql.DB, documents interfaces.DocumentReader, imageResolver *docparser.ImageResolver, governanceRepo interfaces.KnowledgeGovernanceRepository) *IntegrationHandler {
+func NewIntegrationHandler(service *integrationauth.Service, kbs interfaces.KnowledgeBaseService, knowledges interfaces.KnowledgeService, sessions interfaces.SessionService, messages interfaces.MessageService, streams interfaces.StreamManager, files interfaces.FileService, models interfaces.ModelService, agents interfaces.CustomAgentService, tenant interfaces.TenantService, appConfig *config.Config, documents interfaces.DocumentReader, imageResolver *docparser.ImageResolver, governanceRepo interfaces.KnowledgeGovernanceRepository) *IntegrationHandler {
 	return &IntegrationHandler{
-		service: service, kbs: kbs, knowledges: knowledges, sessions: sessions, messages: messages, models: models, agents: agents, tenant: tenant, files: files, duckdb: duckdb, governanceRepo: governanceRepo, streams: streams,
+		service: service, kbs: kbs, knowledges: knowledges, sessions: sessions, messages: messages, models: models, agents: agents, tenant: tenant, files: files, config: appConfig, governanceRepo: governanceRepo, streams: streams,
 		attachments: session.NewAttachmentProcessor(files, documents, imageResolver, models),
 		limiter:     newIntegrationRateLimiter(), limits: loadIntegrationLimits(),
 	}
@@ -880,10 +879,8 @@ type integrationTableAnalysisResult struct {
 	Error    string              `json:"error,omitempty"`
 }
 
-// AnalyzeKnowledgeTable generates and executes read-only DuckDB SQL for one
-// tabular knowledge item. The model and tool configuration remain owned by
-// WeKnora; callers only select an allowed KB/file and provide natural-language
-// questions.
+// AnalyzeKnowledgeTable delegates natural-language table questions to the
+// governed structured-query service. Callers never submit or execute SQL.
 func (h *IntegrationHandler) AnalyzeKnowledgeTable(c *gin.Context) {
 	if !h.enforceRate(c, "api.table.analyze", 20) {
 		return
@@ -928,7 +925,7 @@ func (h *IntegrationHandler) AnalyzeKnowledgeTable(c *gin.Context) {
 		integrationError(c, http.StatusInternalServerError, "knowledge_lookup_failed", "failed to load knowledge")
 		return
 	}
-	if knowledge == nil || knowledge.KnowledgeBaseID != req.KnowledgeBaseID || knowledge.TenantID != principal.TenantID {
+	if knowledge == nil || knowledge.KnowledgeBaseID != req.KnowledgeBaseID || knowledge.TenantID != principal.TenantID || knowledge.EnableStatus != "enabled" || knowledge.ParseStatus != types.ParseStatusCompleted {
 		integrationError(c, http.StatusNotFound, "knowledge_not_found", "knowledge was not found in the requested knowledge base")
 		return
 	}
@@ -953,69 +950,53 @@ func (h *IntegrationHandler) AnalyzeKnowledgeTable(c *gin.Context) {
 		integrationError(c, http.StatusBadRequest, "unsupported_table_type", "only CSV, XLSX and XLS knowledge can be analyzed")
 		return
 	}
-	model, err := h.models.GetDefaultModel(c.Request.Context(), types.ModelTypeKnowledgeQA, "chat")
-	if err != nil || model == nil {
-		integrationError(c, http.StatusServiceUnavailable, "table_analysis_model_unavailable", "default chat model is unavailable")
+	if h.config == nil || h.config.StructuredQuery == nil || !h.config.StructuredQuery.Enabled || strings.TrimSpace(h.config.StructuredQuery.BaseURL) == "" || strings.TrimSpace(h.config.StructuredQuery.APIKey) == "" {
+		integrationError(c, http.StatusServiceUnavailable, "structured_query_unavailable", "structured query service is unavailable")
 		return
 	}
-	chatModel, err := h.models.GetChatModel(c.Request.Context(), model.ID)
-	if err != nil {
-		integrationError(c, http.StatusServiceUnavailable, "table_analysis_model_unavailable", "default chat model is unavailable")
+	datasetID := knowledge.GetMetadata()["structured_dataset_id"]
+	if datasetID == "" {
+		integrationError(c, http.StatusUnprocessableEntity, "structured_dataset_not_ready", "tabular knowledge has not completed structured ingestion")
 		return
 	}
-	tool := tools.NewDataAnalysisTool(h.kbs, h.knowledges, h.tenant, h.files, h.duckdb, "integration_"+uuid.NewString(), tools.InternalDataAnalysisAuthorization())
-	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		tool.Cleanup(cleanupCtx)
-	}()
-	schema, err := tool.LoadFromKnowledge(c.Request.Context(), knowledge)
-	if err != nil {
-		integrationError(c, http.StatusUnprocessableEntity, "table_load_failed", "tabular knowledge could not be loaded")
-		return
-	}
+	client := structuredquery.Client{BaseURL: h.config.StructuredQuery.BaseURL, APIKey: h.config.StructuredQuery.APIKey, Timeout: time.Duration(h.config.StructuredQuery.RequestTimeout) * time.Second}
 	results := make([]integrationTableAnalysisResult, 0, len(req.Queries))
 	for _, query := range req.Queries {
-		results = append(results, h.runIntegrationTableQuery(c.Request.Context(), chatModel, tool, schema, knowledge.ID, query, req.MaxRows))
+		results = append(results, runIntegrationStructuredQuery(c.Request.Context(), client, knowledge, datasetID, query, req.MaxRows))
 	}
 	h.service.AuditResources(c.Request.Context(), principal, "api.table.analyze", "allowed", "", []string{req.KnowledgeBaseID})
 	integrationData(c, http.StatusOK, gin.H{"knowledge_base_id": req.KnowledgeBaseID, "knowledge_id": req.KnowledgeID, "agent_id": types.BuiltinDataAnalystID, "results": results})
 }
 
-func (h *IntegrationHandler) runIntegrationTableQuery(ctx context.Context, model chat.Chat, tool *tools.DataAnalysisTool, schema *tools.TableSchema, knowledgeID string, query integrationTableAnalysisQuery, maxRows int) integrationTableAnalysisResult {
+func runIntegrationStructuredQuery(ctx context.Context, client structuredquery.Client, knowledge *types.Knowledge, datasetID string, query integrationTableAnalysisQuery, maxRows int) integrationTableAnalysisResult {
 	result := integrationTableAnalysisResult{ID: query.ID, Status: "failed", Rows: []map[string]string{}}
-	prompt := fmt.Sprintf(`You are the SQL planning component of WeKnora's built-in data analyst.
-Generate exactly one read-only DuckDB SELECT statement that answers the question using the table below.
-Use exact quoted column names from the schema. Do not use external files, table functions, PRAGMA, SHOW, DESCRIBE, EXPLAIN, or multiple statements.
-Question: %s
-Knowledge ID (return this unchanged in knowledge_id): %s
-SQL table name (use this exact quoted identifier in FROM): "%s"
-Schema:
-%s`, strings.TrimSpace(query.Query), knowledgeID, schema.TableName, schema.Description())
-	response, err := model.Chat(ctx, []chat.Message{{Role: "user", Content: prompt}}, &chat.ChatOptions{Temperature: 0.1, Format: utils.GenerateSchema[tools.DataAnalysisInput]()})
+	response, err := client.Query(ctx, knowledge.TenantID, structuredquery.Request{Namespace: knowledge.KnowledgeBaseID, Question: strings.TrimSpace(query.Query), DatasetIDs: []string{datasetID}})
 	if err != nil {
-		result.Error = "failed to generate SQL"
+		result.Error = "structured query failed"
 		return result
 	}
-	var input tools.DataAnalysisInput
-	if json.Unmarshal([]byte(response.Content), &input) != nil || strings.TrimSpace(input.Sql) == "" {
-		result.Error = "model returned invalid SQL"
-		return result
-	}
-	input.KnowledgeID = knowledgeID
-	input.MaxRows = maxRows
-	payload, _ := json.Marshal(input)
-	toolResult, err := tool.Execute(ctx, payload)
-	if err != nil || toolResult == nil || !toolResult.Success {
-		result.Error = "SQL execution failed"
+	if response.Route == "none" {
+		result.Status = "skipped"
 		return result
 	}
 	result.Status = "completed"
-	if value, ok := toolResult.Data["query"].(string); ok {
-		result.SQL = value
+	result.SQL = response.SQL
+	limit := len(response.Rows)
+	if limit > maxRows {
+		limit = maxRows
 	}
-	if rows, ok := toolResult.Data["rows"].([]map[string]string); ok {
-		result.Rows = rows
+	for _, values := range response.Rows[:limit] {
+		row := make(map[string]string, len(response.Columns))
+		for index, column := range response.Columns {
+			if index < len(values) {
+				if values[index] == nil {
+					row[column] = "NULL"
+				} else {
+					row[column] = fmt.Sprint(values[index])
+				}
+			}
+		}
+		result.Rows = append(result.Rows, row)
 	}
 	result.RowCount = len(result.Rows)
 	return result

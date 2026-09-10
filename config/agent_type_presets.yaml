@@ -141,7 +141,7 @@ agent_type_presets:
     # anything useful.
 
   # --------------------------------------------------------------------------
-  # Data Analysis — SQL / statistics over tabular files (CSV / Excel) in the KB.
+  # Data Analysis — governed queries/statistics over tabular files in the KB.
   # Retrieval capabilities (vector/wiki/…) are largely irrelevant here — the
   # agent drives `data_schema` + `data_analysis` tools against uploaded files,
   # so we gate on supported_file_types rather than KB capabilities.
@@ -150,13 +150,13 @@ agent_type_presets:
     i18n:
       default:
         label: "Data Analysis"
-        description: "SQL queries and statistics over tabular files (CSV / Excel). Pair with a KB that holds data files."
+        description: "Governed queries and statistics over tabular files (CSV / Excel). Pair with a KB that holds data files."
       zh-CN:
         label: "数据分析"
-        description: "对 CSV / Excel 等表格文件执行 SQL 查询和统计分析。请绑定包含数据文件的知识库。"
+        description: "对 CSV / Excel 等表格文件执行受控查询和统计分析。请绑定包含数据文件的知识库。"
       zh-TW:
         label: "數據分析"
-        description: "對 CSV / Excel 等表格檔案執行 SQL 查詢和統計分析。請綁定包含數據檔案的知識庫。"
+        description: "對 CSV / Excel 等表格檔案執行受控查詢和統計分析。請綁定包含數據檔案的知識庫。"
     config:
       system_prompt_id: "data_analyst"
       temperature: 0.3

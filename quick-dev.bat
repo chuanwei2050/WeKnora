@@ -2,5 +2,5 @@
 setlocal
 
 cd /d "%~dp0"
-bash ./scripts/quick-dev.sh %*
+pwsh.exe -NoProfile -File "%~dp0scripts\quick-dev.ps1" %*
 exit /b %errorlevel%

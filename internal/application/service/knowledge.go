@@ -1054,6 +1054,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		_ = s.repo.DeleteKnowledge(ctx, tenantID, knowledge.ID)
 		return nil, err
 	}
+	s.submitStructuredFile(ctx, knowledge, fileService)
 
 	if kb.Governance.Enabled {
 		createdBy, _ := types.UserIDFromContext(ctx)

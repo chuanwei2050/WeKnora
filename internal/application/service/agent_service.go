@@ -557,7 +557,7 @@ func (s *agentService) registerTools(
 			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
 
 		case tools.ToolDataAnalysis:
-			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, tools.AgentDataAnalysisAuthorization(config.SearchTargets, s.governanceRepo))
+			toolToRegister = tools.NewStructuredDataAnalysisTool(s.cfg, s.knowledgeService, config.SearchTargets, s.governanceRepo)
 			logger.Infof(ctx, "Registered data_analysis tool for session: %s", sessionID)
 
 		case tools.ToolDataSchema:

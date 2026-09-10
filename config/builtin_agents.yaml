@@ -145,19 +145,19 @@ builtin_agents:
     i18n:
       default:
         name: "Data Analyst"
-        description: "Professional data analysis agent with SQL query and statistical analysis for CSV/Excel files"
+        description: "Professional data analysis agent for governed queries and statistics over CSV/Excel files"
       zh-CN:
         name: "数据分析师"
-        description: "专业的数据分析智能体，支持对 CSV/Excel 文件进行 SQL 查询和统计分析"
+        description: "专业的数据分析智能体，支持对 CSV/Excel 文件进行受控查询和统计分析"
       zh-TW:
         name: "數據分析師"
-        description: "專業的數據分析智能體，支援對 CSV/Excel 檔案進行 SQL 查詢和統計分析"
+        description: "專業的數據分析智能體，支援對 CSV/Excel 檔案進行受控查詢和統計分析"
       ja-JP:
         name: "データアナリスト"
-        description: "CSV/Excel ファイルの SQL クエリと統計分析に対応するプロフェッショナルなデータ分析エージェント"
+        description: "CSV/Excel ファイルの管理されたクエリと統計分析に対応するデータ分析エージェント"
       ko-KR:
         name: "데이터 분석가"
-        description: "CSV/Excel 파일에 대한 SQL 쿼리 및 통계 분석을 지원하는 전문 데이터 분석 에이전트"
+        description: "CSV/Excel 파일에 대한 관리형 쿼리 및 통계 분석을 지원하는 데이터 분석 에이전트"
     config:
       agent_mode: "smart-reasoning"
       agent_type: "data-analysis"

@@ -292,8 +292,8 @@ func partitionDirectLoadResults(results []*types.SearchResult) ([]*types.SearchR
 // results sorted by score descending.
 func (p *PluginMerge) selectInputResults(ctx context.Context, chatManage *types.ChatManage) []*types.SearchResult {
 	if chatManage.RerankOutcome == types.RerankOutcomeNoRelevantResult {
-		if target := selectDataAnalysisTarget(chatManage.SearchResult, chatManage.KnowledgeIDs, chatManage.SearchTargets); shouldAttemptDataAnalysis(chatManage) && target != nil {
-			return []*types.SearchResult{target}
+		if chatManage.StructuredQueryDone != nil {
+			return nil
 		}
 		return nil
 	}

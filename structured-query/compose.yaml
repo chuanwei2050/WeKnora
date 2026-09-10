@@ -1,0 +1,34 @@
+services:
+  migrate:
+    image: ${STRUCTURED_QUERY_IMAGE:-weknora-structured-query:local}
+    build: .
+    command: ["migrate"]
+    env_file: ${STRUCTURED_QUERY_ENV_FILE:-.env}
+    restart: "no"
+
+  api:
+    image: ${STRUCTURED_QUERY_IMAGE:-weknora-structured-query:local}
+    build: .
+    command: ["api"]
+    env_file: ${STRUCTURED_QUERY_ENV_FILE:-.env}
+    ports:
+      - "${STRUCTURED_QUERY_BIND_ADDRESS:-127.0.0.1}:${STRUCTURED_QUERY_PORT:-8090}:8080"
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/v1/health/live')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    image: ${STRUCTURED_QUERY_IMAGE:-weknora-structured-query:local}
+    build: .
+    command: ["worker"]
+    env_file: ${STRUCTURED_QUERY_ENV_FILE:-.env}
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully

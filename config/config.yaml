@@ -3,6 +3,13 @@ server:
   port: 8080
   host: "0.0.0.0"
 
+structured_query:
+  enabled: false
+  base_url: "http://structured-query-api:8080"
+  api_key: ""
+  request_timeout: 30
+  max_concurrency: 3
+
 # Conversation service configuration
 # NOTE: Prompt content is resolved from prompt_templates/ YAML files via xxx_id fields.
 # Set the _id to the template ID you want; the system will load its content at startup.
