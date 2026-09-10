@@ -239,10 +239,24 @@ start_services() {
         shift
     done
     
-    # DocReader is built from the local source tree. Rebuilding here is cheap
-    # when the Docker cache is warm and prevents quick-dev from silently using
-    # an older pulled image after parser changes.
-    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f "$DOCKER_COMPOSE_FILE" build docreader || return 1
+    # DocReader is normally built from the local source tree. On Windows,
+    # Docker may fail while traversing an unreadable test-cache directory even
+    # when it is excluded by .dockerignore. Reuse an existing image in that
+    # case so quick-dev can still start the rest of the local stack; if no
+    # image exists, keep the failure visible instead of starting a half-ready
+    # environment. Set WEKNORA_BUILD_DOCREADER=1 to make a build failure
+    # fatal and force a fresh image.
+    if [ "${WEKNORA_BUILD_DOCREADER:-0}" = "1" ]; then
+        "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f "$DOCKER_COMPOSE_FILE" build docreader || return 1
+    elif ! "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f "$DOCKER_COMPOSE_FILE" build docreader; then
+        docreader_image="wechatopenai/weknora-docreader:${WEKNORA_VERSION:-latest}"
+        if [ -n "$DOCKER_CLI_BIN" ] && "$DOCKER_CLI_BIN" image inspect "$docreader_image" >/dev/null 2>&1; then
+            log_warning "DocReader 镜像构建失败，复用现有镜像 $docreader_image；如需强制重建请设置 WEKNORA_BUILD_DOCREADER=1"
+        else
+            log_error "DocReader 镜像构建失败且本地没有可复用镜像"
+            return 1
+        fi
+    fi
 
     # 启动服务
     "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f "$DOCKER_COMPOSE_FILE" $PROFILES up -d
