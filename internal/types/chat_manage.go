@@ -114,10 +114,8 @@ func (i QueryIntent) NeedsKBRetrieval() bool {
 // PipelineState holds mutable intermediate data that plugins read and write
 // as the pipeline progresses.
 type PipelineState struct {
-	// Nil means classification is unavailable/uncertain; retain the schema-based decision.
-	NeedsTableQuery *bool  `json:"needs_table_query,omitempty"`
-	RewriteQuery    string `json:"rewrite_query,omitempty"`
-	KeywordQuery    string `json:"keyword_query,omitempty"`
+	RewriteQuery string `json:"rewrite_query,omitempty"`
+	KeywordQuery string `json:"keyword_query,omitempty"`
 	// WebQuery preserves the pre-alias query because KB-specific aliases must not affect web search.
 	WebQuery                    string      `json:"web_query,omitempty"`
 	QualificationAliasesApplied bool        `json:"qualification_aliases_applied,omitempty"`
@@ -125,30 +123,29 @@ type PipelineState struct {
 	Intent                      QueryIntent `json:"intent,omitempty"`
 	History                     []*History  `json:"history,omitempty"`
 
-	SearchResult               []*SearchResult        `json:"-"`
-	IndependentTableCandidates []*SearchResult        `json:"-"`
-	RerankResult               []*SearchResult        `json:"-"`
-	RerankScoredResult         []*SearchResult        `json:"-"`
-	RerankOutcome              RerankOutcome          `json:"rerank_outcome,omitempty"`
-	MergeResult                []*SearchResult        `json:"-"`
-	DataAnalysisResult         []*SearchResult        `json:"-"`
-	DataAnalysisAttempted      bool                   `json:"-"`
-	Entity                     []string               `json:"-"`
-	EntityKBIDs                []string               `json:"-"`
-	EntityKnowledge            map[string]string      `json:"-"`
-	GraphResult                *GraphData             `json:"-"`
-	GraphSearchResult          *GraphSearchResult     `json:"-"`
-	GraphContext               string                 `json:"-"`
-	UserContent                string                 `json:"-"`
-	RenderedContexts           string                 `json:"-"`
-	ChatResponse               *ChatResponse          `json:"-"`
-	ImageDescription           string                 `json:"-"`
-	ImageDescriptions          []string               `json:"-"`
-	QuotedContext              string                 `json:"-"` // Quoted message text, injected at LLM prompt stage
-	SystemPromptOverride       string                 `json:"-"`
-	RoutingDecision            *RoutingDecision       `json:"routing_decision,omitempty"`
-	VerifiedResult             *VerifiedAnswer        `json:"verified_result,omitempty"`
-	StructuredQueryDone        <-chan []*SearchResult `json:"-"`
+	SearchResult          []*SearchResult        `json:"-"`
+	RerankResult          []*SearchResult        `json:"-"`
+	RerankScoredResult    []*SearchResult        `json:"-"`
+	RerankOutcome         RerankOutcome          `json:"rerank_outcome,omitempty"`
+	MergeResult           []*SearchResult        `json:"-"`
+	DataAnalysisResult    []*SearchResult        `json:"-"`
+	DataAnalysisAttempted bool                   `json:"-"`
+	Entity                []string               `json:"-"`
+	EntityKBIDs           []string               `json:"-"`
+	EntityKnowledge       map[string]string      `json:"-"`
+	GraphResult           *GraphData             `json:"-"`
+	GraphSearchResult     *GraphSearchResult     `json:"-"`
+	GraphContext          string                 `json:"-"`
+	UserContent           string                 `json:"-"`
+	RenderedContexts      string                 `json:"-"`
+	ChatResponse          *ChatResponse          `json:"-"`
+	ImageDescription      string                 `json:"-"`
+	ImageDescriptions     []string               `json:"-"`
+	QuotedContext         string                 `json:"-"` // Quoted message text, injected at LLM prompt stage
+	SystemPromptOverride  string                 `json:"-"`
+	RoutingDecision       *RoutingDecision       `json:"routing_decision,omitempty"`
+	VerifiedResult        *VerifiedAnswer        `json:"verified_result,omitempty"`
+	StructuredQueryDone   <-chan []*SearchResult `json:"-"`
 }
 
 type RerankOutcome string
@@ -286,7 +283,6 @@ func (c *ChatManage) Clone() *ChatManage {
 			VerifiedAnswer:           c.VerifiedAnswer,
 		},
 		PipelineState: PipelineState{
-			NeedsTableQuery:             c.NeedsTableQuery,
 			RewriteQuery:                c.RewriteQuery,
 			KeywordQuery:                c.KeywordQuery,
 			WebQuery:                    c.WebQuery,

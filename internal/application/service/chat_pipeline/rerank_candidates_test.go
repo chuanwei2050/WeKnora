@@ -248,13 +248,11 @@ func TestRerankEmptyResultIsNoRelevantResult(t *testing.T) {
 }
 
 func TestRerankEmptyResultContinuesForStructuredCandidate(t *testing.T) {
-	yes := true
 	plugin := &PluginRerank{modelService: fixedRerankModelService{model: fixedReranker{}}}
 	done := make(chan []*types.SearchResult, 1)
 	manage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{RerankThreshold: 0.3, RerankTopK: 3},
 		PipelineState: types.PipelineState{
-			NeedsTableQuery:     &yes,
 			RewriteQuery:        "统计记录数",
 			SearchResult:        []*types.SearchResult{{ID: "table", KnowledgeID: "records", KnowledgeFilename: "records.xlsx", Content: "columns"}},
 			StructuredQueryDone: done,
