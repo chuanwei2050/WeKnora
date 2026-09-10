@@ -9,7 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-const dataAnalysisEvidenceInstruction = "结构化查询结果：这是对原始表格执行 SQL 得到的一条候选证据。请将其与 ES、向量检索的局部检索证据共同判断，不要机械地优先采用任一来源。检索证据由 rerank 决定相关性、候选资格和最终顺序。检索证据入选只表示相关，不表示覆盖完整；判断时核对每条证据的查询条件、语义匹配程度和数据覆盖范围。涉及完整名单、总数或聚合时，只有过滤条件覆盖目标字段和值的结构化结果才能证明完整性；若证据冲突，请指出冲突及采用结论的理由。"
+const dataAnalysisEvidenceInstruction = "结构化查询结果：请与其他检索证据交叉核对后回答。统计、聚合、排序和计算类问题以 SQL 结果为准；普通事实和列举类问题不得因 SQL 未命中而忽略其他证据。补充列举时保留证据中的实际表述，不得臆造同义或纳入无关相邻记录。"
 
 type PluginDataAnalysis struct {
 	knowledgeService interfaces.KnowledgeService

@@ -97,9 +97,11 @@ func TestStructuredAnswerOutputRulesAreAppendedWithoutChangingEvidence(t *testin
 		t.Fatal("structured evidence was changed before answer generation")
 	}
 	for _, rule := range []string{
-		"SQL", "物理表名", "内部标识", "内部生成的字段别名", "原始结果载荷", "自然语言", "业务列名",
-		"rerank 决定相关性、候选资格和最终顺序", "局部检索片段", "入选只表示与问题相关", "不表示覆盖完整", "完整名单、总数或聚合结果",
-		"结构化查询结果和检索片段都是候选证据", "目标字段和值", "SQL 返回行数较少", "区别性主体", "相邻人员",
+		"SQL", "物理表名", "内部标识", "字段别名", "原始载荷", "自然语言",
+		"统计、聚合、排序和计算类问题以 SQL 结果为准",
+		"普通事实和列举类问题不得因 SQL 未命中而忽略其他证据",
+		"实际表述", "不得臆造同义", "无关相邻记录",
+		"不能单独证明完整总数或全集",
 	} {
 		if !strings.Contains(manage.UserContent, rule) {
 			t.Fatalf("missing output rule %q", rule)
@@ -136,7 +138,10 @@ func TestStructuredAndRerankedEvidenceAreBothRenderedForAnswerReview(t *testing.
 	if err := (&PluginIntoChatMessage{}).OnEvent(context.Background(), types.INTO_CHAT_MESSAGE, manage, func() *PluginError { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	for _, evidence := range []string{reranked.Content, structured.Content, "候选证据", "区别性主体", "相邻人员"} {
+	for _, evidence := range []string{
+		reranked.Content, structured.Content,
+		"以 SQL 结果为准", "不得因 SQL 未命中而忽略其他证据", "实际表述", "无关相邻记录",
+	} {
 		if !strings.Contains(manage.UserContent, evidence) {
 			t.Fatalf("answer prompt missing %q: %s", evidence, manage.UserContent)
 		}
