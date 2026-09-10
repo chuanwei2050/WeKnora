@@ -1,17 +1,15 @@
 from logging.config import fileConfig
-import os
 
 from alembic import context
 from sqlalchemy import create_engine
 
+from structured_query.config import postgres_dsn_from_environ
 from structured_query.database import Base
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
-postgres_dsn = os.environ.get("STRUCTURED_QUERY_POSTGRES_DSN")
-if not postgres_dsn:
-    raise RuntimeError("STRUCTURED_QUERY_POSTGRES_DSN is required for migrations")
+postgres_dsn = postgres_dsn_from_environ()
 config.set_main_option("sqlalchemy.url", postgres_dsn.replace("%", "%%"))
 target_metadata = Base.metadata
 

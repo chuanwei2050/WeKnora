@@ -1,9 +1,46 @@
 from functools import lru_cache
+import os
 from typing import Annotated
 from urllib.parse import quote
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+def resolve_postgres_dsn(
+    dsn: str | None,
+    *,
+    host: str = "postgres",
+    port: int = 5432,
+    user: str = "",
+    password: str = "",
+    database: str = "",
+) -> str:
+    if dsn:
+        return dsn
+    if not user or not database:
+        raise ValueError("postgres_dsn or postgres component settings are required")
+    return (
+        f"postgresql+psycopg://{quote(user, safe='')}:{quote(password, safe='')}"
+        f"@{host}:{port}/{quote(database, safe='')}"
+    )
+
+
+def postgres_dsn_from_environ() -> str:
+    try:
+        return resolve_postgres_dsn(
+            os.environ.get("STRUCTURED_QUERY_POSTGRES_DSN"),
+            host=os.environ.get("STRUCTURED_QUERY_POSTGRES_HOST", "postgres"),
+            port=int(os.environ.get("STRUCTURED_QUERY_POSTGRES_PORT", "5432")),
+            user=os.environ.get("STRUCTURED_QUERY_POSTGRES_USER", ""),
+            password=os.environ.get("STRUCTURED_QUERY_POSTGRES_PASSWORD", ""),
+            database=os.environ.get("STRUCTURED_QUERY_POSTGRES_DATABASE", ""),
+        )
+    except ValueError as exc:
+        raise RuntimeError(
+            "STRUCTURED_QUERY_POSTGRES_DSN or STRUCTURED_QUERY_POSTGRES_USER/DATABASE "
+            "are required for migrations"
+        ) from exc
 
 
 class Settings(BaseSettings):
@@ -65,13 +102,15 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def build_connection_urls(self) -> "Settings":
         if self.postgres_dsn is None:
-            if not self.postgres_user or not self.postgres_database:
-                raise ValueError("postgres_dsn or postgres component settings are required")
-            user = quote(self.postgres_user, safe="")
-            password = quote(self.postgres_password.get_secret_value(), safe="")
-            database = quote(self.postgres_database, safe="")
             self.postgres_dsn = SecretStr(
-                f"postgresql+psycopg://{user}:{password}@{self.postgres_host}:{self.postgres_port}/{database}"
+                resolve_postgres_dsn(
+                    None,
+                    host=self.postgres_host,
+                    port=self.postgres_port,
+                    user=self.postgres_user,
+                    password=self.postgres_password.get_secret_value(),
+                    database=self.postgres_database,
+                )
             )
         if self.redis_url is None:
             password = quote(self.redis_password.get_secret_value(), safe="")
