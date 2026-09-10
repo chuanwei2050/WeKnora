@@ -129,7 +129,7 @@ func TestBuildPromptsPreservesConfiguredDefaultTemplate(t *testing.T) {
 	}
 	plugin := &PluginQueryUnderstand{config: appCfg}
 	builtinResult, _ := plugin.buildPrompts(&types.ChatManage{}, nil)
-	if builtinResult != builtin+tableQueryIntentInstruction {
+	if builtinResult != builtin {
 		t.Fatalf("configured default prompt was replaced: %q", builtinResult)
 	}
 
@@ -137,7 +137,7 @@ func TestBuildPromptsPreservesConfiguredDefaultTemplate(t *testing.T) {
 	customChat := &types.ChatManage{}
 	customChat.RewritePromptSystem = custom
 	customResult, _ := plugin.buildPrompts(customChat, nil)
-	if customResult != custom+tableQueryIntentInstruction {
+	if customResult != custom {
 		t.Fatalf("custom prompt was replaced: %q", customResult)
 	}
 }

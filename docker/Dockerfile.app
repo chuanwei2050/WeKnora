@@ -55,6 +55,7 @@ ENV GO_VERSION=${GO_VERSION_ARG}
 
 # Build the application with version info
 RUN --mount=type=cache,target=/go/pkg/mod make build-prod
+RUN --mount=type=cache,target=/go/pkg/mod go build -o /app/WeKnora-backfill-structured-query ./cmd/backfill-structured-query
 RUN --mount=type=cache,target=/go/pkg/mod cp -r /go/pkg/mod/github.com/yanyiwu/ /app/yanyiwu/
 
 # Final stage
@@ -126,6 +127,7 @@ COPY --from=builder /app/skills/preloaded ./skills/preloaded
 COPY --from=builder /app/skills/preloaded ./skills/_builtin
 COPY --from=builder /root/.duckdb /home/appuser/.duckdb
 COPY --from=builder /app/WeKnora .
+COPY --from=builder /app/WeKnora-backfill-structured-query .
 
 # Copy and make entrypoint script executable
 COPY --from=builder /app/scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh

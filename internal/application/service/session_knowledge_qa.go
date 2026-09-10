@@ -199,6 +199,7 @@ func (s *sessionService) KnowledgeQA(
 		// RAG — dynamically assemble based on feature flags.
 		pipeline = types.NewPipelineBuilder().
 			Add(types.LOAD_HISTORY).
+			Add(types.STRUCTURED_QUERY_START).
 			Add(types.QUERY_UNDERSTAND).
 			Add(types.CHUNK_SEARCH_PARALLEL).
 			Add(types.CHUNK_RERANK).

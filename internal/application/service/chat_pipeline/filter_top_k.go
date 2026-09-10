@@ -49,7 +49,7 @@ func (p *PluginFilterTopK) OnEvent(ctx context.Context,
 	}
 
 	if len(chatManage.MergeResult) > 0 {
-		chatManage.MergeResult = filterTopK(chatManage.MergeResult, chatManage.RerankTopK)
+		chatManage.MergeResult = filterTopKPreservingStructured(chatManage.MergeResult, chatManage.RerankTopK)
 	} else if len(chatManage.RerankResult) > 0 {
 		chatManage.RerankResult = filterTopK(chatManage.RerankResult, chatManage.RerankTopK)
 	} else if len(chatManage.SearchResult) > 0 && chatManage.RerankOutcome != types.RerankOutcomeNoRelevantResult {
@@ -66,4 +66,20 @@ func (p *PluginFilterTopK) OnEvent(ctx context.Context,
 		"search_cnt": len(chatManage.SearchResult),
 	})
 	return next()
+}
+
+func filterTopKPreservingStructured(results []*types.SearchResult, topK int) []*types.SearchResult {
+	structured := make([]*types.SearchResult, 0, 1)
+	regular := make([]*types.SearchResult, 0, len(results))
+	for _, result := range results {
+		if result != nil && result.MatchType == types.MatchTypeDataAnalysis {
+			structured = append(structured, result)
+			continue
+		}
+		regular = append(regular, result)
+	}
+	if topK > 0 && len(regular) > topK {
+		regular = regular[:topK]
+	}
+	return append(structured, regular...)
 }

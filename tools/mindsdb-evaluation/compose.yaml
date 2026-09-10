@@ -1,0 +1,23 @@
+name: weknora-mindsdb-evaluation
+
+services:
+  mindsdb:
+    image: mindsdb/mindsdb@sha256:163011c09299a95c97ce2e1b9f157683b3538c5b9167ddc258b95ac256c806bb
+    container_name: weknora-mindsdb-evaluation
+    environment:
+      MINDSDB_APIS: http,mysql
+    ports:
+      - "47344:47334"
+      - "47345:47335"
+    volumes:
+      - mindsdb-data:/root/mdb_storage
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:47334/api/status', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 30
+
+volumes:
+  mindsdb-data:

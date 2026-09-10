@@ -125,29 +125,30 @@ type PipelineState struct {
 	Intent                      QueryIntent `json:"intent,omitempty"`
 	History                     []*History  `json:"history,omitempty"`
 
-	SearchResult               []*SearchResult    `json:"-"`
-	IndependentTableCandidates []*SearchResult    `json:"-"`
-	RerankResult               []*SearchResult    `json:"-"`
-	RerankScoredResult         []*SearchResult    `json:"-"`
-	RerankOutcome              RerankOutcome      `json:"rerank_outcome,omitempty"`
-	MergeResult                []*SearchResult    `json:"-"`
-	DataAnalysisResult         []*SearchResult    `json:"-"`
-	DataAnalysisAttempted      bool               `json:"-"`
-	Entity                     []string           `json:"-"`
-	EntityKBIDs                []string           `json:"-"`
-	EntityKnowledge            map[string]string  `json:"-"`
-	GraphResult                *GraphData         `json:"-"`
-	GraphSearchResult          *GraphSearchResult `json:"-"`
-	GraphContext               string             `json:"-"`
-	UserContent                string             `json:"-"`
-	RenderedContexts           string             `json:"-"`
-	ChatResponse               *ChatResponse      `json:"-"`
-	ImageDescription           string             `json:"-"`
-	ImageDescriptions          []string           `json:"-"`
-	QuotedContext              string             `json:"-"` // Quoted message text, injected at LLM prompt stage
-	SystemPromptOverride       string             `json:"-"`
-	RoutingDecision            *RoutingDecision   `json:"routing_decision,omitempty"`
-	VerifiedResult             *VerifiedAnswer    `json:"verified_result,omitempty"`
+	SearchResult               []*SearchResult        `json:"-"`
+	IndependentTableCandidates []*SearchResult        `json:"-"`
+	RerankResult               []*SearchResult        `json:"-"`
+	RerankScoredResult         []*SearchResult        `json:"-"`
+	RerankOutcome              RerankOutcome          `json:"rerank_outcome,omitempty"`
+	MergeResult                []*SearchResult        `json:"-"`
+	DataAnalysisResult         []*SearchResult        `json:"-"`
+	DataAnalysisAttempted      bool                   `json:"-"`
+	Entity                     []string               `json:"-"`
+	EntityKBIDs                []string               `json:"-"`
+	EntityKnowledge            map[string]string      `json:"-"`
+	GraphResult                *GraphData             `json:"-"`
+	GraphSearchResult          *GraphSearchResult     `json:"-"`
+	GraphContext               string                 `json:"-"`
+	UserContent                string                 `json:"-"`
+	RenderedContexts           string                 `json:"-"`
+	ChatResponse               *ChatResponse          `json:"-"`
+	ImageDescription           string                 `json:"-"`
+	ImageDescriptions          []string               `json:"-"`
+	QuotedContext              string                 `json:"-"` // Quoted message text, injected at LLM prompt stage
+	SystemPromptOverride       string                 `json:"-"`
+	RoutingDecision            *RoutingDecision       `json:"routing_decision,omitempty"`
+	VerifiedResult             *VerifiedAnswer        `json:"verified_result,omitempty"`
+	StructuredQueryDone        <-chan []*SearchResult `json:"-"`
 }
 
 type RerankOutcome string
@@ -303,6 +304,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			Entity:                      entity,
 			EntityKBIDs:                 entityKBIDs,
 			EntityKnowledge:             entityKnowledge,
+			StructuredQueryDone:         c.StructuredQueryDone,
 		},
 	}
 }
@@ -312,6 +314,7 @@ type EventType string
 
 const (
 	LOAD_HISTORY           EventType = "load_history"
+	STRUCTURED_QUERY_START EventType = "structured_query_start"
 	QUERY_UNDERSTAND       EventType = "query_understand"
 	CHUNK_SEARCH           EventType = "chunk_search"
 	CHUNK_SEARCH_PARALLEL  EventType = "chunk_search_parallel"
@@ -383,6 +386,7 @@ var Pipeline = map[string][]EventType{
 	},
 	"rag_stream": {
 		LOAD_HISTORY,
+		STRUCTURED_QUERY_START,
 		QUERY_UNDERSTAND,
 		CHUNK_SEARCH_PARALLEL,
 		CHUNK_RERANK,

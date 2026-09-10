@@ -597,10 +597,14 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		logger.Infof(context.Background(), "Auto-migration is disabled (AUTO_MIGRATE=false)")
 	}
 
-	// Lite mode has no durable queue. Always reconcile tasks interrupted by a
-	// previous process, even when schema auto-migration is disabled.
-	reconcileInterruptedKnowledgeTasks(db)
-	resetPendingTasks(db)
+	// Maintenance commands can reuse the dependency graph without mutating
+	// unrelated background-task state.
+	if os.Getenv("SKIP_TASK_RECONCILIATION") != "true" {
+		// Lite mode has no durable queue. Always reconcile tasks interrupted by a
+		// previous process, even when schema auto-migration is disabled.
+		reconcileInterruptedKnowledgeTasks(db)
+		resetPendingTasks(db)
+	}
 
 	// Get underlying SQL DB object
 	sqlDB, err := db.DB()

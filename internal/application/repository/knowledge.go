@@ -508,6 +508,28 @@ func (r *knowledgeRepository) UpdateKnowledgeColumn(
 	return err
 }
 
+// MergeKnowledgeMetadata atomically adds metadata keys without overwriting
+// processing fields or metadata concurrently written by another worker.
+func (r *knowledgeRepository) MergeKnowledgeMetadata(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+	metadata types.JSON,
+) error {
+	var expression clause.Expr
+	switch r.db.Dialector.Name() {
+	case "postgres":
+		expression = gorm.Expr("COALESCE(metadata, '{}'::jsonb) || ?::jsonb", string(metadata))
+	case "mysql":
+		expression = gorm.Expr("JSON_MERGE_PATCH(COALESCE(metadata, JSON_OBJECT()), CAST(? AS JSON))", string(metadata))
+	default:
+		expression = gorm.Expr("json_patch(COALESCE(metadata, '{}'), ?)", string(metadata))
+	}
+	return r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND id = ?", tenantID, id).
+		Update("metadata", expression).Error
+}
+
 // CountKnowledgeByKnowledgeBaseID counts the number of knowledge items in a knowledge base
 func (r *knowledgeRepository) CountKnowledgeByKnowledgeBaseID(
 	ctx context.Context,

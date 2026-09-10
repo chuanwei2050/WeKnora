@@ -34,5 +34,17 @@ $bashRoot = ($projectRoot -replace '\\', '/')
 $bashRoot = $bashRoot.Replace("'", "'\''")
 
 $command = "cd '$bashRoot' && exec ./scripts/quick-dev.sh $Action"
+if ($Action -eq 'stop') {
+    & (Join-Path $PSScriptRoot 'structured-query-dev.ps1') stop
+}
+
 & $gitBash -lc $command
+$bashExitCode = $LASTEXITCODE
+if ($bashExitCode -ne 0) {
+    exit $bashExitCode
+}
+
+if ($Action -eq 'start') {
+    & (Join-Path $PSScriptRoot 'structured-query-dev.ps1') start
+}
 exit $LASTEXITCODE

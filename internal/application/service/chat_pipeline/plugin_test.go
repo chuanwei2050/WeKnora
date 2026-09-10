@@ -99,10 +99,46 @@ func TestStructuredAnswerOutputRulesAreAppendedWithoutChangingEvidence(t *testin
 	for _, rule := range []string{
 		"SQL", "物理表名", "内部标识", "内部生成的字段别名", "原始结果载荷", "自然语言", "业务列名",
 		"rerank 决定相关性、候选资格和最终顺序", "局部检索片段", "入选只表示与问题相关", "不表示覆盖完整", "完整名单、总数或聚合结果",
-		"目标字段和值直接验证", "SQL 返回行数较少", "过滤条件覆盖", "区别性主体", "前缀、后缀或修饰词", "语义能够确认", "不得计入明确匹配", "可能相关单独列出", "仅共享通用词", "没有证据支持",
+		"结构化查询结果和检索片段都是候选证据", "目标字段和值", "SQL 返回行数较少", "区别性主体", "相邻人员",
 	} {
 		if !strings.Contains(manage.UserContent, rule) {
 			t.Fatalf("missing output rule %q", rule)
+		}
+	}
+}
+
+func TestStructuredEvidenceIsInjectedWhenTemplateOmitsContexts(t *testing.T) {
+	result := &types.SearchResult{ID: "analysis", MatchType: types.MatchTypeDataAnalysis, Content: `{"rows":[[41]]}`}
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{Query: "有多少人", SummaryConfig: types.SummaryConfig{ContextTemplate: "{{query}}"}},
+		PipelineState:   types.PipelineState{MergeResult: []*types.SearchResult{result}},
+	}
+
+	if err := (&PluginIntoChatMessage{}).OnEvent(context.Background(), types.INTO_CHAT_MESSAGE, manage, func() *PluginError { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(manage.UserContent, "<structured_query_evidence>") || !strings.Contains(manage.UserContent, result.Content) {
+		t.Fatalf("structured evidence missing from prompt: %s", manage.UserContent)
+	}
+}
+
+func TestStructuredAndRerankedEvidenceAreBothRenderedForAnswerReview(t *testing.T) {
+	reranked := &types.SearchResult{ID: "reranked", Content: "姓名：夏雨欣；证书：系统集成项目管理师"}
+	structured := &types.SearchResult{ID: "structured", MatchType: types.MatchTypeDataAnalysis, Content: `{"rows":[["许乃汉"]]}`}
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			Query:         "列出持有系统集成项目管理工程师证书的人员",
+			SummaryConfig: types.SummaryConfig{ContextTemplate: "{{contexts}}\n{{query}}"},
+		},
+		PipelineState: types.PipelineState{MergeResult: []*types.SearchResult{reranked, structured}},
+	}
+
+	if err := (&PluginIntoChatMessage{}).OnEvent(context.Background(), types.INTO_CHAT_MESSAGE, manage, func() *PluginError { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	for _, evidence := range []string{reranked.Content, structured.Content, "候选证据", "区别性主体", "相邻人员"} {
+		if !strings.Contains(manage.UserContent, evidence) {
+			t.Fatalf("answer prompt missing %q: %s", evidence, manage.UserContent)
 		}
 	}
 }

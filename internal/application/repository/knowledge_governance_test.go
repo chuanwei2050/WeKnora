@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ func openKnowledgeGovernanceTestDB(t *testing.T) *gorm.DB {
 			id TEXT PRIMARY KEY,
 			tenant_id INTEGER NOT NULL,
 			parse_status TEXT NOT NULL DEFAULT 'draft',
+			metadata TEXT NOT NULL DEFAULT '{}',
 			current_version_id TEXT,
 			pending_version_id TEXT,
 			updated_at DATETIME,
@@ -57,6 +59,36 @@ func openKnowledgeGovernanceTestDB(t *testing.T) *gorm.DB {
 		}
 	}
 	return db
+}
+
+func TestMergeKnowledgeMetadataPreservesConcurrentFields(t *testing.T) {
+	db := openKnowledgeGovernanceTestDB(t)
+	repo := &knowledgeRepository{db: db}
+	if err := db.Exec(
+		"INSERT INTO knowledges (id, tenant_id, parse_status, metadata) VALUES (?, ?, ?, ?)",
+		"knowledge-metadata", 1, types.ParseStatusProcessing, `{"parser":"new"}`,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MergeKnowledgeMetadata(
+		context.Background(), 1, "knowledge-metadata", types.JSON(`{"structured_job_id":"job-1"}`),
+	); err != nil {
+		t.Fatal(err)
+	}
+	var stored struct {
+		ParseStatus string     `gorm:"column:parse_status"`
+		Metadata    types.JSON `gorm:"column:metadata"`
+	}
+	if err := db.Table("knowledges").Where("id = ?", "knowledge-metadata").First(&stored).Error; err != nil {
+		t.Fatal(err)
+	}
+	metadata := map[string]string{}
+	if err := json.Unmarshal(stored.Metadata, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if stored.ParseStatus != types.ParseStatusProcessing || metadata["parser"] != "new" || metadata["structured_job_id"] != "job-1" {
+		t.Fatalf("unexpected merged state: status=%s metadata=%v", stored.ParseStatus, metadata)
+	}
 }
 
 func TestUpdateKnowledgeIfPendingVersionRejectsStaleWorker(t *testing.T) {

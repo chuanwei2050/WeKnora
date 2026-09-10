@@ -219,7 +219,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 			"filtered_cnt": 0,
 		})
 		emitPipelineStageResult(ctx, chatManage, stageID, "rerank", "未筛选出相关内容", stageStarted, true, map[string]interface{}{"status": "empty", "input_count": len(chatManage.SearchResult), "output_count": 0})
-		if shouldAttemptDataAnalysis(chatManage) && selectDataAnalysisTarget(chatManage.SearchResult, chatManage.KnowledgeIDs, chatManage.SearchTargets) != nil {
+		if chatManage.StructuredQueryDone != nil {
 			// Passage relevance does not establish whether the original table can answer SQL.
 			return next()
 		}

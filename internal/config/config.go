@@ -35,9 +35,18 @@ type Config struct {
 	PromptTemplates    *PromptTemplatesConfig   `yaml:"prompt_templates" json:"prompt_templates"`
 	IM                 *IMConfig                `yaml:"im"               json:"im"`
 	Agent              *AgentConfig             `yaml:"agent"            json:"agent"`
+	StructuredQuery    *StructuredQueryConfig   `yaml:"structured_query" json:"structured_query"`
 	AirGapped          bool                     `yaml:"air_gapped_mode"   json:"air_gapped_mode"`
 	AirGapDependencies []types.AirGapDependency `yaml:"air_gapped_dependencies" json:"air_gapped_dependencies"`
 	Voice              types.VoiceConfig        `yaml:"voice"            json:"voice"`
+}
+
+type StructuredQueryConfig struct {
+	Enabled        bool   `yaml:"enabled" json:"enabled"`
+	BaseURL        string `yaml:"base_url" json:"base_url"`
+	APIKey         string `yaml:"api_key" json:"-"`
+	RequestTimeout int    `yaml:"request_timeout" json:"request_timeout"`
+	MaxConcurrency int    `yaml:"max_concurrency" json:"max_concurrency"`
 }
 
 // AgentConfig represents the global agent settings.
@@ -440,12 +449,35 @@ func LoadConfig() (*Config, error) {
 	applyOIDCEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
 	applyAirGapEnvOverrides(&cfg)
+	applyStructuredQueryEnvOverrides(&cfg)
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
 	}
 
 	return &cfg, nil
+}
+
+func applyStructuredQueryEnvOverrides(cfg *Config) {
+	if cfg.StructuredQuery == nil {
+		cfg.StructuredQuery = &StructuredQueryConfig{}
+	}
+	if raw, ok := os.LookupEnv("WEKNORA_STRUCTURED_QUERY_ENABLED"); ok {
+		if enabled, err := strconv.ParseBool(strings.TrimSpace(raw)); err == nil {
+			cfg.StructuredQuery.Enabled = enabled
+		}
+	}
+	if value, ok := os.LookupEnv("WEKNORA_STRUCTURED_QUERY_BASE_URL"); ok {
+		cfg.StructuredQuery.BaseURL = strings.TrimSpace(value)
+	}
+	if value, ok := os.LookupEnv("WEKNORA_STRUCTURED_QUERY_API_KEY"); ok {
+		cfg.StructuredQuery.APIKey = strings.TrimSpace(value)
+	}
+	if raw, ok := os.LookupEnv("WEKNORA_STRUCTURED_QUERY_REQUEST_TIMEOUT"); ok {
+		if timeout, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+			cfg.StructuredQuery.RequestTimeout = timeout
+		}
+	}
 }
 
 // ValidateConfig performs basic validation of the loaded configuration.

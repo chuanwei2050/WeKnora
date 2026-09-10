@@ -245,6 +245,10 @@ services:
       - WEKNORA_SANDBOX_DOCKER_IMAGE=${WEKNORA_SANDBOX_DOCKER_IMAGE:-wechatopenai/weknora-sandbox:${WEKNORA_VERSION:-latest}}
       # Agent LLM call timeout
       - WEKNORA_AGENT_LLM_TIMEOUT=${WEKNORA_AGENT_LLM_TIMEOUT:-}
+      - WEKNORA_STRUCTURED_QUERY_ENABLED=${WEKNORA_STRUCTURED_QUERY_ENABLED:-false}
+      - WEKNORA_STRUCTURED_QUERY_BASE_URL=${WEKNORA_STRUCTURED_QUERY_BASE_URL:-http://structured-query-api:8080}
+      - WEKNORA_STRUCTURED_QUERY_API_KEY=${WEKNORA_STRUCTURED_QUERY_API_KEY:-}
+      - WEKNORA_STRUCTURED_QUERY_REQUEST_TIMEOUT=${WEKNORA_STRUCTURED_QUERY_REQUEST_TIMEOUT:-180}
       - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
     depends_on:
       redis:
@@ -748,6 +752,85 @@ services:
     profiles:
       - langfuse
       - full
+
+  structured-query-migrate:
+    image: weknora-structured-query:${WEKNORA_VERSION:-latest}
+    build:
+      context: ./structured-query
+    command: ["migrate"]
+    environment: &structured-query-env
+      STRUCTURED_QUERY_POSTGRES_HOST: postgres
+      STRUCTURED_QUERY_POSTGRES_PORT: "5432"
+      STRUCTURED_QUERY_POSTGRES_USER: ${DB_USER}
+      STRUCTURED_QUERY_POSTGRES_PASSWORD: ${DB_PASSWORD}
+      STRUCTURED_QUERY_POSTGRES_DATABASE: ${DB_NAME}
+      STRUCTURED_QUERY_REDIS_HOST: redis
+      STRUCTURED_QUERY_REDIS_PORT: "6379"
+      STRUCTURED_QUERY_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      STRUCTURED_QUERY_REDIS_DATABASE: ${STRUCTURED_QUERY_REDIS_DATABASE:-2}
+      STRUCTURED_QUERY_S3_ENDPOINT: http://minio:9000
+      STRUCTURED_QUERY_S3_ACCESS_KEY: ${MINIO_ACCESS_KEY_ID}
+      STRUCTURED_QUERY_S3_SECRET_KEY: ${MINIO_SECRET_ACCESS_KEY}
+      STRUCTURED_QUERY_S3_BUCKET: ${STRUCTURED_QUERY_S3_BUCKET:-structured-query-staging}
+      STRUCTURED_QUERY_MILVUS_URI: http://milvus:19530
+      STRUCTURED_QUERY_MILVUS_TOKEN: ${MILVUS_TOKEN:-}
+      STRUCTURED_QUERY_WEKNORA_BASE_URL: http://app:8080
+      STRUCTURED_QUERY_WEKNORA_SERVICE_KEY: ${WEKNORA_STRUCTURED_QUERY_API_KEY:-}
+      STRUCTURED_QUERY_API_KEYS: ${WEKNORA_STRUCTURED_QUERY_API_KEY:-}:service
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - WeKnora-network
+    profiles:
+      - structured-query
+    restart: "no"
+
+  structured-query-api:
+    image: weknora-structured-query:${WEKNORA_VERSION:-latest}
+    build:
+      context: ./structured-query
+    container_name: WeKnora-structured-query-api
+    command: ["api"]
+    environment: *structured-query-env
+    ports:
+      - "127.0.0.1:${STRUCTURED_QUERY_PORT:-18090}:8080"
+    depends_on:
+      structured-query-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/v1/health/live')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - WeKnora-network
+    profiles:
+      - structured-query
+    restart: unless-stopped
+
+  structured-query-worker:
+    image: weknora-structured-query:${WEKNORA_VERSION:-latest}
+    build:
+      context: ./structured-query
+    container_name: WeKnora-structured-query-worker
+    command: ["worker"]
+    environment: *structured-query-env
+    depends_on:
+      structured-query-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A structured_query.worker:celery_app inspect ping -d celery@$${HOSTNAME} --timeout=5 | grep -q pong"]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 10s
+    networks:
+      - WeKnora-network
+    profiles:
+      - structured-query
+    restart: unless-stopped
 
 networks:
   WeKnora-network:

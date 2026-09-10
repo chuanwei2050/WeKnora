@@ -250,12 +250,14 @@ func TestRerankEmptyResultIsNoRelevantResult(t *testing.T) {
 func TestRerankEmptyResultContinuesForStructuredCandidate(t *testing.T) {
 	yes := true
 	plugin := &PluginRerank{modelService: fixedRerankModelService{model: fixedReranker{}}}
+	done := make(chan []*types.SearchResult, 1)
 	manage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{RerankThreshold: 0.3, RerankTopK: 3},
 		PipelineState: types.PipelineState{
-			NeedsTableQuery: &yes,
-			RewriteQuery:    "统计记录数",
-			SearchResult:    []*types.SearchResult{{ID: "table", KnowledgeID: "records", KnowledgeFilename: "records.xlsx", Content: "columns"}},
+			NeedsTableQuery:     &yes,
+			RewriteQuery:        "统计记录数",
+			SearchResult:        []*types.SearchResult{{ID: "table", KnowledgeID: "records", KnowledgeFilename: "records.xlsx", Content: "columns"}},
+			StructuredQueryDone: done,
 		},
 	}
 	nextCalled := false
@@ -263,20 +265,18 @@ func TestRerankEmptyResultContinuesForStructuredCandidate(t *testing.T) {
 		t.Fatalf("structured candidate did not reach later SQL stages: err=%v next=%v", err, nextCalled)
 	}
 	merged := (&PluginMerge{}).selectInputResults(context.Background(), manage)
-	if len(merged) != 1 || merged[0].KnowledgeID != "records" {
-		t.Fatalf("merge discarded the structured candidate: %+v", merged)
+	if len(merged) != 0 {
+		t.Fatalf("rerank candidate must not be reused as structured input: %+v", merged)
 	}
 }
 
 func TestRerankEmptyResultDoesNotRestoreTableForNonTableIntent(t *testing.T) {
-	no := false
 	plugin := &PluginRerank{modelService: fixedRerankModelService{model: fixedReranker{}}}
 	manage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{RerankThreshold: 0.3, RerankTopK: 3},
 		PipelineState: types.PipelineState{
-			NeedsTableQuery: &no,
-			RewriteQuery:    "解释测试流程",
-			SearchResult:    []*types.SearchResult{{ID: "table", KnowledgeID: "records", KnowledgeFilename: "records.xlsx", Content: "columns"}},
+			RewriteQuery: "解释测试流程",
+			SearchResult: []*types.SearchResult{{ID: "table", KnowledgeID: "records", KnowledgeFilename: "records.xlsx", Content: "columns"}},
 		},
 	}
 	nextCalled := false

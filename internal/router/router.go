@@ -2,10 +2,12 @@ package router
 
 import (
 	"context"
+	"crypto/subtle"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -139,6 +141,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 	// IM 回调路由（在认证中间件之前注册，使用各平台自身的签名验证）
 	RegisterIMRoutes(r, params.IMHandler)
+	registerStructuredQueryInternalRoutes(r, params)
 
 	// 认证中间件
 	RegisterIntegrationPublicRoutes(r, params.IntegrationHandler)
@@ -194,6 +197,52 @@ func NewRouter(params RouterParams) *gin.Engine {
 	}
 
 	return r
+}
+
+type structuredQueryModelConfig struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	BaseURL   string `json:"base_url"`
+	APIKey    string `json:"api_key"`
+	Dimension int    `json:"dimension,omitempty"`
+}
+
+// registerStructuredQueryInternalRoutes exposes only the two runtime models needed by
+// the structured-query sidecar. The shared service key is checked before tenant context
+// is constructed, so model credentials are never exposed through a tenant-facing API.
+func registerStructuredQueryInternalRoutes(r *gin.Engine, params RouterParams) {
+	r.GET("/api/internal/v1/structured-query/model-config", func(c *gin.Context) {
+		cfg := params.Config.StructuredQuery
+		provided := c.GetHeader("X-Structured-Query-Key")
+		if cfg == nil || cfg.APIKey == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(cfg.APIKey)) != 1 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+		tenantID, err := strconv.ParseUint(c.Query("tenant_id"), 10, 64)
+		if err != nil || tenantID == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tenant_id must be a positive integer"})
+			return
+		}
+		ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, tenantID)
+		chatModel, err := params.ModelService.GetDefaultModel(ctx, types.ModelTypeKnowledgeQA, "chat")
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "chat model unavailable"})
+			return
+		}
+		embeddingModel, err := params.ModelService.GetDefaultModel(ctx, types.ModelTypeEmbedding, "embedding")
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "embedding model unavailable"})
+			return
+		}
+		toConfig := func(model *types.Model) structuredQueryModelConfig {
+			return structuredQueryModelConfig{
+				ID: model.ID, Name: model.Name, BaseURL: model.Parameters.BaseURL,
+				APIKey: model.Parameters.APIKey, Dimension: model.Parameters.EmbeddingParameters.Dimension,
+			}
+		}
+		c.Header("Cache-Control", "no-store")
+		c.JSON(http.StatusOK, gin.H{"chat": toConfig(chatModel), "embedding": toConfig(embeddingModel)})
+	})
 }
 
 func RegisterIntegrationPublicRoutes(r *gin.Engine, h *handler.IntegrationHandler) {
