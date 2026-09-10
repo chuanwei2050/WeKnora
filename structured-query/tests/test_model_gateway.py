@@ -26,6 +26,8 @@ def test_generation_prompt_is_bound_to_selected_dialect(monkeypatch):
     assert "必须能从对应字段" in prompt
     assert "不得用 OR 同时覆盖用户原词、纠正词" in prompt
     assert "括号限定词首先用于业务类别和字段消歧" in prompt
+    assert "不要根据问题主题预先排除结构化查询" in prompt
+    assert "组织是否具有某体系" not in prompt
     assert captured["temperature"] == 0
     assert captured["response_format"]["type"] == "json_schema"
     assert captured["response_format"]["json_schema"]["strict"] is True

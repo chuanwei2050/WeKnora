@@ -120,6 +120,20 @@ def test_value_evidence_prioritizes_matching_qualifier_and_marks_conflicts():
     assert "不得与“软考”作为同一条件 OR 合并" in result[1]
 
 
+def test_qualified_subjects_use_structural_spans_not_question_verbs():
+    pairs = query_service._question_qualified_subjects(
+        "请帮我核对：人员具备软件评测师[软考]资格"
+    )
+
+    assert pairs
+    assert pairs[0][1] == "软考"
+    assert pairs[0][0].endswith("软件评测师")
+
+
+def test_qualified_subjects_ignore_mismatched_brackets():
+    assert query_service._question_qualified_subjects("软件评测师（软考]") == []
+
+
 def test_none_route_stops_before_sql_validation_and_execution(monkeypatch):
     monkeypatch.setattr(
         query_service, "generate_sql",

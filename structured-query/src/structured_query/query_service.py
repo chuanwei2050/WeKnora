@@ -618,14 +618,37 @@ def _compact_evidence_values(
 
 
 def _question_qualified_subjects(question: str) -> list[tuple[str, str]]:
-    """Extract local subject/qualifier pairs without encoding business vocabulary."""
-    normalized = unicodedata.normalize("NFKC", question).casefold()
-    pairs: list[tuple[str, str]] = []
-    for match in re.finditer(r"([^,，。；;、或/]{2,24})\(([^()]{1,16})\)", normalized):
-        subject = re.sub(r"^(?:请|问|查询|统计|具有|持有|拥有|是否有)+", "", match.group(1)).strip()
-        if len(subject) >= 2:
-            pairs.append((subject[-12:], match.group(2).strip()))
-    return pairs
+    """Extract explicit subject/qualifier spans without a business vocabulary list."""
+    return list(_extract_qualified_spans(question))
+
+
+def _extract_qualified_spans(text: str):
+    """Yield bracketed qualifier spans bounded by punctuation or the input edge.
+
+    The parser deliberately uses only text structure (matching brackets and span
+    boundaries), so new business terms or question verbs do not require code changes.
+    """
+    normalized = unicodedata.normalize("NFKC", text).casefold()
+    patterns = (
+        re.compile(
+            r"(?P<subject>[^,，。；;、或/:\n()\[\]{}]{2,48})"
+            r"\((?P<qualifier>[^()\[\]{}]{1,32})\)"
+        ),
+        re.compile(
+            r"(?P<subject>[^,，。；;、或/:\n()\[\]{}]{2,48})"
+            r"\[(?P<qualifier>[^()\[\]{}]{1,32})\]"
+        ),
+        re.compile(
+            r"(?P<subject>[^,，。；;、或/:\n()\[\]{}]{2,48})"
+            r"\{(?P<qualifier>[^()\[\]{}]{1,32})\}"
+        ),
+    )
+    for pattern in patterns:
+        for match in pattern.finditer(normalized):
+            subject = match.group("subject").strip()
+            qualifier = match.group("qualifier").strip()
+            if len(subject) >= 2 and qualifier:
+                yield subject[-12:], qualifier[:24]
 
 
 def _qualifier_evidence_label(text: str, subjects: list[tuple[str, str]]) -> tuple[int, str]:
@@ -633,10 +656,7 @@ def _qualifier_evidence_label(text: str, subjects: list[tuple[str, str]]) -> tup
     if not subjects:
         return 1, ""
     normalized = unicodedata.normalize("NFKC", text).casefold()
-    evidence_pairs = [
-        (match.group(1).strip()[-12:], match.group(2).strip())
-        for match in re.finditer(r"([^,，。；;、:\n]{2,24})\(([^()]{1,16})\)", normalized)
-    ]
+    evidence_pairs = list(_extract_qualified_spans(normalized))
     for subject, qualifier in subjects:
         if qualifier and qualifier in normalized:
             return 0, f"[与问题限定词“{qualifier}”一致] "
