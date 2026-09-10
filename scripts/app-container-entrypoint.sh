@@ -43,12 +43,14 @@ build_app_to() {
     local output="$1"
     local ldflags
     ldflags="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
+    # Windows bind mount 下容器内 git 常失败（exit 128），禁用 VCS stamping。
     env -i \
         PATH="$PATH" \
         HOME="$HOME" \
         GOPATH="${GOPATH:-/go}" \
         GOTOOLCHAIN="${GOTOOLCHAIN:-local}" \
-        go build -ldflags="$ldflags" -o "$output" ./cmd/server
+        GOFLAGS="${GOFLAGS:--buildvcs=false}" \
+        go build -buildvcs=false -ldflags="$ldflags" -o "$output" ./cmd/server
 }
 
 if [ "${WEKNORA_APP_HOT_RELOAD:-true}" != "true" ]; then
@@ -82,7 +84,7 @@ start_app() {
 
 stop_app() {
     if [ -n "${app_pid:-}" ] && kill -0 "$app_pid" 2>/dev/null; then
-        kill "$app_pid"
+        kill "$app_pid" 2>/dev/null || true
         wait "$app_pid" 2>/dev/null || true
     fi
 }
@@ -96,7 +98,15 @@ last_snapshot="$(source_snapshot)"
 start_app
 echo '[INFO] 后端热更新已启动（单线程轮询，间隔 2 秒）。'
 
-while kill -0 "$app_pid" 2>/dev/null; do
+# 监督循环不能因业务进程退出而结束：否则 docker run --rm 会把整个后端容器带走。
+while true; do
+    if ! kill -0 "$app_pid" 2>/dev/null; then
+        echo '[WARN] 后端进程已退出，正在重新拉起...' >&2
+        start_app
+        sleep 1
+        continue
+    fi
+
     sleep 2
     current_snapshot="$(source_snapshot)" || {
         echo '[WARN] 读取源码失败，2 秒后重试。' >&2
@@ -106,16 +116,21 @@ while kill -0 "$app_pid" 2>/dev/null; do
         continue
     fi
 
+    # Windows 编辑器保存可能连续触发多次快照变化，稍等稳定再构建。
+    sleep 1
+    settled_snapshot="$(source_snapshot)" || continue
+    if [ "$settled_snapshot" != "$current_snapshot" ]; then
+        continue
+    fi
+
     echo '[INFO] 检测到源码变化，重新构建...'
     if build_app; then
         stop_app
         mv -f "$runtime_dir/main.next" "$runtime_dir/main"
-        last_snapshot="$current_snapshot"
+        last_snapshot="$settled_snapshot"
         start_app
         echo '[INFO] 后端热更新完成。'
     else
         echo '[ERROR] 后端构建失败，保留当前进程并将在下一轮重试。' >&2
     fi
 done
-
-wait "$app_pid"
