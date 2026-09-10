@@ -22,6 +22,42 @@ func (structuredKnowledgeFixture) ListKnowledgeByKnowledgeBaseID(context.Context
 	}}, nil
 }
 
+type emptyStructuredKnowledgeFixture struct{ interfaces.KnowledgeService }
+
+func (emptyStructuredKnowledgeFixture) ListKnowledgeByKnowledgeBaseID(context.Context, string) ([]*types.Knowledge, error) {
+	return nil, nil
+}
+
+func TestStructuredQuerySkipsNamespaceWithoutDatasets(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		http.Error(w, "unexpected structured query", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	plugin := &PluginDataAnalysis{
+		config:           &config.Config{StructuredQuery: &config.StructuredQueryConfig{Enabled: true, BaseURL: server.URL, APIKey: "key", RequestTimeout: 2}},
+		knowledgeService: emptyStructuredKnowledgeFixture{},
+	}
+	manage := &types.ChatManage{PipelineRequest: types.PipelineRequest{
+		Query: "普通文档问题", TenantID: 7,
+		SearchTargets: types.SearchTargets{&types.SearchTarget{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "document-kb", TenantID: 7}},
+	}, PipelineState: types.PipelineState{
+		MergeResult: []*types.SearchResult{{ID: "rag-result"}},
+	}}
+
+	if err := plugin.OnEvent(context.Background(), types.STRUCTURED_QUERY_START, manage, func() *PluginError { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := plugin.OnEvent(context.Background(), types.DATA_ANALYSIS, manage, func() *PluginError { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if requestCount != 0 {
+		t.Fatalf("namespace without structured datasets must not call sidecar, got %d requests", requestCount)
+	}
+}
+
 func TestStructuredQueryStartsBeforeRetrievalAndMergesLater(t *testing.T) {
 	called := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

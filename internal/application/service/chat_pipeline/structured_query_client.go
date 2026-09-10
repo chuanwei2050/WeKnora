@@ -104,7 +104,12 @@ func (p *PluginDataAnalysis) queryStructuredNamespace(ctx context.Context, manag
 		}
 	}
 	if len(payload.DatasetIDs) == 0 {
-		return nil, fmt.Errorf("structured datasets unavailable")
+		// A knowledge base may be part of the normal RAG scope without having
+		// any tabular dataset.  This is an expected route-none case, not a
+		// structured-query failure.  Skip the sidecar request entirely so a
+		// mixed document/table query does not spend time on an invalid
+		// namespace or emit a misleading warning.
+		return nil, nil
 	}
 	tenantID := manage.SearchTargets.GetTenantIDForKB(namespace)
 	if tenantID == 0 {
