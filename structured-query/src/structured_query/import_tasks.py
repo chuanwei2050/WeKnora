@@ -148,6 +148,8 @@ def _import_dataset(task, job_id: str, object_key: str, file_name: str) -> None:
                         profile=profile_to_dict(column_profile),
                     )
                     session.add(column)
+                    # Flush before dependent rows so insertmany cannot outrun sq_columns FK checks.
+                    session.flush()
                     session.add(
                         SchemaProfile(
                             version_id=version.id,
@@ -197,7 +199,7 @@ def _import_dataset(task, job_id: str, object_key: str, file_name: str) -> None:
             if job is not None:
                 job.state = "failed"
                 job.error_code = "import_failed"
-                job.error_message = "文件解析或结构化入库失败"
+                job.error_message = f"文件解析或结构化入库失败: {type(error).__name__}: {error}"
             if version is not None:
                 version.state = VersionState.FAILED
             session.commit()
@@ -205,7 +207,7 @@ def _import_dataset(task, job_id: str, object_key: str, file_name: str) -> None:
                 delete_version(dataset.tenant_id, version.id) if version is not None else None
             except Exception:
                 pass
-            raise task.retry(exc=RuntimeError("import_failed")) from None
+            raise task.retry(exc=RuntimeError("import_failed")) from error
         try:
             delete_object(object_key)
         except Exception:
