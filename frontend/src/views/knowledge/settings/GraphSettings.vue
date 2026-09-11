@@ -37,6 +37,7 @@
       <div v-if="localGraphExtract.enabled" class="setting-row rebuild-row">
         <div class="setting-info">
           <label>{{ t('graphSettings.rebuildLabel') }}</label>
+          <p class="desc">{{ t('graphSettings.rebuildDescription') }}</p>
           <div v-if="rebuildProgress && rebuildProgress.status !== 'idle'" class="rebuild-status">
             <template v-if="rebuildProgress.status === 'running'">
               <t-progress :percentage="rebuildProgress.percent" />
@@ -91,20 +92,23 @@
 
       <div v-if="localGraphExtract.enabled" class="setting-row">
         <div class="setting-info">
-          <label>抽取方式</label>
-          <p class="desc">按知识库内容选择，无需逐项配置。</p>
+          <label>{{ t('graphSettings.extractModeLabel') }}</label>
+          <p class="desc">{{ t('graphSettings.extractModeDescription') }}</p>
         </div>
         <div class="setting-control">
           <t-select v-model="localGraphExtract.mode" @change="handleModeChange" class="preset-select">
-            <t-option value="general" label="通用抽取" />
-            <t-option value="template" label="使用模板" />
-            <t-option value="custom" label="自定义 Schema" />
+            <t-option value="general" :label="t('graphSettings.modeGeneral')" />
+            <t-option value="template" :label="t('graphSettings.modeTemplate')" />
+            <t-option value="custom" :label="t('graphSettings.modeCustom')" />
           </t-select>
         </div>
       </div>
 
       <div v-if="localGraphExtract.enabled && localGraphExtract.mode === 'template'" class="setting-row">
-        <div class="setting-info"><label>配置模板</label></div>
+        <div class="setting-info">
+          <label>{{ t('graphSettings.templateLabel') }}</label>
+          <p class="desc">{{ t('graphSettings.templateDescription') }}</p>
+        </div>
         <div class="setting-control preset-control">
           <t-select v-model="selectedPresetKey" class="preset-select">
             <t-option value="software-testing" :label="t('graphSettings.softwareTestingTemplate')" />
@@ -118,24 +122,30 @@
       <div v-if="localGraphExtract.enabled && (localGraphExtract.mode === 'custom' || !!localGraphExtract.template_key)" class="schema-fields">
         <div class="setting-row vertical">
           <div class="list-section-header">
-            <div class="setting-info"><label>实体类型 Schema</label><p class="desc">定义模型实际允许抽取的实体类型及含义。</p></div>
-            <t-button v-if="localGraphExtract.mode === 'custom'" theme="primary" @click="addEntitySchema">添加实体类型</t-button>
+            <div class="setting-info">
+              <label>{{ t('graphSettings.entitySchemaLabel') }}</label>
+              <p class="desc">{{ t('graphSettings.entitySchemaDescription') }}</p>
+            </div>
+            <t-button v-if="localGraphExtract.mode === 'custom'" theme="primary" @click="addEntitySchema">{{ t('graphSettings.addEntityType') }}</t-button>
           </div>
           <div class="setting-control full-width schema-list">
             <div v-for="(definition, index) in localGraphExtract.entity_schema" :key="index" class="schema-row entity-schema-row">
-              <t-input v-model="definition.type" placeholder="名称" @change="handleSchemaChange" />
-              <t-select v-model="definition.base_type" placeholder="类型" creatable filterable @change="handleSchemaChange">
+              <t-input v-model="definition.type" :placeholder="t('graphSettings.entityTypeNamePlaceholder')" @change="handleSchemaChange" />
+              <t-select v-model="definition.base_type" :placeholder="t('graphSettings.entityBaseTypePlaceholder')" creatable filterable @change="handleSchemaChange">
                 <t-option v-for="baseType in BASE_ENTITY_TYPES" :key="baseType" :value="baseType" :label="baseType" />
               </t-select>
-              <t-input v-model="definition.description" placeholder="说明" @change="handleSchemaChange" />
+              <t-input v-model="definition.description" :placeholder="t('graphSettings.schemaDescriptionPlaceholder')" @change="handleSchemaChange" />
               <t-button v-if="localGraphExtract.mode === 'custom'" theme="default" size="small" @click="removeEntitySchema(index)"><t-icon name="delete" /></t-button>
             </div>
           </div>
         </div>
         <div class="setting-row vertical">
           <div class="list-section-header">
-            <div class="setting-info"><label>关系类型 Schema</label><p class="desc">定义语义关系、起点到终点的方向及含义。</p></div>
-            <t-button v-if="localGraphExtract.mode === 'custom'" theme="primary" @click="addRelationSchema">添加关系类型</t-button>
+            <div class="setting-info">
+              <label>{{ t('graphSettings.relationSchemaLabel') }}</label>
+              <p class="desc">{{ t('graphSettings.relationSchemaDescription') }}</p>
+            </div>
+            <t-button v-if="localGraphExtract.mode === 'custom'" theme="primary" @click="addRelationSchema">{{ t('graphSettings.addRelationType') }}</t-button>
           </div>
           <div class="setting-control full-width schema-list">
             <div v-for="(definition, index) in localGraphExtract.relation_schema" :key="index" class="schema-row relation-schema-row">
@@ -173,7 +183,10 @@
           </div>
 
           <div class="setting-row vertical">
-            <div class="setting-info"><label>{{ t('graphSettings.extractionLimitsLabel') }}</label></div>
+            <div class="setting-info">
+              <label>{{ t('graphSettings.extractionLimitsLabel') }}</label>
+              <p class="desc">{{ t('graphSettings.extractionLimitsDescription') }}</p>
+            </div>
             <div class="setting-control full-width">
               <div class="quality-grid">
                 <label><span>{{ t('graphSettings.maxEntitiesLabel') }}</span><t-input-number v-model="localGraphExtract.max_entities" :min="1" :max="100" @change="handleConfigChange" /></label>
@@ -184,7 +197,7 @@
           </div>
 
           <div v-if="localGraphExtract.mode === 'custom'" class="setting-row vertical few-shot-row">
-            <div class="setting-info"><label>Few-shot 示例文本（可选）</label><p class="desc">仅用于给模型示范，不是正式 Schema。</p></div>
+            <div class="setting-info"><label>{{ t('graphSettings.sampleTextLabel') }}（可选）</label><p class="desc">{{ t('graphSettings.sampleTextDescription') }}</p></div>
             <div class="setting-control full-width">
               <div class="text-control-group">
             <t-button
@@ -212,8 +225,8 @@
           <div v-if="localGraphExtract.mode === 'custom'" class="setting-row vertical few-shot-row">
         <div class="list-section-header">
           <div class="setting-info">
-            <label>Few-shot 示例实体（可选）</label>
-            <p class="desc">示例实例，不会定义允许抽取的实体类型。</p>
+            <label>{{ t('graphSettings.entityListLabel') }}</label>
+            <p class="desc">{{ t('graphSettings.entityListDescription') }}</p>
           </div>
           <t-button
             theme="primary"
@@ -265,8 +278,8 @@
           <div v-if="localGraphExtract.mode === 'custom'" class="setting-row vertical few-shot-row">
         <div class="list-section-header">
           <div class="setting-info">
-            <label>Few-shot 示例关系（可选）</label>
-            <p class="desc">示例答案，不会定义正式关系类型或方向。</p>
+            <label>{{ t('graphSettings.relationListLabel') }}</label>
+            <p class="desc">{{ t('graphSettings.relationListDescription') }}</p>
           </div>
           <t-button
             theme="primary"
@@ -894,10 +907,19 @@ onUnmounted(() => {
   &.vertical {
     flex-direction: column;
     gap: 12px;
+    align-items: stretch;
+
+    > .setting-info {
+      flex: none;
+      width: 100%;
+      max-width: 100%;
+      padding-right: 0;
+    }
 
     .setting-control {
       width: 100%;
       max-width: 100%;
+      justify-content: flex-start;
     }
   }
 }
@@ -920,6 +942,7 @@ onUnmounted(() => {
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
+    word-break: keep-all;
   }
 }
 
@@ -928,6 +951,13 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: flex-start;
   width: 100%;
+  gap: 12px;
+
+  .setting-info {
+    flex: 1 1 auto;
+    max-width: none;
+    padding-right: 0;
+  }
 }
 
 .setting-control {

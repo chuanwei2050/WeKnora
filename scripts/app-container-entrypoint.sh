@@ -106,7 +106,8 @@ wait_app_ready() {
         sleep 1
     done
 
-    kill -0 "$pid" 2>/dev/null
+    # Timed out without a healthy /health — do not treat a still-alive process as ready.
+    return 1
 }
 
 app_pid=""

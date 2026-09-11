@@ -4,7 +4,6 @@
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
           <h2 style="--wails-draggable: drag">{{ $t('knowledgeSearch.title') }}</h2>
-          <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('knowledgeSearch.subtitle') }}</p>
         </div>
       </div>
 

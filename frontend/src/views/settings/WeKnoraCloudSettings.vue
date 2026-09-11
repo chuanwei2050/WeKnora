@@ -49,7 +49,6 @@
       <div class="setting-row">
         <div class="setting-info">
           <label class="setting-label">{{ $t('settings.weknoraCloud.appIdLabel') }}</label>
-          <p class="setting-desc">{{ $t('settings.weknoraCloud.appIdDesc') }}</p>
         </div>
         <div class="setting-control">
           <t-input
@@ -64,7 +63,6 @@
       <div class="setting-row">
         <div class="setting-info">
           <label class="setting-label">{{ $t('settings.weknoraCloud.appSecretLabel') }}</label>
-          <p class="setting-desc">{{ $t('settings.weknoraCloud.appSecretDesc') }}</p>
         </div>
         <div class="setting-control">
           <t-input

@@ -2,7 +2,6 @@
   <div class="system-info">
     <div class="section-header">
       <h2>{{ $t('system.title') }}</h2>
-      <p class="section-description">{{ $t('system.sectionDescription') }}</p>
     </div>
 
     <!-- Loading state -->
@@ -26,7 +25,6 @@
       <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('system.versionLabel') }}</label>
-          <p class="desc">{{ $t('system.versionDescription') }}</p>
         </div>
         <div class="setting-control">
           <span class="info-value">
@@ -49,7 +47,6 @@
       <div v-if="systemInfo?.build_time" class="setting-row">
         <div class="setting-info">
           <label>{{ $t('system.buildTimeLabel') }}</label>
-          <p class="desc">{{ $t('system.buildTimeDescription') }}</p>
         </div>
         <div class="setting-control">
           <span class="info-value">{{ systemInfo.build_time }}</span>
@@ -60,7 +57,6 @@
       <div v-if="systemInfo?.go_version" class="setting-row">
         <div class="setting-info">
           <label>{{ $t('system.goVersionLabel') }}</label>
-          <p class="desc">{{ $t('system.goVersionDescription') }}</p>
         </div>
         <div class="setting-control">
           <span class="info-value">{{ systemInfo.go_version }}</span>
@@ -71,7 +67,6 @@
       <div v-if="systemInfo?.db_version" class="setting-row">
         <div class="setting-info">
           <label>{{ $t('system.dbVersionLabel') }}</label>
-          <p class="desc">{{ $t('system.dbVersionDescription') }}</p>
         </div>
         <div class="setting-control">
           <span class="info-value">{{ systemInfo.db_version }}</span>
@@ -82,7 +77,6 @@
       <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('system.keywordIndexEngineLabel') }}</label>
-          <p class="desc">{{ $t('system.keywordIndexEngineDescription') }}</p>
         </div>
         <div class="setting-control">
           <span class="info-value">{{ systemInfo?.keyword_index_engine || $t('system.unknown') }}</span>
@@ -93,7 +87,6 @@
       <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('system.vectorStoreEngineLabel') }}</label>
-          <p class="desc">{{ $t('system.vectorStoreEngineDescription') }}</p>
         </div>
         <div class="setting-control">
           <span class="info-value">{{ systemInfo?.vector_store_engine || $t('system.unknown') }}</span>
@@ -104,7 +97,6 @@
       <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('system.graphDatabaseEngineLabel') }}</label>
-          <p class="desc">{{ $t('system.graphDatabaseEngineDescription') }}</p>
         </div>
         <div class="setting-control">
           <span class="info-value">{{ systemInfo?.graph_database_engine || $t('system.unknown') }}</span>

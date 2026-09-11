@@ -2,7 +2,6 @@
   <div class="tenant-info">
     <div class="section-header">
       <h2>{{ $t('tenant.title') }}</h2>
-      <p class="section-description">{{ $t('tenant.sectionDescription') }}</p>
     </div>
 
     <!-- Loading state -->
@@ -26,7 +25,6 @@
       <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('tenant.details.idLabel') }}</label>
-          <p class="desc">{{ $t('tenant.details.idDescription') }}</p>
         </div>
         <div class="setting-control">
           <span class="info-value">{{ tenantInfo?.id || '-' }}</span>
@@ -37,7 +35,6 @@
       <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('tenant.details.nameLabel') }}</label>
-          <p class="desc">{{ $t('tenant.details.nameDescription') }}</p>
         </div>
         <div class="setting-control">
           <span class="info-value">{{ tenantInfo?.name || '-' }}</span>
@@ -48,7 +45,6 @@
       <div v-if="tenantInfo?.business" class="setting-row">
         <div class="setting-info">
           <label>{{ $t('tenant.details.businessLabel') }}</label>
-          <p class="desc">{{ $t('tenant.details.businessDescription') }}</p>
         </div>
         <div class="setting-control">
           <span class="info-value">{{ tenantInfo.business }}</span>
@@ -59,7 +55,6 @@
       <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('tenant.details.statusLabel') }}</label>
-          <p class="desc">{{ $t('tenant.details.statusDescription') }}</p>
         </div>
         <div class="setting-control">
           <t-tag 
@@ -76,7 +71,6 @@
       <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('tenant.details.createdAtLabel') }}</label>
-          <p class="desc">{{ $t('tenant.details.createdAtDescription') }}</p>
         </div>
         <div class="setting-control">
           <span class="info-value">{{ formatDate(tenantInfo?.created_at) }}</span>
@@ -87,7 +81,6 @@
       <div v-if="tenantInfo?.storage_quota !== undefined" class="setting-row">
         <div class="setting-info">
           <label>{{ $t('tenant.storage.quotaLabel') }}</label>
-          <p class="desc">{{ $t('tenant.storage.quotaDescription') }}</p>
         </div>
         <div class="setting-control">
           <span class="info-value">{{ formatBytes(tenantInfo.storage_quota) }}</span>
@@ -98,7 +91,6 @@
       <div v-if="tenantInfo?.storage_quota !== undefined" class="setting-row">
         <div class="setting-info">
           <label>{{ $t('tenant.storage.usedLabel') }}</label>
-          <p class="desc">{{ $t('tenant.storage.usedDescription') }}</p>
         </div>
         <div class="setting-control">
           <span class="info-value">{{ formatBytes(tenantInfo.storage_used || 0) }}</span>
@@ -109,7 +101,6 @@
       <div v-if="tenantInfo?.storage_quota !== undefined" class="setting-row">
         <div class="setting-info">
           <label>{{ $t('tenant.storage.usageLabel') }}</label>
-          <p class="desc">{{ $t('tenant.storage.usageDescription') }}</p>
         </div>
         <div class="setting-control">
           <div class="usage-control">

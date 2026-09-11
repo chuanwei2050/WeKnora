@@ -2,7 +2,6 @@
   <div class="vectorstore-settings">
     <div class="section-header">
       <h2>{{ t('vectorStoreSettings.title') }}</h2>
-      <p class="section-description">{{ t('vectorStoreSettings.description') }}</p>
     </div>
 
     <!-- Loading -->

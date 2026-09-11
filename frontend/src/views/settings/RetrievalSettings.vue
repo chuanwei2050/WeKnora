@@ -2,7 +2,6 @@
   <div class="retrieval-settings">
     <div class="section-header">
       <h2>{{ t('retrievalSettings.title') }}</h2>
-      <p class="section-description">{{ t('retrievalSettings.description') }}</p>
     </div>
 
     <div class="settings-group">

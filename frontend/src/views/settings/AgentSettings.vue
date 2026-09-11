@@ -3,7 +3,6 @@
     <div v-if="activeSection === 'modes'">
       <div class="section-header">
         <h2>{{ $t('settings.conversationStrategy') }}</h2>
-        <p class="section-description">{{ $t('conversationSettings.description') }}</p>
         <div class="global-config-notice">
           <t-icon name="info-circle" />
           <span>{{ $t('agentSettings.globalConfigNotice') }}</span>
@@ -267,7 +266,6 @@
     <div v-else-if="activeSection === 'models'" class="section-block" data-conversation-section="models">
       <div class="section-header">
         <h2>{{ $t('conversationSettings.menus.models') }}</h2>
-        <p class="section-description">{{ $t('conversationSettings.models.description') }}</p>
       </div>
 
       <div class="settings-group">
@@ -340,7 +338,6 @@
     <div v-else-if="activeSection === 'thresholds'" class="section-block">
       <div class="section-header">
         <h2>{{ $t('conversationSettings.menus.thresholds') }}</h2>
-        <p class="section-description">{{ $t('conversationSettings.thresholds.description') }}</p>
       </div>
 
       <div class="settings-group">
@@ -365,7 +362,6 @@
     <div v-else-if="activeSection === 'advanced'" class="section-block">
       <div class="section-header">
         <h2>{{ $t('conversationSettings.menus.advanced') }}</h2>
-        <p class="section-description">{{ $t('conversationSettings.advanced.description') }}</p>
       </div>
 
       <div class="settings-group">

@@ -793,7 +793,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 .aside_box {
     min-width: 260px;
     width: 260px;
-    padding: 8px;
+    padding: 7px;
     background: var(--td-bg-color-sidebar);
     box-sizing: border-box;
     height: 100vh;
@@ -813,12 +813,12 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     &--collapsed {
         min-width: 60px;
         width: 60px;
-        padding: 8px 4px;
+        padding: 7px 4px;
         overflow: visible;
 
         .menu_item {
             justify-content: center;
-            padding: 13px 0;
+            padding: 10px 0;
             .menu_item-box {
                 justify-content: center;
                 width: auto;
@@ -837,17 +837,17 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        height: 56px;
+        height: 50px;
         flex-shrink: 0;
-        padding: 0 8px 0 16px;
+        padding: 0 6px 0 14px;
     }
 
     .sidebar-toggle {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 36px;
-        height: 36px;
+        width: 32px;
+        height: 32px;
         flex-shrink: 0;
         cursor: pointer;
         color: var(--td-text-color-secondary);
@@ -1021,8 +1021,8 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 
     .menu_p {
-        height: 56px;
-        padding: 6px 0;
+        height: 48px;
+        padding: 5px 0;
         box-sizing: border-box;
     }
 
@@ -1031,10 +1031,10 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        height: 48px;
-        padding: 13px 8px 13px 16px;
+        height: 42px;
+        padding: 10px 8px 10px 14px;
         box-sizing: border-box;
-        margin-bottom: 4px;
+        margin-bottom: 3px;
         border-radius: 4px;
         transition: background-color 0.2s ease;
 

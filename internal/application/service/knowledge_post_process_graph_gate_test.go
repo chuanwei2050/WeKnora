@@ -47,6 +47,24 @@ func TestShouldEnqueueGraphExtract(t *testing.T) {
 	}
 }
 
+func TestCountEligibleGraphExtractChunks(t *testing.T) {
+	kb := &types.KnowledgeBase{
+		IndexingStrategy: types.IndexingStrategy{GraphEnabled: true},
+		ExtractConfig:    &types.ExtractConfig{Enabled: true},
+	}
+	chunks := []*types.Chunk{
+		{ChunkType: types.ChunkTypeText, Content: "张三任职于腾讯。"},
+		{ChunkType: types.ChunkTypeParentText, Content: "张三任职于腾讯。父子块正文不应计入。"},
+		{ChunkType: types.ChunkTypeFAQ, Content: "A 和 B 是什么关系？"},
+		{ChunkType: types.ChunkTypeImageOCR, Content: "李四属于产品组。"},
+		{ChunkType: types.ChunkTypeSummary, Content: "摘要也不应计入。"},
+		nil,
+	}
+	if got := CountEligibleGraphExtractChunks(kb, chunks); got != 2 {
+		t.Fatalf("expected 2 eligible extract chunks (text+ocr), got %d", got)
+	}
+}
+
 func TestGraphExtractionModelID(t *testing.T) {
 	kb := &types.KnowledgeBase{SummaryModelID: "summary", ExtractConfig: &types.ExtractConfig{ModelID: " graph "}}
 	if got := kb.GraphExtractionModelID(); got != "graph" {

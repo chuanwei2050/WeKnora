@@ -2,7 +2,6 @@
   <div class="api-info">
     <div class="section-header">
       <h2>{{ $t('tenant.api.title') }}</h2>
-      <p class="section-description">{{ $t('tenant.api.description') }}</p>
     </div>
 
     <!-- Loading state -->
@@ -59,7 +58,6 @@
       <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('tenant.api.urlLabel') }}</label>
-          <p class="desc">{{ $t('tenant.api.urlDescription') }}</p>
         </div>
         <div class="setting-control">
           <div class="api-key-control">

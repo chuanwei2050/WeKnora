@@ -4,7 +4,6 @@
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title">
           <h2>{{ t('workbench.title') }}</h2>
-          <p class="header-subtitle">{{ t('workbench.subtitle') }}</p>
         </div>
       </div>
 
@@ -154,15 +153,6 @@ onMounted(loadReviewEnabledKbs)
     font-weight: 600;
     line-height: 32px;
   }
-}
-
-.header-subtitle {
-  margin: 0;
-  color: var(--td-text-color-placeholder);
-  font-family: "PingFang SC", -apple-system, sans-serif;
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 20px;
 }
 
 .workbench-tabs {

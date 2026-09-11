@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -75,14 +76,34 @@ func (h *GraphExploreHandler) Overview(c *gin.Context) {
 		c.Error(errors.NewNotFoundError("knowledge base not found"))
 		return
 	}
-	if kb.TenantID != tenantID {
+	if !types.CanReadKnowledgeBase(c.Request.Context(), kb) {
 		c.Error(errors.NewForbiddenError("knowledge base access denied"))
 		return
 	}
 	limit, _ := strconv.Atoi(strings.TrimSpace(c.Query("limit")))
+	versionByKnowledge := map[string]string{}
+	if h.knowledgeService != nil {
+		items, listErr := h.knowledgeService.ListKnowledgeByKnowledgeBaseID(c.Request.Context(), kbID)
+		if listErr != nil {
+			logger.Warnf(c.Request.Context(), "graph overview: list knowledge for namespaces: %v", listErr)
+		} else {
+			for _, item := range items {
+				if item == nil {
+					continue
+				}
+				// Prefer current published version; also keep pending so staging extracts remain visible while publishing.
+				if vid := strings.TrimSpace(item.CurrentVersionID); vid != "" {
+					versionByKnowledge[item.ID] = vid
+				} else if vid := strings.TrimSpace(item.PendingVersionID); vid != "" {
+					versionByKnowledge[item.ID] = vid
+				}
+			}
+		}
+	}
 	overview, err := h.graphRepo.GetGraphOverview(c.Request.Context(), types.GraphScope{
-		TenantID:        tenantID,
-		KnowledgeBaseID: kbID,
+		TenantID:                 tenantID,
+		KnowledgeBaseID:          kbID,
+		CurrentKnowledgeVersions: versionByKnowledge,
 	}, limit)
 	if err != nil {
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -125,6 +146,10 @@ func (h *GraphExploreHandler) Rebuild(c *gin.Context) {
 		c.Error(apperrors.NewInternalServerError("graph repository unavailable"))
 		return
 	}
+	if h.chunkService == nil {
+		c.Error(apperrors.NewInternalServerError("chunk service unavailable"))
+		return
+	}
 	tenantID, kb, ok := h.authorizeKB(c)
 	if !ok {
 		return
@@ -134,6 +159,28 @@ func (h *GraphExploreHandler) Rebuild(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("knowledge graph is not enabled"))
 		return
 	}
+	items, err := h.knowledgeService.ListKnowledgeByKnowledgeBaseID(c.Request.Context(), kbID)
+	if err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	// Count eligibility before wiping the graph so a list failure cannot leave an empty KB.
+	completed := make([]*types.Knowledge, 0)
+	extractTotal := 0
+	for _, item := range items {
+		if item == nil || item.ParseStatus != types.ParseStatusCompleted {
+			continue
+		}
+		chunks, chunkErr := h.chunkService.ListChunksByKnowledgeID(c.Request.Context(), item.ID)
+		if chunkErr != nil {
+			c.Error(errors.NewInternalServerError(fmt.Sprintf("list chunks for %s: %v", item.ID, chunkErr)))
+			return
+		}
+		extractTotal += service.CountEligibleGraphExtractChunks(kb, chunks)
+		completed = append(completed, item)
+	}
+
 	if err := h.graphRepo.DeleteCanonicalKnowledgeBase(c.Request.Context(), tenantID, kbID); err != nil {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
@@ -141,32 +188,9 @@ func (h *GraphExploreHandler) Rebuild(c *gin.Context) {
 	if h.tripleReviewRepo != nil {
 		_ = h.tripleReviewRepo.SupersedePendingByKnowledgeBase(c.Request.Context(), tenantID, kbID)
 	}
-	items, err := h.knowledgeService.ListKnowledgeByKnowledgeBaseID(c.Request.Context(), kbID)
-	if err != nil {
-		c.Error(errors.NewInternalServerError(err.Error()))
-		return
-	}
-	extractTotal := 0
+
 	enqueued := 0
-	for _, item := range items {
-		if item == nil || item.ParseStatus != types.ParseStatusCompleted {
-			continue
-		}
-		if h.chunkService != nil {
-			chunks, chunkErr := h.chunkService.ListChunksByKnowledgeID(c.Request.Context(), item.ID)
-			if chunkErr != nil {
-				logger.Warnf(c.Request.Context(), "rebuild-graph: list chunks for %s: %v", item.ID, chunkErr)
-			} else {
-				for _, chunk := range chunks {
-					if chunk == nil {
-						continue
-					}
-					if service.ShouldEnqueueGraphExtract(kb, chunk.Content) {
-						extractTotal++
-					}
-				}
-			}
-		}
+	for _, item := range completed {
 		payload, err := json.Marshal(types.KnowledgePostProcessPayload{
 			TenantID: tenantID, KnowledgeID: item.ID, KnowledgeBaseID: kbID,
 		})
@@ -208,7 +232,7 @@ func (h *GraphExploreHandler) authorizeKB(c *gin.Context) (uint64, *types.Knowle
 		c.Error(errors.NewNotFoundError("knowledge base not found"))
 		return 0, nil, false
 	}
-	if kb.TenantID != tenantID {
+	if !types.CanManageKnowledgeBase(c.Request.Context(), kb) {
 		c.Error(errors.NewForbiddenError("knowledge base access denied"))
 		return 0, nil, false
 	}

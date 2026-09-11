@@ -33,10 +33,6 @@ func (s *FeishuPublishService) ProcessPublishTask(ctx context.Context, task *asy
 
 // ProcessPublish executes a queued publish run using its frozen snapshot and config revision.
 func (s *FeishuPublishService) ProcessPublish(ctx context.Context, tenantID uint64, runID string) error {
-	if !s.IsEnabled() {
-		logger.Infof(ctx, "[FeishuPublish] feature disabled; skipping run=%s", runID)
-		return nil
-	}
 	run, err := s.repo.GetRun(ctx, tenantID, runID)
 	if err != nil {
 		return err
@@ -44,20 +40,29 @@ func (s *FeishuPublishService) ProcessPublish(ctx context.Context, tenantID uint
 	if run == nil {
 		return fmt.Errorf("run not found")
 	}
+	if !s.IsEnabled() {
+		logger.Infof(ctx, "[FeishuPublish] feature disabled; failing run=%s", runID)
+		return s.failRun(ctx, run, "feature_disabled", "feishu knowledge sync is disabled")
+	}
 	if run.Status != types.FeishuPublishRunQueued && run.Status != types.FeishuPublishRunRunning {
 		logger.Infof(ctx, "[FeishuPublish] run=%s already terminal status=%s", runID, run.Status)
 		return nil
 	}
 
-	now := time.Now().UTC()
-	run.Status = types.FeishuPublishRunRunning
-	run.Stage = "initializing"
-	run.ProgressDone = 0
-	run.ProgressTotal = 0
-	run.ProgressLabel = ""
-	run.StartedAt = &now
-	if err := s.repo.UpdateRun(ctx, run); err != nil {
+	claimed, err := s.repo.ClaimRun(ctx, tenantID, runID)
+	if err != nil {
 		return err
+	}
+	if !claimed {
+		logger.Infof(ctx, "[FeishuPublish] run=%s not claimed (another worker owns it or status changed)", runID)
+		return nil
+	}
+	run, err = s.repo.GetRun(ctx, tenantID, runID)
+	if err != nil {
+		return err
+	}
+	if run == nil {
+		return fmt.Errorf("run not found after claim")
 	}
 
 	var revision types.FeishuPublishConfigRevision
@@ -83,7 +88,9 @@ func (s *FeishuPublishService) ProcessPublish(ctx context.Context, tenantID uint
 	if err != nil {
 		return s.failRun(ctx, run, "mapping_load", "failed to load mappings")
 	}
-	s.refreshMappingsFromRemote(ctx, client, mappings)
+	if err := s.refreshMappingsFromRemote(ctx, client, mappings); err != nil {
+		return s.failRun(ctx, run, "mapping_refresh", safeSummary(err))
+	}
 
 	exec := &feishuPublishExecutor{
 		svc:      s,
@@ -717,7 +724,10 @@ func (e *feishuPublishExecutor) verifyOwned(ctx context.Context, m *types.Feishu
 	}
 	node, err := e.client.GetWikiNode(ctx, m.NodeToken)
 	if err != nil {
-		return fmt.Errorf("%w: remote node missing: %v", errRemoteUnusable, err)
+		if feishuconn.IsNotFound(err) {
+			return fmt.Errorf("%w: remote node missing: %v", errRemoteUnusable, err)
+		}
+		return fmt.Errorf("remote node lookup failed: %w", err)
 	}
 	if node.SpaceID != "" && node.SpaceID != e.run.SpaceID {
 		return fmt.Errorf("%w: node outside space", errRemoteUnusable)

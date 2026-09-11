@@ -254,7 +254,6 @@
                   <div v-if="formData" class="kb-multimodal-settings">
                     <div class="section-header">
                       <h2>{{ $t('knowledgeEditor.multimodal.title') }}</h2>
-                      <p class="section-description">{{ $t('knowledgeEditor.multimodal.description') }}</p>
                     </div>
 
                     <div class="settings-group">
@@ -290,7 +289,6 @@
                       <div class="setting-row">
                         <div class="setting-info">
                           <label>{{ $t('knowledgeEditor.asr.label') }}</label>
-                          <p class="desc">{{ $t('knowledgeEditor.asr.desc') }}</p>
                         </div>
                         <div class="setting-control">
                           <t-switch

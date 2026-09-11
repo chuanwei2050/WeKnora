@@ -30,6 +30,27 @@ func ShouldEnqueueGraphExtract(kb *types.KnowledgeBase, chunkContent string) boo
 	return true
 }
 
+// isGraphExtractChunkType matches the chunk types KnowledgePostProcess enqueues for graph extract.
+func isGraphExtractChunkType(chunkType types.ChunkType) bool {
+	return chunkType == types.ChunkTypeText ||
+		chunkType == types.ChunkTypeImageOCR ||
+		chunkType == types.ChunkTypeImageCaption
+}
+
+// CountEligibleGraphExtractChunks counts chunks that post-process would enqueue for graph extract.
+func CountEligibleGraphExtractChunks(kb *types.KnowledgeBase, chunks []*types.Chunk) int {
+	n := 0
+	for _, chunk := range chunks {
+		if chunk == nil || !isGraphExtractChunkType(chunk.ChunkType) {
+			continue
+		}
+		if ShouldEnqueueGraphExtract(kb, chunk.Content) {
+			n++
+		}
+	}
+	return n
+}
+
 // KnowledgePostProcessService acts as an orchestrator for all post-processing tasks
 // after a document has been parsed and split into chunks (including multimodal OCR/Caption).
 type KnowledgePostProcessService struct {
@@ -116,7 +137,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	// Gather all text-like chunks (including newly added OCR and Caption from multimodal tasks)
 	var textChunks []*types.Chunk
 	for _, c := range chunks {
-		if c.ChunkType == types.ChunkTypeText || c.ChunkType == types.ChunkTypeImageOCR || c.ChunkType == types.ChunkTypeImageCaption {
+		if c != nil && isGraphExtractChunkType(c.ChunkType) {
 			textChunks = append(textChunks, c)
 		}
 	}

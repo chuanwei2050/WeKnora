@@ -2,7 +2,6 @@
   <div class="kb-chunking-settings">
     <div class="section-header">
       <h2>{{ $t('knowledgeEditor.chunking.title') }}</h2>
-      <p class="section-description">{{ $t('knowledgeEditor.chunking.description') }}</p>
     </div>
 
     <div class="settings-group">

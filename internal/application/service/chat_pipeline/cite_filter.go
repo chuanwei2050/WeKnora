@@ -54,7 +54,11 @@ func FilterSearchResultsByBracketCitations(mode CiteFilterMode, answer string, c
 		}
 		return candidates
 	}
-	return pickByIndexes(candidates, indexes)
+	picked := pickByIndexes(candidates, indexes)
+	if len(picked) == 0 && mode == CiteFilterCitedOrAll {
+		return candidates
+	}
+	return picked
 }
 
 // FilterSearchResultsByChunkCitations keeps candidates whose ID appears in <kb chunk_id="..."> markers.
@@ -87,6 +91,9 @@ func FilterSearchResultsByChunkCitations(mode CiteFilterMode, answer string, can
 		}
 		added[c.ID] = struct{}{}
 		out = append(out, c)
+	}
+	if len(out) == 0 && mode == CiteFilterCitedOrAll {
+		return candidates
 	}
 	return out
 }

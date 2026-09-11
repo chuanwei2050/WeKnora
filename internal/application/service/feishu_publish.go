@@ -151,7 +151,7 @@ func (s *FeishuPublishService) GetConfigView(ctx context.Context, tenantID uint6
 		return nil, err
 	}
 	if len(runs) > 0 {
-		view.LatestRun = runs[0]
+		view.LatestRun = types.RedactFeishuPublishRun(runs[0])
 	}
 	if cfg.TargetID != "" {
 		view.HostedSummary = s.buildHostedSummary(ctx, tenantID, kbID, cfg.TargetID)
@@ -402,7 +402,9 @@ func (s *FeishuPublishService) buildPreview(ctx context.Context, tenantID uint64
 	if err != nil {
 		return nil, nil, "", err
 	}
-	s.refreshMappingsFromRemote(ctx, client, mappings)
+	if err := s.refreshMappingsFromRemote(ctx, client, mappings); err != nil {
+		return nil, nil, "", err
+	}
 
 	mapped := make([]*types.FeishuPublishMappedSource, 0, len(mappings))
 	for _, m := range mappings {
@@ -492,14 +494,14 @@ func (s *FeishuPublishService) ConfirmSync(ctx context.Context, tenantID uint64,
 	}
 	if active != nil {
 		if active.SnapshotDigest == preview.Digest {
-			return &types.FeishuPublishConfirmResponse{Accepted: true, Run: active, Message: "existing run reused"}, nil
+			return &types.FeishuPublishConfirmResponse{Accepted: true, Run: types.RedactFeishuPublishRun(active), Message: "existing run reused"}, nil
 		}
 		return nil, errFeishuPublishActiveRun
 	}
 
 	if existing, _ := s.repo.GetRunByDigest(ctx, tenantID, kbID, targetID, preview.Digest); existing != nil &&
 		(existing.Status == types.FeishuPublishRunQueued || existing.Status == types.FeishuPublishRunRunning) {
-		return &types.FeishuPublishConfirmResponse{Accepted: true, Run: existing, Message: "existing run reused"}, nil
+		return &types.FeishuPublishConfirmResponse{Accepted: true, Run: types.RedactFeishuPublishRun(existing), Message: "existing run reused"}, nil
 	}
 
 	cipher, err := utils.EncryptAESGCM(secret, utils.GetAESKey())
@@ -566,6 +568,9 @@ func (s *FeishuPublishService) ConfirmSync(ctx context.Context, tenantID uint64,
 		Counts:          types.JSON(countsJSON),
 	}
 	if err := s.repo.CreateRun(ctx, run); err != nil {
+		if errors.Is(err, types.ErrFeishuPublishActiveRunExists) {
+			return nil, errFeishuPublishActiveRun
+		}
 		return nil, err
 	}
 	// Same digest after a terminal run: reset and re-enqueue (spec: admin may sync again).
@@ -608,10 +613,10 @@ func (s *FeishuPublishService) ConfirmSync(ctx context.Context, tenantID uint64,
 		now := time.Now().UTC()
 		run.FinishedAt = &now
 		_ = s.repo.UpdateRun(ctx, run)
-		return &types.FeishuPublishConfirmResponse{Accepted: false, Run: run, Message: "task enqueue failed"}, nil
+		return &types.FeishuPublishConfirmResponse{Accepted: false, Run: types.RedactFeishuPublishRun(run), Message: "task enqueue failed"}, nil
 	}
 
-	return &types.FeishuPublishConfirmResponse{Accepted: true, Run: run}, nil
+	return &types.FeishuPublishConfirmResponse{Accepted: true, Run: types.RedactFeishuPublishRun(run)}, nil
 }
 
 // Unbind clears credentials and target while retaining mappings/runs.
@@ -648,20 +653,22 @@ func (s *FeishuPublishService) GetRun(ctx context.Context, tenantID uint64, kbID
 	if run == nil || run.KnowledgeBaseID != kbID {
 		return nil, errors.New("run not found")
 	}
-	return run, nil
+	return types.RedactFeishuPublishRun(run), nil
 }
 
 // refreshMappingsFromRemote overlays live Feishu title/parent onto in-memory
 // mappings so the planner can emit rename/move/recreate under WeKnora-authoritative overwrite.
-// Failures to fetch a mapped node mark it conflict (planner recreates / replaces).
-// Context cancellation stops early without marking remaining nodes as conflict.
-func (s *FeishuPublishService) refreshMappingsFromRemote(ctx context.Context, client *feishuconn.Client, mappings []*types.FeishuPublishMapping) {
+// Only definitive not-found / wrong-space responses mark conflict (planner recreates).
+// Transient or permission errors abort the refresh so callers do not recreate live pages.
+func (s *FeishuPublishService) refreshMappingsFromRemote(ctx context.Context, client *feishuconn.Client, mappings []*types.FeishuPublishMapping) error {
 	if client == nil || len(mappings) == 0 {
-		return
+		return nil
 	}
 	const workers = 8
 	sem := make(chan struct{}, workers)
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var refreshErr error
 	for _, m := range mappings {
 		if m == nil || m.NodeToken == "" {
 			continue
@@ -685,8 +692,17 @@ func (s *FeishuPublishService) refreshMappingsFromRemote(ctx context.Context, cl
 				if ctx.Err() != nil {
 					return
 				}
-				logger.Warnf(ctx, "[FeishuPublish] remote node unusable kind=%s id=%s: %v", m.SourceKind, m.SourceID, err)
-				m.Status = types.FeishuPublishMappingConflict
+				if feishuconn.IsNotFound(err) {
+					logger.Warnf(ctx, "[FeishuPublish] remote node missing kind=%s id=%s: %v", m.SourceKind, m.SourceID, err)
+					m.Status = types.FeishuPublishMappingConflict
+					return
+				}
+				logger.Warnf(ctx, "[FeishuPublish] remote node refresh failed kind=%s id=%s: %v", m.SourceKind, m.SourceID, err)
+				mu.Lock()
+				if refreshErr == nil {
+					refreshErr = fmt.Errorf("refresh mapping %s/%s: %w", m.SourceKind, m.SourceID, err)
+				}
+				mu.Unlock()
 				return
 			}
 			if node.SpaceID != "" && m.SpaceID != "" && node.SpaceID != m.SpaceID {
@@ -707,6 +723,10 @@ func (s *FeishuPublishService) refreshMappingsFromRemote(ctx context.Context, cl
 		}(m)
 	}
 	wg.Wait()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return refreshErr
 }
 
 // loadFeishuSearchableBody returns a searchable text prefix for Feishu pages.

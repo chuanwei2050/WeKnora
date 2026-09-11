@@ -1,6 +1,8 @@
 package types
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"time"
@@ -12,6 +14,9 @@ import (
 func IsFeishuKnowledgeSyncEnabled() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv(EnvEnableFeishuKnowledgeSync)), "true")
 }
+
+// ErrFeishuPublishActiveRunExists is returned when creating a run while another queued/running run exists.
+var ErrFeishuPublishActiveRunExists = errors.New("an active publish run already exists for this target")
 
 // Feishu publish feature constants.
 const (
@@ -296,6 +301,30 @@ type FeishuPublishConfigRevision struct {
 	SpaceID         string `json:"space_id"`
 	SpaceName       string `json:"space_name"`
 	ParentNodeToken string `json:"parent_node_token"`
+}
+
+// RedactFeishuPublishRun returns a shallow copy safe for API responses (strips app_secret_cipher).
+func RedactFeishuPublishRun(run *FeishuPublishRun) *FeishuPublishRun {
+	if run == nil {
+		return nil
+	}
+	out := *run
+	if len(run.ConfigRevision) == 0 || string(run.ConfigRevision) == "null" {
+		return &out
+	}
+	var rev FeishuPublishConfigRevision
+	if err := json.Unmarshal(run.ConfigRevision, &rev); err != nil {
+		out.ConfigRevision = JSON([]byte(`{}`))
+		return &out
+	}
+	rev.AppSecretCipher = ""
+	b, err := json.Marshal(rev)
+	if err != nil {
+		out.ConfigRevision = JSON([]byte(`{}`))
+		return &out
+	}
+	out.ConfigRevision = JSON(b)
+	return &out
 }
 
 // --- API request/response DTOs ---

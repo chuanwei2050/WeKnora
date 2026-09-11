@@ -2,7 +2,6 @@
   <div class="ollama-settings">
     <div class="section-header">
       <h2>{{ $t('ollamaSettings.title') }}</h2>
-      <p class="section-description">{{ $t('ollamaSettings.description') }}</p>
     </div>
 
     <div class="settings-group">
@@ -10,7 +9,6 @@
       <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('ollamaSettings.status.label') }}</label>
-          <p class="desc">{{ $t('ollamaSettings.status.desc') }}</p>
         </div>
         <div class="setting-control">
           <div class="status-display">

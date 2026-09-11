@@ -8,7 +8,7 @@ import TDesign from "tdesign-vue-next";
 import "tdesign-vue-next/es/style/index.css";
 import "@/assets/theme/theme.css";
 import "@/assets/dropdown-menu.less";
-import i18n from "./i18n";
+import i18n, { normalizeAppLocale } from "./i18n";
 import { initTheme } from "@/composables/useTheme";
 import { installTDesignIconOfflineGuard } from "@/utils/tdesign-icon-offline";
 import { ensureBidReviewSession } from "@/utils/bidreview-sso";
@@ -134,7 +134,7 @@ if (mode === 'embedded-page') {
     const message = parseEmbeddedMessage(event.data)
     if (!message) return
     if (message.type === 'set-theme') document.documentElement.dataset.theme = message.theme
-    if (message.type === 'set-locale') i18n.global.locale.value = message.locale as typeof i18n.global.locale.value
+    if (message.type === 'set-locale') i18n.global.locale.value = normalizeAppLocale(message.locale) as typeof i18n.global.locale.value
     if (message.type === 'open-knowledge-base') router.push(`/platform/knowledge-bases/${encodeURIComponent(message.knowledgeBaseId)}`)
   })
   router.afterEach((to) => notifyEmbeddedHost('route-change', { path: to.fullPath }))

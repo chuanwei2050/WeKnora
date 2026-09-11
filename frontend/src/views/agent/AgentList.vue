@@ -35,7 +35,6 @@
               </t-button>
             </t-tooltip>
           </div>
-          <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('agent.subtitle') }}</p>
         </div>
       </div>
       <div class="agent-list-main">

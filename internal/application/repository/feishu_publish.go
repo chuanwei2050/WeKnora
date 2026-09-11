@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -163,11 +164,22 @@ func (r *feishuPublishRepository) CreateRun(ctx context.Context, run *types.Feis
 	if getErr != nil {
 		return getErr
 	}
-	if existing == nil {
-		return err
+	if existing != nil {
+		*run = *existing
+		return nil
 	}
-	*run = *existing
-	return nil
+	active, activeErr := r.GetActiveRun(ctx, run.TenantID, run.KnowledgeBaseID, run.TargetID)
+	if activeErr != nil {
+		return activeErr
+	}
+	if active != nil {
+		if active.SnapshotDigest == run.SnapshotDigest {
+			*run = *active
+			return nil
+		}
+		return types.ErrFeishuPublishActiveRunExists
+	}
+	return err
 }
 
 func (r *feishuPublishRepository) UpdateRun(ctx context.Context, run *types.FeishuPublishRun) error {
@@ -181,6 +193,30 @@ func (r *feishuPublishRepository) UpdateRun(ctx context.Context, run *types.Feis
 		Where("tenant_id = ? AND id = ?", run.TenantID, run.ID).
 		Select("*").
 		Updates(run).Error
+}
+
+// ClaimRun atomically transitions a queued run to running. Returns false if another worker claimed it
+// or the run is no longer queued.
+func (r *feishuPublishRepository) ClaimRun(ctx context.Context, tenantID uint64, runID string) (bool, error) {
+	if runID == "" || tenantID == 0 {
+		return false, errors.New("run id and tenant_id are required")
+	}
+	now := time.Now().UTC()
+	res := r.db.WithContext(ctx).Model(&types.FeishuPublishRun{}).
+		Where("tenant_id = ? AND id = ? AND status = ?", tenantID, runID, types.FeishuPublishRunQueued).
+		Updates(map[string]interface{}{
+			"status":         types.FeishuPublishRunRunning,
+			"stage":          "initializing",
+			"progress_done":  0,
+			"progress_total": 0,
+			"progress_label": "",
+			"started_at":     now,
+			"updated_at":     now,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 func (r *feishuPublishRepository) GetRun(ctx context.Context, tenantID uint64, id string) (*types.FeishuPublishRun, error) {

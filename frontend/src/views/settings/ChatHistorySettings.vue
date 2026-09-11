@@ -2,7 +2,6 @@
   <div class="chat-history-settings">
     <div class="section-header">
       <h2>{{ t('chatHistorySettings.title') }}</h2>
-      <p class="section-description">{{ t('chatHistorySettings.description') }}</p>
     </div>
 
     <div class="settings-group">

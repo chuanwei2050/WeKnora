@@ -84,7 +84,6 @@
               </button>
             </t-tooltip>
           </div>
-          <p class="faq-subtitle">{{ $t('knowledgeEditor.faq.subtitle') }}</p>
         </div>
       </div>
 
@@ -696,7 +695,6 @@
                   {{ $t('knowledgeEditor.faq.standardQuestion') }}
                   <span class="required-mark">*</span>
                 </label>
-                <p class="desc">{{ $t('knowledgeEditor.faq.standardQuestionDesc') }}</p>
               </div>
               <div class="setting-control">
                 <t-input 
@@ -806,7 +804,6 @@
                   {{ $t('knowledgeEditor.faq.answers') }}
                   <span class="required-mark">*</span>
                 </label>
-                <p class="desc">{{ $t('knowledgeEditor.faq.answersDesc') }}</p>
               </div>
               <div class="setting-control">
                 <div class="textarea-container">

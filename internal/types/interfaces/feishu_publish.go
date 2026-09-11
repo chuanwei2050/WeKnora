@@ -17,6 +17,7 @@ type FeishuPublishRepository interface {
 
 	CreateRun(ctx context.Context, run *types.FeishuPublishRun) error
 	UpdateRun(ctx context.Context, run *types.FeishuPublishRun) error
+	ClaimRun(ctx context.Context, tenantID uint64, runID string) (bool, error)
 	GetRun(ctx context.Context, tenantID uint64, id string) (*types.FeishuPublishRun, error)
 	GetRunByDigest(ctx context.Context, tenantID uint64, kbID, targetID, digest string) (*types.FeishuPublishRun, error)
 	GetActiveRun(ctx context.Context, tenantID uint64, kbID, targetID string) (*types.FeishuPublishRun, error)

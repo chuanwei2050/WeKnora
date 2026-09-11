@@ -197,7 +197,15 @@ func (e *AgentEngine) emitCompletionEvent(
 	mode := chatpipeline.NormalizeCiteFilterMode(os.Getenv("CITE_FILTER_MODE"))
 	refs := state.KnowledgeRefs
 	if mode != chatpipeline.CiteFilterOff {
-		refs = chatpipeline.FilterSearchResultsByChunkCitations(mode, state.FinalAnswer, state.KnowledgeRefs)
+		// Agent public answers must not embed <kb chunk_id>; prefer [n] bracket cites.
+		// When the answer has no usable cites, keep tool-collected KnowledgeRefs
+		// (do not empty cited_only via chunk-marker parsing).
+		filtered := chatpipeline.FilterSearchResultsByBracketCitations(mode, state.FinalAnswer, state.KnowledgeRefs)
+		if mode == chatpipeline.CiteFilterCitedOnly && len(filtered) == 0 {
+			refs = state.KnowledgeRefs
+		} else {
+			refs = filtered
+		}
 		state.KnowledgeRefs = refs
 	}
 

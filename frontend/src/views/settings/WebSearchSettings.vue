@@ -2,7 +2,6 @@
   <div class="websearch-settings">
     <div class="section-header">
       <h2>{{ t('webSearchSettings.title') }}</h2>
-      <p class="section-description">{{ t('webSearchSettings.description') }}</p>
     </div>
 
     <div class="settings-group">

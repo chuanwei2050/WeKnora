@@ -36,7 +36,6 @@
                 <div v-show="currentSection === 'basic'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.basicInfo') }}</h2>
-                    <p class="section-description">{{ $t('agent.editor.basicInfoDesc') }}</p>
                   </div>
                   
                   <div class="settings-group">
@@ -313,7 +312,7 @@
                     </div>
                     <template v-if="formData.config.complexity_routing.enabled">
                       <div class="setting-row">
-                        <div class="setting-info"><label>置信度阈值</label><p class="desc">范围 0 到 1。</p></div>
+                        <div class="setting-info"><label>置信度阈值</label></div>
                         <div class="setting-control"><t-input-number v-model="formData.config.complexity_routing.confidence_threshold" :min="0" :max="1" :step="0.05" theme="column" /></div>
                       </div>
                       <div class="setting-row">
@@ -383,7 +382,6 @@
                 <div v-show="currentSection === 'multimodal'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agentEditor.imageUpload.sectionTitle') }}</h2>
-                    <p class="section-description">{{ $t('agentEditor.imageUpload.sectionDesc') }}</p>
                   </div>
 
                   <div class="settings-group">
@@ -467,7 +465,6 @@
                 <div v-show="currentSection === 'conversation' && !isAgentMode" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.conversationSettings') }}</h2>
-                    <p class="section-description">{{ $t('agentEditor.desc.conversationSection') }}</p>
                   </div>
                   
                   <div class="settings-group">
@@ -638,7 +635,6 @@
                 <div v-show="currentSection === 'tools' && isAgentMode" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.toolsConfig') }}</h2>
-                    <p class="section-description">{{ $t('agent.editor.toolsConfigDesc') }}</p>
                   </div>
 
                   <!-- 合并面板：能力状态 + 预设切换 -->
@@ -818,7 +814,6 @@
                 <div v-show="currentSection === 'skills' && isAgentMode" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.skillsConfig') }}</h2>
-                    <p class="section-description">{{ $t('agent.editor.skillsConfigDesc') }}</p>
                   </div>
 
                   <div class="settings-group">
@@ -882,7 +877,6 @@
                 <div v-show="currentSection === 'knowledge'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.knowledgeConfig') }}</h2>
-                    <p class="section-description">{{ $t('agent.editor.knowledgeConfigDesc') }}</p>
                   </div>
                   
                   <div class="settings-group">
@@ -1050,7 +1044,6 @@
                 <div v-show="currentSection === 'websearch'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.webSearchConfig') }}</h2>
-                    <p class="section-description">{{ $t('agent.editor.webSearchConfigDesc') }}</p>
                   </div>
                   
                   <div class="settings-group">
@@ -1136,7 +1129,6 @@
                 <div v-show="currentSection === 'response' && !isAgentMode" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agent.editor.responseStrategy') }}</h2>
-                    <p class="section-description">{{ $t('agentEditor.desc.responseStrategy') }}</p>
                   </div>
                   
                   <div class="settings-group">
@@ -1250,10 +1242,6 @@
                 <div v-if="props.mode === 'edit' && props.agent?.id" v-show="currentSection === 'im'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agentEditor.im.title') }}</h2>
-                    <p class="section-description">
-                      {{ $t('agentEditor.im.description') }}
-
-                    </p>
                   </div>
                   <div class="settings-group">
                     <IMChannelPanel :agent-id="props.agent.id" />

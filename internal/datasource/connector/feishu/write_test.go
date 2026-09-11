@@ -34,6 +34,22 @@ func TestMapAPIError_PermissionDenied(t *testing.T) {
 	}
 }
 
+func TestMapAPIError_NotFound(t *testing.T) {
+	err := MapAPIError(http.StatusNotFound, 0, "wiki node not found", "/wiki/v2/spaces/get_node")
+	if !IsNotFound(err) {
+		t.Fatalf("expected IsNotFound, got %T %v", err, err)
+	}
+	err = MapAPIError(http.StatusOK, 131004, "node does not exist", "/wiki")
+	if !IsNotFound(err) {
+		t.Fatalf("expected IsNotFound for code 131004, got %T %v", err, err)
+	}
+	err = MapAPIError(http.StatusOK, CodePermissionDenied, "denied", "/wiki")
+	if IsNotFound(err) {
+		t.Fatalf("permission denied must not be not-found")
+	}
+}
+
+
 func asPermissionDenied(err error, target **PermissionDeniedError) bool {
 	for err != nil {
 		if e, ok := err.(*PermissionDeniedError); ok {

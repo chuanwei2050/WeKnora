@@ -2,7 +2,6 @@
   <div class="general-settings">
     <div class="section-header">
       <h2>{{ $t('general.title') }}</h2>
-      <p class="section-description">{{ $t('general.description') }}</p>
     </div>
 
     <div class="settings-group">
@@ -10,7 +9,6 @@
       <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('theme.theme') }}</label>
-          <p class="desc">{{ $t('theme.themeDescription') }}</p>
         </div>
         <div class="setting-control">
           <t-select

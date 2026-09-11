@@ -180,9 +180,9 @@ func NewChunkExtractService(
 }
 
 // Handle handles the chunk extraction task
-func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
+func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) (err error) {
 	var p types.ExtractChunkPayload
-	if err := json.Unmarshal(t.Payload(), &p); err != nil {
+	if err = json.Unmarshal(t.Payload(), &p); err != nil {
 		logger.Errorf(ctx, "failed to unmarshal task payload: %v", err)
 		return err
 	}
@@ -190,11 +190,22 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	ctx = logger.WithField(ctx, "extract", p.ChunkID)
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, p.TenantID)
 
+	var kbID string
+	// On the final asynq attempt, still advance rebuild progress so a dead task cannot
+	// leave the KB rebuild UI stuck in "running" forever.
+	defer func() {
+		if err == nil || !isLastAsynqAttempt(ctx) || strings.TrimSpace(kbID) == "" {
+			return
+		}
+		s.markRebuildProgress(ctx, p.TenantID, kbID)
+	}()
+
 	chunk, err := s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get chunk: %v", err)
 		return err
 	}
+	kbID = chunk.KnowledgeBaseID
 	kb, err := s.knowledgeBaseRepo.GetKnowledgeBaseByID(ctx, chunk.KnowledgeBaseID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get knowledge base: %v", err)
@@ -272,7 +283,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			GraphData:          types.GraphDataPayload(*graph),
 			Status:             types.GraphTriplePending,
 		}
-		if err := s.tripleReviewRepo.Enqueue(ctx, candidate); err != nil {
+		if err = s.tripleReviewRepo.Enqueue(ctx, candidate); err != nil {
 			logger.Errorf(ctx, "failed to enqueue graph triple for review: %v", err)
 			return err
 		}
@@ -286,6 +297,12 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	}
 	s.markRebuildProgress(ctx, p.TenantID, chunk.KnowledgeBaseID)
 	return nil
+}
+
+func isLastAsynqAttempt(ctx context.Context) bool {
+	retryCount, retryCountOK := asynq.GetRetryCount(ctx)
+	maxRetry, maxRetryOK := asynq.GetMaxRetry(ctx)
+	return retryCountOK && maxRetryOK && retryCount >= maxRetry
 }
 
 func (s *ChunkExtractService) markRebuildProgress(ctx context.Context, tenantID uint64, kbID string) {
@@ -344,11 +361,14 @@ func WriteExtractedGraph(
 		return err
 	}
 	canonicalRecords := canonicalRecordsFromExtractedGraph(chunk, graph, modelID)
+	// Versioned writes go to staging:<version> until governance SwitchCanonicalNamespace
+	// promotes that namespace. Ungoverned (empty version) keeps the legacy default namespace.
+	namespace := types.GraphNamespaceForVersion(chunk.KnowledgeVersionID, chunk.KnowledgeVersionID != "")
 	return graphEngine.ReplaceCanonicalSourceRecords(
 		ctx,
 		chunk.TenantID,
 		chunk.KnowledgeBaseID,
-		types.GraphNamespaceForVersion(chunk.KnowledgeVersionID, chunk.KnowledgeVersionID != ""),
+		namespace,
 		types.GraphSource{KnowledgeID: chunk.KnowledgeID, KnowledgeVersionID: chunk.KnowledgeVersionID, ChunkID: chunk.ID},
 		canonicalRecords,
 	)

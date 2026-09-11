@@ -287,13 +287,13 @@ onUnmounted(() => {
 <style scoped lang="less">
 .tenant-selector {
   position: relative;
-  margin: 0 0 12px;
+  margin: 0 0 8px;
 }
 
 .tenant-trigger {
   display: flex;
   align-items: center;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;

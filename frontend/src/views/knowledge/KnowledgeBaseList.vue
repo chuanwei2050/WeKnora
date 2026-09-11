@@ -18,7 +18,6 @@
               </t-button>
             </t-tooltip>
           </div>
-          <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('knowledgeList.subtitle') }}</p>
         </div>
       </div>
       <div class="kb-list-main">

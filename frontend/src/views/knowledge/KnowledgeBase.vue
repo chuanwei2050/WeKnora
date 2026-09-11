@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick, h, defineAsyncComponent, type ComponentPublicInstance } from "vue";
-import { MessagePlugin, DialogPlugin, Icon as TIcon } from "tdesign-vue-next";
+import { MessagePlugin, DialogPlugin, Icon as TIcon, Input as TInput } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { useRoute, useRouter } from 'vue-router';
@@ -2670,6 +2670,46 @@ const governanceActionSuccessKeys: Record<GovernanceReviewAction, string> = {
   reject: 'knowledgeBase.governanceRejectSuccess',
 };
 
+const promptGovernanceRejectComment = (): Promise<string | null> => {
+  const comment = ref('');
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const dialog = DialogPlugin.confirm({
+      header: t('knowledgeBase.governanceReject'),
+      body: () =>
+        h(TInput, {
+          modelValue: comment.value,
+          placeholder: t('knowledgeBase.governanceRejectCommentPlaceholder'),
+          autofocus: true,
+          'onUpdate:modelValue': (val: string) => {
+            comment.value = val;
+          },
+        }),
+      confirmBtn: t('common.confirm'),
+      cancelBtn: t('common.cancel'),
+      onConfirm: () => {
+        const value = comment.value.trim();
+        if (!value) {
+          MessagePlugin.warning(t('knowledgeBase.governanceRejectCommentRequired'));
+          return false;
+        }
+        dialog.hide();
+        finish(value);
+      },
+      onCancel: () => {
+        dialog.hide();
+        finish(null);
+      },
+      onClose: () => finish(null),
+    });
+  });
+};
+
 const executeGovernanceAction = async (action: GovernanceReviewAction, item: KnowledgeCard) => {
   const versionId = item.pending_version_id;
   if (!versionId) throw new Error(t('knowledgeBase.governanceVersionMissing'));
@@ -2677,9 +2717,11 @@ const executeGovernanceAction = async (action: GovernanceReviewAction, item: Kno
   if (action === 'withdraw') await withdrawKnowledgeVersionReview(item.id, versionId);
   if (action === 'approve') await approveKnowledgeVersion(item.id, versionId);
   if (action === 'reject') {
-    const comment = (window.prompt(t('knowledgeBase.governanceRejectCommentPlaceholder'), '') || '').trim();
-    if (!comment) {
-      throw new Error(t('knowledgeBase.governanceRejectCommentRequired'));
+    const comment = await promptGovernanceRejectComment();
+    if (comment === null) {
+      const err = new Error('cancelled') as Error & { cancelled?: boolean };
+      err.cancelled = true;
+      throw err;
     }
     await rejectKnowledgeVersion(item.id, versionId, comment);
   }
@@ -2697,6 +2739,7 @@ const handleGovernanceAction = async (action: GovernanceReviewAction, item: Know
     page = 1;
     loadKnowledgeFiles(kbId.value);
   } catch (error: any) {
+    if (error?.cancelled) return;
     MessagePlugin.error(error?.message || t('knowledgeBase.governanceActionFailed'));
   } finally {
     governanceBusyId.value = '';
@@ -2711,6 +2754,7 @@ const handleBatchGovernanceAction = async (action: GovernanceReviewAction) => {
   try {
     const succeeded: KnowledgeCard[] = [];
     let failed = 0;
+    let cancelled = false;
     for (const item of items) {
       try {
         await executeGovernanceAction(action, item);
@@ -2718,7 +2762,11 @@ const handleBatchGovernanceAction = async (action: GovernanceReviewAction) => {
         if (action === 'approve') {
           window.dispatchEvent(new CustomEvent('weknora:document-published', { detail: { knowledgeBaseId: kbId.value, documentId: item.id } }));
         }
-      } catch {
+      } catch (error: any) {
+        if (error?.cancelled) {
+          cancelled = true;
+          break;
+        }
         failed += 1;
       }
     }
@@ -2726,6 +2774,9 @@ const handleBatchGovernanceAction = async (action: GovernanceReviewAction) => {
       item.parse_status = getGovernanceActionNextStatus(action);
       selectedIds.value.delete(item.id);
     });
+    if (cancelled && succeeded.length === 0 && failed === 0) {
+      return;
+    }
     if (failed === 0) {
       MessagePlugin.success(t('knowledgeBase.batchGovernanceSuccess', {
         action: t(governanceActionLabelKeys[action]),

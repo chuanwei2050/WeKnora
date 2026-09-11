@@ -53,6 +53,11 @@ func TestFilterSearchResultsByBracketCitations(t *testing.T) {
 	if len(got) != 1 || got[0].ID != "b" {
 		t.Fatalf("invalid indexes ignored: %#v", got)
 	}
+
+	got = FilterSearchResultsByBracketCitations(CiteFilterCitedOrAll, "[0][99]", cands)
+	if len(got) != 3 {
+		t.Fatalf("cited_or_all with only invalid cites should fallback, got %d", len(got))
+	}
 }
 
 func TestFilterSearchResultsByChunkCitations(t *testing.T) {

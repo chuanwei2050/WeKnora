@@ -38,7 +38,12 @@ export interface GraphOverview {
 }
 
 const props = defineProps<{ knowledgeBaseId: string }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
+
+const truncatedHint = computed(() => {
+  if (te('knowledgeGraphExplore.resultLimited')) return t('knowledgeGraphExplore.resultLimited')
+  return '已截断（全景约 300 实体），可用检索缩小范围'
+})
 
 const siderCollapsed = ref(false)
 const loading = ref(false)
@@ -58,6 +63,10 @@ let pieChart: ECharts | null = null
 let disposed = false
 let canvasRo: ResizeObserver | null = null
 let pieRo: ResizeObserver | null = null
+let renderRetryTimer: ReturnType<typeof setTimeout> | null = null
+let lastGraphSignature = ''
+
+const CATEGORY_COLORS = ['#1677ff', '#52c41a', '#fa8c16', '#13c2c2', '#722ed1'] as const
 
 const CATEGORIES = [
   { name: 'doc', itemStyle: { color: '#1677ff' } },
@@ -213,14 +222,47 @@ function edgeLineStyle(kind: string) {
   return { color: '#722ed1', width: 1.3, type: 'dashed' as const, curveness: 0.2, opacity: 0.8 }
 }
 
+/** ECharts graph 要求 name 全局唯一；展示名可重复。边用数字下标，避免 id 解析失败导致 dataIndex 崩溃 */
+function dedupeGraphNodes(nodes: GraphOverviewNode[]) {
+  const seen = new Set<string>()
+  const out: GraphOverviewNode[] = []
+  for (const node of nodes) {
+    const id = String(node.id || '').trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out.push({ ...node, id })
+  }
+  return out
+}
+
 function buildGraphOption(nodes: GraphOverviewNode[], edges: GraphOverviewEdge[]): EChartsOption {
-  const degree = new Map<string, number>()
-  const idSet = new Set(nodes.map((n) => n.id))
-  const safeEdges = edges.filter((e) => idSet.has(e.source) && idSet.has(e.target))
+  const uniqueNodes = dedupeGraphNodes(nodes)
+  const indexById = new Map<string, number>()
+  uniqueNodes.forEach((n, i) => indexById.set(n.id, i))
+
+  const edgeSeen = new Set<string>()
+  const safeEdges: Array<{ source: number; target: number; relation: string; kind: string }> = []
+  for (const edge of edges) {
+    const s = indexById.get(String(edge.source || '').trim())
+    const t = indexById.get(String(edge.target || '').trim())
+    if (s === undefined || t === undefined || s === t) continue
+    const key = s < t ? `${s}->${t}:${edge.kind}` : `${t}->${s}:${edge.kind}`
+    if (edgeSeen.has(key)) continue
+    edgeSeen.add(key)
+    safeEdges.push({
+      source: s,
+      target: t,
+      relation: edge.label || edge.kind,
+      kind: edge.kind,
+    })
+  }
+
+  const degree = new Map<number, number>()
   for (const edge of safeEdges) {
     degree.set(edge.source, (degree.get(edge.source) || 0) + 1)
     degree.set(edge.target, (degree.get(edge.target) || 0) + 1)
   }
+
   return {
     backgroundColor: 'transparent',
     tooltip: {
@@ -230,8 +272,8 @@ function buildGraphOption(nodes: GraphOverviewNode[], edges: GraphOverviewEdge[]
         if (raw.dataType === 'edge') {
           return `<div style="padding:4px 2px">${raw.data?.relation || t('knowledgeGraphExplore.legendRelated')}</div>`
         }
-        const node = nodes.find((n) => n.id === raw.data?.id)
-        if (!node) return raw.data?.name ?? ''
+        const node = uniqueNodes[Number(raw.dataIndex)] || uniqueNodes.find((n) => n.id === raw.data?.id)
+        if (!node) return raw.data?.displayName ?? ''
         const kind =
           node.kind === 'knowledge'
             ? t('knowledgeGraphExplore.legendKnowledge')
@@ -252,35 +294,41 @@ function buildGraphOption(nodes: GraphOverviewNode[], edges: GraphOverviewEdge[]
         top: 24,
         bottom: 48,
         categories: [...CATEGORIES],
-        data: nodes.map((node) => ({
-          id: node.id,
-          name: node.label,
-          category: categoryIndex(node),
-          symbolSize:
-            node.kind === 'knowledge' ? 32 : 18 + Math.min(degree.get(node.id) || 1, 8),
-          label: {
-            show: true,
-            position: 'bottom' as const,
-            distance: 8,
-            color: '#434343',
-            fontSize: node.kind === 'knowledge' ? 12 : 11,
-            fontWeight: node.kind === 'knowledge' ? 600 : 400,
-            formatter: () => shortName(node.label),
-          },
-        })),
+        data: uniqueNodes.map((node, idx) => {
+          const cat = categoryIndex(node)
+          return {
+            // 仅用唯一 name，不再额外设 id，减少 ECharts 双键冲突
+            name: node.id,
+            id: node.id,
+            displayName: node.label || node.id,
+            category: cat,
+            symbolSize:
+              node.kind === 'knowledge' ? 32 : 18 + Math.min(degree.get(idx) || 1, 8),
+            itemStyle: { color: CATEGORY_COLORS[cat] || CATEGORY_COLORS[1] },
+            label: {
+              show: true,
+              position: 'bottom' as const,
+              distance: 8,
+              color: '#434343',
+              fontSize: node.kind === 'knowledge' ? 12 : 11,
+              fontWeight: node.kind === 'knowledge' ? 600 : 400,
+              formatter: () => shortName(node.label || node.id),
+            },
+          }
+        }),
         links: safeEdges.map((edge) => ({
           source: edge.source,
           target: edge.target,
-          relation: edge.label || edge.kind,
+          relation: edge.relation,
           silent: true,
           lineStyle: edgeLineStyle(edge.kind),
         })),
         force: {
-          repulsion: 160,
-          gravity: 0.1,
-          edgeLength: 70,
-          friction: 0.5,
-          layoutAnimation: false,
+          repulsion: Math.max(120, Math.min(280, 80 + uniqueNodes.length * 0.35)),
+          gravity: 0.08,
+          edgeLength: [55, 140],
+          friction: 0.6,
+          layoutAnimation: true,
         },
         labelLayout: { hideOverlap: true, moveOverlap: 'shiftY' },
         lineStyle: { opacity: 0.9 },
@@ -303,11 +351,44 @@ function buildGraphOption(nodes: GraphOverviewNode[], edges: GraphOverviewEdge[]
   }
 }
 
+function scheduleRenderRetry() {
+  if (disposed || renderRetryTimer) return
+  renderRetryTimer = setTimeout(() => {
+    renderRetryTimer = null
+    if (!disposed) renderGraph(true)
+  }, 120)
+}
+
+/** 避开 ECharts「main process」内嵌套 setOption/resize */
+function runOutsideEcharts(fn: () => void) {
+  setTimeout(() => {
+    if (!disposed) fn()
+  }, 0)
+}
+
 function ensureChart() {
   if (disposed) return null
   const el = canvasRef.value
-  if (!el || el.clientWidth < 40 || el.clientHeight < 40) return null
+  if (!el) {
+    scheduleRenderRetry()
+    return null
+  }
+  // v-show / flex 布局尚未撑开时宽高为 0，稍后再试
+  if (el.clientWidth < 40 || el.clientHeight < 40) {
+    scheduleRenderRetry()
+    return null
+  }
   try {
+    // 容器被重建或实例已销毁时重新 init
+    if (chart && (chart.getDom() !== el || (chart as any).isDisposed?.())) {
+      try {
+        chart.dispose()
+      } catch {
+        /* ignore */
+      }
+      chart = null
+      lastGraphSignature = ''
+    }
     if (!chart) {
       chart = echarts.init(el)
       chart.on('click', (params: any) => {
@@ -320,25 +401,40 @@ function ensureChart() {
     return chart
   } catch (e) {
     console.warn('[KnowledgeGraphExplore] chart init failed', e)
+    scheduleRenderRetry()
     return null
   }
 }
 
-function renderGraph() {
+function graphSignature(nodes: GraphOverviewNode[], edges: GraphOverviewEdge[]) {
+  return `${nodes.length}:${edges.length}:${nodes[0]?.id || ''}:${nodes[nodes.length - 1]?.id || ''}:${edges[0]?.id || ''}`
+}
+
+function renderGraph(force = false) {
   if (disposed) return
-  try {
-    const c = ensureChart()
-    if (!c) return
-    const data = filtered.value
-    if (!data.nodes.length) {
-      c.clear()
-      return
+  runOutsideEcharts(() => {
+    try {
+      const c = ensureChart()
+      if (!c) return
+      const data = filtered.value
+      if (!data.nodes.length) {
+        lastGraphSignature = ''
+        c.clear()
+        return
+      }
+      const sig = graphSignature(data.nodes, data.edges)
+      if (!force && sig === lastGraphSignature) {
+        c.resize()
+        return
+      }
+      lastGraphSignature = sig
+      c.setOption(buildGraphOption(data.nodes, data.edges), { notMerge: true })
+      c.resize()
+    } catch (e) {
+      console.warn('[KnowledgeGraphExplore] renderGraph failed', e)
+      scheduleRenderRetry()
     }
-    c.setOption(buildGraphOption(data.nodes, data.edges), { notMerge: true })
-    c.resize()
-  } catch (e) {
-    console.warn('[KnowledgeGraphExplore] renderGraph failed', e)
-  }
+  })
 }
 
 function renderPie() {
@@ -503,13 +599,15 @@ function onExportClick(data: { value?: string | number }) {
 }
 
 function onResize() {
-  chart?.resize()
-  pieChart?.resize()
+  runOutsideEcharts(() => {
+    chart?.resize()
+    pieChart?.resize()
+  })
 }
 
 watch(filtered, async () => {
   await nextTick()
-  renderGraph()
+  renderGraph(true)
 }, { deep: true })
 
 watch(typePieItems, async () => {
@@ -526,16 +624,23 @@ onMounted(async () => {
   await loadOverview()
   applyFilters()
   await nextTick()
-  renderGraph()
-  renderPie()
+  // 等布局完成后再画，避免容器 0 尺寸导致 init 失败后永久空白
+  requestAnimationFrame(() => {
+    renderGraph(true)
+    renderPie()
+  })
   window.addEventListener('resize', onResize)
   window.addEventListener('keydown', onFullscreenKey)
   if (typeof ResizeObserver !== 'undefined') {
     canvasRo = new ResizeObserver(() => {
-      if (!disposed) renderGraph()
+      // 仅 resize，避免反复 setOption 打断力导向导致空白
+      if (!disposed) {
+        if (!chart) renderGraph(true)
+        else runOutsideEcharts(() => chart?.resize())
+      }
     })
     pieRo = new ResizeObserver(() => {
-      if (!disposed) renderPie()
+      if (!disposed) runOutsideEcharts(() => renderPie())
     })
     if (canvasRef.value) canvasRo.observe(canvasRef.value)
     if (pieRef.value) pieRo.observe(pieRef.value)
@@ -544,6 +649,10 @@ onMounted(async () => {
 
 onUnmounted(() => {
   disposed = true
+  if (renderRetryTimer) {
+    clearTimeout(renderRetryTimer)
+    renderRetryTimer = null
+  }
   window.removeEventListener('resize', onResize)
   window.removeEventListener('keydown', onFullscreenKey)
   canvasRo?.disconnect()
@@ -620,6 +729,7 @@ onUnmounted(() => {
               {{ t('knowledgeGraphExplore.export') }}
             </t-button>
           </t-dropdown>
+          <span v-if="overview?.stats?.truncatedated" class="kg-toolbar-limit">{{ truncatedHint }}</span>
         </div>
 
         <div class="kg-canvas" :class="{ 'is-fullscreen': isFullscreen }">
@@ -689,7 +799,6 @@ onUnmounted(() => {
               <span>{{ t('knowledgeGraphExplore.statsCanvasEdges') }}</span>
             </div>
           </div>
-          <p v-if="overview?.stats?.truncatedated" class="kg-truncatedated">{{ t('knowledgeGraphExplore.truncatedated') }}</p>
         </div>
 
         <div class="kg-card">
@@ -820,7 +929,13 @@ onUnmounted(() => {
   color: #8c8c8c;
   font-size: 12px;
 }
-
+.kg-toolbar-limit {
+  flex: 1;
+  min-width: 180px;
+  color: #d48806;
+  font-size: 12px;
+  line-height: 1.4;
+}
 .kg-canvas {
   position: relative;
   flex: 1;
@@ -952,11 +1067,6 @@ onUnmounted(() => {
     font-size: 12px;
     color: #8c8c8c;
   }
-}
-.kg-truncatedated {
-  color: #faad14;
-  font-size: 12px;
-  margin: 8px 0 0;
 }
 .kg-type-pie {
   width: 100%;

@@ -41,7 +41,6 @@
                 <div v-show="currentSection === 'basic'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('organization.editor.basicTitle') }}</h2>
-                    <p class="section-description">{{ $t('organization.editor.basicDesc') }}</p>
                   </div>
                   
                   <div class="settings-group">
@@ -49,7 +48,6 @@
                     <div class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('organization.name') }} <span class="required">*</span></label>
-                        <p class="desc">{{ $t('organization.editor.nameTip') }}</p>
                       </div>
                       <div class="setting-control">
                         <div class="name-input-wrapper">
@@ -105,7 +103,6 @@
                     <div class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('organization.description') }}</label>
-                        <p class="desc">{{ $t('organization.editor.descriptionTip') }}</p>
                       </div>
                       <div class="setting-control">
                         <t-textarea 
@@ -254,7 +251,6 @@
                 <div v-show="currentSection === 'members'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('organization.manageMembers') }}</h2>
-                    <p class="section-description">{{ $t('organization.settings.membersDesc') }}</p>
                   </div>
 
                   <!-- 角色权限说明 -->
@@ -403,7 +399,6 @@
                 <div v-show="currentSection === 'joinRequests'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('organization.settings.joinRequests') }}</h2>
-                    <p class="section-description">{{ $t('organization.settings.joinRequestsDesc') }}</p>
                   </div>
 
                   <div class="settings-group">
@@ -472,7 +467,6 @@
                 <div v-show="currentSection === 'sharedKb'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('organization.share.sharedKnowledgeBase') }}</h2>
-                    <p class="section-description">{{ $t('organization.settings.sharedDesc') }}</p>
                     <p class="section-description permission-calc-hint">
                       <t-tooltip :content="$t('organization.settings.permissionCalcTip')" placement="top">
                         <span class="hint-inner">
@@ -555,7 +549,6 @@
                 <div v-show="currentSection === 'sharedAgents'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('organization.settings.sharedAgents') }}</h2>
-                    <p class="section-description">{{ $t('organization.settings.sharedAgentsDesc') }}</p>
                     <p class="section-description permission-calc-hint">
                       <t-tooltip :content="$t('organization.settings.sharedAgentsKbHint')" placement="top" :show-delay="300">
                         <span class="hint-inner">

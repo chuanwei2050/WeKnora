@@ -2,9 +2,6 @@
   <div class="mcp-settings">
     <div class="section-header">
       <h2>{{ $t('mcpSettings.title') }}</h2>
-      <p class="section-description">
-        {{ $t('mcpSettings.description') }}
-      </p>
     </div>
 
     <div v-if="loading" class="loading-container">
@@ -15,7 +12,6 @@
       <div class="services-header">
         <div class="header-info">
           <h3>{{ $t('mcpSettings.configuredServices') }}</h3>
-          <p>{{ $t('mcpSettings.manageAndTest') }}</p>
         </div>
         <t-button size="small" theme="primary" @click="handleAdd">
           <template #icon><t-icon name="add" /></template>

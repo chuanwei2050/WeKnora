@@ -11,6 +11,7 @@ import (
 )
 
 const graphRebuildTTL = 7 * 24 * time.Hour
+const graphRebuildIncrMaxTries = 8
 
 // GraphRebuildProgressStore tracks async graph rebuild progress in Redis.
 type GraphRebuildProgressStore struct {
@@ -76,35 +77,55 @@ func (s *GraphRebuildProgressStore) Get(ctx context.Context, tenantID uint64, kb
 	return &p, nil
 }
 
-// IncrProcessed increments extract completion; finalizes when processed >= total.
+// IncrProcessed increments extract completion atomically; finalizes when processed >= total.
 func (s *GraphRebuildProgressStore) IncrProcessed(ctx context.Context, tenantID uint64, kbID string) (*types.GraphRebuildProgress, error) {
 	if !s.available() {
 		return nil, nil
 	}
-	p, err := s.Get(ctx, tenantID, kbID)
-	if err != nil || p == nil || p.Status != types.GraphRebuildRunning {
-		return p, err
-	}
-	p.Processed++
-	if p.Processed > p.Total && p.Total > 0 {
-		p.Processed = p.Total
-	}
-	p.Percent = calcPercent(p.Processed, p.Total, p.Status)
-	if p.Total > 0 && p.Processed >= p.Total {
-		now := time.Now().UTC()
-		p.FinishedAt = &now
-		if p.RequireReview {
-			p.Status = types.GraphRebuildAwaitingReview
-			p.Percent = 100
-		} else {
-			p.Status = types.GraphRebuildCompleted
-			p.Percent = 100
+	key := graphRebuildKey(tenantID, kbID)
+	var out *types.GraphRebuildProgress
+	for try := 0; try < graphRebuildIncrMaxTries; try++ {
+		err := s.redis.Watch(ctx, func(tx *redis.Tx) error {
+			raw, err := tx.Get(ctx, key).Bytes()
+			if err == redis.Nil {
+				out = &types.GraphRebuildProgress{Status: types.GraphRebuildIdle}
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			var p types.GraphRebuildProgress
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return err
+			}
+			if p.Status != types.GraphRebuildRunning {
+				out = &p
+				return nil
+			}
+			applyGraphRebuildIncr(&p)
+			b, err := json.Marshal(&p)
+			if err != nil {
+				return err
+			}
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				pipe.Set(ctx, key, b, graphRebuildTTL)
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			out = &p
+			return nil
+		}, key)
+		if err == nil {
+			return out, nil
 		}
+		if err == redis.TxFailedErr {
+			continue
+		}
+		return out, err
 	}
-	if err := s.save(ctx, tenantID, kbID, p); err != nil {
-		return p, err
-	}
-	return p, nil
+	return out, fmt.Errorf("graph rebuild progress incr conflict after %d retries", graphRebuildIncrMaxTries)
 }
 
 // RefreshFinalState updates awaiting_review pending count / completed when review cleared.
@@ -135,9 +156,7 @@ func (s *GraphRebuildProgressStore) RefreshFinalState(ctx context.Context, tenan
 		now := time.Now().UTC()
 		p.FinishedAt = &now
 		p.Percent = 100
-		if p.RequireReview && pendingReview > 0 {
-			p.Status = types.GraphRebuildAwaitingReview
-		} else if p.RequireReview {
+		if p.RequireReview {
 			p.Status = types.GraphRebuildAwaitingReview
 		} else {
 			p.Status = types.GraphRebuildCompleted
@@ -154,6 +173,28 @@ func (s *GraphRebuildProgressStore) save(ctx context.Context, tenantID uint64, k
 		return err
 	}
 	return s.redis.Set(ctx, graphRebuildKey(tenantID, kbID), b, graphRebuildTTL).Err()
+}
+
+func applyGraphRebuildIncr(p *types.GraphRebuildProgress) {
+	if p == nil {
+		return
+	}
+	p.Processed++
+	if p.Processed > p.Total && p.Total > 0 {
+		p.Processed = p.Total
+	}
+	p.Percent = calcPercent(p.Processed, p.Total, p.Status)
+	if p.Total > 0 && p.Processed >= p.Total {
+		now := time.Now().UTC()
+		p.FinishedAt = &now
+		if p.RequireReview {
+			p.Status = types.GraphRebuildAwaitingReview
+			p.Percent = 100
+		} else {
+			p.Status = types.GraphRebuildCompleted
+			p.Percent = 100
+		}
+	}
 }
 
 func calcPercent(processed, total int, status string) int {

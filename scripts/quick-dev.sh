@@ -207,31 +207,42 @@ start_windows_backend() {
     local bash_exe
     local project_dir
     local backend_pid_file
-    local backend_lc
+    local launcher_unix
     local bridge_env
 
     bash_exe="$(windows_path "$(command -v bash)")"
     project_dir="$(windows_path "$PROJECT_ROOT")"
     backend_pid_file="$(windows_path "$PROJECT_ROOT/logs/backend.pid")"
-    # 日志重定向放在 bash -c 内；用 ProcessStartInfo 脱离当前控制台作业对象。
-    backend_lc="cd '$PROJECT_ROOT' && exec ./scripts/dev.sh app-container > '$PROJECT_ROOT/logs/backend.log' 2>&1"
-    bridge_env="${WSLENV:+$WSLENV:}WEKNORA_BASH_EXE:WEKNORA_BACKEND_DIR:WEKNORA_BACKEND_PID_FILE:WEKNORA_BACKEND_LC"
+    launcher_unix="$PROJECT_ROOT/logs/backend-launch.sh"
+
+    # Avoid embedding paths inside powershell/bash -c quote soup (spaces / quotes break).
+    # Launch a small script and pass PROJECT_ROOT via the child process environment.
+    cat > "$launcher_unix" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$WEKNORA_PROJECT_ROOT"
+mkdir -p "$WEKNORA_PROJECT_ROOT/logs"
+exec ./scripts/dev.sh app-container > "$WEKNORA_PROJECT_ROOT/logs/backend.log" 2>&1
+EOF
 
     : > "$PROJECT_ROOT/logs/backend.log"
     rm -f "$PROJECT_ROOT/logs/backend.pid"
 
+    bridge_env="${WSLENV:+$WSLENV:}WEKNORA_BASH_EXE:WEKNORA_BACKEND_DIR:WEKNORA_BACKEND_LAUNCHER:WEKNORA_BACKEND_PID_FILE:WEKNORA_PROJECT_ROOT"
     WSLENV="$bridge_env" \
     WEKNORA_BASH_EXE="$bash_exe" \
     WEKNORA_BACKEND_DIR="$project_dir" \
+    WEKNORA_BACKEND_LAUNCHER="$launcher_unix" \
     WEKNORA_BACKEND_PID_FILE="$backend_pid_file" \
-    WEKNORA_BACKEND_LC="$backend_lc" \
+    WEKNORA_PROJECT_ROOT="$PROJECT_ROOT" \
     powershell.exe -NoProfile -NonInteractive -Command '
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $env:WEKNORA_BASH_EXE
-        $psi.Arguments = "-c `"$($env:WEKNORA_BACKEND_LC)`""
+        $psi.Arguments = [char]34 + $env:WEKNORA_BACKEND_LAUNCHER + [char]34
         $psi.WorkingDirectory = $env:WEKNORA_BACKEND_DIR
         $psi.UseShellExecute = $false
         $psi.CreateNoWindow = $true
+        $psi.EnvironmentVariables["WEKNORA_PROJECT_ROOT"] = $env:WEKNORA_PROJECT_ROOT
         $proc = [Diagnostics.Process]::Start($psi)
         if ($null -eq $proc) { exit 1 }
         [IO.File]::WriteAllText($env:WEKNORA_BACKEND_PID_FILE, "$($proc.Id)")

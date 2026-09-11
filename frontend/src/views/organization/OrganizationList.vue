@@ -39,7 +39,6 @@
               </t-tooltip>
             </div>
           </div>
-          <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('organization.subtitle') }}</p>
         </div>
       </div>
       <div class="org-list-main">

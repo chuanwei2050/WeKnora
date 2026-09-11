@@ -2,30 +2,62 @@
   <section class="triple-review">
     <div v-if="!hideHeader" class="section-header">
       <h2>{{ t('settings.graphTripleReview.title') }}</h2>
-      <p class="section-description">{{ t('settings.graphTripleReview.description') }}</p>
     </div>
 
     <div class="toolbar">
+      <t-checkbox
+        v-if="selectableItems.length"
+        :checked="allSelected"
+        :indeterminate="partialSelected"
+        :disabled="batchBusy"
+        @change="toggleSelectAll"
+      >
+        {{ t('settings.graphTripleReview.selectAll') }}
+      </t-checkbox>
       <t-select
         v-model="statusFilter"
         :options="statusOptions"
-        :disabled="loading"
+        :disabled="loading || batchBusy"
         size="small"
         class="status-select"
         :placeholder="t('common.filter')"
         :aria-label="t('common.filter')"
-        @change="loadItems"
+        @change="() => loadItems()"
       />
       <t-button
         theme="default"
         variant="outline"
         size="small"
-        :loading="loading"
-        @click="loadItems"
+        :loading="refreshing"
+        :disabled="batchBusy"
+        @click="() => loadItems({ silent: items.length > 0 })"
       >
         <template #icon><t-icon name="refresh" /></template>
         {{ t('settings.graphTripleReview.refresh') }}
       </t-button>
+
+      <template v-if="selectedCount">
+        <t-popconfirm
+          :content="t('settings.graphTripleReview.batchApproveConfirm', { n: selectedCount })"
+          :confirm-btn="{ content: t('settings.graphTripleReview.batchApprove'), theme: 'primary' }"
+          :cancel-btn="t('common.cancel')"
+          @confirm="batchApprove"
+        >
+          <t-button theme="primary" size="small" :loading="batchBusy" :disabled="batchBusy">
+            {{ t('settings.graphTripleReview.batchApprove') }} ({{ selectedCount }})
+          </t-button>
+        </t-popconfirm>
+        <t-button
+          theme="default"
+          variant="outline"
+          size="small"
+          :disabled="batchBusy"
+          @click="openBatchReject"
+        >
+          {{ t('settings.graphTripleReview.batchReject') }} ({{ selectedCount }})
+        </t-button>
+      </template>
+
       <span v-if="!loading" class="item-count">
         {{ t('settings.graphTripleReview.countLabel', { n: items.length }) }}
       </span>
@@ -48,7 +80,7 @@
       <t-empty :description="emptyDescription">
         <div class="empty-actions">
           <p class="empty-hint">{{ t('settings.graphTripleReview.emptyHint') }}</p>
-          <t-button theme="default" variant="outline" size="small" @click="loadItems">
+          <t-button theme="default" variant="outline" size="small" @click="() => loadItems()">
             <template #icon><t-icon name="refresh" /></template>
             {{ t('settings.graphTripleReview.refresh') }}
           </t-button>
@@ -57,9 +89,20 @@
     </div>
 
     <div v-else class="triple-list">
-      <article v-for="item in items" :key="item.id" class="triple-card">
+      <article
+        v-for="item in items"
+        :key="item.id"
+        class="triple-card"
+        :class="{ selected: selectedIds.has(item.id), busy: busyIds.has(item.id) }"
+      >
         <div class="card-header">
           <div class="card-title-row">
+            <t-checkbox
+              v-if="item.status === 'pending'"
+              :checked="selectedIds.has(item.id)"
+              :disabled="batchBusy || busyIds.has(item.id)"
+              @change="(checked) => toggleSelect(item.id, !!checked)"
+            />
             <t-tag :theme="statusTheme(item.status)" variant="light" size="small">
               {{ statusLabel(item.status) }}
             </t-tag>
@@ -118,8 +161,8 @@
             <t-button
               theme="primary"
               size="small"
-              :loading="busyId === item.id"
-              :disabled="!!busyId && busyId !== item.id"
+              :loading="busyIds.has(item.id)"
+              :disabled="batchBusy || (busyIds.size > 0 && !busyIds.has(item.id))"
             >
               {{ t('settings.graphTripleReview.approve') }}
             </t-button>
@@ -128,7 +171,7 @@
             theme="default"
             variant="outline"
             size="small"
-            :disabled="!!busyId"
+            :disabled="batchBusy || busyIds.size > 0"
             @click="openReject(item)"
           >
             {{ t('settings.graphTripleReview.reject') }}
@@ -139,7 +182,9 @@
 
     <t-dialog
       v-model:visible="rejectDialogVisible"
-      :header="t('settings.graphTripleReview.rejectTitle')"
+      :header="rejectMode === 'batch'
+        ? t('settings.graphTripleReview.batchRejectTitle', { n: selectedCount })
+        : t('settings.graphTripleReview.rejectTitle')"
       :confirm-btn="{ content: t('settings.graphTripleReview.reject'), theme: 'danger' }"
       :cancel-btn="t('common.cancel')"
       :confirm-loading="rejecting"
@@ -182,13 +227,19 @@ const props = withDefaults(defineProps<{
 const { t, locale } = useI18n()
 const items = ref<GraphTripleCandidate[]>([])
 const loading = ref(false)
-const busyId = ref('')
+const refreshing = ref(false)
+const busyIds = ref<Set<string>>(new Set())
+const selectedIds = ref<Set<string>>(new Set())
+const batchBusy = ref(false)
 const errorMessage = ref('')
 const statusFilter = ref<GraphTripleStatus | 'all'>('pending')
 const rejectDialogVisible = ref(false)
 const rejectComment = ref('')
 const rejectTarget = ref<GraphTripleCandidate | null>(null)
+const rejectMode = ref<'single' | 'batch'>('single')
 const rejecting = ref(false)
+
+const BATCH_CONCURRENCY = 3
 
 const allowedKbSet = computed(() => {
   if (!props.allowedKnowledgeBaseIds) return null
@@ -208,6 +259,13 @@ const emptyDescription = computed(() =>
     ? t('settings.graphTripleReview.emptyPending')
     : t('settings.graphTripleReview.emptyFiltered'),
 )
+
+const selectableItems = computed(() => items.value.filter((item) => item.status === 'pending'))
+const selectedCount = computed(() => selectedIds.value.size)
+const allSelected = computed(
+  () => selectableItems.value.length > 0 && selectableItems.value.every((item) => selectedIds.value.has(item.id)),
+)
+const partialSelected = computed(() => selectedCount.value > 0 && !allSelected.value)
 
 const statusLabel = (status: GraphTripleStatus) => ({
   pending: t('settings.graphTripleReview.statusPending'),
@@ -241,12 +299,82 @@ const formatDate = (value?: string) => {
   })
 }
 
-const loadItems = async () => {
-  loading.value = true
+const clearSelection = () => {
+  selectedIds.value = new Set()
+}
+
+const markBusy = (id: string, on: boolean) => {
+  const next = new Set(busyIds.value)
+  if (on) next.add(id)
+  else next.delete(id)
+  busyIds.value = next
+}
+
+const toggleSelect = (id: string, checked: boolean) => {
+  const next = new Set(selectedIds.value)
+  if (checked) next.add(id)
+  else next.delete(id)
+  selectedIds.value = next
+}
+
+const toggleSelectAll = (checked: boolean) => {
+  if (!checked) {
+    clearSelection()
+    return
+  }
+  selectedIds.value = new Set(selectableItems.value.map((item) => item.id))
+}
+
+const pruneSelection = () => {
+  const alive = new Set(items.value.map((item) => item.id))
+  selectedIds.value = new Set([...selectedIds.value].filter((id) => alive.has(id)))
+}
+
+/** Optimistically apply a terminal status; restore snapshot on failure. */
+const applyLocalOutcome = (
+  snapshot: GraphTripleCandidate,
+  status: GraphTripleStatus,
+  comment?: string,
+) => {
+  const idx = items.value.findIndex((item) => item.id === snapshot.id)
+  const nextSelected = new Set(selectedIds.value)
+  nextSelected.delete(snapshot.id)
+  selectedIds.value = nextSelected
+  if (statusFilter.value === 'pending' && status !== 'pending') {
+    if (idx >= 0) items.value.splice(idx, 1)
+    return
+  }
+  if (idx >= 0) {
+    items.value[idx] = {
+      ...items.value[idx],
+      status,
+      comment: comment ?? items.value[idx].comment,
+    }
+  }
+}
+
+const restoreSnapshot = (snapshot: GraphTripleCandidate) => {
+  const idx = items.value.findIndex((item) => item.id === snapshot.id)
+  if (idx >= 0) {
+    items.value[idx] = snapshot
+    return
+  }
+  const insertAt = items.value.findIndex(
+    (item) => (item.created_at || '') < (snapshot.created_at || ''),
+  )
+  if (insertAt < 0) items.value.push(snapshot)
+  else items.value.splice(insertAt, 0, snapshot)
+}
+
+const loadItems = async (opts?: { silent?: boolean }) => {
+  const silent = !!opts?.silent
   errorMessage.value = ''
+  if (!silent && items.value.length === 0) loading.value = true
+  refreshing.value = true
   try {
     if (allowedKbSet.value && allowedKbSet.value.size === 0) {
       items.value = []
+      clearSelection()
       return
     }
     const response: any = await listGraphTripleReviews({
@@ -256,10 +384,12 @@ const loadItems = async () => {
     items.value = allowedKbSet.value
       ? list.filter((item) => allowedKbSet.value!.has(item.knowledge_base_id))
       : list
+    pruneSelection()
   } catch (error: any) {
     errorMessage.value = error?.message || t('settings.graphTripleReview.loadFailed')
   } finally {
     loading.value = false
+    refreshing.value = false
   }
 }
 
@@ -267,44 +397,145 @@ watch(allowedKbSet, () => {
   loadItems()
 })
 
-const approve = async (item: GraphTripleCandidate) => {
-  busyId.value = item.id
+watch(statusFilter, () => {
+  clearSelection()
+})
+
+const runWithConcurrency = async <T,>(
+  tasks: Array<() => Promise<T>>,
+  limit: number,
+): Promise<Array<PromiseSettledResult<T>>> => {
+  const results: Array<PromiseSettledResult<T>> = new Array(tasks.length)
+  let next = 0
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
+    while (next < tasks.length) {
+      const i = next++
+      try {
+        results[i] = { status: 'fulfilled', value: await tasks[i]() }
+      } catch (reason: any) {
+        results[i] = { status: 'rejected', reason }
+      }
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
+const approveOne = async (item: GraphTripleCandidate) => {
+  const snapshot: GraphTripleCandidate = { ...item, graph_data: item.graph_data }
+  markBusy(item.id, true)
+  applyLocalOutcome(snapshot, 'written')
   try {
     await approveGraphTripleReview(item.id)
+  } catch (error: any) {
+    restoreSnapshot(snapshot)
+    throw error
+  } finally {
+    markBusy(item.id, false)
+  }
+}
+
+const rejectOne = async (item: GraphTripleCandidate, comment: string) => {
+  const snapshot: GraphTripleCandidate = { ...item, graph_data: item.graph_data }
+  markBusy(item.id, true)
+  applyLocalOutcome(snapshot, 'rejected', comment)
+  try {
+    await rejectGraphTripleReview(item.id, comment)
+  } catch (error: any) {
+    restoreSnapshot(snapshot)
+    throw error
+  } finally {
+    markBusy(item.id, false)
+  }
+}
+
+const approve = async (item: GraphTripleCandidate) => {
+  try {
+    await approveOne(item)
     MessagePlugin.success(t('settings.graphTripleReview.approveSuccess'))
-    await loadItems()
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('settings.graphTripleReview.approveFailed'))
-  } finally {
-    busyId.value = ''
   }
 }
 
 const openReject = (item: GraphTripleCandidate) => {
+  rejectMode.value = 'single'
   rejectTarget.value = item
   rejectComment.value = ''
   rejectDialogVisible.value = true
 }
 
+const openBatchReject = () => {
+  if (!selectedCount.value) return
+  rejectMode.value = 'batch'
+  rejectTarget.value = null
+  rejectComment.value = ''
+  rejectDialogVisible.value = true
+}
+
 const confirmReject = async () => {
-  if (!rejectTarget.value) return
   rejecting.value = true
-  busyId.value = rejectTarget.value.id
+  const comment = rejectComment.value.trim()
   try {
-    await rejectGraphTripleReview(rejectTarget.value.id, rejectComment.value.trim())
-    MessagePlugin.success(t('settings.graphTripleReview.rejectSuccess'))
+    if (rejectMode.value === 'single') {
+      if (!rejectTarget.value) return
+      await rejectOne(rejectTarget.value, comment)
+      MessagePlugin.success(t('settings.graphTripleReview.rejectSuccess'))
+    } else {
+      await batchReject(comment)
+    }
     rejectDialogVisible.value = false
-    await loadItems()
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('settings.graphTripleReview.rejectFailed'))
     throw error
   } finally {
     rejecting.value = false
-    busyId.value = ''
   }
 }
 
-onMounted(loadItems)
+const batchApprove = async () => {
+  const targets = selectableItems.value.filter((item) => selectedIds.value.has(item.id))
+  if (!targets.length) return
+  batchBusy.value = true
+  try {
+    const results = await runWithConcurrency(
+      targets.map((item) => () => approveOne(item)),
+      BATCH_CONCURRENCY,
+    )
+    const failed = results.filter((r) => r.status === 'rejected').length
+    const ok = targets.length - failed
+    if (failed === 0) {
+      MessagePlugin.success(t('settings.graphTripleReview.batchApproveSuccess', { n: ok }))
+    } else {
+      MessagePlugin.warning(t('settings.graphTripleReview.batchPartial', { ok, failed }))
+    }
+  } finally {
+    batchBusy.value = false
+  }
+}
+
+const batchReject = async (comment: string) => {
+  const targets = selectableItems.value.filter((item) => selectedIds.value.has(item.id))
+  if (!targets.length) return
+  batchBusy.value = true
+  try {
+    const results = await runWithConcurrency(
+      targets.map((item) => () => rejectOne(item, comment)),
+      BATCH_CONCURRENCY,
+    )
+    const failed = results.filter((r) => r.status === 'rejected').length
+    const ok = targets.length - failed
+    if (failed === 0) {
+      MessagePlugin.success(t('settings.graphTripleReview.batchRejectSuccess', { n: ok }))
+    } else {
+      MessagePlugin.warning(t('settings.graphTripleReview.batchPartial', { ok, failed }))
+    }
+  } finally {
+    batchBusy.value = false
+  }
+}
+
+onMounted(() => loadItems())
 </script>
 
 <style scoped lang="less">
@@ -319,20 +550,14 @@ onMounted(loadItems)
     font-size: 20px;
     font-weight: 600;
     color: var(--td-text-color-primary);
-    margin: 0 0 8px;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
     margin: 0;
-    line-height: 1.5;
   }
 }
 
 .toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 16px;
   padding-bottom: 16px;
@@ -401,10 +626,19 @@ onMounted(loadItems)
   border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   background: var(--td-bg-color-container);
-  transition: border-color 0.2s ease;
+  transition: border-color 0.2s ease, opacity 0.2s ease;
 
   &:hover {
     border-color: var(--td-brand-color);
+  }
+
+  &.selected {
+    border-color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+  }
+
+  &.busy {
+    opacity: 0.72;
   }
 }
 
@@ -546,12 +780,13 @@ onMounted(loadItems)
     text-align: left;
   }
 
-  .toolbar {
-    flex-wrap: wrap;
+  .triple-edge {
+    justify-self: start;
   }
 
-  .item-count {
-    margin-left: 0;
+  .card-header {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 </style>

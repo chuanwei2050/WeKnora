@@ -596,12 +596,57 @@ func (n *Neo4jRepository) canonicalSearchNamespaces(ctx context.Context, scope t
 	// progressively rebuilt alongside governed version namespaces.
 	namespaces := []string{"default", active}
 	for _, versionID := range scope.CurrentKnowledgeVersions {
-		if namespace := types.GraphNamespaceForVersion(versionID, true); namespace != "default" {
-			namespaces = append(namespaces, namespace)
+		if ns := types.GraphNamespaceForVersion(versionID, false); ns != "default" {
+			namespaces = append(namespaces, ns) // active:<version>
 		}
+		if ns := types.GraphNamespaceForVersion(versionID, true); ns != "default" {
+			// Include staging so triples approved before the write-path fix remain visible.
+			namespaces = append(namespaces, ns)
+		}
+	}
+	// Discover namespaces already present for this KB (covers legacy staging writes
+	// when CurrentKnowledgeVersions is incomplete).
+	if discovered, discErr := n.listCanonicalNamespacesForKB(ctx, scope.TenantID, scope.KnowledgeBaseID); discErr == nil {
+		namespaces = append(namespaces, discovered...)
 	}
 	sort.Strings(namespaces)
 	return uniqueStrings(namespaces), nil
+}
+
+func (n *Neo4jRepository) listCanonicalNamespacesForKB(ctx context.Context, tenantID uint64, knowledgeBaseID string) ([]string, error) {
+	if n.driver == nil {
+		return nil, nil
+	}
+	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
+	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		cursor, err := tx.Run(ctx, `MATCH (entity:CanonicalEntity)
+WHERE entity.tenant_id = $tenant_id AND entity.knowledge_base_id = $knowledge_base_id
+RETURN DISTINCT entity.namespace AS namespace`, map[string]interface{}{
+			"tenant_id":         tenantID,
+			"knowledge_base_id": knowledgeBaseID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		var namespaces []string
+		for cursor.Next(ctx) {
+			value, _ := cursor.Record().Get("namespace")
+			ns := strings.TrimSpace(fmt.Sprint(value))
+			if ns == "" || ns == "<nil>" {
+				continue
+			}
+			namespaces = append(namespaces, ns)
+		}
+		return namespaces, cursor.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, nil
+	}
+	return result.([]string), nil
 }
 
 func (n *Neo4jRepository) loadCanonicalSeeds(ctx context.Context, scope types.GraphScope, namespaces []string, seeds []map[string]interface{}) ([]types.CanonicalEntity, error) {
@@ -1026,11 +1071,22 @@ func (n *Neo4jRepository) GetGraphOverview(ctx context.Context, scope types.Grap
 		edgeSeen := map[string]struct{}{}
 		mentionCount := map[string]int{}
 
-		entityCursor, err := tx.Run(ctx, `MATCH (entity:CanonicalEntity)
+		entityQuery := `MATCH (entity:CanonicalEntity)
 WHERE entity.tenant_id = $tenant_id AND entity.knowledge_base_id = $knowledge_base_id
-  AND entity.namespace IN $namespaces
+  AND entity.namespace IN $namespaces`
+		if allowedFilter != "" {
+			// Restrict entities to those mentioned by caller-visible knowledge documents.
+			entityQuery += `
+  AND EXISTS {
+    MATCH (instance:DocumentEntityInstance)-[:INSTANCE_OF]->(entity)
+    WHERE instance.tenant_id = $tenant_id AND instance.knowledge_base_id = $knowledge_base_id
+      AND instance.namespace IN $namespaces` + allowedFilter + `
+  }`
+		}
+		entityQuery += `
 RETURN entity.canonical_key AS id, entity.name AS label, entity.entity_type AS entity_type
-LIMIT $limit`, params)
+LIMIT $limit`
+		entityCursor, err := tx.Run(ctx, entityQuery, params)
 		if err != nil {
 			return nil, err
 		}
@@ -1047,6 +1103,10 @@ LIMIT $limit`, params)
 			}
 			if entityType == "<nil>" {
 				entityType = ""
+			}
+			// Same canonical_key can appear in multiple namespaces (default + staging).
+			if _, ok := nodeSeen[id]; ok {
+				continue
 			}
 			nodeSeen[id] = struct{}{}
 			overview.Nodes = append(overview.Nodes, types.GraphOverviewNode{

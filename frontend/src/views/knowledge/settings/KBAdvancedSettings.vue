@@ -2,7 +2,6 @@
   <div class="kb-advanced-settings">
     <div class="section-header">
       <h2>{{ $t('knowledgeEditor.advanced.title') }}</h2>
-      <p class="section-description">{{ $t('knowledgeEditor.advanced.description') }}</p>
     </div>
 
     <div class="settings-group">

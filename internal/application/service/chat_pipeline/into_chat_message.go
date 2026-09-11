@@ -137,15 +137,17 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		contextsBuilder.WriteString("\n")
 	}
 
-	// Build contexts string based on FAQ priority strategy
+	// Build contexts with numeric ids aligned to MergeResult / [n] cite filter.
 	if chatManage.FAQPriorityEnabled && len(faqResults) > 0 {
+		chatManage.MergeResult = allResults
 		contextsBuilder.WriteString("<source type=\"faq\" priority=\"high\">\n")
 		for i, result := range faqResults {
 			passage := getEnrichedPassageForChat(ctx, result)
+			id := i + 1
 			if hasHighConfidenceFAQ && i == 0 {
-				contextsBuilder.WriteString(fmt.Sprintf("<context id=\"FAQ-%d\" match=\"exact\">%s</context>\n", i+1, passage))
+				contextsBuilder.WriteString(fmt.Sprintf("<context id=\"%d\" match=\"exact\">%s</context>\n", id, passage))
 			} else {
-				contextsBuilder.WriteString(fmt.Sprintf("<context id=\"FAQ-%d\">%s</context>\n", i+1, passage))
+				contextsBuilder.WriteString(fmt.Sprintf("<context id=\"%d\">%s</context>\n", id, passage))
 			}
 		}
 		contextsBuilder.WriteString("</source>\n")
@@ -154,7 +156,8 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 			contextsBuilder.WriteString("<source type=\"document\" priority=\"supplementary\">\n")
 			for i, result := range docResults {
 				passage := getEnrichedPassageForChat(ctx, result)
-				contextsBuilder.WriteString(fmt.Sprintf("<context id=\"DOC-%d\">%s</context>\n", i+1, passage))
+				id := len(faqResults) + i + 1
+				contextsBuilder.WriteString(fmt.Sprintf("<context id=\"%d\">%s</context>\n", id, passage))
 			}
 			contextsBuilder.WriteString("</source>")
 		}

@@ -2,7 +2,6 @@
   <div class="kb-model-config">
     <div class="section-header">
       <h2>{{ $t('knowledgeEditor.models.title') }}</h2>
-      <p class="section-description">{{ $t('knowledgeEditor.models.description') }}</p>
     </div>
 
     <div class="settings-group">
@@ -10,7 +9,6 @@
       <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.models.llmLabel') }} <span class="required">*</span></label>
-          <p class="desc">{{ $t('knowledgeEditor.models.llmDesc') }}</p>
         </div>
         <div class="setting-control">
           <ModelSelector
@@ -29,7 +27,6 @@
       <div v-if="ragEnabled !== false" class="setting-row">
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.models.embeddingLabel') }} <span v-if="ragEnabled" class="required">*</span></label>
-          <p class="desc">{{ $t('knowledgeEditor.models.embeddingDesc') }}</p>
           <t-alert
             v-if="hasFiles"
             theme="warning"

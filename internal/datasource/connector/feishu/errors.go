@@ -21,10 +21,16 @@ const (
 
 // Known permission-denied Feishu codes (non-exhaustive but covers publish paths).
 var permissionDeniedCodes = map[int]struct{}{
-	131006: {}, // wiki permission denied
+	131006:   {}, // wiki permission denied
 	99991663: {},
 	99991668: {},
 	99991672: {},
+}
+
+// Known not-found Feishu codes for wiki/doc nodes.
+var notFoundCodes = map[int]struct{}{
+	131004: {}, // wiki node not found (common)
+	1770002: {}, // docx not found variants
 }
 
 var rateLimitCodes = map[int]struct{}{
@@ -95,6 +101,25 @@ func (e *PermissionDeniedError) Unwrap() error {
 	return e.APIError
 }
 
+// NotFoundError indicates a wiki/doc node no longer exists remotely.
+type NotFoundError struct {
+	*APIError
+}
+
+func (e *NotFoundError) Error() string {
+	if e == nil || e.APIError == nil {
+		return "feishu resource not found"
+	}
+	return fmt.Sprintf("feishu not found: %s", e.APIError.Error())
+}
+
+func (e *NotFoundError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.APIError
+}
+
 // IsRetryable reports whether err (or any wrapped error) is transient.
 func IsRetryable(err error) bool {
 	var re *RetryableError
@@ -114,8 +139,32 @@ func IsPermissionDenied(err error) bool {
 	return false
 }
 
+// IsNotFound reports whether err means the remote wiki/doc node is gone.
+func IsNotFound(err error) bool {
+	var ne *NotFoundError
+	if errors.As(err, &ne) {
+		return true
+	}
+	var ae *APIError
+	if errors.As(err, &ae) {
+		if ae.HTTPStatus == http.StatusNotFound || isNotFoundCode(ae.Code) {
+			return true
+		}
+		msg := strings.ToLower(ae.Msg)
+		if strings.Contains(msg, "not found") || strings.Contains(msg, "does not exist") || strings.Contains(msg, "node_not_exist") {
+			return true
+		}
+	}
+	return false
+}
+
 func isPermissionDeniedCode(code int) bool {
 	_, ok := permissionDeniedCodes[code]
+	return ok
+}
+
+func isNotFoundCode(code int) bool {
+	_, ok := notFoundCodes[code]
 	return ok
 }
 
@@ -146,6 +195,13 @@ func MapAPIError(httpStatus, code int, msg, path string) error {
 	}
 	if isPermissionDeniedCode(code) {
 		return &PermissionDeniedError{APIError: ae}
+	}
+	if httpStatus == http.StatusNotFound || isNotFoundCode(code) {
+		return &NotFoundError{APIError: ae}
+	}
+	msgLower := strings.ToLower(ae.Msg)
+	if strings.Contains(msgLower, "not found") || strings.Contains(msgLower, "does not exist") || strings.Contains(msgLower, "node_not_exist") {
+		return &NotFoundError{APIError: ae}
 	}
 	return ae
 }

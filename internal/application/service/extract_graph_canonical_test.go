@@ -21,8 +21,8 @@ func TestCanonicalRecordsFromExtractedGraphCarriesVersionEvidence(t *testing.T) 
 			t.Fatalf("record lost source version: %+v", record)
 		}
 	}
-	if got := types.GraphNamespaceForVersion(chunk.KnowledgeVersionID, true); got != "staging:v2" {
-		t.Fatalf("unexpected staging namespace %q", got)
+	if got := types.GraphNamespaceForVersion(chunk.KnowledgeVersionID, chunk.KnowledgeVersionID != ""); got != "staging:v2" {
+		t.Fatalf("unexpected governed write namespace %q", got)
 	}
 	if records[4].Edge == nil || records[4].Edge.Source == "" || records[4].Edge.Target == "" {
 		t.Fatalf("edge was not canonicalized: %+v", records[4])
