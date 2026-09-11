@@ -126,6 +126,8 @@ spec:
               value: {{ .Values.app.env.CONCURRENCY_POOL_SIZE | quote }}
             - name: ENABLE_GRAPH_RAG
               value: {{ .Values.app.env.ENABLE_GRAPH_RAG | quote }}
+            - name: ENABLE_FEISHU_KNOWLEDGE_SYNC
+              value: {{ .Values.app.env.ENABLE_FEISHU_KNOWLEDGE_SYNC | quote }}
             {{- if .Values.neo4j.enabled }}
             # Neo4j configuration (for GraphRAG)
             - name: NEO4J_URI

@@ -128,6 +128,6 @@ npm run type-check
 |------|------|
 | 使用与运维 | [常见问题](./docs/QA.md) · [生产部署](./docs/production-deployment.md) · [Helm 部署](./helm/README.md) · [严格离线运行](./docs/airgap-operations.md) · [Langfuse](./docs/Langfuse集成.md) |
 | 平台能力 | [知识图谱](./docs/开启知识图谱功能.md) · [共享空间](./docs/共享空间说明.md) · [OIDC](./docs/OIDC认证调用流程.md) |
-| API 与集成 | [API](./docs/api/README.md) · [外挂知识库](./docs/外挂知识库指南.md) · [数据源导入](./docs/数据源导入开发文档.md) · [IM 集成](./docs/IM集成开发文档.md) |
+| API 与集成 | [API](./docs/api/README.md) · [外挂知识库](./docs/外挂知识库指南.md) · [数据源导入](./docs/数据源导入开发文档.md) · [飞书知识库同步](./docs/飞书知识库同步.md) · [IM 集成](./docs/IM集成开发文档.md) |
 | 扩展开发 | [Agent Skills](./docs/agent-skills.md) · [向量数据库](./docs/使用其他向量数据库.md) · [网络搜索引擎](./docs/添加新的网络搜索引擎.md) |
 | 维护者 | [内置模型](./docs/maintainers/BUILTIN_MODELS.md) · [内置 MCP 服务](./docs/maintainers/BUILTIN_MCP_SERVICES.md) · [语音能力](./docs/voice-capabilities.md) |

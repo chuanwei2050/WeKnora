@@ -67,6 +67,7 @@ type RouterParams struct {
 	OrganizationHandler        *handler.OrganizationHandler
 	IMHandler                  *handler.IMHandler
 	DataSourceHandler          *handler.DataSourceHandler
+	FeishuPublishHandler       *handler.FeishuPublishHandler
 	WeKnoraCloudHandler        *handler.WeKnoraCloudHandler
 	WikiPageHandler            *handler.WikiPageHandler
 	AnswerFeedbackHandler      *handler.AnswerFeedbackHandler
@@ -185,6 +186,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler)
 		RegisterIMChannelRoutes(v1, params.IMHandler)
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler)
+		RegisterFeishuPublishRoutes(v1, params.FeishuPublishHandler)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler)
 		RegisterFeedbackRoutes(v1, params.AnswerFeedbackHandler)
@@ -1109,6 +1111,23 @@ func RegisterDataSourceRoutes(r *gin.RouterGroup, handler *handler.DataSourceHan
 		// Sync logs
 		ds.GET("/:id/logs", handler.GetSyncLogs)
 		ds.GET("/logs/:log_id", handler.GetSyncLog)
+	}
+}
+
+// RegisterFeishuPublishRoutes registers knowledge-base Feishu publish APIs.
+func RegisterFeishuPublishRoutes(r *gin.RouterGroup, h *handler.FeishuPublishHandler) {
+	if h == nil {
+		return
+	}
+	g := r.Group("/knowledge-bases/:id/feishu-publish")
+	{
+		g.GET("/config", h.GetConfig)
+		g.POST("/spaces", h.DiscoverSpaces)
+		g.POST("/nodes", h.ListNodes)
+		g.POST("/preview", h.PreviewSync)
+		g.POST("/confirm", h.ConfirmSync)
+		g.POST("/unbind", h.Unbind)
+		g.GET("/runs/:run_id", h.GetRun)
 	}
 }
 

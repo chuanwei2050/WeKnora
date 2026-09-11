@@ -97,6 +97,7 @@ app:
     STREAM_MANAGER_TYPE: redis
     CONCURRENCY_POOL_SIZE: "5"
     ENABLE_GRAPH_RAG: "false"
+    ENABLE_FEISHU_KNOWLEDGE_SYNC: "false"
     TZ: UTC
 
   # -- Additional environment variables

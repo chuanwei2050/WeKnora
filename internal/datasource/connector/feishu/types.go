@@ -91,59 +91,36 @@ type tokenResponse struct {
 	Expire            int    `json:"expire"` // seconds
 }
 
+// wikiSpace / wikiNode are unexported aliases so existing pull-connector code
+// keeps compiling; publish callers should use the exported WikiSpace / WikiNode.
+type wikiSpace = WikiSpace
+type wikiNode = WikiNode
+
 // wikiSpaceListResponse is the response for GET /open-apis/wiki/v2/spaces.
 type wikiSpaceListResponse struct {
 	apiResponse
 	Data struct {
-		Items     []wikiSpace `json:"items"`
+		Items     []WikiSpace `json:"items"`
 		HasMore   bool        `json:"has_more"`
 		PageToken string      `json:"page_token"`
 	} `json:"data"`
-}
-
-// wikiSpace represents a Feishu Wiki space.
-type wikiSpace struct {
-	SpaceID     string `json:"space_id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Visibility  string `json:"visibility"` // "public" or "private"
 }
 
 // wikiNodeListResponse is the response for GET /open-apis/wiki/v2/spaces/:space_id/nodes.
 type wikiNodeListResponse struct {
 	apiResponse
 	Data struct {
-		Items     []wikiNode `json:"items"`
+		Items     []WikiNode `json:"items"`
 		HasMore   bool       `json:"has_more"`
 		PageToken string     `json:"page_token"`
 	} `json:"data"`
-}
-
-// wikiNode represents a node (document or folder) in a Feishu Wiki space.
-type wikiNode struct {
-	SpaceID       string `json:"space_id"`
-	NodeToken     string `json:"node_token"`
-	ObjToken      string `json:"obj_token"`      // document token
-	ObjType       string `json:"obj_type"`        // "doc", "sheet", "mindnote", "bitable", "file", "docx", "slides"
-	ParentNodeID  string `json:"parent_node_id"`
-	NodeType      string `json:"node_type"`       // "origin" or "shortcut"
-	OriginNodeID  string `json:"origin_node_id"`
-	OriginSpaceID string `json:"origin_space_id"`
-	HasChild      bool   `json:"has_child"`
-	Title         string `json:"title"`
-	Creator       string `json:"creator"`
-	Owner         string `json:"owner"`
-	ObjCreateTime  string `json:"obj_create_time"`  // document creation time (unix timestamp string)
-	ObjEditTime    string `json:"obj_edit_time"`    // document last edit time (unix timestamp string) — tracks content changes
-	NodeCreateTime string `json:"node_create_time"` // node creation time (unix timestamp string)
-	NodeEditTime   string `json:"node_edit_time"`   // node edit time (unix timestamp string) — only tracks node attribute changes
 }
 
 // wikiNodeInfoResponse is the response for GET /open-apis/wiki/v2/spaces/get_node.
 type wikiNodeInfoResponse struct {
 	apiResponse
 	Data struct {
-		Node wikiNode `json:"node"`
+		Node WikiNode `json:"node"`
 	} `json:"data"`
 }
 

@@ -29,6 +29,12 @@ type Client struct {
 	tokenExpAt time.Time
 }
 
+// retry knobs (overridable in tests).
+var (
+	maxRequestAttempts = 6 // 1 initial + up to 5 retries
+	retryBaseDelay     = 200 * time.Millisecond
+)
+
 // NewClient creates a new Feishu API client.
 func NewClient(config *Config) *Client {
 	return &Client{
@@ -37,6 +43,16 @@ func NewClient(config *Config) *Client {
 		appSecret:  config.AppSecret,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// NewOfficialClient builds a Client that always uses the official DefaultBaseURL.
+// Publish paths must call this so callers cannot inject a custom endpoint.
+func NewOfficialClient(appID, appSecret string) *Client {
+	return NewClient(&Config{
+		AppID:     appID,
+		AppSecret: appSecret,
+		BaseURL:   DefaultBaseURL,
+	})
 }
 
 // NewClientWithEndpoint uses the administrator-approved transport when the
@@ -83,11 +99,11 @@ func (c *Client) getTenantAccessToken(ctx context.Context) (string, error) {
 	defer resp.Body.Close()
 
 	var result tokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBodyBytes+1)).Decode(&result); err != nil {
 		return "", fmt.Errorf("decode token response: %w", err)
 	}
 	if result.Code != 0 {
-		return "", fmt.Errorf("feishu auth error: code=%d msg=%s", result.Code, result.Msg)
+		return "", MapAPIError(resp.StatusCode, result.Code, result.Msg, "/open-apis/auth/v3/tenant_access_token/internal")
 	}
 
 	c.tokenCache = result.TenantAccessToken
@@ -111,19 +127,99 @@ func (c *Client) getTenantAccessToken(ctx context.Context) (string, error) {
 	return c.tokenCache, nil
 }
 
-// doRequest executes an authenticated API request and decodes the JSON response.
+// requestOptions customizes a single HTTP call.
+type requestOptions struct {
+	// ContentType overrides the default JSON content type when set.
+	ContentType string
+	// RawBody sends opaque bytes instead of JSON-marshaled Body.
+	RawBody []byte
+	// SkipRetry disables 429/lock retries.
+	SkipRetry bool
+	// Timeout overrides the client timeout for this request when > 0.
+	Timeout time.Duration
+}
+
+func (c *Client) httpClientFor(opts requestOptions) *http.Client {
+	if opts.Timeout <= 0 || c.httpClient == nil {
+		return c.httpClient
+	}
+	return &http.Client{
+		Timeout:   opts.Timeout,
+		Transport: c.httpClient.Transport,
+	}
+}
+
+// doRequest executes an authenticated JSON API request and decodes the response.
 func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}, result interface{}) error {
+	return c.doRequestWithOptions(ctx, method, path, body, result, requestOptions{})
+}
+
+// doRequestWithOptions is the shared authenticated request path with size limits,
+// typed rate-limit errors, and finite exponential backoff.
+func (c *Client) doRequestWithOptions(ctx context.Context, method, path string, body interface{}, result interface{}, opts requestOptions) error {
+	var bodyBytes []byte
+	var err error
+	if opts.RawBody != nil {
+		bodyBytes = opts.RawBody
+	} else if body != nil {
+		bodyBytes, err = json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("marshal request body: %w", err)
+		}
+	}
+
+	attempts := maxRequestAttempts
+	if opts.SkipRetry {
+		attempts = 1
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if attempt > 1 {
+			delay := retryDelay(attempt - 1)
+			logger.Infof(ctx, "[Feishu] retry %d/%d after %s for %s %s", attempt-1, attempts-1, delay, method, path)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		lastErr = c.doRequestOnce(ctx, method, path, bodyBytes, result, opts)
+		if lastErr == nil {
+			return nil
+		}
+		if !IsRetryable(lastErr) || attempt == attempts {
+			if re, ok := lastErr.(*RetryableError); ok {
+				re.Attempts = attempt
+			}
+			return lastErr
+		}
+	}
+	return lastErr
+}
+
+func retryDelay(retryNum int) time.Duration {
+	// Exponential: base * 2^(retryNum-1), capped.
+	d := retryBaseDelay
+	for i := 1; i < retryNum; i++ {
+		d *= 2
+	}
+	const maxDelay = 5 * time.Second
+	if d > maxDelay {
+		return maxDelay
+	}
+	return d
+}
+
+func (c *Client) doRequestOnce(ctx context.Context, method, path string, bodyBytes []byte, result interface{}, opts requestOptions) error {
 	token, err := c.getTenantAccessToken(ctx)
 	if err != nil {
 		return err
 	}
 
 	var bodyReader io.Reader
-	if body != nil {
-		bodyBytes, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("marshal request body: %w", err)
-		}
+	if bodyBytes != nil {
 		bodyReader = bytes.NewReader(bodyBytes)
 	}
 
@@ -132,33 +228,72 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	ct := opts.ContentType
+	if ct == "" {
+		ct = "application/json; charset=utf-8"
+	}
+	req.Header.Set("Content-Type", ct)
 	req.Header.Set("Authorization", "Bearer "+token)
 
 	logger.Infof(ctx, "[Feishu] %s %s", method, path)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpClientFor(opts).Do(req)
 	if err != nil {
 		return fmt.Errorf("execute request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// Read body once for logging + decoding
-	respBody, err := io.ReadAll(resp.Body)
+	limited := io.LimitReader(resp.Body, maxResponseBodyBytes+1)
+	respBody, err := io.ReadAll(limited)
 	if err != nil {
 		return fmt.Errorf("read response body: %w", err)
 	}
+	if len(respBody) > maxResponseBodyBytes {
+		return fmt.Errorf("feishu api error: response body exceeds %d bytes", maxResponseBodyBytes)
+	}
 
+	safeBody := SanitizeErrorMessage(truncate(string(respBody), 1000))
 	logger.Infof(ctx, "[Feishu] %s %s → status=%d bodyLen=%d body=%s",
-		method, path, resp.StatusCode, len(respBody), truncate(string(respBody), 1000))
+		method, path, resp.StatusCode, len(respBody), safeBody)
+
+	// Peek business code for retry / typed mapping even on non-200.
+	var probe apiResponse
+	_ = json.Unmarshal(respBody, &probe)
+
+	if resp.StatusCode == http.StatusTooManyRequests || isRetryableCode(resp.StatusCode, probe.Code) {
+		return &RetryableError{
+			APIError: &APIError{
+				HTTPStatus: resp.StatusCode,
+				Code:       probe.Code,
+				Msg:        SanitizeErrorMessage(probe.Msg),
+				Path:       path,
+			},
+		}
+	}
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("feishu api error: status=%d body=%s", resp.StatusCode, string(respBody))
+		msg := probe.Msg
+		if msg == "" {
+			msg = truncate(string(respBody), 200)
+		}
+		return MapAPIError(resp.StatusCode, probe.Code, msg, path)
 	}
 
 	if result != nil {
 		if err := json.Unmarshal(respBody, result); err != nil {
 			return fmt.Errorf("decode response: %w", err)
+		}
+	}
+
+	// HTTP 200 with retryable business code (rate limit / lock) — treat as retryable.
+	if isRetryableCode(http.StatusOK, probe.Code) {
+		return &RetryableError{
+			APIError: &APIError{
+				HTTPStatus: resp.StatusCode,
+				Code:       probe.Code,
+				Msg:        SanitizeErrorMessage(probe.Msg),
+				Path:       path,
+			},
 		}
 	}
 
@@ -179,31 +314,15 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]wikiSpace, error) {
 	pageToken := ""
 
 	for {
-		path := "/open-apis/wiki/v2/spaces?page_size=50"
-		if pageToken != "" {
-			path += "&page_token=" + pageToken
+		spaces, hasMore, next, err := c.ListWikiSpacesPage(ctx, pageToken, 50)
+		if err != nil {
+			return nil, err
 		}
-
-		var resp wikiSpaceListResponse
-		if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
-			return nil, fmt.Errorf("list wiki spaces: %w", err)
-		}
-		if resp.Code != 0 {
-			logger.Errorf(ctx, "[Feishu] ListWikiSpaces error: code=%d msg=%s", resp.Code, resp.Msg)
-			return nil, fmt.Errorf("list wiki spaces error: code=%d msg=%s", resp.Code, resp.Msg)
-		}
-
-		logger.Infof(ctx, "[Feishu] ListWikiSpaces: got %d spaces, has_more=%v", len(resp.Data.Items), resp.Data.HasMore)
-		for i, s := range resp.Data.Items {
-			logger.Infof(ctx, "[Feishu]   space[%d]: id=%s name=%q visibility=%s", i, s.SpaceID, s.Name, s.Visibility)
-		}
-
-		allSpaces = append(allSpaces, resp.Data.Items...)
-
-		if !resp.Data.HasMore || resp.Data.PageToken == "" {
+		allSpaces = append(allSpaces, spaces...)
+		if !hasMore || next == "" {
 			break
 		}
-		pageToken = resp.Data.PageToken
+		pageToken = next
 	}
 
 	logger.Infof(ctx, "[Feishu] ListWikiSpaces: total %d spaces", len(allSpaces))
@@ -217,28 +336,15 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 	pageToken := ""
 
 	for {
-		path := fmt.Sprintf("/open-apis/wiki/v2/spaces/%s/nodes?page_size=50", spaceID)
-		if parentNodeToken != "" {
-			path += "&parent_node_token=" + parentNodeToken
+		nodes, hasMore, next, err := c.ListWikiNodesPage(ctx, spaceID, parentNodeToken, pageToken, 50)
+		if err != nil {
+			return nil, err
 		}
-		if pageToken != "" {
-			path += "&page_token=" + pageToken
-		}
-
-		var resp wikiNodeListResponse
-		if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
-			return nil, fmt.Errorf("list wiki nodes: %w", err)
-		}
-		if resp.Code != 0 {
-			return nil, fmt.Errorf("list wiki nodes error: code=%d msg=%s", resp.Code, resp.Msg)
-		}
-
-		allNodes = append(allNodes, resp.Data.Items...)
-
-		if !resp.Data.HasMore || resp.Data.PageToken == "" {
+		allNodes = append(allNodes, nodes...)
+		if !hasMore || next == "" {
 			break
 		}
-		pageToken = resp.Data.PageToken
+		pageToken = next
 	}
 
 	return allNodes, nil
@@ -292,7 +398,7 @@ func (c *Client) GetDocumentRawContent(ctx context.Context, documentID string) (
 		return "", fmt.Errorf("get document raw content: %w", err)
 	}
 	if resp.Code != 0 {
-		return "", fmt.Errorf("get document raw content error: code=%d msg=%s", resp.Code, resp.Msg)
+		return "", fmt.Errorf("get document raw content error: code=%d msg=%s", resp.Code, SanitizeErrorMessage(resp.Msg))
 	}
 
 	return resp.Data.Content, nil
@@ -329,7 +435,7 @@ func (c *Client) CreateExportTask(ctx context.Context, token, objType, fileExten
 		return "", fmt.Errorf("create export task: %w", err)
 	}
 	if resp.Code != 0 {
-		return "", fmt.Errorf("create export task error: code=%d msg=%s", resp.Code, resp.Msg)
+		return "", fmt.Errorf("create export task error: code=%d msg=%s", resp.Code, SanitizeErrorMessage(resp.Msg))
 	}
 
 	return resp.Data.Ticket, nil
@@ -346,7 +452,7 @@ func (c *Client) GetExportTaskStatus(ctx context.Context, ticket string, token s
 		return "", "", fmt.Errorf("get export task status: %w", err)
 	}
 	if resp.Code != 0 {
-		return "", "", fmt.Errorf("get export task status error: code=%d msg=%s", resp.Code, resp.Msg)
+		return "", "", fmt.Errorf("get export task status error: code=%d msg=%s", resp.Code, SanitizeErrorMessage(resp.Msg))
 	}
 
 	r := resp.Data.Result
@@ -356,7 +462,7 @@ func (c *Client) GetExportTaskStatus(ctx context.Context, ticket string, token s
 	case 1, 2: // initializing, processing
 		return "", "", nil // not ready yet
 	default:
-		return "", "", fmt.Errorf("export task failed: status=%d msg=%s", r.JobStatus, r.JobErrorMsg)
+		return "", "", fmt.Errorf("export task failed: status=%d msg=%s", r.JobStatus, SanitizeErrorMessage(r.JobErrorMsg))
 	}
 }
 
@@ -438,6 +544,9 @@ func (c *Client) DownloadDriveFile(ctx context.Context, fileToken string) ([]byt
 	return c.downloadRawBytes(ctx, path)
 }
 
+// maxDownloadBodyBytes allows binary downloads up to the product soft ceiling.
+const maxDownloadBodyBytes = 100 * 1024 * 1024
+
 // downloadRawBytes performs an authenticated GET and returns the raw response body.
 func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, error) {
 	token, err := c.getTenantAccessToken(ctx)
@@ -461,14 +570,17 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, truncate(string(body), 500))
-		return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, string(body))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes+1))
+		logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, SanitizeErrorMessage(truncate(string(body), 500)))
+		return nil, MapAPIError(resp.StatusCode, 0, truncate(string(body), 200), path)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDownloadBodyBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read download body: %w", err)
+	}
+	if len(data) > maxDownloadBodyBytes {
+		return nil, fmt.Errorf("download failed: body exceeds %d bytes", maxDownloadBodyBytes)
 	}
 
 	logger.Infof(ctx, "[Feishu] download GET %s → OK, %d bytes", path, len(data))

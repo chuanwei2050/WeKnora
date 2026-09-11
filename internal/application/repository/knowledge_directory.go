@@ -167,6 +167,7 @@ func (r *knowledgeDirectoryRepository) ListChildren(ctx context.Context, tenantI
 			WITH RECURSIVE directory_tree(id) AS (SELECT id FROM knowledge_directories WHERE id = ? AND tenant_id = ? AND knowledge_base_id = ?
 			UNION ALL SELECT child.id FROM knowledge_directories child JOIN directory_tree parent ON child.parent_id = parent.id
 			WHERE child.tenant_id = ? AND child.knowledge_base_id = ?) SELECT id FROM directory_tree)`, tenantID, kbID, types.ParseStatusDeleting, directory.ID, tenantID, kbID, tenantID, kbID)
+
 		if tagID != "" {
 			countQuery = countQuery.Where("tag_id = ?", tagID)
 		}
@@ -176,6 +177,19 @@ func (r *knowledgeDirectoryRepository) ListChildren(ctx context.Context, tenantI
 		}
 	}
 	return directories, total, err
+}
+
+// ListActiveByKB returns all active directories for a knowledge base across tags.
+func (r *knowledgeDirectoryRepository) ListActiveByKB(ctx context.Context, tenantID uint64, kbID string) ([]*types.KnowledgeDirectory, error) {
+	if kbID == "" {
+		return nil, errors.New("knowledge base id is empty")
+	}
+	var directories []*types.KnowledgeDirectory
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND status = ?", tenantID, kbID, types.DirectoryStatusActive).
+		Order("parent_key ASC").Order("normalized_name ASC").Order("id ASC").
+		Find(&directories).Error
+	return directories, err
 }
 
 func (r *knowledgeDirectoryRepository) Rename(ctx context.Context, tenantID uint64, kbID, id, name, normalizedName string, tagIDs ...string) error {

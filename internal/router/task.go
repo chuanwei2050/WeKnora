@@ -1,6 +1,8 @@
 package router
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"os"
@@ -25,6 +27,7 @@ type AsynqTaskParams struct {
 	KnowledgeBaseService interfaces.KnowledgeBaseService
 	TagService           interfaces.KnowledgeTagService
 	DataSourceService    interfaces.DataSourceService
+	FeishuPublishService interfaces.FeishuPublishService
 	ChunkExtractor       interfaces.TaskHandler `name:"chunkExtractor"`
 	DataTableSummary     interfaces.TaskHandler `name:"dataTableSummary"`
 	ImageMultimodal      interfaces.TaskHandler `name:"imageMultimodal"`
@@ -172,6 +175,15 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 
 	// Register data source sync handler
 	mux.HandleFunc(types.TypeDataSourceSync, params.DataSourceService.ProcessSync)
+
+	// Register Feishu publish handler
+	mux.HandleFunc(types.TypeFeishuPublish, func(ctx context.Context, task *asynq.Task) error {
+		var payload types.FeishuPublishPayload
+		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+			return err
+		}
+		return params.FeishuPublishService.ProcessPublish(ctx, payload.TenantID, payload.RunID)
+	})
 
 	// Register wiki ingest handler
 	mux.HandleFunc(types.TypeWikiIngest, params.WikiIngest.Handle)

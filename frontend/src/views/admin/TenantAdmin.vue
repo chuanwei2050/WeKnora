@@ -106,8 +106,8 @@
 
     <t-dialog v-model:visible="integrationEditVisible" header="修改第三方接入信息" :confirm-btn="{ content: '保存并生成接入信息', loading: integrationEditSaving }" @confirm="saveIntegrationEdit">
       <t-form label-align="top">
-        <t-form-item label="WeKnora 服务地址" required>
-          <div class="field-control"><t-input v-model="integrationEditForm.serverUrl" placeholder="例如：https://weknora.example.com" /><div class="field-hint">更换 WeKnora 部署服务器后，请填写新服务器的协议、域名和端口。</div></div>
+        <t-form-item label="KnowledgeMesh 服务地址" required>
+          <div class="field-control"><t-input v-model="integrationEditForm.serverUrl" placeholder="例如：https://knowledgemesh.example.com" /><div class="field-hint">更换 KnowledgeMesh 部署服务器后，请填写新服务器的协议、域名和端口。</div></div>
         </t-form-item>
         <t-form-item label="第三方项目 Origin" required>
           <div class="field-control"><t-input v-model="integrationEditForm.allowedOrigin" placeholder="例如：https://bidder.example.com" /><div class="field-hint">更换第三方项目服务器后，需同步更新允许访问的 Origin。</div></div>
@@ -316,7 +316,7 @@ function openIntegrationEditor() {
 async function saveIntegrationEdit() {
   const client = viewingIntegrationClient.value
   if (!client) return
-  const server = parseOrigin(integrationEditForm.serverUrl, 'WeKnora 服务地址')
+  const server = parseOrigin(integrationEditForm.serverUrl, 'KnowledgeMesh 服务地址')
   const allowedOrigin = parseOrigin(integrationEditForm.allowedOrigin, '第三方项目 Origin')
   if (!server || !allowedOrigin) return
   integrationEditSaving.value = true

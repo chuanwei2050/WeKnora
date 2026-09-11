@@ -21,7 +21,7 @@
                   v-for="(item, index) in navItems" 
                   :key="index"
                   :class="['nav-item', { 'active': currentSection === item.key }]"
-                  @click="currentSection = item.key"
+                  @click="handleSectionChange(item.key)"
                 >
                   <t-icon :name="item.icon" class="nav-icon" />
                   <span class="nav-label">{{ item.label }}</span>
@@ -361,14 +361,24 @@
                   <DataSourceSettings :kb-id="kbId" @count="dsCount = $event" />
                 </div>
 
+                <!-- 同步飞书（仅文档型知识库编辑模式） -->
+                <div v-if="mode === 'edit' && kbId && !isFAQ" v-show="currentSection === 'feishu-sync'" class="section">
+                  <FeishuPublishSettings ref="feishuPublishRef" :kb-id="kbId" />
+                </div>
+
               </div>
 
-              <!-- 保存按钮 -->
+              <!-- 保存按钮（数据源 / 同步飞书页签自行保存，隐藏全局保存） -->
               <div class="settings-footer">
                 <t-button theme="default" variant="outline" @click="handleClose">
-                  {{ $t('common.cancel') }}
+                  {{ hideGlobalSave ? $t('general.close') : $t('common.cancel') }}
                 </t-button>
-                <t-button theme="primary" @click="handleSubmit" :loading="saving">
+                <t-button
+                  v-if="!hideGlobalSave"
+                  theme="primary"
+                  @click="handleSubmit"
+                  :loading="saving"
+                >
                   {{ mode === 'create' ? $t('knowledgeEditor.buttons.create') : $t('knowledgeEditor.buttons.save') }}
                 </t-button>
               </div>
@@ -390,6 +400,7 @@ import KBChunkingSettings from './settings/KBChunkingSettings.vue'
 import KBAdvancedSettings from './settings/KBAdvancedSettings.vue'
 import GraphSettings from './settings/GraphSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
+import FeishuPublishSettings from './settings/FeishuPublishSettings.vue'
 import { createEmptyGraphExtractDefaults, restoreKnownPresetSchema } from '@/constants/software-testing-graph-preset'
 import { useI18n } from 'vue-i18n'
 import { listTenantUsers, type AdminUser } from '@/api/admin'
@@ -463,12 +474,50 @@ const navItems = computed(() => {
     )
     if (props.mode === 'edit' && props.kbId) {
       items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource'), badge: dsCount.value || undefined })
+      items.push({ key: 'feishu-sync', icon: 'cloud-upload', label: t('knowledgeEditor.sidebar.feishuSync') })
     }
   }
   return items
 })
 
 const advancedSettingsRef = ref<InstanceType<typeof KBAdvancedSettings>>()
+const feishuPublishRef = ref<{ hasUnsavedChanges?: () => boolean } | null>(null)
+
+const hideGlobalSave = computed(() =>
+  currentSection.value === 'feishu-sync' || currentSection.value === 'datasource'
+)
+
+const confirmDiscardFeishuChanges = (): Promise<boolean> => {
+  if (!feishuPublishRef.value?.hasUnsavedChanges?.()) {
+    return Promise.resolve(true)
+  }
+  return new Promise((resolve) => {
+    const dialog = DialogPlugin.confirm({
+      header: t('feishuPublish.discardTitle'),
+      body: t('feishuPublish.discardBody'),
+      confirmBtn: { content: t('feishuPublish.discardConfirm'), theme: 'danger' },
+      cancelBtn: t('common.cancel'),
+      onConfirm: () => {
+        dialog.hide()
+        resolve(true)
+      },
+      onClose: () => resolve(false),
+      onCancel: () => {
+        dialog.hide()
+        resolve(false)
+      },
+    })
+  })
+}
+
+const handleSectionChange = async (key: string) => {
+  if (key === currentSection.value) return
+  if (currentSection.value === 'feishu-sync') {
+    const ok = await confirmDiscardFeishuChanges()
+    if (!ok) return
+  }
+  currentSection.value = key
+}
 
 // 表单数据
 const formData = ref<any>(null)
@@ -1176,7 +1225,11 @@ const resetState = () => {
 }
 
 // 关闭弹窗
-const handleClose = () => {
+const handleClose = async () => {
+  if (currentSection.value === 'feishu-sync') {
+    const ok = await confirmDiscardFeishuChanges()
+    if (!ok) return
+  }
   emit('update:visible', false)
   setTimeout(() => {
     resetState()

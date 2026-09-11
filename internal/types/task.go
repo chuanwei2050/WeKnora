@@ -20,7 +20,15 @@ const (
 	TypeDataSourceSync       = "datasource:sync"        // 数据源同步任务
 	TypeWikiIngest           = "wiki:ingest"            // Wiki 页面同步任务
 	TypeDocumentPreview      = "document:preview"       // 大文档完整预览异步转换
+	TypeFeishuPublish        = "feishu:publish"         // 飞书知识库发布同步任务
 )
+
+// FeishuPublishPayload identifies a queued Feishu publish run. Secrets must not be included.
+type FeishuPublishPayload struct {
+	TracingContext
+	TenantID uint64 `json:"tenant_id"`
+	RunID    string `json:"run_id"`
+}
 
 type DocumentPreviewPayload struct {
 	TenantID    uint64 `json:"tenant_id"`

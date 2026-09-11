@@ -12,6 +12,8 @@ type KnowledgeDirectoryRepository interface {
 	Get(ctx context.Context, tenantID uint64, kbID, id string, tagIDs ...string) (*types.KnowledgeDirectory, error)
 	FindChild(ctx context.Context, tenantID uint64, kbID string, parentID *string, normalizedName string, tagIDs ...string) (*types.KnowledgeDirectory, error)
 	ListChildren(ctx context.Context, tenantID uint64, kbID string, parentID *string, offset, limit int, sortBy, sortOrder string, visibility types.KnowledgeVisibilityFilter, tagIDs ...string) ([]*types.KnowledgeDirectory, int64, error)
+	// ListActiveByKB returns all active directories under a knowledge base (any tag).
+	ListActiveByKB(ctx context.Context, tenantID uint64, kbID string) ([]*types.KnowledgeDirectory, error)
 	Rename(ctx context.Context, tenantID uint64, kbID, id, name, normalizedName string, tagIDs ...string) error
 	Move(ctx context.Context, tenantID uint64, kbID, id string, parentID *string, tagIDs ...string) error
 	MoveEntries(ctx context.Context, tenantID uint64, kbID string, directoryIDs, knowledgeIDs []string, parentID *string, tagIDs ...string) error
