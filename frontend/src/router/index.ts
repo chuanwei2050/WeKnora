@@ -113,6 +113,12 @@ const router = createRouter({
           meta: { requiresInit: true, requiresAuth: true, allowedRoles: ['tenant_admin', 'member'] }
         },
         {
+          path: "workbench",
+          name: "workbench",
+          component: () => import("../views/workbench/Workbench.vue"),
+          meta: { requiresInit: true, requiresAuth: true, allowedRoles: ['tenant_admin'] }
+        },
+        {
           path: "agents",
           name: "agentList",
           component: () => import("../views/agent/AgentList.vue"),

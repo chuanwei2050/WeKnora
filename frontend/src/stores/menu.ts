@@ -20,6 +20,7 @@ export const useMenuStore = defineStore('menuStore', () => {
   const menuArr = reactive<MenuItem[]>([
     { title: '', titleKey: 'menu.knowledgeBase', icon: 'zhishiku', path: 'knowledge-bases' },
     { title: '', titleKey: 'menu.knowledgeSearch', icon: 'search', path: 'knowledge-search' },
+    { title: '', titleKey: 'menu.workbench', icon: 'workbench', path: 'workbench' },
     { title: '', titleKey: 'menu.agents', icon: 'agent', path: 'agents' },
     { title: '', titleKey: 'menu.organizations', icon: 'organization', path: 'organizations' },
     { title: '租户管理', icon: 'setting', path: 'admin/tenants' },
@@ -74,6 +75,7 @@ export const useMenuStore = defineStore('menuStore', () => {
       if (item.path === 'admin/tenants' || item.path === 'organizations') return false
       if (item.path === 'agents') return false
       if (item.path === 'admin/users') return role === 'tenant_admin'
+      if (item.path === 'workbench') return role === 'tenant_admin'
       return item.path !== 'logout'
     })
   })

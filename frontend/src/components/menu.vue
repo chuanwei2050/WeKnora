@@ -55,7 +55,7 @@
                      :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
                     <div class="menu_item-box">
                         <div class="menu_icon">
-                            <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'search' ? searchIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)" alt="">
+                            <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'search' ? searchIcon : item.icon == 'workbench' ? workbenchIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)" alt="">
                         </div>
                         <template v-if="!uiStore.sidebarCollapsed">
                             <span class="menu_title" :title="item.title">{{ item.title }}</span>
@@ -176,7 +176,7 @@ const { menuArr, visibleMenuArr } = storeToRefs(usemenuStore);
 let activeSubmenu = ref<string>('');
 const isLiteEdition = ref(false);
 const isBidReviewEmbedded = computed(() => isBidReviewEmbeddedMode());
-const bidReviewHiddenMenuPaths = new Set(['agents', 'organizations', 'creatChat']);
+const bidReviewHiddenMenuPaths = new Set(['agents', 'organizations', 'creatChat', 'workbench']);
 
 const goHome = () => router.push(authStore.user?.role === 'platform_admin' && authStore.workspaceMode === 'platform' ? '/platform/admin/tenants' : '/platform/knowledge-bases')
 
@@ -243,6 +243,8 @@ const isMenuItemActive = (itemPath: string): boolean => {
                    currentRoute === 'knowledgeBaseSettings';
         case 'knowledge-search':
             return currentRoute === 'knowledgeSearch';
+        case 'workbench':
+            return currentRoute === 'workbench';
         case 'agents':
             return currentRoute === 'agentList';
         case 'organizations':
@@ -279,14 +281,14 @@ const getIconActiveState = (itemPath: string) => {
 // 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
 const topMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => 
-        (item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat' || item.path === 'admin/tenants' || item.path === 'admin/users')
+        (item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'workbench' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat' || item.path === 'admin/tenants' || item.path === 'admin/users')
         && !(isBidReviewEmbedded.value && bidReviewHiddenMenuPaths.has(item.path))
     );
 });
 
 const bottomMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => {
-        if (item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat' || item.path === 'admin/tenants' || item.path === 'admin/users') {
+        if (item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'workbench' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat' || item.path === 'admin/tenants' || item.path === 'admin/users') {
             return false;
         }
         return true;
@@ -642,6 +644,7 @@ watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
 });
 let knowledgeIcon = ref('zhishiku-green.svg');
 let searchIcon = ref('search.svg');
+let workbenchIcon = ref('workbench.svg');
 let prefixIcon = ref('prefixIcon.svg');
 let logoutIcon = ref('logout.svg');
 let settingIcon = ref('setting.svg');
@@ -656,12 +659,16 @@ let pathPrefix = ref(route.name)
       const agentsActiveState = route.name === 'agentList';
       const organizationsActiveState = route.name === 'organizationList';
       const knowledgeSearchActiveState = route.name === 'knowledgeSearch';
+      const workbenchActiveState = route.name === 'workbench';
       
       // 知识库图标：只在知识库页面显示绿色
       knowledgeIcon.value = kbActiveState.isKbActive ? 'zhishiku-green.svg' : 'zhishiku.svg';
       
       // 知识搜索图标：只在知识搜索页面显示绿色
       searchIcon.value = knowledgeSearchActiveState ? 'search-green.svg' : 'search.svg';
+
+      // 工作台图标
+      workbenchIcon.value = workbenchActiveState ? 'workbench-green.svg' : 'workbench.svg';
       
       // 智能体图标：只在智能体页面显示绿色
       agentIcon.value = agentsActiveState ? 'agent-green.svg' : 'agent.svg';
@@ -690,6 +697,8 @@ const handleMenuClick = async (path: string) => {
         }
     } else if (path === 'knowledge-search') {
         router.push('/platform/knowledge-search')
+    } else if (path === 'workbench') {
+        router.push('/platform/workbench')
     } else if (path === 'agents') {
         router.push('/platform/agents')
     } else if (path === 'organizations') {

@@ -71,6 +71,19 @@ func (r *graphTripleReviewRepository) List(ctx context.Context, tenantID uint64,
 	return items, err
 }
 
+func (r *graphTripleReviewRepository) CountByStatus(ctx context.Context, tenantID uint64, knowledgeBaseID string, status types.GraphTripleReviewStatus) (int64, error) {
+	q := r.db.WithContext(ctx).Model(&types.GraphTripleCandidate{}).Where("tenant_id = ?", tenantID)
+	if knowledgeBaseID != "" {
+		q = q.Where("knowledge_base_id = ?", knowledgeBaseID)
+	}
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+	var n int64
+	err := q.Count(&n).Error
+	return n, err
+}
+
 func (r *graphTripleReviewRepository) MarkWritten(ctx context.Context, tenantID uint64, id, reviewerID string) error {
 	return r.transitionPending(ctx, tenantID, id, types.GraphTripleWritten, reviewerID, "", true)
 }

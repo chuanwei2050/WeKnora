@@ -34,13 +34,43 @@
         </div>
       </div>
 
-      <div v-if="localGraphExtract.enabled" class="setting-row">
+      <div v-if="localGraphExtract.enabled" class="setting-row rebuild-row">
         <div class="setting-info">
           <label>{{ t('graphSettings.rebuildLabel') }}</label>
-          <p class="desc">{{ t('graphSettings.rebuildDescription') }}</p>
+          <div v-if="rebuildProgress && rebuildProgress.status !== 'idle'" class="rebuild-status">
+            <template v-if="rebuildProgress.status === 'running'">
+              <t-progress :percentage="rebuildProgress.percent" />
+              <p class="rebuild-status-text">{{ t('graphSettings.rebuildRunning', { done: rebuildProgress.processed, total: rebuildProgress.total }) }}</p>
+            </template>
+            <t-alert
+              v-else-if="rebuildProgress.status === 'awaiting_review'"
+              theme="warning"
+              :message="t('graphSettings.rebuildAwaitingReview', { n: rebuildProgress.pending_review })"
+            >
+              <template #operation>
+                <t-link theme="primary" @click="openTripleReview">{{ t('graphSettings.openTripleReview') }}</t-link>
+              </template>
+            </t-alert>
+            <t-alert
+              v-else-if="rebuildProgress.status === 'completed'"
+              theme="success"
+              :message="t('graphSettings.rebuildCompletedAt', { time: formatRebuildTime(rebuildProgress.finished_at || rebuildProgress.started_at) })"
+            />
+            <t-alert
+              v-else-if="rebuildProgress.status === 'failed'"
+              theme="error"
+              :message="rebuildProgress.message || t('graphSettings.rebuildFailed')"
+            />
+          </div>
         </div>
         <div class="setting-control">
-          <t-button theme="warning" variant="outline" :loading="rebuildLoading" @click="handleRebuildGraph">
+          <t-button
+            theme="warning"
+            variant="outline"
+            :loading="rebuildLoading"
+            :disabled="rebuildProgress?.status === 'running'"
+            @click="handleRebuildGraph"
+          >
             {{ t('graphSettings.rebuildLabel') }}
           </t-button>
         </div>
@@ -342,13 +372,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { extractTextRelations, fabriText, type Node, type Relation } from '@/api/initialization'
 import { getSystemInfo } from '@/api/system'
-import { post } from '@/utils/request'
-import { useUIStore } from '@/stores/ui'
+import { get, post } from '@/utils/request'
+import { useRouter } from 'vue-router'
 import { openExternalUrl } from '@/utils/open-external-url'
 import {
   applyGraphPreset,
@@ -361,7 +391,7 @@ import {
 } from '@/constants/software-testing-graph-preset'
 
 const { t } = useI18n()
-const uiStore = useUIStore()
+const router = useRouter()
 
 interface GraphExtractConfig {
   enabled: boolean
@@ -478,16 +508,98 @@ const handleEnabledChange = () => {
 }
 
 const rebuildLoading = ref(false)
+interface RebuildProgress {
+  status: 'idle' | 'running' | 'awaiting_review' | 'completed' | 'failed'
+  started_at?: string
+  finished_at?: string
+  total: number
+  processed: number
+  percent: number
+  require_review?: boolean
+  pending_review?: number
+  document_count?: number
+  message?: string
+}
+const rebuildProgress = ref<RebuildProgress | null>(null)
+let rebuildPollTimer: ReturnType<typeof setInterval> | null = null
+
+function formatRebuildTime(raw?: string) {
+  if (!raw) return '-'
+  const d = new Date(raw)
+  if (Number.isNaN(d.getTime())) return raw
+  return d.toLocaleString()
+}
+
+function stopRebuildPoll() {
+  if (rebuildPollTimer) {
+    clearInterval(rebuildPollTimer)
+    rebuildPollTimer = null
+  }
+}
+
+async function fetchRebuildStatus() {
+  const kbId = props.knowledgeBaseId
+  if (!kbId) return
+  try {
+    const res: any = await get(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/graph/rebuild-status`)
+    const data = (res?.data ?? res) as RebuildProgress
+    rebuildProgress.value = data
+    if (data?.status === 'running') {
+      startRebuildPoll()
+    } else {
+      stopRebuildPoll()
+    }
+  } catch (e) {
+    console.warn('Failed to load graph rebuild status', e)
+  }
+}
+
+function startRebuildPoll() {
+  if (rebuildPollTimer) return
+  rebuildPollTimer = setInterval(() => {
+    void fetchRebuildStatus()
+  }, 2500)
+}
+
 const handleRebuildGraph = async () => {
   const kbId = props.knowledgeBaseId
   if (!kbId) return
-  const ok = window.confirm(t('graphSettings.rebuildConfirm'))
-  if (!ok) return
+
+  const confirmed = await new Promise<boolean>((resolve) => {
+    const dialog = DialogPlugin.confirm({
+      header: t('graphSettings.rebuildLabel'),
+      body: t('graphSettings.rebuildConfirm'),
+      theme: 'warning',
+      confirmBtn: { content: t('common.confirm'), theme: 'danger' },
+      cancelBtn: t('common.cancel'),
+      onConfirm: () => {
+        dialog.hide()
+        resolve(true)
+      },
+      onCancel: () => {
+        dialog.hide()
+        resolve(false)
+      },
+      onClose: () => resolve(false),
+    })
+  })
+  if (!confirmed) return
+
   rebuildLoading.value = true
   try {
     const res: any = await post(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/rebuild-graph`, {})
     const count = res?.data?.document_count ?? 0
-    MessagePlugin.success(t('graphSettings.rebuildSuccess', { n: count }))
+    MessagePlugin.success(t('graphSettings.rebuildStarted', { n: count }))
+    rebuildProgress.value = {
+      status: 'running',
+      total: res?.data?.extract_total ?? 0,
+      processed: 0,
+      percent: 0,
+      document_count: count,
+      require_review: !!res?.data?.require_review || localGraphExtract.value.require_triple_review,
+    }
+    await fetchRebuildStatus()
+    startRebuildPoll()
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('graphSettings.rebuildFailed'))
   } finally {
@@ -552,7 +664,7 @@ const loadSelectedPreset = () => {
   MessagePlugin.success(t('graphSettings.templateLoaded'))
 }
 
-const openTripleReview = () => uiStore.openSettings('graph-triples')
+const openTripleReview = () => router.push({ path: '/platform/workbench', query: { tab: 'graph-triples' } })
 
 const handleTextChange = () => {
   handleConfigChange()
@@ -695,9 +807,20 @@ const handleOpenGraphGuide = () => {
   openExternalUrl(graphGuideUrl)
 }
 
+watch(() => props.knowledgeBaseId, () => {
+  stopRebuildPoll()
+  rebuildProgress.value = null
+  void fetchRebuildStatus()
+})
+
 // 初始化
 onMounted(async () => {
   await loadSystemInfo()
+  await fetchRebuildStatus()
+})
+
+onUnmounted(() => {
+  stopRebuildPoll()
 })
 </script>
 
@@ -722,6 +845,17 @@ onMounted(async () => {
     margin: 0;
     line-height: 1.5;
   }
+}
+
+.rebuild-status {
+  margin-top: 12px;
+  max-width: 520px;
+}
+
+.rebuild-status-text {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
 }
 
 .settings-group {

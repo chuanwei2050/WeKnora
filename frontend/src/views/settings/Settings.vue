@@ -73,7 +73,7 @@
 
             <!-- 右侧内容区域 -->
             <div class="settings-content">
-              <div class="content-wrapper" :class="{ 'content-wrapper--review': currentSection === 'graph-triples' }">
+              <div class="content-wrapper">
                 <!-- 常规设置 -->
                 <div v-if="currentSection === 'general'" class="section">
                   <GeneralSettings />
@@ -137,21 +137,6 @@
                 <div v-if="currentSection === 'mcp'" class="section">
                   <McpSettings />
                 </div>
-
-                <!-- 回答反馈审核 -->
-                <div v-if="currentSection === 'feedback'" class="section">
-                  <FeedbackReview />
-                </div>
-
-                <!-- 图三元组审核（独立于知识版本治理） -->
-                <div v-if="currentSection === 'graph-triples'" class="section">
-                  <GraphTripleReview />
-                </div>
-
-                <!-- 验收评测 -->
-                <div v-if="currentSection === 'acceptance'" class="section">
-                  <AcceptanceReview />
-                </div>
               </div>
             </div>
           </div>
@@ -181,9 +166,6 @@ import ParserEngineSettings from './ParserEngineSettings.vue'
 import StorageEngineSettings from './StorageEngineSettings.vue'
 import RetrievalSettings from './RetrievalSettings.vue'
 import { isBidReviewEmbeddedMode } from '@/utils/bidreview-sso'
-import FeedbackReview from './FeedbackReview.vue'
-import GraphTripleReview from './GraphTripleReview.vue'
-import AcceptanceReview from './AcceptanceReview.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -217,9 +199,6 @@ const navItems = computed<SettingsNavItem[]>(() => {
     { key: 'system', icon: 'info-circle', label: t('settings.systemSettings') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'api', icon: 'secured', label: t('settings.apiInfo') },
-    { key: 'feedback', icon: 'check-circle', label: t('settings.graphTripleReview.feedbackNav') },
-    { key: 'graph-triples', icon: 'relation', label: t('settings.graphTripleReview.nav') },
-    { key: 'acceptance', icon: 'chart-line', label: t('settings.graphTripleReview.acceptanceNav') }
   ]
   const role = authStore.user?.role === 'platform_admin' && authStore.workspaceMode === 'tenant'
     ? 'tenant_admin'
@@ -229,7 +208,7 @@ const navItems = computed<SettingsNavItem[]>(() => {
     return items.filter(item => platformSections.has(item.key))
   }
   if (role === 'tenant_admin') {
-    const tenantAdminSections = new Set(['general', 'tenant', 'api', 'feedback', 'graph-triples', 'acceptance'])
+    const tenantAdminSections = new Set(['general', 'tenant', 'api'])
     return items.filter(item => tenantAdminSections.has(item.key))
   }
   // Chat history indexing depends on tenant-owned hidden knowledge bases and
@@ -557,11 +536,6 @@ onUnmounted(() => {
 .content-wrapper {
   max-width: 600px;
   padding: 40px 48px;
-}
-
-.content-wrapper--review {
-  max-width: none;
-  padding: 32px 32px 40px;
 }
 
 .section {

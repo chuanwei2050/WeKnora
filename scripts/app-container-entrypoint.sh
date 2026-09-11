@@ -77,16 +77,43 @@ build_app() {
     build_app_to "$runtime_dir/main.next"
 }
 
-start_app() {
-    "$runtime_dir/main" &
-    app_pid=$!
+start_app_bin() {
+    local bin="$1"
+    "$bin" &
+    echo $!
 }
 
-stop_app() {
-    if [ -n "${app_pid:-}" ] && kill -0 "$app_pid" 2>/dev/null; then
-        kill "$app_pid" 2>/dev/null || true
-        wait "$app_pid" 2>/dev/null || true
+stop_pid() {
+    local pid="$1"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
     fi
+}
+
+wait_app_ready() {
+    local pid="$1"
+    local timeout_secs="${2:-45}"
+    local i
+
+    for i in $(seq 1 "$timeout_secs"); do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            return 1
+        fi
+        if curl --noproxy '*' -fsS --max-time 1 "http://127.0.0.1:8080/health" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+
+    kill -0 "$pid" 2>/dev/null
+}
+
+app_pid=""
+
+stop_app() {
+    stop_pid "$app_pid"
+    app_pid=""
 }
 
 trap 'stop_app; exit 0' INT TERM
@@ -94,16 +121,51 @@ trap 'stop_app; exit 0' INT TERM
 echo '[INFO] 首次构建后端应用...'
 build_app
 mv -f "$runtime_dir/main.next" "$runtime_dir/main"
+cp -f "$runtime_dir/main" "$runtime_dir/main.prev"
 last_snapshot="$(source_snapshot)"
-start_app
+app_pid="$(start_app_bin "$runtime_dir/main")"
+if ! wait_app_ready "$app_pid" 120; then
+    echo '[ERROR] 后端首次启动失败' >&2
+    exit 1
+fi
 echo '[INFO] 后端热更新已启动（单线程轮询，间隔 2 秒）。'
+
+consecutive_crashes=0
 
 # 监督循环不能因业务进程退出而结束：否则 docker run --rm 会把整个后端容器带走。
 while true; do
     if ! kill -0 "$app_pid" 2>/dev/null; then
-        echo '[WARN] 后端进程已退出，正在重新拉起...' >&2
-        start_app
-        sleep 1
+        consecutive_crashes=$((consecutive_crashes + 1))
+        echo "[WARN] 后端进程已退出 (连续 ${consecutive_crashes} 次)，正在重新拉起..." >&2
+        if [ "$consecutive_crashes" -ge 3 ]; then
+            echo '[WARN] 连续崩溃，等待下一次源码变化后再构建重启。' >&2
+            while true; do
+                sleep 2
+                current_snapshot="$(source_snapshot)" || continue
+                if [ "$current_snapshot" != "$last_snapshot" ]; then
+                    break
+                fi
+            done
+            echo '[INFO] 检测到源码变化，重新构建...'
+            if build_app && mv -f "$runtime_dir/main.next" "$runtime_dir/main"; then
+                cp -f "$runtime_dir/main" "$runtime_dir/main.prev"
+                last_snapshot="$(source_snapshot)" || true
+                consecutive_crashes=0
+            else
+                echo '[ERROR] 后端构建失败，继续等待源码变化。' >&2
+                last_snapshot="$(source_snapshot)" || true
+                continue
+            fi
+        fi
+        app_pid="$(start_app_bin "$runtime_dir/main")"
+        if wait_app_ready "$app_pid" 60; then
+            consecutive_crashes=0
+            echo '[INFO] 后端已重新拉起。'
+        else
+            stop_pid "$app_pid"
+            app_pid=""
+            echo '[ERROR] 后端重新拉起失败。' >&2
+        fi
         continue
     fi
 
@@ -124,13 +186,37 @@ while true; do
     fi
 
     echo '[INFO] 检测到源码变化，重新构建...'
-    if build_app; then
-        stop_app
-        mv -f "$runtime_dir/main.next" "$runtime_dir/main"
+    if ! build_app; then
+        echo '[ERROR] 后端构建失败，保留当前进程并将在下一轮重试。' >&2
+        continue
+    fi
+
+    # 8080 只能有一个监听者：先停旧进程，再启新进程；失败则回滚到上一份二进制。
+    stop_app
+    mv -f "$runtime_dir/main.next" "$runtime_dir/main"
+    app_pid="$(start_app_bin "$runtime_dir/main")"
+    if wait_app_ready "$app_pid" 60; then
+        cp -f "$runtime_dir/main" "$runtime_dir/main.prev"
         last_snapshot="$settled_snapshot"
-        start_app
+        consecutive_crashes=0
         echo '[INFO] 后端热更新完成。'
     else
-        echo '[ERROR] 后端构建失败，保留当前进程并将在下一轮重试。' >&2
+        echo '[ERROR] 新二进制启动失败，回滚到上一份可用二进制。' >&2
+        stop_pid "$app_pid"
+        app_pid=""
+        if [ -f "$runtime_dir/main.prev" ]; then
+            cp -f "$runtime_dir/main.prev" "$runtime_dir/main"
+            app_pid="$(start_app_bin "$runtime_dir/main")"
+            if wait_app_ready "$app_pid" 60; then
+                consecutive_crashes=0
+                echo '[INFO] 已回滚并恢复旧进程。'
+            else
+                stop_pid "$app_pid"
+                app_pid=""
+                echo '[ERROR] 回滚后仍无法启动。' >&2
+            fi
+        fi
+        # 避免同一坏快照反复构建；等下次文件变化。
+        last_snapshot="$settled_snapshot"
     fi
 done

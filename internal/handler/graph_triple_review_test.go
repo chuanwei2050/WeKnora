@@ -55,6 +55,14 @@ func (m *memoryTripleRepo) List(_ context.Context, tenantID uint64, knowledgeBas
 	return out, nil
 }
 
+func (m *memoryTripleRepo) CountByStatus(ctx context.Context, tenantID uint64, knowledgeBaseID string, status types.GraphTripleReviewStatus) (int64, error) {
+	items, err := m.List(ctx, tenantID, knowledgeBaseID, status)
+	if err != nil {
+		return 0, err
+	}
+	return int64(len(items)), nil
+}
+
 func (m *memoryTripleRepo) SupersedePendingByKnowledgeBase(_ context.Context, tenantID uint64, knowledgeBaseID string) error {
 	return nil
 }

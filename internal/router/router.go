@@ -407,6 +407,7 @@ func RegisterGraphExploreRoutes(r *gin.RouterGroup, h *handler.GraphExploreHandl
 		return
 	}
 	r.GET("/knowledge-bases/:id/graph/overview", h.Overview)
+	r.GET("/knowledge-bases/:id/graph/rebuild-status", h.RebuildStatus)
 	r.POST("/knowledge-bases/:id/rebuild-graph", h.Rebuild)
 }
 

@@ -18,9 +18,19 @@ export default {
     confirmLogout: "정말 로그아웃 하시겠습니까?",
     systemInfo: "시스템 정보",
     knowledgeSearch: "검색",
+    workbench: "작업대",
     collapseSidebar: "사이드바 접기",
     expandSidebar: "사이드바 펼치기",
     logoutSuccess: "로그아웃되었습니다",
+  },
+  workbench: {
+    title: "작업대",
+    subtitle: "답변 피드백, 그래프 심사, 인수 평가를 처리합니다.",
+    tabs: {
+      feedback: "답변 피드백",
+      graphTriples: "그래프 심사",
+      acceptance: "인수 평가",
+    },
   },
   batchManage: {
     title: "대화 관리",

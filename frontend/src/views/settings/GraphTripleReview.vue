@@ -1,6 +1,6 @@
 <template>
   <section class="triple-review">
-    <div class="section-header">
+    <div v-if="!hideHeader" class="section-header">
       <h2>{{ t('settings.graphTripleReview.title') }}</h2>
       <p class="section-description">{{ t('settings.graphTripleReview.description') }}</p>
     </div>
@@ -159,7 +159,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import {
@@ -169,6 +169,15 @@ import {
   type GraphTripleCandidate,
   type GraphTripleStatus,
 } from '@/api/graph-triple-review'
+
+const props = withDefaults(defineProps<{
+  /** When set, only candidates from these knowledge bases are shown. */
+  allowedKnowledgeBaseIds?: string[]
+  hideHeader?: boolean
+}>(), {
+  allowedKnowledgeBaseIds: undefined,
+  hideHeader: false,
+})
 
 const { t, locale } = useI18n()
 const items = ref<GraphTripleCandidate[]>([])
@@ -180,6 +189,11 @@ const rejectDialogVisible = ref(false)
 const rejectComment = ref('')
 const rejectTarget = ref<GraphTripleCandidate | null>(null)
 const rejecting = ref(false)
+
+const allowedKbSet = computed(() => {
+  if (!props.allowedKnowledgeBaseIds) return null
+  return new Set(props.allowedKnowledgeBaseIds.filter(Boolean))
+})
 
 const statusOptions = computed(() => [
   { label: t('settings.graphTripleReview.statusPending'), value: 'pending' },
@@ -231,16 +245,27 @@ const loadItems = async () => {
   loading.value = true
   errorMessage.value = ''
   try {
+    if (allowedKbSet.value && allowedKbSet.value.size === 0) {
+      items.value = []
+      return
+    }
     const response: any = await listGraphTripleReviews({
       status: statusFilter.value === 'all' ? undefined : statusFilter.value,
     })
-    items.value = response?.data ?? response ?? []
+    const list: GraphTripleCandidate[] = response?.data ?? response ?? []
+    items.value = allowedKbSet.value
+      ? list.filter((item) => allowedKbSet.value!.has(item.knowledge_base_id))
+      : list
   } catch (error: any) {
     errorMessage.value = error?.message || t('settings.graphTripleReview.loadFailed')
   } finally {
     loading.value = false
   }
 }
+
+watch(allowedKbSet, () => {
+  loadItems()
+})
 
 const approve = async (item: GraphTripleCandidate) => {
   busyId.value = item.id

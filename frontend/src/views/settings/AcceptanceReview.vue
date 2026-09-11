@@ -1,10 +1,13 @@
 <template>
   <section class="acceptance-review">
-    <div class="page-header">
+    <div v-if="!hideHeader" class="page-header">
       <div>
         <h2>验收评测</h2>
         <p>查看运行门禁、失败样本、人工复核和已登记报告材料。</p>
       </div>
+      <button type="button" class="secondary-button" :disabled="loading" @click="loadRuns">刷新</button>
+    </div>
+    <div v-else class="toolbar-row">
       <button type="button" class="secondary-button" :disabled="loading" @click="loadRuns">刷新</button>
     </div>
 
@@ -93,6 +96,8 @@ import {
   type AcceptanceRun,
 } from '@/api/acceptance'
 
+withDefaults(defineProps<{ hideHeader?: boolean }>(), { hideHeader: false })
+
 type CaseResult = { case_id: string; payload: { passed?: boolean; error?: string; human_review_required?: boolean; human_reviewed?: boolean } }
 
 const runs = ref<AcceptanceRun[]>([])
@@ -162,6 +167,7 @@ onMounted(loadRuns)
 .acceptance-review { padding: 4px 0; color: var(--td-text-color-primary); }
 .page-header, .detail-header, .result-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .page-header { margin-bottom: 20px; }
+.toolbar-row { display: flex; justify-content: flex-end; margin-bottom: 12px; }
 h2, h3, h4, p { margin: 0; }
 .page-header p, .detail-header p, .run-card span, .result-reason { color: var(--td-text-color-secondary); font-size: 12px; }
 .run-layout { display: grid; grid-template-columns: minmax(180px, 260px) 1fr; gap: 20px; }

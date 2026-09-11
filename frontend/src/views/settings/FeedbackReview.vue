@@ -1,10 +1,13 @@
 <template>
   <section class="feedback-review">
-    <div class="section-heading">
+    <div v-if="!hideHeader" class="section-heading">
       <div>
         <h2>回答反馈审核</h2>
         <p>将用户纠错反馈采纳为知识草稿或评测样例候选；采纳不会自动发布。</p>
       </div>
+      <button type="button" class="refresh-button" :disabled="loading" @click="loadFeedback">刷新</button>
+    </div>
+    <div v-else class="toolbar-row">
       <button type="button" class="refresh-button" :disabled="loading" @click="loadFeedback">刷新</button>
     </div>
 
@@ -43,6 +46,8 @@
 import { onMounted, reactive, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { listAnswerFeedback, reviewAnswerFeedback, type AnswerFeedback } from '@/api/feedback'
+
+withDefaults(defineProps<{ hideHeader?: boolean }>(), { hideHeader: false })
 
 const feedback = ref<AnswerFeedback[]>([])
 const targetById = reactive<Record<string, NonNullable<AnswerFeedback['target']>>>({})
@@ -88,6 +93,7 @@ onMounted(loadFeedback)
 <style scoped lang="less">
 .feedback-review { padding: 4px 0; }
 .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.toolbar-row { display: flex; justify-content: flex-end; margin-bottom: 12px; }
 .section-heading h2 { margin: 0; color: var(--td-text-color-primary); font-size: 20px; }
 .section-heading p { margin: 8px 0 0; color: var(--td-text-color-secondary); font-size: 13px; }
 .refresh-button, .accept-button, .reject-button { padding: 7px 12px; border-radius: 6px; cursor: pointer; }

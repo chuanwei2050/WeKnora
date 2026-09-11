@@ -16,11 +16,21 @@ export default {
     confirmLogout: 'Вы уверены, что хотите выйти?',
     systemInfo: 'Информация о системе',
     knowledgeSearch: 'Поиск',
+    workbench: 'Рабочий стол',
     collapseSidebar: 'Свернуть боковую панель',
     expandSidebar: 'Развернуть боковую панель',
     logoutSuccess: 'Вы вышли из системы',
     agents: 'Агенты',
     organizations: 'Общие пространства'
+  },
+  workbench: {
+    title: 'Рабочий стол',
+    subtitle: 'Обработка отзывов на ответы, проверки графа и приемочных тестов.',
+    tabs: {
+      feedback: 'Отзывы на ответы',
+      graphTriples: 'Проверка графа',
+      acceptance: 'Приёмка',
+    },
   },
   batchManage: {
     title: 'Управление диалогами',

@@ -155,6 +155,7 @@ type ChunkExtractService struct {
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
 	tripleReviewRepo  interfaces.GraphTripleReviewRepository
+	rebuildProgress   *GraphRebuildProgressStore
 }
 
 // NewChunkExtractService creates a new chunk extract service
@@ -165,6 +166,7 @@ func NewChunkExtractService(
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
 	tripleReviewRepo interfaces.GraphTripleReviewRepository,
+	rebuildProgress *GraphRebuildProgressStore,
 ) interfaces.TaskHandler {
 	return &ChunkExtractService{
 		template:          config.ExtractManager.ExtractGraph,
@@ -173,6 +175,7 @@ func NewChunkExtractService(
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
 		tripleReviewRepo:  tripleReviewRepo,
+		rebuildProgress:   rebuildProgress,
 	}
 }
 
@@ -199,6 +202,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	}
 	if !kb.IsGraphEnabled() {
 		logger.Infof(ctx, "skip graph extraction for chunk %s: graph indexing is disabled", p.ChunkID)
+		s.markRebuildProgress(ctx, p.TenantID, chunk.KnowledgeBaseID)
 		return nil
 	}
 	extractConfig := kb.ExtractConfig
@@ -236,6 +240,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	if len(graph.Relation) == 0 {
 		if kb.ExtractConfig != nil && kb.ExtractConfig.RequireTripleReview {
 			logger.Infof(ctx, "skip empty graph extraction for chunk %s: triple review is required", p.ChunkID)
+			s.markRebuildProgress(ctx, p.TenantID, chunk.KnowledgeBaseID)
 			return nil
 		}
 		logger.Infof(ctx, "replace prior canonical graph source for chunk %s with empty extraction", p.ChunkID)
@@ -245,6 +250,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
 	if err != nil {
 		logger.Warnf(ctx, "graph ignore chunk %s: %v", p.ChunkID, err)
+		s.markRebuildProgress(ctx, p.TenantID, kb.ID)
 		return nil
 	}
 
@@ -271,13 +277,24 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			return err
 		}
 		logger.Infof(ctx, "queued graph triple candidate %s for chunk %s (require_triple_review)", candidate.ID, chunk.ID)
+		s.markRebuildProgress(ctx, p.TenantID, chunk.KnowledgeBaseID)
 		return nil
 	}
 	if err = WriteExtractedGraph(ctx, s.graphEngine, chunk, graph, p.ModelID); err != nil {
 		logger.Errorf(ctx, "failed to write extracted graph: %v", err)
 		return err
 	}
+	s.markRebuildProgress(ctx, p.TenantID, chunk.KnowledgeBaseID)
 	return nil
+}
+
+func (s *ChunkExtractService) markRebuildProgress(ctx context.Context, tenantID uint64, kbID string) {
+	if s == nil || s.rebuildProgress == nil || strings.TrimSpace(kbID) == "" {
+		return
+	}
+	if _, err := s.rebuildProgress.IncrProcessed(ctx, tenantID, kbID); err != nil {
+		logger.Warnf(ctx, "graph rebuild progress incr failed for kb %s: %v", kbID, err)
+	}
 }
 
 func buildGraphFewShotExamples(config *types.ExtractConfig) []types.GraphData {

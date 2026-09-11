@@ -193,6 +193,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(ensureDefaultAdmin))
 	must(container.Provide(service.NewWeKnoraCloudService))
 
+	// Graph rebuild progress must be registered before chunk extract / graph handlers.
+	must(container.Provide(service.NewGraphRebuildProgressStore))
+
 	// Extract services - register individual extracters with names
 	must(container.Provide(service.NewChunkExtractService, dig.Name("chunkExtractor")))
 	must(container.Provide(service.NewDataTableSummaryService, dig.Name("dataTableSummary")))
