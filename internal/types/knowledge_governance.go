@@ -184,6 +184,18 @@ type KnowledgeVersionReview struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+// KnowledgeReviewTask summarizes a pending governed version for cross-KB review workbenches.
+type KnowledgeReviewTask struct {
+	VersionID         string    `json:"version_id"`
+	KnowledgeID       string    `json:"knowledge_id"`
+	KnowledgeTitle    string    `json:"knowledge_title"`
+	KnowledgeBaseID   string    `json:"knowledge_base_id"`
+	KnowledgeBaseName string    `json:"knowledge_base_name"`
+	VersionLabel      string    `json:"version_label"`
+	Submitter         string    `json:"submitter"`
+	SubmittedAt       time.Time `json:"submitted_at"`
+}
+
 func HashKnowledgeContent(content []byte) string {
 	sum := sha256.Sum256(content)
 	return hex.EncodeToString(sum[:])

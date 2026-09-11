@@ -2835,9 +2835,10 @@ type ProcessChunksOptions struct {
 // buildSplitterConfig creates a SplitterConfig with fallbacks from a KnowledgeBase.
 func buildSplitterConfig(kb *types.KnowledgeBase) chunker.SplitterConfig {
 	chunkCfg := chunker.SplitterConfig{
-		ChunkSize:    kb.ChunkingConfig.ChunkSize,
-		ChunkOverlap: kb.ChunkingConfig.ChunkOverlap,
-		Separators:   kb.ChunkingConfig.Separators,
+		ChunkSize:      kb.ChunkingConfig.ChunkSize,
+		ChunkOverlap:   kb.ChunkingConfig.ChunkOverlap,
+		Separators:     kb.ChunkingConfig.Separators,
+		InheritHeading: kb.ChunkingConfig.InheritHeading,
 	}
 	if chunkCfg.ChunkSize <= 0 {
 		chunkCfg.ChunkSize = 512
@@ -2863,14 +2864,16 @@ func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfi
 		childSize = 384
 	}
 	parent = chunker.SplitterConfig{
-		ChunkSize:    parentSize,
-		ChunkOverlap: base.ChunkOverlap, // reuse configured overlap for parents
-		Separators:   base.Separators,
+		ChunkSize:      parentSize,
+		ChunkOverlap:   base.ChunkOverlap, // reuse configured overlap for parents
+		Separators:     base.Separators,
+		InheritHeading: base.InheritHeading,
 	}
 	child = chunker.SplitterConfig{
-		ChunkSize:    childSize,
-		ChunkOverlap: childSize / 5, // ~20% overlap for child chunks
-		Separators:   base.Separators,
+		ChunkSize:      childSize,
+		ChunkOverlap:   childSize / 5, // ~20% overlap for child chunks
+		Separators:     base.Separators,
+		InheritHeading: base.InheritHeading,
 	}
 	return
 }
@@ -7280,18 +7283,16 @@ func (s *knowledgeService) UpdateFAQEntryStatus(ctx context.Context,
 		return err
 	}
 
-	// Sync update to retriever engines
-	chunkStatusMap := map[string]bool{chunk.ID: isEnabled}
+	// Sync update to retriever engines (whitelist metadata hot update, no re-embed)
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 	if err != nil {
 		return err
 	}
-	if err := retrieveEngine.BatchUpdateChunkEnabledStatus(ctx, chunkStatusMap); err != nil {
-		return err
-	}
-
-	return nil
+	enabled := isEnabled
+	return retrieveEngine.BatchUpdateChunkMetadata(ctx, map[string]types.ChunkMetadataPatch{
+		chunk.ID: {IsEnabled: &enabled},
+	})
 }
 
 // UpdateFAQEntryFieldsBatch updates multiple fields for FAQ entries in batch.
@@ -7474,7 +7475,7 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 		}
 	}
 
-	// Sync to retriever engines
+	// Sync to retriever engines via whitelist metadata hot update (no re-embed)
 	if len(enabledUpdates) > 0 || len(tagUpdates) > 0 {
 		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
@@ -7484,16 +7485,7 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		if len(enabledUpdates) > 0 {
-			if err := retrieveEngine.BatchUpdateChunkEnabledStatus(ctx, enabledUpdates); err != nil {
-				return err
-			}
-		}
-		if len(tagUpdates) > 0 {
-			if err := retrieveEngine.BatchUpdateChunkTagID(ctx, tagUpdates); err != nil {
-				return err
-			}
-		}
+		return retrieveEngine.BatchUpdateChunkMetadata(ctx, types.MergeChunkMetadataPatches(enabledUpdates, tagUpdates))
 	}
 
 	return nil
@@ -7652,7 +7644,7 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 		if err != nil {
 			return err
 		}
-		if err := retrieveEngine.BatchUpdateChunkTagID(ctx, chunkTagUpdates); err != nil {
+		if err := retrieveEngine.BatchUpdateChunkMetadata(ctx, types.MergeChunkMetadataPatches(nil, chunkTagUpdates)); err != nil {
 			return err
 		}
 	}
@@ -7715,7 +7707,7 @@ func (s *knowledgeService) MoveSubtreesToTag(ctx context.Context, kbID, sourceTa
 		}
 		var syncErr error
 		for attempt := 0; attempt < 3; attempt++ {
-			syncErr = retrieveEngine.BatchUpdateChunkTagID(ctx, chunkTagUpdates)
+			syncErr = retrieveEngine.BatchUpdateChunkMetadata(ctx, types.MergeChunkMetadataPatches(nil, chunkTagUpdates))
 			if syncErr == nil {
 				break
 			}
@@ -7832,7 +7824,7 @@ func (s *knowledgeService) ProcessChunkTagSync(ctx context.Context, task *asynq.
 	if len(updates) == 0 {
 		return nil
 	}
-	return retrieveEngine.BatchUpdateChunkTagID(ctx, updates)
+	return retrieveEngine.BatchUpdateChunkMetadata(ctx, types.MergeChunkMetadataPatches(nil, updates))
 }
 
 // UpdateFAQEntryTag updates the tag assigned to an FAQ entry.
@@ -7873,7 +7865,7 @@ func (s *knowledgeService) UpdateFAQEntryTag(ctx context.Context, kbID string, e
 		return err
 	}
 
-	// Sync tag update to retriever engines
+	// Sync tag update to retriever engines (whitelist hot update, no re-embed)
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
 		s.retrieveEngine,
@@ -7882,7 +7874,10 @@ func (s *knowledgeService) UpdateFAQEntryTag(ctx context.Context, kbID string, e
 	if err != nil {
 		return err
 	}
-	return retrieveEngine.BatchUpdateChunkTagID(ctx, map[string]string{chunk.ID: resolvedTagID})
+	tag := resolvedTagID
+	return retrieveEngine.BatchUpdateChunkMetadata(ctx, map[string]types.ChunkMetadataPatch{
+		chunk.ID: {TagID: &tag},
+	})
 }
 
 // UpdateFAQEntryTagBatch updates tags for FAQ entries in batch.
@@ -7983,7 +7978,7 @@ func (s *knowledgeService) UpdateFAQEntryTagBatch(ctx context.Context, kbID stri
 		if err != nil {
 			return err
 		}
-		if err := retrieveEngine.BatchUpdateChunkTagID(ctx, tagUpdates); err != nil {
+		if err := retrieveEngine.BatchUpdateChunkMetadata(ctx, types.MergeChunkMetadataPatches(nil, tagUpdates)); err != nil {
 			return err
 		}
 	}
@@ -11672,7 +11667,7 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 			for _, chunk := range oldChunks {
 				chunkTagUpdates[chunk.ID] = ""
 			}
-			if err := retrieveEngine.BatchUpdateChunkTagID(ctx, chunkTagUpdates); err != nil {
+			if err := retrieveEngine.BatchUpdateChunkMetadata(ctx, types.MergeChunkMetadataPatches(nil, chunkTagUpdates)); err != nil {
 				logger.Warnf(ctx, "moveKnowledgeReuseVectors: failed to clear moved chunk tags for knowledge %s: %v", knowledge.ID, err)
 			}
 		}

@@ -334,6 +334,9 @@ type ChunkingConfig struct {
 	// ChildChunkSize is the size of child chunks used for embedding (default: 384).
 	// Only used when EnableParentChild is true.
 	ChildChunkSize int `yaml:"child_chunk_size,omitempty" json:"child_chunk_size,omitempty"`
+	// InheritHeading prepends the current Markdown ATX heading path to chunks that
+	// do not start with a heading line. New knowledge bases default to true in UI/create paths.
+	InheritHeading bool `yaml:"inherit_heading,omitempty" json:"inherit_heading,omitempty"`
 }
 
 // StorageProviderConfig is the legacy KB-level storage provider selection.

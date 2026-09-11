@@ -202,6 +202,9 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 	if len(chatManage.Attachments) > 0 {
 		userContent += chatManage.Attachments.BuildPrompt()
 	}
+	if NormalizeCiteFilterMode(chatManage.CiteFilterMode) != CiteFilterOff {
+		userContent += CitationInstructionHint
+	}
 
 	// Set formatted content back to chat management
 	chatManage.UserContent = userContent

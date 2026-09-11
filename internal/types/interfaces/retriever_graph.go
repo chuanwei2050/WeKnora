@@ -20,6 +20,7 @@ type RetrieveGraphRepository interface {
 	ReplaceCanonicalSourceRecords(ctx context.Context, tenantID uint64, knowledgeBaseID, namespace string, source types.GraphSource, records []types.GraphRebuildRecord) error
 	RemoveCanonicalSource(ctx context.Context, tenantID uint64, knowledgeBaseID, namespace string, source types.GraphSource) error
 	DeleteCanonicalKnowledgeBase(ctx context.Context, tenantID uint64, knowledgeBaseID string) error
+	GetGraphOverview(ctx context.Context, scope types.GraphScope, limit int) (*types.GraphOverview, error)
 	RebuildCanonicalGraph(ctx context.Context, tenantID uint64, knowledgeBaseID, namespace string, records []types.GraphRebuildRecord, switchActive bool) (types.GraphRebuildResult, error)
 	SwitchCanonicalNamespace(ctx context.Context, tenantID uint64, knowledgeBaseID, namespace string) error
 	RollbackCanonicalNamespace(ctx context.Context, tenantID uint64, knowledgeBaseID string) (string, error)

@@ -201,6 +201,8 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 							},
 						})
 					}
+					chatManage.ChatResponse = &types.ChatResponse{Content: finalContent, FinishReason: "stop", Usage: initialUsage}
+					emitCiteFilteredReferences(ctx, eventBus, chatManage, finalContent)
 					pipelineInfo(ctx, "Stream", "channel_close", map[string]interface{}{
 						"session_id": chatManage.SessionID,
 					})
@@ -333,4 +335,43 @@ func (p *PluginChatCompletionStream) emitVerifiedResult(ctx context.Context, eve
 			IsFallback: isFallback,
 		},
 	})
+	emitCiteFilteredReferences(ctx, eventBus, chatManage, content)
+}
+
+// emitCiteFilteredReferences emits a replace references event when cite filtering is enabled.
+func emitCiteFilteredReferences(ctx context.Context, eventBus types.EventBusInterface, chatManage *types.ChatManage, answer string) {
+	mode := NormalizeCiteFilterMode(chatManage.CiteFilterMode)
+	if mode == CiteFilterOff || eventBus == nil {
+		return
+	}
+	visible := stripThinkTagsForCite(answer)
+	filtered := FilterSearchResultsByBracketCitations(mode, visible, chatManage.MergeResult)
+	_ = eventBus.Emit(ctx, types.Event{
+		ID:        fmt.Sprintf("%s-cite-refs", uuid.New().String()[:8]),
+		Type:      types.EventType(event.EventAgentReferences),
+		SessionID: chatManage.SessionID,
+		Data: event.AgentReferencesData{
+			References: filtered,
+			Extra: map[string]interface{}{
+				"replace_refs":     true,
+				"cite_filter_mode": string(mode),
+			},
+		},
+	})
+}
+
+func stripThinkTagsForCite(s string) string {
+	for {
+		start := strings.Index(s, "<think>")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(s[start:], "</think>")
+		if end < 0 {
+			s = s[:start]
+			break
+		}
+		s = s[:start] + s[start+end+len("</think>"):]
+	}
+	return s
 }

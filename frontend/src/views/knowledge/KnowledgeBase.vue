@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick, h, type ComponentPublicInstance } from "vue";
+import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick, h, defineAsyncComponent, type ComponentPublicInstance } from "vue";
 import { MessagePlugin, DialogPlugin, Icon as TIcon } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
@@ -80,6 +80,8 @@ import {
 } from './components/document-folder-organization';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import { getWikiStats } from '@/api/wiki';
+
+const KnowledgeGraphExplore = defineAsyncComponent(() => import('./KnowledgeGraphExplore.vue'));
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
 import { useI18n } from 'vue-i18n';
 import { formatStringDate, kbFileTypeVerification } from '@/utils';
@@ -100,7 +102,8 @@ const kbLoading = ref(false);
 const docListLoading = ref(true);
 const isFAQ = computed(() => (kbInfo.value?.type || '') === 'faq');
 const isWiki = computed(() => !!kbInfo.value?.indexing_strategy?.wiki_enabled);
-const validTabs = ['documents', 'wiki', 'graph'] as const
+const isGraphEnabled = computed(() => !!kbInfo.value?.indexing_strategy?.graph_enabled || !!kbInfo.value?.extract_config?.enabled);
+const validTabs = ['documents', 'wiki', 'graph', 'entity-graph'] as const
 type KbTab = typeof validTabs[number]
 const initTab = validTabs.includes(route.query.tab as any) ? (route.query.tab as KbTab) : 'documents'
 const activeKbTab = ref<KbTab>(initTab);
@@ -1375,13 +1378,15 @@ const loadKnowledgeList = async () => {
 // 监听路由参数变化，重新获取知识库内容
 // Sync activeKbTab to URL query so it survives page refresh
 watch(activeKbTab, (tab) => {
+  const current = (route.query.tab as string) || 'documents'
+  if (current === tab) return
   const query = { ...route.query }
   if (tab === 'documents') {
     delete query.tab
   } else {
     query.tab = tab
   }
-  router.replace({ query })
+  router.replace({ query }).catch(() => undefined)
 })
 
 watch(() => kbId.value, (newKbId, oldKbId) => {
@@ -2671,7 +2676,13 @@ const executeGovernanceAction = async (action: GovernanceReviewAction, item: Kno
   if (action === 'submit') await submitKnowledgeVersionReview(item.id, versionId);
   if (action === 'withdraw') await withdrawKnowledgeVersionReview(item.id, versionId);
   if (action === 'approve') await approveKnowledgeVersion(item.id, versionId);
-  if (action === 'reject') await rejectKnowledgeVersion(item.id, versionId);
+  if (action === 'reject') {
+    const comment = (window.prompt(t('knowledgeBase.governanceRejectCommentPlaceholder'), '') || '').trim();
+    if (!comment) {
+      throw new Error(t('knowledgeBase.governanceRejectCommentRequired'));
+    }
+    await rejectKnowledgeVersion(item.id, versionId, comment);
+  }
 };
 
 const handleGovernanceAction = async (action: GovernanceReviewAction, item: KnowledgeCard) => {
@@ -2877,11 +2888,29 @@ async function createNewSession(value: string): Promise<void> {
                   :class="['breadcrumb-tab', { active: activeKbTab === 'graph', indexing: wikiIsIndexing }]"
                   @click="activeKbTab = 'graph'"
                 >
-                  {{ $t('knowledgeEditor.wikiBrowser.tabGraph') }}
+                  {{ $t('knowledgeEditor.wikiBrowser.tabWikiGraph') }}
                   <t-tooltip v-if="wikiIsIndexing" :content="wikiIndexingTip" placement="bottom">
                     <t-loading size="small" class="breadcrumb-tab-indicator" />
                   </t-tooltip>
                 </span>
+                <template v-if="isGraphEnabled">
+                  <span class="breadcrumb-tab-sep">/</span>
+                  <span
+                    :class="['breadcrumb-tab', { active: activeKbTab === 'entity-graph' }]"
+                    @click="activeKbTab = 'entity-graph'"
+                  >{{ $t('knowledgeGraphExplore.tab') }}</span>
+                </template>
+              </template>
+              <template v-else-if="isGraphEnabled">
+                <span
+                  :class="['breadcrumb-tab', { active: activeKbTab === 'documents' }]"
+                  @click="activeKbTab = 'documents'"
+                >{{ $t('knowledgeEditor.document.title') }}</span>
+                <span class="breadcrumb-tab-sep">/</span>
+                <span
+                  :class="['breadcrumb-tab', { active: activeKbTab === 'entity-graph' }]"
+                  @click="activeKbTab = 'entity-graph'"
+                >{{ $t('knowledgeGraphExplore.tab') }}</span>
               </template>
               <span v-else class="breadcrumb-current">{{ $t('knowledgeEditor.document.title') }}</span>
             </h2>
@@ -2903,8 +2932,11 @@ async function createNewSession(value: string): Promise<void> {
       <div v-if="isWiki && (activeKbTab === 'wiki' || activeKbTab === 'graph')" class="wiki-main-area">
         <WikiBrowser v-if="kbId" :knowledge-base-id="kbId" :view="activeKbTab === 'graph' ? 'graph' : 'browser'" @open-source-doc="openSourceDoc" @status-change="onWikiStatusChange" />
       </div>
+      <div v-else-if="isGraphEnabled && activeKbTab === 'entity-graph'" class="wiki-main-area">
+        <KnowledgeGraphExplore v-if="kbId" :knowledge-base-id="kbId" />
+      </div>
 
-      <template v-if="activeKbTab === 'documents' || !isWiki">
+      <template v-if="activeKbTab === 'documents' || (!isWiki && activeKbTab !== 'entity-graph')">
       <input
         ref="uploadInputRef"
         type="file"

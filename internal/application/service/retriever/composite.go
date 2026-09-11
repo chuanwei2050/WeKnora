@@ -128,6 +128,14 @@ func (c *CompositeRetrieveEngine) BatchUpdateChunkTagID(
 	})
 }
 
+// BatchUpdateChunkMetadata updates whitelisted metadata without re-embedding.
+func (c *CompositeRetrieveEngine) BatchUpdateChunkMetadata(
+	ctx context.Context,
+	updates map[string]types.ChunkMetadataPatch,
+) error {
+	return ApplyChunkMetadataPatches(ctx, c, updates)
+}
+
 // concurrentRetrieve is a helper function for concurrent processing of retrieval parameters
 // and collecting results
 func concurrentRetrieve(

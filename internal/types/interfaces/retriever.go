@@ -127,6 +127,9 @@ type RetrieveEngineService interface {
 	// chunkTagMap: map of chunk ID to tag ID (empty string means no tag)
 	BatchUpdateChunkTagID(ctx context.Context, chunkTagMap map[string]string) error
 
+	// BatchUpdateChunkMetadata updates whitelisted index metadata without re-embedding.
+	BatchUpdateChunkMetadata(ctx context.Context, updates map[string]types.ChunkMetadataPatch) error
+
 	// RetrieveEngine retrieves the engine
 	RetrieveEngine
 }

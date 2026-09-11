@@ -51,6 +51,9 @@ func (m *mockEngineService) BatchUpdateChunkEnabledStatus(_ context.Context, _ m
 func (m *mockEngineService) BatchUpdateChunkTagID(_ context.Context, _ map[string]string) error {
 	return nil
 }
+func (m *mockEngineService) BatchUpdateChunkMetadata(_ context.Context, _ map[string]types.ChunkMetadataPatch) error {
+	return nil
+}
 
 func newMock(engineType types.RetrieverEngineType) interfaces.RetrieveEngineService {
 	return &mockEngineService{engineType: engineType}

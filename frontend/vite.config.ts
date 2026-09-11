@@ -52,7 +52,15 @@ export default defineConfig({
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
       '@vue-office/pptx': resolveVueOfficePptxEntry(),
+      // Force a single Vue runtime even if leftover package managers pollute node_modules
+      vue: fileURLToPath(new URL('./node_modules/vue/dist/vue.runtime.esm-bundler.js', import.meta.url)),
     },
+    // Prevent duplicate Vue runtimes (e.g. leftover node_modules/.pnpm) from
+    // breaking vue-router RouterView (__vrv_devtools null instance).
+    dedupe: ['vue', 'vue-router', 'vue-i18n'],
+  },
+  optimizeDeps: {
+    include: ['vue', 'vue-router', 'vue-i18n', 'pinia', 'echarts'],
   },
   server: {
     port: 5173,

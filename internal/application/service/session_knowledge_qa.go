@@ -147,6 +147,7 @@ func (s *sessionService) KnowledgeQA(
 			Attachments:             req.Attachments,
 			Language:                types.LanguageNameFromContext(ctx),
 			ComplexityRouting:       types.DefaultComplexityRoutingConfig(),
+			CiteFilterMode:          string(chatpipeline.ResolveCiteFilterMode()),
 		},
 		PipelineState: types.PipelineState{
 			RewriteQuery:     req.Query,
@@ -226,11 +227,11 @@ func (s *sessionService) KnowledgeQA(
 		return err
 	}
 
-	// Emit the references/telemetry event even when retrieval is empty so a
-	// formal acceptance run can distinguish graph skip from a missing stream
-	// observation on refusal and unanswerable cases.
+	// Emit references/telemetry. When cite filtering is enabled, only emit
+	// telemetry here; filtered references are emitted after the answer stream
+	// completes (see chat_completion_stream) so citations can be parsed.
 	{
-		logger.Infof(ctx, "Emitting references event with %d results", len(chatManage.MergeResult))
+		logger.Infof(ctx, "Emitting references event with %d results (cite_filter=%s)", len(chatManage.MergeResult), chatManage.CiteFilterMode)
 		skip := chatpipeline.AssessGraphSkip(chatManage)
 		graphRequested := skip.Layer1Allowed
 		graphUsed := chatManage.GraphSearchResult != nil && (len(chatManage.GraphSearchResult.Paths) > 0 || len(chatManage.GraphSearchResult.Citations) > 0)
@@ -256,12 +257,18 @@ func (s *sessionService) KnowledgeQA(
 			"graph":             graphTelemetry,
 			"verification_path": verifiedExecutionPath(chatManage.VerifiedResult),
 		}
+		mode := chatpipeline.NormalizeCiteFilterMode(chatManage.CiteFilterMode)
+		refs := chatManage.MergeResult
+		if mode != chatpipeline.CiteFilterOff {
+			refs = nil
+			telemetry["cite_filter_deferred"] = true
+		}
 		if err := eventBus.Emit(ctx, event.Event{
 			ID:        generateEventID("references"),
 			Type:      event.EventAgentReferences,
 			SessionID: req.Session.ID,
 			Data: event.AgentReferencesData{
-				References: chatManage.MergeResult,
+				References: refs,
 				Extra:      telemetry,
 			},
 		}); err != nil {

@@ -84,6 +84,20 @@
         </div>
       </div>
 
+      <!-- Inherit Markdown Heading -->
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.chunking.inheritHeadingLabel') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.chunking.inheritHeadingDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-switch
+            v-model="localInheritHeading"
+            @change="handleInheritHeadingChange"
+          />
+        </div>
+      </div>
+
       <!-- Parent Chunk Size -->
       <div v-if="localEnableParentChild" class="setting-row">
         <div class="setting-info">
@@ -142,6 +156,7 @@ interface ChunkingConfig {
   enableParentChild: boolean
   parentChunkSize: number
   childChunkSize: number
+  inheritHeading: boolean
 }
 
 interface Props {
@@ -160,6 +175,7 @@ const localSeparators = ref([...props.config.separators])
 const localEnableParentChild = ref(props.config.enableParentChild ?? false)
 const localParentChunkSize = ref(props.config.parentChunkSize || 4096)
 const localChildChunkSize = ref(props.config.childChunkSize || 384)
+const localInheritHeading = ref(props.config.inheritHeading ?? true)
 const { t } = useI18n()
 
 const separatorOptions = computed(() => [
@@ -180,6 +196,7 @@ watch(() => props.config, (newConfig) => {
   localEnableParentChild.value = newConfig.enableParentChild ?? false
   localParentChunkSize.value = newConfig.parentChunkSize || 4096
   localChildChunkSize.value = newConfig.childChunkSize || 384
+  localInheritHeading.value = newConfig.inheritHeading ?? true
 }, { deep: true })
 
 const handleChunkSizeChange = () => { emitUpdate() }
@@ -188,6 +205,7 @@ const handleSeparatorsChange = () => { emitUpdate() }
 const handleParentChildChange = () => { emitUpdate() }
 const handleParentChunkSizeChange = () => { emitUpdate() }
 const handleChildChunkSizeChange = () => { emitUpdate() }
+const handleInheritHeadingChange = () => { emitUpdate() }
 
 const emitUpdate = () => {
   emit('update:config', {
@@ -196,7 +214,8 @@ const emitUpdate = () => {
     separators: localSeparators.value,
     enableParentChild: localEnableParentChild.value,
     parentChunkSize: localParentChunkSize.value,
-    childChunkSize: localChildChunkSize.value
+    childChunkSize: localChildChunkSize.value,
+    inheritHeading: localInheritHeading.value
   })
 }
 </script>

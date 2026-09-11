@@ -72,6 +72,7 @@ type RouterParams struct {
 	WikiPageHandler            *handler.WikiPageHandler
 	AnswerFeedbackHandler      *handler.AnswerFeedbackHandler
 	GraphTripleReviewHandler   *handler.GraphTripleReviewHandler
+	GraphExploreHandler        *handler.GraphExploreHandler
 	KnowledgeGovernanceHandler *handler.KnowledgeGovernanceHandler
 	AcceptanceBenchmarkHandler *handler.AcceptanceBenchmarkHandler
 	ApprovedEndpointHandler    *handler.ApprovedEndpointHandler
@@ -191,6 +192,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler)
 		RegisterFeedbackRoutes(v1, params.AnswerFeedbackHandler)
 		RegisterGraphTripleReviewRoutes(v1, params.GraphTripleReviewHandler)
+		RegisterGraphExploreRoutes(v1, params.GraphExploreHandler)
 		RegisterKnowledgeGovernanceRoutes(v1, params.KnowledgeGovernanceHandler)
 		RegisterAcceptanceBenchmarkRoutes(v1, params.AcceptanceBenchmarkHandler)
 		RegisterApprovedEndpointRoutes(v1, params.ApprovedEndpointHandler)
@@ -330,6 +332,9 @@ func RegisterKnowledgeGovernanceRoutes(r *gin.RouterGroup, h *handler.KnowledgeG
 	if h == nil {
 		return
 	}
+	reviewTasks := r.Group("/knowledge-versions/review-tasks")
+	reviewTasks.GET("/pending-count", h.PendingReviewCount)
+	reviewTasks.GET("", h.ListReviewTasks)
 	// Reuse the existing /knowledge/:id branch so Gin can attach the nested
 	// version routes without conflicting wildcard parameter names.
 	versions := r.Group("/knowledge/:id/versions")
@@ -395,6 +400,14 @@ func RegisterGraphTripleReviewRoutes(r *gin.RouterGroup, h *handler.GraphTripleR
 	triples.GET("/:id", h.Get)
 	triples.POST("/:id/approve", h.Approve)
 	triples.POST("/:id/reject", h.Reject)
+}
+
+func RegisterGraphExploreRoutes(r *gin.RouterGroup, h *handler.GraphExploreHandler) {
+	if h == nil {
+		return
+	}
+	r.GET("/knowledge-bases/:id/graph/overview", h.Overview)
+	r.POST("/knowledge-bases/:id/rebuild-graph", h.Rebuild)
 }
 
 // RegisterChunkRoutes 注册分块相关的路由

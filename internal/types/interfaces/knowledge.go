@@ -257,4 +257,8 @@ type KnowledgeGovernanceRepository interface {
 	ActivateDueVersions(ctx context.Context, now time.Time) (int, error)
 	CreateReview(ctx context.Context, review *types.KnowledgeVersionReview) error
 	ListReviews(ctx context.Context, versionID string) ([]*types.KnowledgeVersionReview, error)
+	// ListReviewTasks returns pending_review versions scoped to reviewable knowledge bases.
+	ListReviewTasks(ctx context.Context, tenantID uint64, knowledgeBaseIDs []string, offset, limit int) ([]*types.KnowledgeReviewTask, int64, error)
+	// CountPendingReviewTasks counts pending_review versions scoped to reviewable knowledge bases.
+	CountPendingReviewTasks(ctx context.Context, tenantID uint64, knowledgeBaseIDs []string) (int64, error)
 }

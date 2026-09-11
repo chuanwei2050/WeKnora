@@ -423,7 +423,7 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 				retrieveEngine, engineErr := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 				if engineErr != nil {
 					logger.Warnf(ctx, "failed to initialize retriever while deleting empty folder %s: %v", tag.ID, engineErr)
-				} else if engineErr = retrieveEngine.BatchUpdateChunkTagID(ctx, chunkTagUpdates); engineErr != nil {
+				} else if engineErr = retrieveEngine.BatchUpdateChunkMetadata(ctx, types.MergeChunkMetadataPatches(nil, chunkTagUpdates)); engineErr != nil {
 					logger.Warnf(ctx, "failed to sync repaired chunk tags while deleting empty folder %s: %v", tag.ID, engineErr)
 				}
 			}

@@ -264,15 +264,23 @@ func (h *AgentStreamHandler) handleReferences(ctx context.Context, evt event.Eve
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	replace := false
+	if data.Extra != nil {
+		if v, ok := data.Extra["replace_refs"].(bool); ok && v {
+			replace = true
+		}
+	}
+
+	parsed := make([]*types.SearchResult, 0)
 	// Extract knowledge references
 	// Try to cast directly to []*types.SearchResult first
 	if searchResults, ok := data.References.([]*types.SearchResult); ok {
-		h.knowledgeRefs = append(h.knowledgeRefs, searchResults...)
+		parsed = append(parsed, searchResults...)
 	} else if refs, ok := data.References.([]interface{}); ok {
 		// Fallback: convert from []interface{}
 		for _, ref := range refs {
 			if sr, ok := ref.(*types.SearchResult); ok {
-				h.knowledgeRefs = append(h.knowledgeRefs, sr)
+				parsed = append(parsed, sr)
 			} else if refMap, ok := ref.(map[string]interface{}); ok {
 				// Parse from map if needed
 				searchResult := &types.SearchResult{
@@ -296,9 +304,15 @@ func (h *AgentStreamHandler) handleReferences(ctx context.Context, evt event.Eve
 					searchResult.Metadata = metadata
 				}
 
-				h.knowledgeRefs = append(h.knowledgeRefs, searchResult)
+				parsed = append(parsed, searchResult)
 			}
 		}
+	}
+
+	if replace {
+		h.knowledgeRefs = parsed
+	} else {
+		h.knowledgeRefs = append(h.knowledgeRefs, parsed...)
 	}
 
 	// Update assistant message references

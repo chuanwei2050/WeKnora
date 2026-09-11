@@ -523,3 +523,115 @@ func TestKnowledgeGovernanceActivationSupportsRetryAndRollback(t *testing.T) {
 		t.Fatalf("rollback previous_version_id = %q, want %q", current.PreviousVersionID, failed.ID)
 	}
 }
+
+func openKnowledgeReviewTasksTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`CREATE TABLE knowledge_bases (
+			id TEXT PRIMARY KEY,
+			tenant_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			deleted_at DATETIME
+		)`,
+		`CREATE TABLE knowledges (
+			id TEXT PRIMARY KEY,
+			tenant_id INTEGER NOT NULL,
+			knowledge_base_id TEXT NOT NULL,
+			title TEXT NOT NULL DEFAULT '',
+			parse_status TEXT NOT NULL DEFAULT 'draft',
+			pending_version_id TEXT,
+			deleted_at DATETIME
+		)`,
+		`CREATE TABLE knowledge_versions (
+			id TEXT PRIMARY KEY,
+			tenant_id INTEGER NOT NULL,
+			knowledge_id TEXT NOT NULL,
+			version_label TEXT NOT NULL,
+			content_hash TEXT NOT NULL,
+			snapshot_ref TEXT,
+			source_metadata TEXT NOT NULL DEFAULT '{}',
+			previous_version_id TEXT,
+			status TEXT NOT NULL,
+			created_by TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			effective_at DATETIME,
+			expires_at DATETIME
+		)`,
+		`CREATE TABLE knowledge_version_reviews (
+			id TEXT PRIMARY KEY,
+			version_id TEXT NOT NULL,
+			reviewer_id TEXT NOT NULL,
+			action TEXT NOT NULL,
+			comment TEXT,
+			created_at DATETIME NOT NULL
+		)`,
+	} {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	return db
+}
+
+func TestListReviewTasksScopesToKnowledgeBaseIDs(t *testing.T) {
+	db := openKnowledgeReviewTasksTestDB(t)
+	repo := NewKnowledgeGovernanceRepository(db, nil)
+	ctx := context.Background()
+	submittedAt := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+
+	for _, row := range []struct {
+		kbID, kbName, knowledgeID, title, versionID, submitter string
+	}{
+		{"kb-a", "Alpha KB", "doc-a", "Alpha Doc", "version-a", "author-a"},
+		{"kb-b", "Beta KB", "doc-b", "Beta Doc", "version-b", "author-b"},
+	} {
+		if err := db.Exec("INSERT INTO knowledge_bases (id, tenant_id, name) VALUES (?, ?, ?)", row.kbID, 1, row.kbName).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Exec(
+			"INSERT INTO knowledges (id, tenant_id, knowledge_base_id, title, parse_status, pending_version_id) VALUES (?, ?, ?, ?, ?, ?)",
+			row.knowledgeID, 1, row.kbID, row.title, types.ParseStatusPendingReview, row.versionID,
+		).Error; err != nil {
+			t.Fatal(err)
+		}
+		version := &types.KnowledgeVersion{
+			ID: row.versionID, TenantID: 1, KnowledgeID: row.knowledgeID, VersionLabel: "v1",
+			ContentHash: types.HashKnowledgeContent([]byte(row.versionID)),
+			SourceMetadata: types.KnowledgeSourceMetadata{
+				Layer: types.KnowledgeLayerFoundation, SourceCategory: "test", AuthorityLevel: "test",
+			},
+			Status: types.KnowledgeVersionPendingReview, CreatedBy: row.submitter, CreatedAt: submittedAt,
+		}
+		if err := repo.CreateVersion(ctx, version); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.CreateReview(ctx, &types.KnowledgeVersionReview{
+			ID: uuid.NewString(), VersionID: row.versionID, ReviewerID: row.submitter, Action: "submit", CreatedAt: submittedAt,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tasks, total, err := repo.ListReviewTasks(ctx, 1, []string{"kb-a"}, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(tasks) != 1 {
+		t.Fatalf("scoped list = total:%d tasks:%d, want 1", total, len(tasks))
+	}
+	if tasks[0].KnowledgeBaseID != "kb-a" || tasks[0].KnowledgeTitle != "Alpha Doc" || tasks[0].Submitter != "author-a" {
+		t.Fatalf("scoped task = %+v", tasks[0])
+	}
+
+	count, err := repo.CountPendingReviewTasks(ctx, 1, []string{"kb-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("scoped count = %d, want 1", count)
+	}
+}

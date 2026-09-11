@@ -29,9 +29,10 @@ type ImageRef struct {
 
 // SplitterConfig configures the text splitter.
 type SplitterConfig struct {
-	ChunkSize    int
-	ChunkOverlap int
-	Separators   []string
+	ChunkSize      int
+	ChunkOverlap   int
+	Separators     []string
+	InheritHeading bool
 }
 
 // DefaultConfig returns sensible defaults.
@@ -163,7 +164,7 @@ func SplitText(text string, cfg SplitterConfig) []Chunk {
 	units := buildUnitsWithProtection(text, protected, separators)
 
 	// Step 3: Merge units into chunks with overlap
-	return mergeUnits(units, chunkSize, chunkOverlap)
+	return mergeUnits(units, chunkSize, chunkOverlap, cfg.InheritHeading)
 }
 
 // buildUnitsWithProtection splits text into units, preserving protected spans as atomic.
@@ -258,9 +259,9 @@ func buildUnitsWithProtection(text string, protected []span, separators []string
 
 // mergeUnits combines split units into chunks with overlap tracking.
 // Enforces an absolute maximum chunk size to prevent exceeding downstream limits (e.g., embedding APIs).
-// Active contextual headers (e.g., Markdown table headers) are prepended to new
-// chunks so that every chunk carries its own header context.
-func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
+// Active contextual prefixes (chapter heading path, then Markdown table headers) are prepended
+// to new chunks so that every chunk carries its own header context.
+func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int, inheritHeading bool) []Chunk {
 	if len(units) == 0 {
 		return nil
 	}
@@ -268,6 +269,10 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 	const absoluteMaxSize = 7500
 
 	ht := newHeaderTracker()
+	var hdt *headingTracker
+	if inheritHeading {
+		hdt = newHeadingTracker()
+	}
 
 	var chunks []Chunk
 	var current []splitUnit
@@ -286,6 +291,9 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 			}
 
 			// Update header state even for oversized units
+			if hdt != nil {
+				hdt.update(u.text)
+			}
 			ht.update(u.text)
 
 			// Split this oversized unit into smaller chunks
@@ -316,8 +324,23 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 			continue
 		}
 
-		// Update header tracking
+		// Update contextual prefix tracking
+		if hdt != nil {
+			hdt.update(u.text)
+		}
 		ht.update(u.text)
+
+		headingPrefix := ""
+		headingPrefixLen := 0
+		if hdt != nil {
+			headingPrefix = hdt.getPrefix()
+			headingPrefixLen = runeLen(headingPrefix)
+			if headingPrefixLen > chunkSize {
+				headingPrefix = ""
+				headingPrefixLen = 0
+			}
+		}
+
 		headers := ht.getHeaders()
 		headersLen := runeLen(headers)
 		if headersLen > chunkSize {
@@ -325,32 +348,39 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 			headersLen = 0
 		}
 
-		// If adding this unit (plus reserving space for headers in a potential
+		prefixReserve := headingPrefixLen + headersLen
+
+		// If adding this unit (plus reserving space for prefixes in a potential
 		// next chunk) would exceed chunk size, flush the current chunk.
-		if curLen+uLen+headersLen > chunkSize && len(current) > 0 {
+		if curLen+uLen+prefixReserve > chunkSize && len(current) > 0 {
 			chunks = append(chunks, buildChunk(current, len(chunks)))
 
 			// Keep overlap from the end of current
 			current, curLen = computeOverlap(current, chunkOverlap, chunkSize, uLen)
 
-			// Shrink overlap further if needed to fit headers + next unit
-			if headers != "" && headersLen+uLen <= chunkSize {
-				for len(current) > 0 && curLen+uLen+headersLen > chunkSize {
+			// Shrink overlap further if needed to fit prefixes + next unit
+			if prefixReserve > 0 && prefixReserve+uLen <= chunkSize {
+				for len(current) > 0 && curLen+uLen+prefixReserve > chunkSize {
 					curLen -= runeLen(current[0].text)
 					current = current[1:]
 				}
 
-				// Prepend headers if the column-name context is not already present
-				// in the overlap or the next unit being added.
 				overlapText := unitsText(current)
-				if !headerAlreadyPresent(headers, overlapText, u.text) {
-					startPos := u.start
-					if len(current) > 0 {
-						startPos = current[0].start
-					}
+				startPos := u.start
+				if len(current) > 0 {
+					startPos = current[0].start
+				}
+
+				// Prepend in reverse so final order is: heading path, table headers, content.
+				if headers != "" && !headerAlreadyPresent(headers, overlapText, u.text) {
 					hUnit := splitUnit{text: headers, start: startPos, end: startPos}
 					current = append([]splitUnit{hUnit}, current...)
 					curLen += headersLen
+				}
+				if headingPrefix != "" && !headingPrefixAlreadyPresent(headingPrefix, overlapText, u.text) {
+					hUnit := splitUnit{text: headingPrefix, start: startPos, end: startPos}
+					current = append([]splitUnit{hUnit}, current...)
+					curLen += headingPrefixLen
 				}
 			}
 		}

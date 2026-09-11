@@ -953,6 +953,160 @@ func TestSplitText_RestoreTextWithOverlap(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Heading inheritance tests
+// ---------------------------------------------------------------------------
+
+func TestSplitText_HeadingInheritCrossChunk(t *testing.T) {
+	para := strings.Repeat("这是一段用于测试标题继承的中文内容。", 8)
+	text := "## 部署\n\n" + para + "\n\n" + para
+
+	cfg := SplitterConfig{
+		ChunkSize:      80,
+		ChunkOverlap:   5,
+		Separators:     []string{"\n\n", "\n", "。"},
+		InheritHeading: true,
+	}
+	chunks := SplitText(text, cfg)
+	if len(chunks) < 2 {
+		t.Fatalf("expected multiple chunks, got %d", len(chunks))
+	}
+
+	foundInherited := false
+	for i, c := range chunks {
+		if i == 0 {
+			continue
+		}
+		contentRunes := []rune(c.Content)
+		spanLen := c.End - c.Start
+		hasVirtualPrefix := len(contentRunes) > spanLen
+		if strings.HasPrefix(c.Content, "## 部署\n") && hasVirtualPrefix {
+			foundInherited = true
+		}
+	}
+	if !foundInherited {
+		t.Error("expected at least one continuation chunk with inherited heading prefix")
+		for i, c := range chunks {
+			t.Logf("chunk[%d] start=%d end=%d:\n%s", i, c.Start, c.End, c.Content)
+		}
+	}
+}
+
+func TestSplitText_HeadingInheritNoDuplicateWhenHeadingPresent(t *testing.T) {
+	text := "# 文档\n\n## 部署\n\n" + strings.Repeat("正文内容。", 20) + "\n\n### 子节\n\n" + strings.Repeat("子节正文。", 20)
+
+	cfg := SplitterConfig{
+		ChunkSize:      60,
+		ChunkOverlap:   5,
+		Separators:     []string{"\n\n", "\n", "。"},
+		InheritHeading: true,
+	}
+	chunks := SplitText(text, cfg)
+
+	for i, c := range chunks {
+		if strings.Contains(c.Content, "### 子节") {
+			trimmed := strings.TrimLeft(c.Content, " \t")
+			count := strings.Count(trimmed, "### 子节")
+			if strings.HasPrefix(trimmed, "### 子节") && count > 1 {
+				t.Errorf("chunk[%d] duplicated heading prefix:\n%s", i, c.Content)
+			}
+		}
+	}
+}
+
+func TestSplitText_HeadingInheritWithTableHeader(t *testing.T) {
+	text := "" +
+		"## 部署\n\n" +
+		"| 名称 | 值 |\n" +
+		"| --- | --- |\n" +
+		"| A | 1 |\n" +
+		"| B | 2 |\n" +
+		"| C | 3 |\n" +
+		"| D | 4 |\n" +
+		"| E | 5 |\n" +
+		"| F | 6 |\n"
+
+	tableHeader := "| 名称 | 值 |\n| --- | --- |\n"
+	headingPrefix := "## 部署\n"
+
+	cfg := SplitterConfig{
+		ChunkSize:      50,
+		ChunkOverlap:   5,
+		Separators:     []string{"\n\n", "\n"},
+		InheritHeading: true,
+	}
+	chunks := SplitText(text, cfg)
+
+	foundCombined := false
+	for _, c := range chunks {
+		hasLaterRow := strings.Contains(c.Content, "| C |") || strings.Contains(c.Content, "| D |")
+		if hasLaterRow && !strings.Contains(c.Content, "| A |") {
+			headingIdx := strings.Index(c.Content, headingPrefix)
+			tableIdx := strings.Index(c.Content, tableHeader)
+			if headingIdx < 0 || tableIdx < 0 {
+				t.Errorf("chunk missing heading or table prefix:\n%s", c.Content)
+				continue
+			}
+			if headingIdx > tableIdx {
+				t.Errorf("heading prefix should come before table header:\n%s", c.Content)
+			}
+			foundCombined = true
+		}
+	}
+	if !foundCombined {
+		t.Error("expected at least one chunk with both heading and table header prefixes")
+	}
+}
+
+func TestSplitText_HeadingInheritDisabled(t *testing.T) {
+	para := strings.Repeat("这是一段用于测试标题继承的中文内容。", 8)
+	text := "## 部署\n\n" + para + "\n\n" + para
+
+	cfg := SplitterConfig{
+		ChunkSize:      80,
+		ChunkOverlap:   5,
+		Separators:     []string{"\n\n", "\n", "。"},
+		InheritHeading: false,
+	}
+	chunks := SplitText(text, cfg)
+	if len(chunks) < 2 {
+		t.Fatalf("expected multiple chunks, got %d", len(chunks))
+	}
+
+	for i, c := range chunks {
+		if i == 0 {
+			continue
+		}
+		if strings.HasPrefix(c.Content, "## 部署\n") && !strings.Contains(c.Content, "## 部署\n\n") {
+			// Allow only when the heading is part of original overlap, not a virtual prefix.
+			contentRunes := []rune(c.Content)
+			spanLen := c.End - c.Start
+			if len(contentRunes) > spanLen {
+				t.Errorf("chunk[%d] has virtual heading prefix with InheritHeading=false:\n%s", i, c.Content)
+			}
+		}
+	}
+}
+
+func TestHeadingTracker_StackLifecycle(t *testing.T) {
+	ht := newHeadingTracker()
+
+	ht.update("# 文档\n\n一些介绍。")
+	if p := ht.getPrefix(); p != "# 文档\n" {
+		t.Errorf("after h1: got %q, want %q", p, "# 文档\n")
+	}
+
+	ht.update("## 部署\n\n步骤一。")
+	if p := ht.getPrefix(); p != "# 文档\n## 部署\n" {
+		t.Errorf("after h2: got %q", p)
+	}
+
+	ht.update("## 监控\n\n步骤二。")
+	if p := ht.getPrefix(); p != "# 文档\n## 监控\n" {
+		t.Errorf("after sibling h2: got %q", p)
+	}
+}
+
 func TestSplitTextParentChild_WithTableHeaders(t *testing.T) {
 	text := "" +
 		"前言\n\n" +

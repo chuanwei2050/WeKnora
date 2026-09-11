@@ -975,3 +975,203 @@ func mapCanonicalEdges(values map[string]types.GraphEdge) []types.GraphEdge {
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
 }
+
+const defaultGraphOverviewLimit = 300
+const maxGraphOverviewLimit = 800
+
+// GetGraphOverview returns a read-only explore canvas for a knowledge base.
+func (n *Neo4jRepository) GetGraphOverview(ctx context.Context, scope types.GraphScope, limit int) (*types.GraphOverview, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if n.driver == nil {
+		return &types.GraphOverview{Nodes: []types.GraphOverviewNode{}, Edges: []types.GraphOverviewEdge{}, Stats: types.GraphOverviewStats{EntityTypes: map[string]int{}}}, nil
+	}
+	if limit <= 0 {
+		limit = defaultGraphOverviewLimit
+	}
+	if limit > maxGraphOverviewLimit {
+		limit = maxGraphOverviewLimit
+	}
+	namespaces, err := n.canonicalSearchNamespaces(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	if len(namespaces) == 0 {
+		namespaces = []string{"default"}
+	}
+
+	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
+
+	params := map[string]interface{}{
+		"tenant_id":         scope.TenantID,
+		"knowledge_base_id": scope.KnowledgeBaseID,
+		"namespaces":        namespaces,
+		"limit":             limit,
+	}
+	allowedFilter := ""
+	if len(scope.AllowedKnowledgeIDs) > 0 {
+		allowedFilter = " AND instance.knowledge_id IN $allowed_knowledge_ids"
+		params["allowed_knowledge_ids"] = scope.AllowedKnowledgeIDs
+	}
+
+	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		overview := &types.GraphOverview{
+			Nodes: []types.GraphOverviewNode{},
+			Edges: []types.GraphOverviewEdge{},
+			Stats: types.GraphOverviewStats{EntityTypes: map[string]int{}},
+		}
+		nodeSeen := map[string]struct{}{}
+		edgeSeen := map[string]struct{}{}
+		mentionCount := map[string]int{}
+
+		entityCursor, err := tx.Run(ctx, `MATCH (entity:CanonicalEntity)
+WHERE entity.tenant_id = $tenant_id AND entity.knowledge_base_id = $knowledge_base_id
+  AND entity.namespace IN $namespaces
+RETURN entity.canonical_key AS id, entity.name AS label, entity.entity_type AS entity_type
+LIMIT $limit`, params)
+		if err != nil {
+			return nil, err
+		}
+		for entityCursor.Next(ctx) {
+			rec := entityCursor.Record()
+			id := strings.TrimSpace(fmt.Sprint(rec.Values[0]))
+			label := strings.TrimSpace(fmt.Sprint(rec.Values[1]))
+			entityType := strings.TrimSpace(fmt.Sprint(rec.Values[2]))
+			if id == "" || id == "<nil>" {
+				continue
+			}
+			if label == "" || label == "<nil>" {
+				label = id
+			}
+			if entityType == "<nil>" {
+				entityType = ""
+			}
+			nodeSeen[id] = struct{}{}
+			overview.Nodes = append(overview.Nodes, types.GraphOverviewNode{
+				ID: id, Kind: "entity", Label: label, EntityType: entityType,
+			})
+			overview.Stats.EntityCount++
+			if entityType != "" {
+				overview.Stats.EntityTypes[entityType]++
+			}
+		}
+		if err := entityCursor.Err(); err != nil {
+			return nil, err
+		}
+
+		mentionQuery := `MATCH (instance:DocumentEntityInstance)-[:INSTANCE_OF]->(entity:CanonicalEntity)
+WHERE instance.tenant_id = $tenant_id AND instance.knowledge_base_id = $knowledge_base_id
+  AND instance.namespace IN $namespaces` + allowedFilter + `
+RETURN DISTINCT instance.knowledge_id AS knowledge_id, entity.canonical_key AS entity_id
+LIMIT $limit`
+		mentionCursor, err := tx.Run(ctx, mentionQuery, params)
+		if err != nil {
+			return nil, err
+		}
+		for mentionCursor.Next(ctx) {
+			rec := mentionCursor.Record()
+			kid := strings.TrimSpace(fmt.Sprint(rec.Values[0]))
+			eid := strings.TrimSpace(fmt.Sprint(rec.Values[1]))
+			if kid == "" || kid == "<nil>" || eid == "" || eid == "<nil>" {
+				continue
+			}
+			knowledgeNodeID := "knowledge:" + kid
+			if _, ok := nodeSeen[knowledgeNodeID]; !ok {
+				nodeSeen[knowledgeNodeID] = struct{}{}
+				overview.Nodes = append(overview.Nodes, types.GraphOverviewNode{
+					ID: knowledgeNodeID, Kind: "knowledge", Label: kid, KnowledgeID: kid,
+				})
+				overview.Stats.KnowledgeCount++
+			}
+			if _, ok := nodeSeen[eid]; !ok {
+				continue
+			}
+			edgeID := "mentions:" + kid + ":" + eid
+			if _, ok := edgeSeen[edgeID]; ok {
+				continue
+			}
+			edgeSeen[edgeID] = struct{}{}
+			overview.Edges = append(overview.Edges, types.GraphOverviewEdge{
+				ID: edgeID, Source: knowledgeNodeID, Target: eid, Kind: "mentions", Label: "mentions",
+			})
+			overview.Stats.EdgeCount++
+			mentionCount[eid]++
+		}
+		if err := mentionCursor.Err(); err != nil {
+			return nil, err
+		}
+
+		relCursor, err := tx.Run(ctx, `MATCH (relation:CanonicalRelation)-[:CONNECTS_FROM]->(source:CanonicalEntity)
+MATCH (relation)-[:CONNECTS_TO]->(target:CanonicalEntity)
+WHERE relation.tenant_id = $tenant_id AND relation.knowledge_base_id = $knowledge_base_id
+  AND relation.namespace IN $namespaces
+RETURN relation.relation_key AS id, source.canonical_key AS source, target.canonical_key AS target, relation.relation_type AS label
+LIMIT $limit`, params)
+		if err != nil {
+			return nil, err
+		}
+		for relCursor.Next(ctx) {
+			rec := relCursor.Record()
+			id := strings.TrimSpace(fmt.Sprint(rec.Values[0]))
+			source := strings.TrimSpace(fmt.Sprint(rec.Values[1]))
+			target := strings.TrimSpace(fmt.Sprint(rec.Values[2]))
+			label := strings.TrimSpace(fmt.Sprint(rec.Values[3]))
+			if id == "" || id == "<nil>" || source == "" || target == "" {
+				continue
+			}
+			if _, ok := nodeSeen[source]; !ok {
+				continue
+			}
+			if _, ok := nodeSeen[target]; !ok {
+				continue
+			}
+			if _, ok := edgeSeen[id]; ok {
+				continue
+			}
+			edgeSeen[id] = struct{}{}
+			overview.Edges = append(overview.Edges, types.GraphOverviewEdge{
+				ID: id, Source: source, Target: target, Kind: "related", Label: label,
+			})
+			overview.Stats.EdgeCount++
+		}
+		if err := relCursor.Err(); err != nil {
+			return nil, err
+		}
+
+		type ranked struct {
+			id    string
+			count int
+		}
+		rankedList := make([]ranked, 0, len(mentionCount))
+		for id, count := range mentionCount {
+			rankedList = append(rankedList, ranked{id: id, count: count})
+		}
+		sort.Slice(rankedList, func(i, j int) bool {
+			if rankedList[i].count == rankedList[j].count {
+				return rankedList[i].id < rankedList[j].id
+			}
+			return rankedList[i].count > rankedList[j].count
+		})
+		for i, item := range rankedList {
+			if i >= 10 {
+				break
+			}
+			for _, node := range overview.Nodes {
+				if node.ID == item.id {
+					overview.TopEntities = append(overview.TopEntities, node.Label)
+					break
+				}
+			}
+		}
+		if overview.Stats.EntityCount >= limit || overview.Stats.EdgeCount >= limit {
+			overview.Stats.Truncated = true
+		}
+		return overview, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.(*types.GraphOverview), nil
+}

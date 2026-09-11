@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
+	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -192,9 +194,16 @@ func (e *AgentEngine) handleMaxIterations(
 func (e *AgentEngine) emitCompletionEvent(
 	ctx context.Context, state *types.AgentState, sessionID, messageID string, startTime time.Time,
 ) {
+	mode := chatpipeline.NormalizeCiteFilterMode(os.Getenv("CITE_FILTER_MODE"))
+	refs := state.KnowledgeRefs
+	if mode != chatpipeline.CiteFilterOff {
+		refs = chatpipeline.FilterSearchResultsByChunkCitations(mode, state.FinalAnswer, state.KnowledgeRefs)
+		state.KnowledgeRefs = refs
+	}
+
 	// Convert knowledge refs to interface{} slice for event data
-	knowledgeRefsInterface := make([]interface{}, 0, len(state.KnowledgeRefs))
-	for _, ref := range state.KnowledgeRefs {
+	knowledgeRefsInterface := make([]interface{}, 0, len(refs))
+	for _, ref := range refs {
 		knowledgeRefsInterface = append(knowledgeRefsInterface, ref)
 	}
 
@@ -204,6 +213,21 @@ func (e *AgentEngine) emitCompletionEvent(
 	}
 	if e.config != nil && e.config.SubQuestionPlan != nil {
 		extra["sub_question_plan"] = e.config.SubQuestionPlan
+	}
+	if mode != chatpipeline.CiteFilterOff {
+		extra["cite_filter_mode"] = string(mode)
+		_ = e.eventBus.Emit(ctx, event.Event{
+			ID:        generateEventID("cite-refs"),
+			Type:      event.EventAgentReferences,
+			SessionID: sessionID,
+			Data: event.AgentReferencesData{
+				References: refs,
+				Extra: map[string]interface{}{
+					"replace_refs":     true,
+					"cite_filter_mode": string(mode),
+				},
+			},
+		})
 	}
 	e.eventBus.Emit(ctx, event.Event{
 		ID:        generateEventID("complete"),

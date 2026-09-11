@@ -309,6 +309,7 @@
                   <GraphSettings
                     v-if="formData"
                     :graph-extract="formData.nodeExtractConfig"
+                    :knowledge-base-id="kbId"
                     @update:graphExtract="handleNodeExtractUpdate"
                   />
                 </div>
@@ -591,7 +592,8 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       separators: ['\n\n', '\n', '。', '！', '？', ';', '；'],
       enableParentChild: true,
       parentChunkSize: 4096,
-      childChunkSize: 384
+      childChunkSize: 384,
+      inheritHeading: true
     },
     multimodalConfig: {
       enabled: false,
@@ -671,7 +673,8 @@ const loadKBData = async () => {
         separators: kb.chunking_config?.separators || ['\n\n', '\n', '。', '！', '？', ';', '；'],
         enableParentChild: kb.chunking_config?.enable_parent_child || false,
         parentChunkSize: kb.chunking_config?.parent_chunk_size || 4096,
-        childChunkSize: kb.chunking_config?.child_chunk_size || 384
+        childChunkSize: kb.chunking_config?.child_chunk_size || 384,
+        inheritHeading: kb.chunking_config?.inherit_heading ?? true
       },
       multimodalConfig: {
         enabled: !!kb.vlm_config?.enabled,
@@ -942,7 +945,8 @@ const buildSubmitData = () => {
       enable_multimodal: formData.value.multimodalConfig.enabled,
       enable_parent_child: formData.value.chunkingConfig.enableParentChild,
       parent_chunk_size: formData.value.chunkingConfig.parentChunkSize,
-      child_chunk_size: formData.value.chunkingConfig.childChunkSize
+      child_chunk_size: formData.value.chunkingConfig.childChunkSize,
+      inherit_heading: formData.value.chunkingConfig.inheritHeading ?? true
     },
     embedding_model_id: '',
     summary_model_id: ''
@@ -1130,7 +1134,8 @@ const doSubmit = async () => {
           separators: data.chunking_config.separators,
           enableParentChild: data.chunking_config.enable_parent_child || false,
           parentChunkSize: data.chunking_config.parent_chunk_size || 4096,
-          childChunkSize: data.chunking_config.child_chunk_size || 384
+          childChunkSize: data.chunking_config.child_chunk_size || 384,
+          inheritHeading: data.chunking_config.inherit_heading ?? true
         },
         multimodal: {
           enabled: !!data.vlm_config?.enabled

@@ -314,6 +314,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewWikiPageHandler))
 	must(container.Provide(handler.NewAnswerFeedbackHandler))
 	must(container.Provide(handler.NewGraphTripleReviewHandler))
+	must(container.Provide(handler.NewGraphExploreHandler))
 	must(container.Provide(handler.NewKnowledgeGovernanceHandler))
 	must(container.Provide(handler.NewAcceptanceBenchmarkHandler))
 	must(container.Invoke(startVoiceTempCleaner))

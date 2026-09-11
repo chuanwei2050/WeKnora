@@ -639,3 +639,38 @@ func finalizeGraphResult(result GraphSearchResult, query GraphQuery) GraphSearch
 	sort.Slice(result.Edges, func(i, j int) bool { return result.Edges[i].ID < result.Edges[j].ID })
 	return result
 }
+
+// GraphOverviewNode is a node in the knowledge-graph explore canvas.
+type GraphOverviewNode struct {
+	ID         string `json:"id"`
+	Kind       string `json:"kind"` // knowledge | entity
+	Label      string `json:"label"`
+	EntityType string `json:"entity_type,omitempty"`
+	KnowledgeID string `json:"knowledge_id,omitempty"`
+}
+
+// GraphOverviewEdge is an edge in the knowledge-graph explore canvas.
+type GraphOverviewEdge struct {
+	ID     string `json:"id"`
+	Source string `json:"source"`
+	Target string `json:"target"`
+	Kind   string `json:"kind"` // mentions | related
+	Label  string `json:"label,omitempty"`
+}
+
+// GraphOverviewStats aggregates explore canvas counters.
+type GraphOverviewStats struct {
+	KnowledgeCount int            `json:"knowledge_count"`
+	EntityCount    int            `json:"entity_count"`
+	EdgeCount      int            `json:"edge_count"`
+	EntityTypes    map[string]int `json:"entity_types,omitempty"`
+	Truncated      bool           `json:"truncatedated,omitempty"`
+}
+
+// GraphOverview is the read-only payload for KB graph visualization.
+type GraphOverview struct {
+	Nodes       []GraphOverviewNode `json:"nodes"`
+	Edges       []GraphOverviewEdge `json:"edges"`
+	Stats       GraphOverviewStats  `json:"stats"`
+	TopEntities []string            `json:"top_entities,omitempty"`
+}

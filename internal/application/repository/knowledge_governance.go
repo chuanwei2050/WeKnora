@@ -452,3 +452,104 @@ func (r *knowledgeGovernanceRepository) ListReviews(ctx context.Context, version
 	err := r.db.WithContext(ctx).Where("version_id = ?", versionID).Order("created_at ASC").Find(&reviews).Error
 	return reviews, err
 }
+
+type reviewTaskQueryRow struct {
+	VersionID         string    `gorm:"column:version_id"`
+	KnowledgeID       string    `gorm:"column:knowledge_id"`
+	KnowledgeTitle    string    `gorm:"column:knowledge_title"`
+	KnowledgeBaseID   string    `gorm:"column:knowledge_base_id"`
+	KnowledgeBaseName string    `gorm:"column:knowledge_base_name"`
+	VersionLabel      string    `gorm:"column:version_label"`
+	Submitter         string    `gorm:"column:submitter"`
+	SubmitTimeRaw     *string   `gorm:"column:submit_time"`
+	VersionCreatedAt  time.Time `gorm:"column:version_created_at"`
+}
+
+func parseReviewTaskTimestamp(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05.999999999-07:00", "2006-01-02 15:04:05", "2006-01-02T15:04:05Z07:00"} {
+		if parsed, err := time.Parse(layout, raw); err == nil {
+			return parsed.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+func (row reviewTaskQueryRow) task() *types.KnowledgeReviewTask {
+	submittedAt := row.VersionCreatedAt
+	if row.SubmitTimeRaw != nil {
+		if parsed, ok := parseReviewTaskTimestamp(*row.SubmitTimeRaw); ok {
+			submittedAt = parsed
+		}
+	}
+	return &types.KnowledgeReviewTask{
+		VersionID:         row.VersionID,
+		KnowledgeID:       row.KnowledgeID,
+		KnowledgeTitle:    row.KnowledgeTitle,
+		KnowledgeBaseID:   row.KnowledgeBaseID,
+		KnowledgeBaseName: row.KnowledgeBaseName,
+		VersionLabel:      row.VersionLabel,
+		Submitter:         row.Submitter,
+		SubmittedAt:       submittedAt,
+	}
+}
+
+func (r *knowledgeGovernanceRepository) pendingReviewTasksQuery(tenantID uint64, knowledgeBaseIDs []string) *gorm.DB {
+	submitReviews := r.db.Table("knowledge_version_reviews").
+		Select("version_id, MAX(created_at) AS submit_time").
+		Where("action = ?", "submit").
+		Group("version_id")
+	return r.db.Table("knowledge_versions AS kv").
+		Select(`kv.id AS version_id, kv.knowledge_id, k.title AS knowledge_title,
+			k.knowledge_base_id, kb.name AS knowledge_base_name,
+			kv.version_label, kv.created_by AS submitter,
+			submits.submit_time, kv.created_at AS version_created_at`).
+		Joins("INNER JOIN knowledges k ON k.id = kv.knowledge_id AND k.tenant_id = kv.tenant_id AND k.deleted_at IS NULL").
+		Joins("INNER JOIN knowledge_bases kb ON kb.id = k.knowledge_base_id AND kb.tenant_id = k.tenant_id AND kb.deleted_at IS NULL").
+		Joins("LEFT JOIN (?) AS submits ON submits.version_id = kv.id", submitReviews).
+		Where("kv.tenant_id = ?", tenantID).
+		Where("kv.status = ?", types.KnowledgeVersionPendingReview).
+		Where("k.pending_version_id = kv.id").
+		Where("k.knowledge_base_id IN ?", knowledgeBaseIDs)
+}
+
+func (r *knowledgeGovernanceRepository) ListReviewTasks(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseIDs []string,
+	offset, limit int,
+) ([]*types.KnowledgeReviewTask, int64, error) {
+	if len(knowledgeBaseIDs) == 0 {
+		return nil, 0, nil
+	}
+	query := r.pendingReviewTasksQuery(tenantID, knowledgeBaseIDs).WithContext(ctx)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []reviewTaskQueryRow
+	if err := query.Order("submit_time ASC, version_created_at ASC").Offset(offset).Limit(limit).Scan(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	tasks := make([]*types.KnowledgeReviewTask, len(rows))
+	for i, row := range rows {
+		tasks[i] = row.task()
+	}
+	return tasks, total, nil
+}
+
+func (r *knowledgeGovernanceRepository) CountPendingReviewTasks(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseIDs []string,
+) (int64, error) {
+	if len(knowledgeBaseIDs) == 0 {
+		return 0, nil
+	}
+	var count int64
+	err := r.pendingReviewTasksQuery(tenantID, knowledgeBaseIDs).WithContext(ctx).Count(&count).Error
+	return count, err
+}

@@ -36,6 +36,18 @@
 
       <div v-if="localGraphExtract.enabled" class="setting-row">
         <div class="setting-info">
+          <label>{{ t('graphSettings.rebuildLabel') }}</label>
+          <p class="desc">{{ t('graphSettings.rebuildDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-button theme="warning" variant="outline" :loading="rebuildLoading" @click="handleRebuildGraph">
+            {{ t('graphSettings.rebuildLabel') }}
+          </t-button>
+        </div>
+      </div>
+
+      <div v-if="localGraphExtract.enabled" class="setting-row">
+        <div class="setting-info">
           <label>{{ t('graphSettings.requireTripleReviewLabel') }}</label>
           <p class="desc">{{ t('graphSettings.requireTripleReviewDescription') }}</p>
         </div>
@@ -335,6 +347,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { extractTextRelations, fabriText, type Node, type Relation } from '@/api/initialization'
 import { getSystemInfo } from '@/api/system'
+import { post } from '@/utils/request'
 import { useUIStore } from '@/stores/ui'
 import { openExternalUrl } from '@/utils/open-external-url'
 import {
@@ -372,6 +385,7 @@ interface GraphExtractConfig {
 
 interface Props {
   graphExtract: GraphExtractConfig
+  knowledgeBaseId?: string
 }
 
 const props = defineProps<Props>()
@@ -461,6 +475,24 @@ const handleConfigChange = () => {
 // 处理启用/禁用切换
 const handleEnabledChange = () => {
   handleConfigChange()
+}
+
+const rebuildLoading = ref(false)
+const handleRebuildGraph = async () => {
+  const kbId = props.knowledgeBaseId
+  if (!kbId) return
+  const ok = window.confirm(t('graphSettings.rebuildConfirm'))
+  if (!ok) return
+  rebuildLoading.value = true
+  try {
+    const res: any = await post(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/rebuild-graph`, {})
+    const count = res?.data?.document_count ?? 0
+    MessagePlugin.success(t('graphSettings.rebuildSuccess', { n: count }))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('graphSettings.rebuildFailed'))
+  } finally {
+    rebuildLoading.value = false
+  }
 }
 
 const handleModeChange = () => {

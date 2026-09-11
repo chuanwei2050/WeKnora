@@ -56,3 +56,17 @@ TBD - created by archiving change simplify-knowledge-graph-configuration. Update
 - **WHEN** 管理员确认重建
 - **THEN** 后端 MUST 清理旧图来源并为当前有效文档创建重新处理任务
 
+### Requirement: 知识库设置提供实体图谱浏览入口
+在知识库已启用实体关系抽取时，系统 MUST 在知识库界面提供进入知识图谱浏览的入口；文案 MUST 标明为知识图谱，MUST NOT 与 Wiki 页面图谱入口混淆。浏览使用只读 overview 数据，MUST NOT 替代三种抽取方式配置或三元组审核流程。
+
+#### Scenario: 启用实体抽取后可见浏览入口
+- **WHEN** 管理员已启用知识库实体关系抽取
+- **THEN** 知识库界面可导航至知识图谱浏览
+
+### Requirement: 一键重建实体图谱的用户心智
+系统 MUST 提供明确的实体图谱重建操作入口（或等价能力），并在执行前说明将清理旧图数据后重新抽取；重建 MUST 复用现有删除与入队抽取机制。
+
+#### Scenario: 用户确认重建
+- **WHEN** 管理员确认对某知识库执行实体图谱重建
+- **THEN** 系统清理该库相关图数据并重新入队抽取任务，配置中的抽取方式保持不变
+

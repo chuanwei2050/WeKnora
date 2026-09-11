@@ -53,6 +53,10 @@ func (f *graphRepositoryFixture) DeleteCanonicalKnowledgeBase(context.Context, u
 	return nil
 }
 
+func (f *graphRepositoryFixture) GetGraphOverview(context.Context, types.GraphScope, int) (*types.GraphOverview, error) {
+	return &types.GraphOverview{Nodes: []types.GraphOverviewNode{}, Edges: []types.GraphOverviewEdge{}, Stats: types.GraphOverviewStats{EntityTypes: map[string]int{}}}, nil
+}
+
 func (f *graphRepositoryFixture) RebuildCanonicalGraph(context.Context, uint64, string, string, []types.GraphRebuildRecord, bool) (types.GraphRebuildResult, error) {
 	return types.GraphRebuildResult{}, nil
 }

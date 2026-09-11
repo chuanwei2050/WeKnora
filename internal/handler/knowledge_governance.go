@@ -97,6 +97,28 @@ func (h *KnowledgeGovernanceHandler) canReadGovernance(c *gin.Context, knowledge
 	return types.CanManageKnowledgeBase(c.Request.Context(), kb) || types.CanReviewKnowledge(c.Request.Context(), kb) || (ok && knowledge.CreatedBy == userID)
 }
 
+func (h *KnowledgeGovernanceHandler) reviewableKnowledgeBaseIDs(c *gin.Context) ([]string, error) {
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
+		return nil, errors.NewUnauthorizedError("unauthorized")
+	}
+	if h.knowledgeBases == nil {
+		return nil, nil
+	}
+	kbs, err := h.knowledgeBases.ListKnowledgeBases(c.Request.Context())
+	if err != nil {
+		return nil, err
+	}
+	ctx := c.Request.Context()
+	ids := make([]string, 0, len(kbs))
+	for _, kb := range kbs {
+		if kb != nil && kb.Governance.Enabled && types.CanReviewKnowledge(ctx, kb) {
+			ids = append(ids, kb.ID)
+		}
+	}
+	return ids, nil
+}
+
 func knowledgeIDFromPath(c *gin.Context) string {
 	if id := c.Param("knowledge_id"); id != "" {
 		return id
@@ -197,6 +219,68 @@ func (h *KnowledgeGovernanceHandler) CreateVersion(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"success": true, "data": version})
+}
+
+func (h *KnowledgeGovernanceHandler) ListReviewTasks(c *gin.Context) {
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
+		c.Error(errors.NewUnauthorizedError("unauthorized"))
+		return
+	}
+	status := strings.TrimSpace(c.Query("status"))
+	if status != "" && status != "pending" {
+		c.Error(errors.NewBadRequestError("status must be pending"))
+		return
+	}
+	kbIDs, err := h.reviewableKnowledgeBaseIDs(c)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			c.Error(errors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+	pagination := types.Pagination{}
+	_ = c.ShouldBindQuery(&pagination)
+	tasks, total, err := h.repo.ListReviewTasks(c.Request.Context(), tenantID, kbIDs, pagination.Offset(), pagination.Limit())
+	if err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if tasks == nil {
+		tasks = []*types.KnowledgeReviewTask{}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"data":      tasks,
+		"total":     total,
+		"page":      pagination.GetPage(),
+		"page_size": pagination.GetPageSize(),
+	})
+}
+
+func (h *KnowledgeGovernanceHandler) PendingReviewCount(c *gin.Context) {
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
+		c.Error(errors.NewUnauthorizedError("unauthorized"))
+		return
+	}
+	kbIDs, err := h.reviewableKnowledgeBaseIDs(c)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			c.Error(errors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+	count, err := h.repo.CountPendingReviewTasks(c.Request.Context(), tenantID, kbIDs)
+	if err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"count": count}})
 }
 
 func (h *KnowledgeGovernanceHandler) ListVersions(c *gin.Context) {
@@ -314,9 +398,22 @@ func (h *KnowledgeGovernanceHandler) transition(c *gin.Context, next types.Knowl
 		return
 	}
 	comment := ""
-	var request reviewKnowledgeVersionRequest
-	if c.Request.ContentLength > 0 && c.ShouldBindJSON(&request) == nil {
+	if action == "reject" {
+		var request reviewKnowledgeVersionRequest
+		if err := c.ShouldBindJSON(&request); err != nil {
+			c.Error(errors.NewBadRequestError("comment is required for reject"))
+			return
+		}
 		comment = strings.TrimSpace(request.Comment)
+		if comment == "" {
+			c.Error(errors.NewBadRequestError("comment is required for reject"))
+			return
+		}
+	} else if c.Request.ContentLength > 0 {
+		var request reviewKnowledgeVersionRequest
+		if c.ShouldBindJSON(&request) == nil {
+			comment = strings.TrimSpace(request.Comment)
+		}
 	}
 	if err := h.repo.TransitionVersionWithReview(c.Request.Context(), tenantID, version.ID, next, &types.KnowledgeVersionReview{ID: uuid.NewString(), VersionID: version.ID, ReviewerID: userID, Action: action, Comment: comment, CreatedAt: time.Now().UTC()}); err != nil {
 		c.Error(errors.NewConflictError(err.Error()))

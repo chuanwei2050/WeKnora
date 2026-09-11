@@ -297,3 +297,11 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchUpdateChunkTagID(
 ) error {
 	return v.indexRepository.BatchUpdateChunkTagID(ctx, chunkTagMap)
 }
+
+// BatchUpdateChunkMetadata updates whitelisted metadata without re-embedding.
+func (v *KeywordsVectorHybridRetrieveEngineService) BatchUpdateChunkMetadata(
+	ctx context.Context,
+	updates map[string]types.ChunkMetadataPatch,
+) error {
+	return ApplyChunkMetadataPatches(ctx, v, updates)
+}

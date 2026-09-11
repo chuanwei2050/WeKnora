@@ -81,6 +81,8 @@ type PipelineRequest struct {
 	Language            string                  `json:"-"`
 	ComplexityRouting   ComplexityRoutingConfig `json:"complexity_routing,omitempty"`
 	VerifiedAnswer      VerifiedAnswerConfig    `json:"verified_answer,omitempty"`
+	// CiteFilterMode: off | cited_or_all | cited_only (from CITE_FILTER_MODE).
+	CiteFilterMode string `json:"cite_filter_mode,omitempty"`
 }
 
 // QueryIntent represents the classified intent of a user query.
