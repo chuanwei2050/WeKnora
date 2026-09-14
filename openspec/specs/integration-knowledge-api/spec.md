@@ -44,20 +44,21 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 - **THEN** 系统在摄取文件前整次拒绝请求
 
 ### Requirement: Integration API 必须支持按知识库 ID 列表列出文件夹
-系统 MUST 在 `GET /api/integration/v1/knowledge-bases/folders?knowledge_base_ids={id1},{id2}` 为同时具有 `kb:list` 和 `knowledge:read` scope 的主体返回 ID 列表对应知识库内可用于筛选的真实文件夹，并继续执行租户、client allowlist 和用户权限校验。每个返回项 MUST 包含所属的 `knowledge_base_id`。
+系统 MUST 在 `GET /api/integration/v1/knowledge-bases/folders?knowledge_base_ids={id1},{id2}` 为同时具有 `kb:list` 和 `knowledge:read` scope 的主体返回 ID 列表对应知识库内可用于筛选的普通一级文件夹，并继续执行租户、client allowlist 和用户权限校验。每个返回项 MUST 包含所属的 `knowledge_base_id`。
 
 #### Scenario: 按多个 ID 查询授权知识库文件夹
 - **WHEN** 授权主体提交其租户内多个可访问知识库的有效 ID
-- **THEN** 系统返回普通文件夹和每个知识库唯一的虚拟“公共知识”文件夹
-- **AND** 每项只包含稳定字段 `knowledge_base_id`、`id`、`name` 和 `sort_order`
+- **THEN** 系统仅返回每个知识库的普通一级文件夹
+- **AND** 每项只包含稳定字段 `knowledge_base_id`、`id`、`name`、`parent_id` 和 `sort_order`
 - **AND** 结果保持持久化顺序
 
-#### Scenario: 文件夹列表排除固定入口
-- **WHEN** ID 对应知识库包含“未分类”、普通文件夹和公共子文件夹
+#### Scenario: 文件夹列表排除非一级普通文件夹
+- **WHEN** ID 对应知识库包含“未分类”、普通一级文件夹、普通二级文件夹和公共子文件夹
 - **THEN** 响应不包含“未分类”
 - **AND** 响应不包含无真实标签 ID 的“公共文件”容器
+- **AND** 响应不包含普通二级文件夹
 - **AND** 响应不包含“公共知识”下的真实公共子文件夹
-- **AND** 虚拟“公共知识”项具有稳定且不与真实标签冲突的专属 ID
+- **AND** 响应不包含虚拟“公共知识”项
 
 #### Scenario: 任一知识库 ID 不存在或不可访问
 - **WHEN** 任一知识库 ID 不存在或主体无权访问对应知识库
@@ -77,7 +78,7 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 - **THEN** 系统返回 `403` 且不暴露文件夹名称或 ID
 
 ### Requirement: RAG 搜索必须支持多个授权知识库
-系统 MUST 要求请求显式提交至少一个 `knowledge_base_id`，对所有授权知识库使用平台检索策略执行统一召回和统一重排，并返回全局 Top K；字段缺失、null 或空数组 MUST 返回 `400`，MUST NOT 被解释为全部知识库。系统 MUST 接受可选的 `folder_ids` 多选字段：字段缺失、null 或空数组时不得按文件夹筛选；字段为非空数组时，最终检索范围 MUST 为显式文件夹及其全部子文件夹，与这些显式文件夹所属知识库的公共子文件夹的并集。请求 `top_k` 只能缩小平台 `rerank_top_k` 所定义的最终响应上限，MUST NOT 放大或改变平台召回、融合和 rerank 预算。
+系统 MUST 要求请求显式提交至少一个 `knowledge_base_id`，对所有授权知识库使用平台检索策略执行统一召回和统一重排，并返回全局 Top K；字段缺失、null 或空数组 MUST 返回 `400`，MUST NOT 被解释为全部知识库。系统 MUST 接受可选的 `folder_ids` 多选字段：字段缺失、null 或空数组时不得按文件夹筛选；字段为非空数组时，最终检索范围 MUST 为显式普通文件夹及其全部子文件夹。请求 `top_k` 只能缩小平台 `rerank_top_k` 所定义的最终响应上限，MUST NOT 放大或改变平台召回、融合和 rerank 预算。
 
 #### Scenario: 搜索两个授权知识库
 - **WHEN** 具有 `rag:search` scope 的主体提交两个授权知识库、query 和合法 `top_k`
@@ -108,12 +109,7 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 #### Scenario: 按多个文件夹搜索
 - **WHEN** 主体提交属于所选知识库的非空 `folder_ids`
 - **THEN** 系统检索显式文件夹及其全部子文件夹
-- **AND** 系统检索这些显式文件夹所属知识库内的全部公共子文件夹
-- **AND** 对重复的公共子文件夹 ID 去重
-
-#### Scenario: 只选择公共知识
-- **WHEN** 主体仅提交某知识库的虚拟“公共知识”ID
-- **THEN** 系统只检索该知识库的全部公共子文件夹，不检索普通文件夹或未分类内容
+- **AND** 系统不因选择普通文件夹而自动加入公共子文件夹
 
 #### Scenario: 文件夹不属于所选知识库
 - **WHEN** 任一 `folder_id` 不存在、属于其他租户或不属于本次 `knowledge_base_ids`
@@ -144,7 +140,7 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 
 #### Scenario: 批量查询使用不同文件夹范围
 - **WHEN** 批量内不同查询分别提交不同的非空 `folder_ids`
-- **THEN** 系统分别使用各自显式文件夹及其全部子文件夹，与显式文件夹所属知识库内全部公共子文件夹的并集
+- **THEN** 系统分别使用各自显式普通文件夹及其全部子文件夹
 
 #### Scenario: 批量查询未提供文件夹筛选
 - **WHEN** 某个查询的 `folder_ids` 缺失、为 null 或为空数组
@@ -351,4 +347,3 @@ TBD - created by archiving change add-integration-knowledge-api. Update Purpose 
 #### Scenario: 询问公司是否具有质量体系
 - **WHEN** 用户询问公司是否具有 GJB9001C 或 ISO9001 体系且问题未要求统计表格记录
 - **THEN** 系统使用文档 RAG 路径，不因人员证书表存在相似文字而强制调用 SQL
-
