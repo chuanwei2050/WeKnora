@@ -1,0 +1,7 @@
+ARG BUILDER_IMAGE
+ARG BASE_IMAGE
+FROM ${BUILDER_IMAGE} AS builder
+
+FROM ${BASE_IMAGE}
+
+COPY --from=builder --chown=appuser:appuser /app/WeKnora /app/WeKnora

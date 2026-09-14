@@ -1,0 +1,5 @@
+services:
+  app:
+    image: wechatopenai/weknora-app:project-create-fixed-scope-v1-20260827T135000Z
+    build: !reset null
+    pull_policy: never
