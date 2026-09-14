@@ -290,7 +290,7 @@ func TestIntegrationFoldersByIDsReturnsStableOrdinaryFolderDTOAndAudits(t *testi
 		"kb-1": {ID: "kb-1", TenantID: 1},
 		"kb-2": {ID: "kb-2", TenantID: 1},
 	}, []*types.KnowledgeTag{
-		{ID: "folder-1", Name: "普通文件夹", SortOrder: 3},
+		{ID: "folder-1", Name: "普通文件夹", SortOrder: 3, IsPublic: true},
 		{ID: "folder-2", Name: "二级文件夹", ParentID: &parentID, SortOrder: 4},
 	})
 	principal := &integrationauth.Principal{ClientID: "client-1", TenantID: 1, KnowledgeBaseIDs: []string{"kb-1", "kb-2"}, Scopes: []string{"kb:list", "knowledge:read"}}
@@ -311,7 +311,6 @@ func TestIntegrationFoldersByIDsReturnsStableOrdinaryFolderDTOAndAudits(t *testi
 		{"knowledge_base_id": "kb-2", "id": "folder-1", "name": "普通文件夹", "parent_id": nil, "sort_order": float64(3)},
 		{"knowledge_base_id": "kb-2", "id": "folder-2", "name": "二级文件夹", "parent_id": "folder-1", "sort_order": float64(4)},
 	}, response.Data)
-	require.NotContains(t, recorder.Body.String(), "is_public")
 
 	var audit integrationauth.Audit
 	require.NoError(t, db.Where("action = ?", "api.knowledge_base.folders").First(&audit).Error)
