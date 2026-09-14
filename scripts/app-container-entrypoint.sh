@@ -77,9 +77,16 @@ build_app() {
     build_app_to "$runtime_dir/main.next"
 }
 
+# Preserve the container's real stdout/stderr. When start_app_bin is called via
+# $(...), the function body runs with stdout redirected to the substitution
+# pipe; a background app that inherits that pipe keeps the write end open, so
+# $(...) never sees EOF, entrypoint blocks on anon_pipe_read, and app logs
+# (including "Server is running at") never reach docker logs / backend.log.
+exec 3>&1 4>&2
+
 start_app_bin() {
     local bin="$1"
-    "$bin" &
+    "$bin" >&3 2>&4 </dev/null &
     echo $!
 }
 
