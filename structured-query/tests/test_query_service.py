@@ -178,6 +178,14 @@ def test_none_route_is_reconsidered_with_full_schema_when_profiles_are_relevant(
     assert calls[0][1].get("force_sql") is False
 
 
+def test_should_reconsider_none_requires_strong_evidence():
+    assert query_service.should_reconsider_none([], [{"text": "张三", "score": 0.1}]) is True
+    assert query_service.should_reconsider_none([{"score": 2.0}], []) is True
+    assert query_service.should_reconsider_none([{"score": 1.5}], []) is False
+    assert query_service.should_reconsider_none([{"score": 0.4}], []) is False
+    assert query_service.should_reconsider_none([], []) is False
+
+
 def _dataset(file_name, *sheet_names):
     version_id = uuid4()
     version = SimpleNamespace(

@@ -153,6 +153,18 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	// 3. Update ParseStatus to Completed
 	// (Except if it's already completed or if it was marked as failed/deleting, but we'll just set it to completed if it's processing)
 	if knowledge.ParseStatus == types.ParseStatusProcessing {
+		// Re-load so a concurrent stop-parse cannot be overwritten to completed.
+		if fresh, freshErr := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID); freshErr == nil && fresh != nil {
+			if fresh.ParseStatus == types.ParseStatusFailed && types.IsDeliberateParseInterrupt(fresh.ErrorMessage) {
+				logger.Infof(ctx, "[KnowledgePostProcess] Skipping deliberately interrupted knowledge %s before completed", payload.KnowledgeID)
+				return nil
+			}
+			knowledge = fresh
+		}
+		if knowledge.ParseStatus != types.ParseStatusProcessing {
+			logger.Infof(ctx, "[KnowledgePostProcess] Knowledge %s left processing (%s), skipping completed write", payload.KnowledgeID, knowledge.ParseStatus)
+			return nil
+		}
 		knowledge.ParseStatus = types.ParseStatusCompleted
 		knowledge.ErrorMessage = ""
 		knowledge.UpdatedAt = time.Now()

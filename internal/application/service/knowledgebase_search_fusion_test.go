@@ -240,6 +240,23 @@ func TestDeduplicateMarksRelevanceScoreDomain(t *testing.T) {
 	}
 }
 
+func TestDeduplicatePreservesRRFScoreDomain(t *testing.T) {
+	result := deduplicateByScore([]*types.IndexWithScore{
+		{ChunkID: "rrf", Score: 1.0 / 61, ScoreDomain: types.RetrievalScoreDomainRRF},
+		{ChunkID: "raw", Score: 0.9},
+	})
+	byID := map[string]*types.IndexWithScore{}
+	for _, item := range result {
+		byID[item.ChunkID] = item
+	}
+	if byID["rrf"].ScoreDomain != types.RetrievalScoreDomainRRF {
+		t.Fatalf("multi-query RRF domain was overwritten: %+v", byID["rrf"])
+	}
+	if byID["raw"].ScoreDomain != types.RetrievalScoreDomainRelevance {
+		t.Fatalf("raw similarity should default to relevance: %+v", byID["raw"])
+	}
+}
+
 func TestFuseWithRRFUsesConfiguredVectorWeight(t *testing.T) {
 	vector := &types.IndexWithScore{ChunkID: "vector"}
 	keyword := &types.IndexWithScore{ChunkID: "keyword"}

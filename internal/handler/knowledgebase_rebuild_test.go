@@ -95,6 +95,32 @@ func TestSummarizeDocumentPipelineProgress(t *testing.T) {
 	}
 }
 
+func TestSummarizeDocumentPipelineProgressCountsMissingTargetsFailed(t *testing.T) {
+	items := []*types.Knowledge{
+		{ID: "a", ParseStatus: types.ParseStatusCompleted, SummaryStatus: types.SummaryStatusCompleted},
+	}
+	done, failed, active := summarizeDocumentPipelineProgress(items, []string{"a", "deleted"})
+	if done != 1 || failed != 1 || active != 0 {
+		t.Fatalf("missing targets should count failed: done=%d failed=%d active=%d", done, failed, active)
+	}
+}
+
+func TestDocumentPipelineHasUserStop(t *testing.T) {
+	items := []*types.Knowledge{
+		{ID: "a", ParseStatus: types.ParseStatusCompleted},
+		{ID: "b", ParseStatus: types.ParseStatusFailed, ErrorMessage: types.ParseInterruptedByUserStopMessage},
+	}
+	if !documentPipelineHasUserStop(items, []string{"a", "b"}) {
+		t.Fatal("expected user stop to be detected")
+	}
+	rebuildInterrupted := []*types.Knowledge{
+		{ID: "a", ParseStatus: types.ParseStatusFailed, ErrorMessage: types.ParseInterruptedForRebuildMessage},
+	}
+	if documentPipelineHasUserStop(rebuildInterrupted, []string{"a"}) {
+		t.Fatal("transitional rebuild interrupt must not block structured advance")
+	}
+}
+
 func TestIsDocumentPipelineMaintenance(t *testing.T) {
 	if !types.KBMaintenanceReparse.IsDocumentPipelineMaintenance() || !types.KBMaintenanceRechunk.IsDocumentPipelineMaintenance() {
 		t.Fatal("reparse/rechunk should be document pipeline ops")

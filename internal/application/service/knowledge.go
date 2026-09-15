@@ -600,6 +600,17 @@ func (s *knowledgeService) isKnowledgeDeleting(ctx context.Context, tenantID uin
 	return knowledge.ParseStatus == types.ParseStatusDeleting
 }
 
+// isDeliberateParseInterrupted reloads knowledge and reports whether a user/system
+// interrupt marker was written after this worker started. In-flight workers must
+// abort instead of overwriting failed→completed.
+func (s *knowledgeService) isDeliberateParseInterrupted(ctx context.Context, tenantID uint64, knowledgeID string) bool {
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil || knowledge == nil {
+		return false
+	}
+	return knowledge.ParseStatus == types.ParseStatusFailed && types.IsDeliberateParseInterrupt(knowledge.ErrorMessage)
+}
+
 // platformStorageProvider returns the storage provider managed by platform settings.
 func platformStorageProvider(ctx context.Context) string {
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
@@ -2949,6 +2960,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		cleanupStoredImages()
 		return
 	}
+	if s.isDeliberateParseInterrupted(ctx, knowledge.TenantID, knowledge.ID) {
+		logger.Infof(ctx, "Knowledge parse was deliberately interrupted, aborting chunk processing: %s", knowledge.ID)
+		span.AddEvent("aborted: deliberate parse interrupt")
+		cleanupStoredImages()
+		return
+	}
 
 	// Get embedding model for vectorization — only needed when vector/keyword indexing is enabled
 	var embeddingModel embedding.Embedder
@@ -3270,6 +3287,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		cleanupStoredImages()
 		return
 	}
+	if s.isDeliberateParseInterrupted(ctx, knowledge.TenantID, knowledge.ID) {
+		logger.Infof(ctx, "Knowledge parse was deliberately interrupted, aborting before saving chunks: %s", knowledge.ID)
+		span.AddEvent("aborted: deliberate parse interrupt before saving")
+		cleanupStoredImages()
+		return
+	}
 
 	// Save chunks to database — ALWAYS, regardless of indexing strategy.
 	// Chunks are needed for wiki generation, graph extraction, and summary generation
@@ -3353,6 +3376,16 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			span.AddEvent("aborted: knowledge is being deleted before indexing")
 			return
 		}
+		if s.isDeliberateParseInterrupted(ctx, knowledge.TenantID, knowledge.ID) {
+			logger.Infof(ctx, "Knowledge parse was deliberately interrupted, cleaning up and aborting before indexing: %s", knowledge.ID)
+			if isGovernedStaging {
+				cleanupCreatedChunks()
+			} else if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+				logger.Warnf(ctx, "Failed to cleanup chunks after interrupt detected: %v", err)
+			}
+			span.AddEvent("aborted: deliberate parse interrupt before indexing")
+			return
+		}
 
 		span.AddEvent("batch index")
 		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
@@ -3414,10 +3447,41 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			span.AddEvent("aborted: knowledge was deleted during processing")
 			return
 		}
+		if s.isDeliberateParseInterrupted(ctx, knowledge.TenantID, knowledge.ID) {
+			logger.Infof(ctx, "Knowledge parse was deliberately interrupted during processing, skipping completion update: %s", knowledge.ID)
+			if isGovernedStaging {
+				cleanupCreatedChunks()
+			} else if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+				logger.Warnf(ctx, "Failed to cleanup chunks after interrupt detected: %v", err)
+			}
+			if !isGovernedStaging {
+				dimension := 0
+				if embeddingModel != nil {
+					dimension = embeddingModel.GetDimensions()
+				}
+				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, dimension, kb.Type); err != nil {
+					logger.Warnf(ctx, "Failed to cleanup index after interrupt detected: %v", err)
+				}
+			}
+			span.AddEvent("aborted: deliberate parse interrupt during processing")
+			return
+		}
 	} else if isGovernedStaging {
 		logger.Infof(ctx, "Governed version %s parsed into version-scoped staging chunks", stagingVersionID)
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping BatchIndex", kb.ID)
+	}
+
+	// Abort before enabling/persisting if the user stopped parse while we worked.
+	if s.isDeliberateParseInterrupted(ctx, knowledge.TenantID, knowledge.ID) {
+		logger.Infof(ctx, "Knowledge parse was deliberately interrupted, skipping enable/persist: %s", knowledge.ID)
+		if isGovernedStaging {
+			cleanupCreatedChunks()
+		} else if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+			logger.Warnf(ctx, "Failed to cleanup chunks after interrupt detected: %v", err)
+		}
+		span.AddEvent("aborted: deliberate parse interrupt before enable")
+		return
 	}
 
 	// Check if this document has extracted images that will be processed asynchronously
@@ -10548,6 +10612,13 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	}
 
+	// Narrow the stop-parse race: re-read before claiming processing so we do
+	// not clobber an interrupt that landed after the initial load.
+	if s.isDeliberateParseInterrupted(ctx, payload.TenantID, payload.KnowledgeID) {
+		logger.Infof(ctx, "Document parse was deliberately interrupted before claiming processing, aborting: %s", payload.KnowledgeID)
+		return nil
+	}
+
 	knowledge.ParseStatus = "processing"
 	knowledge.ErrorMessage = ""
 	knowledge.UpdatedAt = time.Now()
@@ -10570,6 +10641,10 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			}
 			knowledge.UpdatedAt = time.Now()
 			persistDocumentState()
+			return nil
+		}
+		if s.isDeliberateParseInterrupted(ctx, payload.TenantID, payload.KnowledgeID) {
+			logger.Infof(ctx, "Document parse was deliberately interrupted after cleanup, aborting: %s", payload.KnowledgeID)
 			return nil
 		}
 	}

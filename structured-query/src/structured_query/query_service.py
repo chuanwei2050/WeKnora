@@ -58,6 +58,27 @@ class QueryAttemptsFailed(ValueError):
         self.execution_ms = execution_ms
 
 
+def should_reconsider_none(
+    column_hits: list[dict] | None,
+    value_hits: list[dict] | None,
+) -> bool:
+    """Force a second SQL-only attempt only on strong record-op evidence.
+
+    Value hits are concrete cell matches. Column hits alone must clear the same
+    strength bar as lexical_evidence_is_sufficient (>=2) so topical mentions of
+    a field name (conceptual questions) do not override route=none.
+    """
+    if value_hits:
+        return True
+    for hit in column_hits or ():
+        try:
+            if float(hit.get("score", 0) or 0) >= 2:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
 def trace_sql_attempts(attempts: list[str]) -> list[str]:
     """Keep auditable SQL structure while removing all literal source values."""
     redacted: list[str] = []
@@ -569,9 +590,9 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
                 verify_columns,
                 probe_literal,
                 full_schema_context,
-                # Structured hits already show the question can be answered from
-                # table evidence; if the model still returns none, force SQL once.
-                reconsider_none=bool(column_hits or value_hits),
+                # Strong value/column evidence can override a mistaken none;
+                # weak topical column hits must not (conceptual questions).
+                reconsider_none=should_reconsider_none(column_hits, value_hits),
             )
         except QueryAttemptsFailed as failure:
             failed_at = perf_counter()
