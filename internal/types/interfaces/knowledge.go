@@ -99,6 +99,9 @@ type KnowledgeService interface {
 	) (*types.Knowledge, error)
 	// ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.
 	ReparseKnowledge(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+	// InterruptStuckParses marks pending/processing documents in a knowledge base as failed
+	// so they can be safely requeued by a subsequent reparse/rechunk operation.
+	InterruptStuckParses(ctx context.Context, kbID string, message string) (int, error)
 	// CloneKnowledgeBase clones knowledge to another knowledge base.
 	CloneKnowledgeBase(ctx context.Context, srcID, dstID string) error
 	// UpdateImageInfo updates image information for a knowledge chunk.

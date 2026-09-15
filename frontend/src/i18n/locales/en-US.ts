@@ -1964,7 +1964,7 @@ export default {
     maintenance: {
       title: 'Rebuild & Maintenance',
       description: 'Manage derived knowledge-base data. While one task is running, all other maintenance operations are locked to prevent conflicts.',
-      documentStatus: '{total} task-related documents: {completed} completed, {failed} failed, {pending} pending, and {processing} processing. Full rebuild handles completed and failed documents; other maintenance only handles completed documents.',
+      documentStatus: '{total} task-related documents: {completed} completed, {failed} failed, {pending} pending, and {processing} processing. Full rebuild handles completed and failed documents; re-parse & chunk first stops stuck parsing; other maintenance only handles completed documents.',
       running: '{processed}/{total} processed',
       stop: 'Stop rebuild',
       stopSubmitted: 'Stopped taking new work; the current item will finish safely',
@@ -1978,7 +1978,8 @@ export default {
       graphDisabled: 'Enable the knowledge graph first', keywordDisabled: 'Enable keyword retrieval first', vectorDisabled: 'Enable vector retrieval first',
       questionsDisabled: 'Enable chunk question generation in Advanced Settings first', structuredDisabled: 'Structured query service is disabled',
       actions: {
-        reparse: { label: 'Re-chunk and Rebuild All', description: 'Reparse every document and rebuild summaries, chunk questions, keyword/ES, vectors, structured data, and the enabled graph.' },
+        reparse: { label: 'Re-chunk and Rebuild All', description: 'One-click full pipeline: reparse every document and rebuild summaries, chunk questions, keyword/ES, vectors, structured data, and the enabled graph.' },
+        rechunk: { label: 'Re-parse & Chunk', description: 'Stop stuck parsing jobs, then reparse and rechunk documents. This is the parse/chunk step of the full pipeline; use the actions below for graph, keywords, vectors, questions, and structured data.' },
         graph: { label: 'Rebuild Knowledge Graph', description: 'Clear the graph and extract it again from all eligible chunks using the current configuration.' },
         keywords: { label: 'Rebuild Keyword/ES Index', description: 'Keep existing chunks and rebuild only the keyword retrieval channel without recomputing vectors.' },
         vector: { label: 'Rebuild Vector Index', description: 'Keep existing chunks and recompute embeddings only for the vector retrieval channel.' },

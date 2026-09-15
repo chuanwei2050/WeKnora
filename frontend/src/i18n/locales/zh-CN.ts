@@ -2503,7 +2503,7 @@ export default {
     maintenance: {
       title: "重建与维护",
       description: "集中管理知识库派生数据。任一任务运行期间，其他维护操作都会锁定以避免数据冲突。",
-      documentStatus: "当前共 {total} 篇任务相关文档：{completed} 篇已完成，{failed} 篇失败，{pending} 篇等待，{processing} 篇处理中。全部重建处理已完成和失败文档；其他维护仅处理已完成文档。",
+      documentStatus: "当前共 {total} 篇任务相关文档：{completed} 篇已完成，{failed} 篇失败，{pending} 篇等待，{processing} 篇处理中。全部重建处理已完成和失败文档；重新解析分块会先停止卡住的解析；其他维护仅处理已完成文档。",
       running: "已处理 {processed}/{total}",
       stop: "停止重建",
       stopSubmitted: "已停止领取后续任务，当前处理项将安全收尾",
@@ -2521,10 +2521,11 @@ export default {
       questionsDisabled: "请先在高级设置中启用块问题生成",
       structuredDisabled: "结构化查询服务未启用",
       actions: {
-        reparse: { label: "重新分块并全部重建", description: "重新解析全部文档和分块，并重建摘要、块问题、关键词/ES、向量、结构化数据及已启用的知识图谱。" },
+        reparse: { label: "全部重建", description: "一键跑完整流程：重新解析全部文档和分块，并重建摘要、块问题、关键词/ES、向量、结构化数据及已启用的知识图谱。" },
+        rechunk: { label: "重新解析", description: "停止卡住的解析任务，重新解析并分块。" },
         graph: { label: "重建知识图谱", description: "清空当前知识图谱，按现有配置对全部有效分块重新抽取。" },
-        keywords: { label: "重建关键词/ES 索引", description: "保留现有分块，仅重建关键词检索通道，不重新计算向量。" },
-        vector: { label: "重建向量索引", description: "保留现有分块，仅重新计算 Embedding 并写入向量检索通道。" },
+        keywords: { label: "重建ES 索引", description: "保留现有分块，仅重建ES 索引" },
+        vector: { label: "重建向量索引", description: "保留现有分块，仅重新计算 Embedding 向量" },
         questions: { label: "重新生成块问题", description: "清理旧块问题索引，按当前数量配置重新生成并索引。" },
         structured: { label: "重建结构化数据（SQL）", description: "重新上传表格并按当前抽取、字段格式化与分析规则生成结构化数据。" },
       },

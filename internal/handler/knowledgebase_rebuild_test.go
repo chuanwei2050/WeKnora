@@ -78,3 +78,39 @@ func TestSummarizeKnowledgeBaseRebuildStatus(t *testing.T) {
 		t.Fatalf("idle status: %+v", status)
 	}
 }
+
+func TestSummarizeDocumentPipelineProgress(t *testing.T) {
+	items := []*types.Knowledge{
+		{ID: "a", ParseStatus: types.ParseStatusCompleted, SummaryStatus: types.SummaryStatusCompleted},
+		{ID: "b", ParseStatus: types.ParseStatusCompleted, SummaryStatus: types.SummaryStatusProcessing},
+		{ID: "c", ParseStatus: types.ParseStatusFailed},
+		{ID: "d", ParseStatus: types.ParseStatusPending},
+		{ID: "e", ParseStatus: types.ParseStatusCompleted},
+	}
+	done, failed, active := summarizeDocumentPipelineProgress(items, []string{"a", "b", "c", "d"})
+	if done != 1 || failed != 1 || active != 2 {
+		t.Fatalf("unexpected progress done=%d failed=%d active=%d", done, failed, active)
+	}
+}
+
+func TestIsDocumentPipelineMaintenance(t *testing.T) {
+	if !types.KBMaintenanceReparse.IsDocumentPipelineMaintenance() || !types.KBMaintenanceRechunk.IsDocumentPipelineMaintenance() {
+		t.Fatal("reparse/rechunk should be document pipeline ops")
+	}
+	if types.KBMaintenanceKeywords.IsDocumentPipelineMaintenance() {
+		t.Fatal("keywords should not be a document pipeline op")
+	}
+}
+
+func TestIsDocumentPipelineTargetIncludesStuckWhenRequested(t *testing.T) {
+	pending := &types.Knowledge{ID: "p", ParseStatus: types.ParseStatusPending}
+	if isDocumentPipelineTarget(pending, false) {
+		t.Fatal("full rebuild must not target pending documents")
+	}
+	if !isDocumentPipelineTarget(pending, true) {
+		t.Fatal("rechunk must target stuck pending documents")
+	}
+	if isDocumentPipelineTarget(&types.Knowledge{ID: "d", ParseStatus: types.ParseStatusDraft}, true) {
+		t.Fatal("draft documents must stay excluded")
+	}
+}

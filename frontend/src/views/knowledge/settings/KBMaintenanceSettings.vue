@@ -47,7 +47,7 @@
           <p v-if="action.disabledReason" class="disabled-reason">{{ action.disabledReason }}</p>
         </div>
         <t-button
-          :theme="action.operation === 'reparse' || action.operation === 'graph' ? 'warning' : 'default'"
+          :theme="action.operation === 'reparse' || action.operation === 'rechunk' || action.operation === 'graph' ? 'warning' : 'default'"
           variant="outline"
           :loading="submitting === action.operation"
           :disabled="isRunning || !hasFiles || !!action.disabledReason"
@@ -65,7 +65,7 @@ import { useI18n } from 'vue-i18n'
 import { getSystemInfo } from '@/api/system'
 import {
   cancelKBMaintenance, getKBGraphRebuildStatus, getKBMaintenanceStatus, getKBRebuildStatus, rebuildKBGraph, rebuildKBIndex,
-  startKBMaintenance, type KBMaintenanceOperation, type KBMaintenanceProgress, type KnowledgeBaseRebuildStatus,
+  rechunkKB, startKBMaintenance, type KBMaintenanceOperation, type KBMaintenanceProgress, type KnowledgeBaseRebuildStatus,
 } from '@/api/knowledge-base'
 
 const props = defineProps<{
@@ -88,6 +88,7 @@ const isRunning = computed(() => progress.value.status === 'running' || progress
 type Action = { operation: KBMaintenanceOperation; label: string; description: string; disabledReason?: string }
 const actions = computed<Action[]>(() => [
   { operation: 'reparse', label: t('knowledgeEditor.maintenance.actions.reparse.label'), description: t('knowledgeEditor.maintenance.actions.reparse.description') },
+  { operation: 'rechunk', label: t('knowledgeEditor.maintenance.actions.rechunk.label'), description: t('knowledgeEditor.maintenance.actions.rechunk.description') },
   { operation: 'graph', label: t('knowledgeEditor.maintenance.actions.graph.label'), description: t('knowledgeEditor.maintenance.actions.graph.description'), disabledReason: props.graphEnabled ? undefined : t('knowledgeEditor.maintenance.graphDisabled') },
   { operation: 'keywords', label: t('knowledgeEditor.maintenance.actions.keywords.label'), description: t('knowledgeEditor.maintenance.actions.keywords.description'), disabledReason: props.keywordEnabled ? undefined : t('knowledgeEditor.maintenance.keywordDisabled') },
   { operation: 'vector', label: t('knowledgeEditor.maintenance.actions.vector.label'), description: t('knowledgeEditor.maintenance.actions.vector.description'), disabledReason: props.vectorEnabled ? undefined : t('knowledgeEditor.maintenance.vectorDisabled') },
@@ -138,6 +139,7 @@ function confirmRun(action: Action) {
       dialog.hide(); submitting.value = action.operation
       try {
         if (action.operation === 'reparse') await rebuildKBIndex(props.knowledgeBaseId)
+        else if (action.operation === 'rechunk') await rechunkKB(props.knowledgeBaseId)
         else if (action.operation === 'graph') await rebuildKBGraph(props.knowledgeBaseId)
         else await startKBMaintenance(props.knowledgeBaseId, action.operation)
         MessagePlugin.success(t('knowledgeEditor.maintenance.submitted', { name: action.label }))

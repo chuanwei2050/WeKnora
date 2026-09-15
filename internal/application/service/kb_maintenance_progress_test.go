@@ -29,6 +29,25 @@ func TestApplyKBMaintenanceCancelReparseKeepsLock(t *testing.T) {
 	}
 }
 
+func TestApplyKBMaintenanceCancelRechunkKeepsLock(t *testing.T) {
+	now := time.Date(2026, 9, 15, 6, 0, 0, 0, time.UTC)
+	p := &types.KBMaintenanceProgress{
+		Operation: types.KBMaintenanceRechunk,
+		Status:    "running",
+		Total:     2,
+	}
+	applyKBMaintenanceCancel(p, now)
+	if p.Status != "canceling" {
+		t.Fatalf("rechunk cancel should stay busy as canceling, got %s", p.Status)
+	}
+	if p.FinishedAt != nil {
+		t.Fatalf("canceling rechunk must not set FinishedAt")
+	}
+	if !kbMaintenanceBusy(p.Status) {
+		t.Fatalf("canceling must keep the maintenance lock")
+	}
+}
+
 func TestApplyKBMaintenanceCancelOtherOpsReleaseLock(t *testing.T) {
 	now := time.Date(2026, 9, 15, 6, 0, 0, 0, time.UTC)
 	p := &types.KBMaintenanceProgress{

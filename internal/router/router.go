@@ -547,6 +547,7 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		kb.PUT("/:id", handler.UpdateKnowledgeBase)
 		kb.POST("/:id/rebuild-index", handler.RebuildIndex)
 		kb.GET("/:id/rebuild-index/status", handler.GetRebuildIndexStatus)
+		kb.POST("/:id/rechunk", handler.RebuildChunks)
 		kb.POST("/:id/maintenance/:operation", handler.StartMaintenance)
 		kb.GET("/:id/maintenance/status", handler.GetMaintenanceStatus)
 		kb.POST("/:id/maintenance/cancel", handler.CancelMaintenance)

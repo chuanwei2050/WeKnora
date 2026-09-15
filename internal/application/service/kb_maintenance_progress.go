@@ -41,12 +41,12 @@ func kbMaintenanceBusy(status string) bool {
 }
 
 // applyKBMaintenanceCancel marks a running job as canceled.
-// Reparse stays "canceling" (lock held) until in-flight documents finish;
-// other operations release the lock immediately as "canceled".
+// Document-pipeline ops (reparse/rechunk) stay "canceling" (lock held) until
+// in-flight documents finish; other operations release the lock immediately.
 func applyKBMaintenanceCancel(p *types.KBMaintenanceProgress, now time.Time) {
 	p.Message = "canceled_by_user"
 	p.HeartbeatAt = now
-	if p.Operation == types.KBMaintenanceReparse {
+	if p.Operation.IsDocumentPipelineMaintenance() {
 		p.Status = "canceling"
 		p.FinishedAt = nil
 		return

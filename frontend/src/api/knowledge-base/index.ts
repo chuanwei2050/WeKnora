@@ -95,6 +95,10 @@ export function rebuildKBIndex(kbId: string) {
   return post(`/api/v1/knowledge-bases/${kbId}/rebuild-index`, {});
 }
 
+export function rechunkKB(kbId: string) {
+  return post(`/api/v1/knowledge-bases/${kbId}/rechunk`, {});
+}
+
 export interface KnowledgeBaseRebuildStatus {
   status: 'idle' | 'running' | 'completed' | 'completed_with_failures';
   total: number;
@@ -109,7 +113,7 @@ export function getKBRebuildStatus(kbId: string) {
   return get<{ success: boolean; data: KnowledgeBaseRebuildStatus }>(`/api/v1/knowledge-bases/${kbId}/rebuild-index/status`);
 }
 
-export type KBMaintenanceOperation = 'reparse' | 'graph' | 'keywords' | 'vector' | 'questions' | 'structured';
+export type KBMaintenanceOperation = 'reparse' | 'rechunk' | 'graph' | 'keywords' | 'vector' | 'questions' | 'structured';
 export interface KBMaintenanceProgress {
   run_id?: string;
   operation?: KBMaintenanceOperation;
@@ -131,7 +135,7 @@ export function cancelKBMaintenance(kbId: string) {
   return post<{ success: boolean; data: KBMaintenanceProgress }>(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/maintenance/cancel`, {});
 }
 
-export function startKBMaintenance(kbId: string, operation: Exclude<KBMaintenanceOperation, 'reparse' | 'graph'>) {
+export function startKBMaintenance(kbId: string, operation: Exclude<KBMaintenanceOperation, 'reparse' | 'rechunk' | 'graph'>) {
   return post<{ success: boolean; data: KBMaintenanceProgress }>(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/maintenance/${operation}`, {});
 }
 

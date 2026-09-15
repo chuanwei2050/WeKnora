@@ -4886,8 +4886,43 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 	return nil
 }
 
+// InterruptStuckParses marks pending/processing documents as failed so a follow-up
+// reparse/rechunk can safely take over. Returns how many documents were interrupted.
+func (s *knowledgeService) InterruptStuckParses(ctx context.Context, kbID string, message string) (int, error) {
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	items, err := s.repo.ListKnowledgeByKnowledgeBaseID(ctx, tenantID, kbID)
+	if err != nil {
+		return 0, err
+	}
+	if strings.TrimSpace(message) == "" {
+		message = types.ParseInterruptedForRechunkMessage
+	}
+	reset := 0
+	now := time.Now()
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		switch item.ParseStatus {
+		case types.ParseStatusPending, types.ParseStatusProcessing:
+		default:
+			continue
+		}
+		item.ParseStatus = types.ParseStatusFailed
+		item.ErrorMessage = message
+		item.UpdatedAt = now
+		if err := s.repo.UpdateKnowledge(ctx, item); err != nil {
+			return reset, err
+		}
+		reset++
+	}
+	if reset > 0 {
+		logger.Infof(ctx, "Interrupted %d stuck parse task(s) in knowledge base %s", reset, kbID)
+	}
+	return reset, nil
+}
+
 // ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.
-// This method reuses the logic from UpdateManualKnowledge for resource cleanup and async parsing.
 func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID string) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start re-parsing knowledge")
 
@@ -10167,15 +10202,16 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	}
 
 	if knowledge.ParseStatus == types.ParseStatusFailed {
-		// 检查是否可恢复（例如：超时、临时错误等）
-		// 对于不可恢复的错误，直接返回
+		if knowledge.ErrorMessage == types.ParseInterruptedForRechunkMessage {
+			logger.Infof(ctx, "Document parse was interrupted for rechunk, skipping leftover job: %s", payload.KnowledgeID)
+			return nil
+		}
 		logger.Warnf(
 			ctx,
 			"Document processing previously failed: %s, error: %s",
 			payload.KnowledgeID,
 			knowledge.ErrorMessage,
 		)
-		// 这里可以根据错误类型判断是否可恢复，暂时允许重试
 	}
 
 	// 检查是否有部分处理（有chunks但状态不是completed）

@@ -556,7 +556,20 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 // base's current settings. Pending and processing documents are excluded to
 // avoid racing their existing queue jobs. ReparseKnowledge owns cleanup and
 // rebuilding of chunks and all enabled derived data and indexes.
+// After documents finish, GetMaintenanceStatus advances into the structured phase.
 func (h *KnowledgeBaseHandler) RebuildIndex(c *gin.Context) {
+	h.startDocumentPipelineMaintenance(c, types.KBMaintenanceReparse, false)
+}
+
+// RebuildChunks stops stuck pending/processing documents, then reparses and
+// rechunks candidates. Unlike RebuildIndex it does not advance into the
+// structured maintenance phase — remaining derived artifacts are rebuilt via
+// the individual maintenance actions.
+func (h *KnowledgeBaseHandler) RebuildChunks(c *gin.Context) {
+	h.startDocumentPipelineMaintenance(c, types.KBMaintenanceRechunk, true)
+}
+
+func (h *KnowledgeBaseHandler) startDocumentPipelineMaintenance(c *gin.Context, operation types.KBMaintenanceOperation, resetStuck bool) {
 	ctx := c.Request.Context()
 	_, id, tenantID, permission, err := h.validateAndGetKnowledgeBase(c)
 	if err != nil {
@@ -574,11 +587,11 @@ func (h *KnowledgeBaseHandler) RebuildIndex(c *gin.Context) {
 	}
 	targetIDs := make([]string, 0, len(items))
 	for _, item := range items {
-		if isKnowledgeBaseReparseCandidate(item) {
+		if isDocumentPipelineTarget(item, resetStuck) {
 			targetIDs = append(targetIDs, item.ID)
 		}
 	}
-	progress, acquired, err := h.maintenance.TryStart(ctx, tenantID, id, types.KBMaintenanceReparse, len(targetIDs), targetIDs)
+	progress, acquired, err := h.maintenance.TryStart(ctx, tenantID, id, operation, len(targetIDs), targetIDs)
 	if err != nil {
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
@@ -586,6 +599,19 @@ func (h *KnowledgeBaseHandler) RebuildIndex(c *gin.Context) {
 	if !acquired {
 		c.JSON(http.StatusConflict, gin.H{"success": false, "error": gin.H{"message": "another maintenance task is running"}, "data": progress})
 		return
+	}
+	if resetStuck {
+		if _, err := h.knowledgeService.InterruptStuckParses(ctx, id, types.ParseInterruptedForRechunkMessage); err != nil {
+			_ = h.maintenance.Fail(ctx, tenantID, id, progress.RunID, err.Error())
+			c.Error(apperrors.NewInternalServerError(err.Error()))
+			return
+		}
+		items, err = h.knowledgeService.ListKnowledgeByKnowledgeBaseID(ctx, id)
+		if err != nil {
+			_ = h.maintenance.Fail(ctx, tenantID, id, progress.RunID, err.Error())
+			c.Error(apperrors.NewInternalServerError(err.Error()))
+			return
+		}
 	}
 	enqueued, err := reparseKnowledgeBaseItems(ctx, items, h.knowledgeService.ReparseKnowledge)
 	if err != nil {
@@ -680,39 +706,12 @@ func (h *KnowledgeBaseHandler) GetMaintenanceStatus(c *gin.Context) {
 	if p == nil {
 		p = &types.KBMaintenanceProgress{Status: "idle"}
 	}
-	if (p.Status == "running" || p.Status == "canceling") && p.Operation == types.KBMaintenanceReparse {
+	if (p.Status == "running" || p.Status == "canceling") && p.Operation.IsDocumentPipelineMaintenance() {
 		items, listErr := h.knowledgeService.ListKnowledgeByKnowledgeBaseID(c.Request.Context(), id)
 		if listErr == nil {
-			targets := make(map[string]struct{}, len(p.TargetKnowledgeIDs))
-			for _, targetID := range p.TargetKnowledgeIDs {
-				targets[targetID] = struct{}{}
-			}
-			done, failed, active := 0, 0, 0
-			for _, item := range items {
-				if item == nil {
-					continue
-				}
-				if _, targeted := targets[item.ID]; !targeted {
-					continue
-				}
-				switch item.ParseStatus {
-				case types.ParseStatusCompleted:
-					switch item.SummaryStatus {
-					case types.SummaryStatusPending, types.SummaryStatusProcessing:
-						active++
-					case types.SummaryStatusFailed:
-						failed++
-					default:
-						done++
-					}
-				case types.ParseStatusFailed:
-					failed++
-				case types.ParseStatusPending, types.ParseStatusProcessing:
-					active++
-				}
-			}
+			done, failed, active := summarizeDocumentPipelineProgress(items, p.TargetKnowledgeIDs)
 			finished := active == 0 && done+failed >= p.Total
-			if finished && p.Total > 0 && p.Status == "running" {
+			if finished && p.Total > 0 && p.Status == "running" && p.Operation == types.KBMaintenanceReparse {
 				next, advanced, advanceErr := h.maintenance.AdvancePhase(c.Request.Context(), tenantID, id, p.RunID, types.KBMaintenanceReparse, types.KBMaintenanceStructured, len(p.TargetKnowledgeIDs), p.TargetKnowledgeIDs)
 				if advanceErr == nil && advanced {
 					payload, marshalErr := json.Marshal(types.KBMaintenancePayload{TenantID: tenantID, KnowledgeBaseID: id, RunID: next.RunID, Operation: next.Operation})
@@ -865,6 +864,52 @@ func isKnowledgeBaseReparseCandidate(item *types.Knowledge) bool {
 	default:
 		return false
 	}
+}
+
+func isDocumentPipelineTarget(item *types.Knowledge, includeStuck bool) bool {
+	if isKnowledgeBaseReparseCandidate(item) {
+		return true
+	}
+	if !includeStuck || item == nil {
+		return false
+	}
+	switch item.ParseStatus {
+	case types.ParseStatusPending, types.ParseStatusProcessing:
+		return true
+	default:
+		return false
+	}
+}
+
+func summarizeDocumentPipelineProgress(items []*types.Knowledge, targetIDs []string) (done, failed, active int) {
+	targets := make(map[string]struct{}, len(targetIDs))
+	for _, targetID := range targetIDs {
+		targets[targetID] = struct{}{}
+	}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if _, targeted := targets[item.ID]; !targeted {
+			continue
+		}
+		switch item.ParseStatus {
+		case types.ParseStatusCompleted:
+			switch item.SummaryStatus {
+			case types.SummaryStatusPending, types.SummaryStatusProcessing:
+				active++
+			case types.SummaryStatusFailed:
+				failed++
+			default:
+				done++
+			}
+		case types.ParseStatusFailed:
+			failed++
+		case types.ParseStatusPending, types.ParseStatusProcessing:
+			active++
+		}
+	}
+	return done, failed, active
 }
 
 // DeleteKnowledgeBase godoc
