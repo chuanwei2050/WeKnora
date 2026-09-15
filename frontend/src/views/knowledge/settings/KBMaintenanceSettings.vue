@@ -10,12 +10,17 @@
 
     <t-alert v-if="progress.status === 'running'" theme="info" class="active-status">
       <template #message>
-        <strong>{{ operationLabel(progress.operation) }}</strong>
-        <t-progress :percentage="progress.percent" size="small" />
-        <span>{{ t('knowledgeEditor.maintenance.running', { processed: progress.processed, total: progress.total }) }}</span>
-        <t-button class="stop-button" theme="danger" variant="outline" size="small" :loading="stopping" @click="stopCurrent">
+        <div class="active-status-content">
+          <div class="active-status-main">
+            <strong>{{ operationLabel(progress.operation) }}</strong>
+            <t-progress :percentage="progress.percent" size="small" />
+            <span class="progress-copy">{{ t('knowledgeEditor.maintenance.running', { processed: progress.processed, total: progress.total }) }}</span>
+          </div>
+          <t-button class="stop-button" theme="danger" variant="outline" :loading="stopping" @click="stopCurrent">
+            <template #icon><t-icon name="stop-circle" size="16px" /></template>
           {{ t('knowledgeEditor.maintenance.stop') }}
-        </t-button>
+          </t-button>
+        </div>
       </template>
     </t-alert>
     <t-alert v-else-if="progress.status === 'completed_with_failures'" theme="warning" class="active-status"
@@ -145,9 +150,23 @@ onBeforeUnmount(stopPolling)
 
 <style scoped lang="less">
 .section-header { margin-bottom: 20px; h2 { margin: 0 0 8px; font-size: 20px; } .section-description { margin: 0; color: var(--td-text-color-secondary); } .document-status { margin: 8px 0 0; color: var(--td-text-color-placeholder); font-size: 13px; } }
-.active-status { margin-bottom: 16px; :deep(.t-progress) { margin: 8px 0 4px; max-width: 560px; } .stop-button { margin-top: 10px; } }
+.active-status {
+  margin-bottom: 16px;
+  :deep(.t-alert__content), :deep(.t-alert__message) { width: 100%; }
+  .active-status-content { display: flex; align-items: center; gap: 24px; width: 100%; }
+  .active-status-main { flex: 1; min-width: 0; }
+  :deep(.t-progress) { margin: 8px 0 4px; max-width: 560px; }
+  .progress-copy { color: var(--td-text-color-secondary); font-size: 13px; }
+  .stop-button { flex: 0 0 auto; min-width: 112px; }
+}
 .maintenance-list { border: 1px solid var(--td-component-stroke); border-radius: 8px; overflow: hidden; }
 .maintenance-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 18px 20px; border-bottom: 1px solid var(--td-component-stroke); &:last-child { border-bottom: 0; } }
 .maintenance-copy { min-width: 0; label { color: var(--td-text-color-primary); font-weight: 600; } p { margin: 6px 0 0; color: var(--td-text-color-secondary); font-size: 13px; line-height: 1.5; } .disabled-reason { color: var(--td-warning-color); } }
-@media (max-width: 720px) { .maintenance-row { align-items: stretch; flex-direction: column; gap: 12px; } }
+@media (max-width: 720px) {
+  .active-status {
+    .active-status-content { align-items: stretch; flex-direction: column; gap: 14px; }
+    .stop-button { align-self: flex-end; min-height: 40px; }
+  }
+  .maintenance-row { align-items: stretch; flex-direction: column; gap: 12px; }
+}
 </style>
