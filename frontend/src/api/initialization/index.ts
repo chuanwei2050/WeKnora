@@ -103,6 +103,7 @@ export interface KBModelConfigRequest {
         enableParentChild?: boolean
         parentChunkSize?: number
         childChunkSize?: number
+        inheritHeading?: boolean
     }
     multimodal: {
         enabled: boolean

@@ -101,7 +101,7 @@
               v-if="item.status === 'pending'"
               :checked="selectedIds.has(item.id)"
               :disabled="batchBusy || busyIds.has(item.id)"
-              @change="(checked) => toggleSelect(item.id, !!checked)"
+              @change="(checked: boolean) => toggleSelect(item.id, checked)"
             />
             <t-tag :theme="statusTheme(item.status)" variant="light" size="small">
               {{ statusLabel(item.status) }}

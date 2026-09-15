@@ -399,19 +399,29 @@ const uploadTarget = computed(() => resolveUploadTarget(selectedFolder.value));
 const uploadTargetTagId = computed(() => uploadTarget.value.tagId);
 
 const editingTagInputRefs = new Map<string, TagInputInstance | null>();
-const setEditingTagInputRef = (el: TagInputInstance | null, tagId: string) => {
-  if (el) {
+type TemplateRefValue = Element | ComponentPublicInstance | null;
+const isTagInputInstance = (value: TemplateRefValue): value is TagInputInstance => {
+  if (!value || value instanceof Element) return false;
+  const focus = Reflect.get(value, 'focus');
+  const select = Reflect.get(value, 'select');
+  const inputRef = Reflect.get(value, 'inputRef');
+  return (focus === undefined || typeof focus === 'function')
+    && (select === undefined || typeof select === 'function')
+    && (inputRef === undefined || inputRef instanceof HTMLInputElement);
+};
+const setEditingTagInputRef = (el: TemplateRefValue, tagId: string) => {
+  if (isTagInputInstance(el)) {
     editingTagInputRefs.set(tagId, el);
   } else {
     editingTagInputRefs.delete(tagId);
   }
 };
-const setEditingTagInputRefByTag = (tagId: string) => (el: TagInputInstance | null) => {
+const setEditingTagInputRefByTag = (tagId: string) => (el: TemplateRefValue) => {
   setEditingTagInputRef(el, tagId);
 };
 const newTagInputRef = ref<TagInputInstance | null>(null);
-const setNewTagInputRef = (el: TagInputInstance | null) => {
-  newTagInputRef.value = el;
+const setNewTagInputRef = (el: TemplateRefValue) => {
+  newTagInputRef.value = isTagInputInstance(el) ? el : null;
 };
 const openTagMoreId = ref('');
 const creatingTag = ref(false);
