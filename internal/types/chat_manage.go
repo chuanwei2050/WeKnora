@@ -148,6 +148,7 @@ type PipelineState struct {
 	RoutingDecision       *RoutingDecision       `json:"routing_decision,omitempty"`
 	VerifiedResult        *VerifiedAnswer        `json:"verified_result,omitempty"`
 	StructuredQueryDone   <-chan []*SearchResult `json:"-"`
+	StructuredQueryFailed bool                   `json:"-"`
 }
 
 type RerankOutcome string
@@ -303,6 +304,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			EntityKBIDs:                 entityKBIDs,
 			EntityKnowledge:             entityKnowledge,
 			StructuredQueryDone:         c.StructuredQueryDone,
+			StructuredQueryFailed:       c.StructuredQueryFailed,
 		},
 	}
 }

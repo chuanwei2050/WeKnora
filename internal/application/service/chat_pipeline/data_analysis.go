@@ -65,6 +65,11 @@ func (p *PluginDataAnalysis) OnEvent(ctx context.Context, eventType types.EventT
 			emitPipelineStageResult(ctx, manage, stageID, "data_analysis", "表格分析完成，已交叉核对结构化结果和检索证据", stageStarted, true, map[string]interface{}{
 				"status": "completed", "structured_result_count": len(manage.DataAnalysisResult),
 			})
+		} else if manage.StructuredQueryFailed {
+			stageID, stageStarted := emitPipelineStageStart(ctx, manage, "data_analysis", "表格分析")
+			emitPipelineStageResult(ctx, manage, stageID, "data_analysis", "结构化查询失败", stageStarted, false, map[string]interface{}{
+				"status": "failed",
+			})
 		}
 	}
 	if len(manage.MergeResult) == 0 {

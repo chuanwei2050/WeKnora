@@ -150,3 +150,60 @@ func TestSuccessfulStructuredQueryEmitsTableAnalysisStage(t *testing.T) {
 		t.Fatalf("unexpected table-analysis result event: %#v", result)
 	}
 }
+
+func TestFailedStructuredQueryEmitsFailureStage(t *testing.T) {
+	bus := &stageEventBus{handlers: make(map[types.EventType][]types.EventHandler)}
+	var result event.AgentToolResultData
+	bus.On(types.EventType(event.EventAgentToolResult), func(_ context.Context, evt types.Event) error {
+		result = evt.Data.(event.AgentToolResultData)
+		return nil
+	})
+	done := make(chan []*types.SearchResult, 1)
+	done <- nil
+	close(done)
+	manage := &types.ChatManage{
+		PipelineState: types.PipelineState{
+			StructuredQueryDone:   done,
+			StructuredQueryFailed: true,
+			MergeResult:           []*types.SearchResult{{ID: "rag"}},
+		},
+		PipelineContext: types.PipelineContext{EventBus: bus},
+	}
+	plugin := &PluginDataAnalysis{config: &config.Config{StructuredQuery: &config.StructuredQueryConfig{Enabled: true, BaseURL: "http://unused"}}}
+
+	if err := plugin.OnEvent(context.Background(), types.DATA_ANALYSIS, manage, func() *PluginError { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if result.ToolName != "data_analysis" || result.Success || result.Output != "结构化查询失败" || result.Data["status"] != "failed" {
+		t.Fatalf("unexpected failure stage: %#v", result)
+	}
+}
+
+func TestStructuredQueryMarksFailedWhenSidecarErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"detail":"model_unavailable"}`))
+	}))
+	defer server.Close()
+	plugin := &PluginDataAnalysis{
+		config:           &config.Config{StructuredQuery: &config.StructuredQueryConfig{Enabled: true, BaseURL: server.URL, APIKey: "key", RequestTimeout: 2}},
+		knowledgeService: structuredKnowledgeFixture{},
+	}
+	manage := &types.ChatManage{PipelineRequest: types.PipelineRequest{
+		Query: "硕士人数", TenantID: 7,
+		SearchTargets: types.SearchTargets{&types.SearchTarget{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb", TenantID: 7}},
+	}, PipelineState: types.PipelineState{MergeResult: []*types.SearchResult{{ID: "rag"}}}}
+
+	if err := plugin.OnEvent(context.Background(), types.STRUCTURED_QUERY_START, manage, func() *PluginError { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := plugin.OnEvent(context.Background(), types.DATA_ANALYSIS, manage, func() *PluginError { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if !manage.StructuredQueryFailed {
+		t.Fatal("expected structured query failure flag")
+	}
+	if len(manage.DataAnalysisResult) != 0 {
+		t.Fatalf("failed query must not inject evidence: %#v", manage.DataAnalysisResult)
+	}
+}

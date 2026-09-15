@@ -47,6 +47,9 @@ func (p *PluginDataAnalysis) startStructuredQuery(ctx context.Context, manage *t
 				result, err := p.queryStructuredNamespace(ctx, manage, kbID)
 				if err != nil {
 					logger.Warnf(ctx, "[StructuredQuery] namespace=%s failed: %v", kbID, err)
+					mutex.Lock()
+					manage.StructuredQueryFailed = true
+					mutex.Unlock()
 					return
 				}
 				mutex.Lock()
