@@ -247,6 +247,21 @@
                     :config="formData.chunkingConfig"
                     @update:config="handleChunkingConfigUpdate"
                   />
+                  <div v-if="mode === 'edit' && kbId" class="reprocess-panel">
+                    <div class="reprocess-copy">
+                      <h3>{{ $t('knowledgeEditor.reprocess.title') }}</h3>
+                      <p>{{ $t('knowledgeEditor.reprocess.description') }}</p>
+                    </div>
+                    <t-button
+                      theme="warning"
+                      variant="outline"
+                      :loading="reprocessing"
+                      :disabled="!hasFiles"
+                      @click="confirmReprocess"
+                    >
+                      {{ $t('knowledgeEditor.reprocess.action') }}
+                    </t-button>
+                  </div>
                 </div>
 
                 <!-- 多模态配置 -->
@@ -425,6 +440,7 @@ const emit = defineEmits<{
 const currentSection = ref<string>('basic')
 const saving = ref(false)
 const loading = ref(false)
+const reprocessing = ref(false)
 const hasFiles = ref(false)
 const initialIndexingStrategy = ref<any>(null)
 const initialGraphFingerprint = ref('')
@@ -1047,6 +1063,32 @@ const buildSubmitData = () => {
 }
 
 // 提交表单
+const confirmReprocess = () => {
+  if (!props.kbId || reprocessing.value || !hasFiles.value) return
+  const knowledgeBaseId = props.kbId
+  const dialog = DialogPlugin.confirm({
+    header: t('knowledgeEditor.reprocess.confirmTitle'),
+    body: t('knowledgeEditor.reprocess.confirmBody'),
+    confirmBtn: t('knowledgeEditor.reprocess.confirmAction'),
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      dialog.destroy()
+      reprocessing.value = true
+      try {
+        const result = await rebuildKBIndex(knowledgeBaseId)
+        const count = result?.data?.document_count ?? 0
+        MessagePlugin.success(t('knowledgeEditor.reprocess.submitted', { count }))
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : t('knowledgeEditor.reprocess.failed')
+        MessagePlugin.error(message)
+      } finally {
+        reprocessing.value = false
+      }
+    },
+    onCancel: () => dialog.destroy(),
+  })
+}
+
 const handleSubmit = async () => {
   if (!validateForm()) {
     return
@@ -1224,6 +1266,7 @@ const resetState = () => {
   graphConfigDraft.value = null
   saving.value = false
   loading.value = false
+  reprocessing.value = false
   chunkingDirty.value = false
 }
 
@@ -1699,6 +1742,35 @@ watch(() => props.visible, async (newVal) => {
   justify-content: flex-end;
   gap: 12px;
   flex-shrink: 0;
+}
+
+.reprocess-panel {
+  margin-top: 24px;
+  padding: 18px 20px;
+  border: 1px solid var(--td-warning-color-3);
+  border-radius: 8px;
+  background: var(--td-warning-color-1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+
+  .reprocess-copy {
+    min-width: 0;
+  }
+
+  h3 {
+    margin: 0 0 6px;
+    color: var(--td-text-color-primary);
+    font-size: 15px;
+  }
+
+  p {
+    margin: 0;
+    color: var(--td-text-color-secondary);
+    font-size: 13px;
+    line-height: 1.6;
+  }
 }
 
 // 过渡动画

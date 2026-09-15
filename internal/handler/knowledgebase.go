@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	stderrors "errors"
 	"net/http"
@@ -548,10 +549,12 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	})
 }
 
-// RebuildIndex re-runs post-processing for every completed document using current settings.
+// RebuildIndex reparses every completed document using the knowledge base's
+// current settings. ReparseKnowledge owns cleanup and rebuilding of chunks and
+// all enabled derived data and indexes.
 func (h *KnowledgeBaseHandler) RebuildIndex(c *gin.Context) {
 	ctx := c.Request.Context()
-	kb, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	_, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -565,7 +568,7 @@ func (h *KnowledgeBaseHandler) RebuildIndex(c *gin.Context) {
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
-	enqueued, err := enqueueKnowledgePostProcessTasks(h.asynqClient, kb.TenantID, id, items)
+	enqueued, err := reparseKnowledgeBaseItems(ctx, items, h.knowledgeService.ReparseKnowledge)
 	if err != nil {
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
@@ -573,18 +576,17 @@ func (h *KnowledgeBaseHandler) RebuildIndex(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": gin.H{"document_count": enqueued}})
 }
 
-func enqueueKnowledgePostProcessTasks(enqueuer interfaces.TaskEnqueuer, tenantID uint64, kbID string, items []*types.Knowledge) (int, error) {
+func reparseKnowledgeBaseItems(
+	ctx context.Context,
+	items []*types.Knowledge,
+	reparse func(context.Context, string) (*types.Knowledge, error),
+) (int, error) {
 	enqueued := 0
 	for _, item := range items {
 		if item == nil || item.ParseStatus != types.ParseStatusCompleted {
 			continue
 		}
-		payload, err := json.Marshal(types.KnowledgePostProcessPayload{TenantID: tenantID, KnowledgeID: item.ID, KnowledgeBaseID: kbID})
-		if err != nil {
-			return enqueued, err
-		}
-		task := asynq.NewTask(types.TypeKnowledgePostProcess, payload, asynq.Queue("default"), asynq.MaxRetry(3))
-		if _, err = enqueuer.Enqueue(task); err != nil {
+		if _, err := reparse(ctx, item.ID); err != nil {
 			return enqueued, err
 		}
 		enqueued++

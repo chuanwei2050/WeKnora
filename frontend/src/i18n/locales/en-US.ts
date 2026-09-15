@@ -1948,6 +1948,16 @@ export default {
       rebuildSuccess: 'Rebuild task submitted for {count} documents',
       rebuildSkip: 'You can manually trigger a rebuild later from Data Sources',
     },
+    reprocess: {
+      title: 'Reprocess All Documents',
+      description: 'Parse and chunk again with the current settings, then regenerate summaries, chunk questions, Elasticsearch and vector indexes. The knowledge graph is also rebuilt when enabled.',
+      action: 'Re-chunk and Rebuild Indexes',
+      confirmTitle: 'Reprocess All Documents',
+      confirmBody: 'This clears current chunks and derived data, reparses every completed document, and rebuilds summaries, chunk questions, Elasticsearch, vector indexes, and the enabled knowledge graph. Search results may be incomplete while processing. Continue?',
+      confirmAction: 'Reprocess',
+      submitted: 'Reprocessing submitted for {count} documents',
+      failed: 'Failed to submit reprocessing tasks',
+    },
     wikiBrowser: {
       viewInGraph: 'View in Graph',
       tabDocuments: 'Documents',

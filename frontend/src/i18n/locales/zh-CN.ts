@@ -2487,6 +2487,16 @@ export default {
       rebuildSuccess: "已提交重建任务，共 {count} 篇文档",
       rebuildSkip: "稍后可在数据源中手动触发重建",
     },
+    reprocess: {
+      title: "重新处理全部文档",
+      description: "按当前配置重新解析和分块，并重新生成摘要、块问题、ES 与向量索引；已启用的知识图谱也会同步重建。",
+      action: "重新分块并重建索引",
+      confirmTitle: "重新处理全部文档",
+      confirmBody: "该操作会清理现有分块及其派生数据，重新解析全部已完成文档，并重建摘要、块问题、ES、向量索引及已启用的知识图谱。处理期间检索结果可能暂时不完整，是否继续？",
+      confirmAction: "确认重新处理",
+      submitted: "已提交 {count} 篇文档的重新处理任务",
+      failed: "提交重新处理任务失败",
+    },
     wikiBrowser: {
       viewInGraph: '在图谱中查看',
       tabDocuments: "文档",
