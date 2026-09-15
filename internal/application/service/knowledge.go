@@ -3016,12 +3016,41 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// 删除旧的索引数据 — only when vector/keyword indexing is enabled
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenantInfo, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenantInfo == nil {
+		logger.Errorf(ctx, "processChunks: tenant info missing from context")
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = "租户上下文缺失，无法建立检索引擎"
+		knowledge.UpdatedAt = time.Now()
+		persistProcessingState()
+		cleanupStoredImages()
+		span.RecordError(errors.New("tenant info missing from context"))
+		return
+	}
 	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
 		s.retrieveEngine,
 		indexingEnginesForKnowledgeBase(tenantInfo.GetEffectiveEngines(), kb),
 	)
-	if !isGovernedStaging && err == nil && embeddingModel != nil {
+	if err != nil {
+		// Vector/keyword KBs must not continue: later EstimateStorageSize/BatchIndex
+		// would nil-deref and only show up as asynq "panic error".
+		if kb.IsVectorEnabled() || kb.IsKeywordEnabled() {
+			logger.Errorf(ctx, "processChunks: init retrieve engine failed: %v", err)
+			knowledge.ParseStatus = types.ParseStatusFailed
+			knowledge.ErrorMessage = fmt.Sprintf("初始化检索引擎失败: %v", err)
+			if len(knowledge.ErrorMessage) > 1000 {
+				knowledge.ErrorMessage = knowledge.ErrorMessage[:1000]
+			}
+			knowledge.UpdatedAt = time.Now()
+			persistProcessingState()
+			cleanupStoredImages()
+			span.RecordError(err)
+			return
+		}
+		logger.Warnf(ctx, "processChunks: retrieve engine unavailable (indexing disabled): %v", err)
+		retrieveEngine = nil
+	}
+	if !isGovernedStaging && retrieveEngine != nil && embeddingModel != nil {
 		deleteDimension := oldEmbeddingDimension
 		if deleteDimension <= 0 {
 			deleteDimension = embeddingModel.GetDimensions()
@@ -3260,6 +3289,15 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Chunks are ALWAYS saved to DB (above) because wiki and graph need them even without vector indexing.
 	var totalStorageSize int64
 	if kb.IsVectorEnabled() || kb.IsKeywordEnabled() {
+		if retrieveEngine == nil {
+			knowledge.ParseStatus = types.ParseStatusFailed
+			knowledge.ErrorMessage = "检索引擎未初始化，无法写入向量/关键词索引"
+			knowledge.UpdatedAt = time.Now()
+			persistProcessingState()
+			cleanupCreatedChunks()
+			span.RecordError(errors.New("retrieve engine is nil"))
+			return
+		}
 		// Create index information — only for child/flat chunks, NOT parent chunks.
 		// Parent chunks are stored for context retrieval but do not need vector embeddings.
 		// Prepend the document title to improve semantic alignment between
