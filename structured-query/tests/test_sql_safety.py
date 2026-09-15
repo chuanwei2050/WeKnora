@@ -67,6 +67,24 @@ def test_rejects_cross_metric_or_leakage_for_separate_counts():
     assert "每个 UNION 分支" in failure.value.repair_hint
 
 
+def test_rejects_cross_metric_or_leakage_without_separate_keyword():
+    sql = """
+        SELECT '软件评测师' AS metric_1, COUNT(*) AS count_1
+        FROM people
+        WHERE certificate ILIKE '%软件评测师%'
+           OR certificate ILIKE '%ISTQB%'
+        UNION ALL
+        SELECT 'ISTQB' AS metric_2, COUNT(*) AS count_2
+        FROM people WHERE certificate ILIKE '%ISTQB%'
+    """
+    with pytest.raises(UnsafeSQL) as failure:
+        validate_read_only_sql(
+            sql,
+            {"people"},
+            question_text="软件评测师和 ISTQB 各有多少人",
+        )
+    assert failure.value.code == "cross_metric_condition_leakage"
+
 def test_allows_independent_union_branches_for_separate_counts():
     sql = """
         SELECT '软件评测师' AS metric_1, COUNT(*) AS count_1

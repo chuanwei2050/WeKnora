@@ -242,22 +242,34 @@ def _match_profile_metadata_scope(question: str, datasets: list[Dataset]) -> tup
 
 
 def _question_without_resolved_scope(question: str, scope_labels: list[str]) -> str:
-    """Remove a uniquely resolved leading dataset locator from the model question."""
+    """Remove a uniquely resolved leading dataset locator from the model question.
+
+    Only strip when the prefix overlaps a resolved scope label and a locator
+    particle marks file/sheet scope (里/内/中的). Bare 「中」 and mid-lexeme
+    uses like 「内容」「内部」「哪里」 are left alone so entity filters and
+    normal Chinese compounds are preserved.
+    """
     if not scope_labels:
         return question
-    for match in re.finditer(r"[里中内]", question):
+    normalized_labels = [_normalize_scope_text(label) for label in scope_labels]
+    for match in re.finditer(r"(?<![哪这那])里(?!面|边|头|程)|内(?!容|部|在)|中的", question):
         prefix = question[: match.start()]
         suffix = question[match.end() :].lstrip("的，,：: ")
         if not suffix:
             continue
         normalized_prefix = _normalize_scope_text(prefix)
-        locator_ending = re.search(r"(?:清单|名单|表格|文件|数据集|数据库)$", normalized_prefix)
-        if locator_ending and any(
-            len(_longest_shared_segment(normalized_prefix, _normalize_scope_text(label))) >= 4
-            for label in scope_labels
+        if any(
+            len(_longest_shared_segment(normalized_prefix, label)) >= 4
+            for label in normalized_labels
         ):
             return suffix
     return question
+
+
+# Tolerate ~1% row-count drift between equivalent full-table snapshots so a
+# newly activated replacement wins over an older near-equal copy; materially
+# smaller subset tables stay below this floor and are excluded.
+_EQUIVALENT_SCHEMA_COVERAGE_TOLERANCE_RATIO = 0.01
 
 
 def _select_current_broad_tables(
@@ -268,7 +280,7 @@ def _select_current_broad_tables(
 
     Row count remains the coverage signal, but tiny row-count changes between
     snapshots must not make an older file outrank a newly activated replacement.
-    Materially smaller departmental subsets are still excluded.
+    Materially smaller subset tables are still excluded.
     """
     tables_by_signature: dict[tuple[str, ...], list[DataTable]] = {}
     for table in tables:
@@ -281,7 +293,8 @@ def _select_current_broad_tables(
     selected: dict[tuple[str, ...], DataTable] = {}
     for signature, equivalents in tables_by_signature.items():
         largest_row_count = max(table.row_count for table in equivalents)
-        coverage_floor = largest_row_count - max(1, (largest_row_count + 99) // 100)
+        drift = max(1, int(largest_row_count * _EQUIVALENT_SCHEMA_COVERAGE_TOLERANCE_RATIO + 0.999))
+        coverage_floor = largest_row_count - drift
         full_size = [table for table in equivalents if table.row_count >= coverage_floor]
 
         def activation_key(table: DataTable) -> tuple[datetime, datetime, str]:
@@ -556,10 +569,9 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
                 verify_columns,
                 probe_literal,
                 full_schema_context,
-                reconsider_none=bool(
-                    (column_hits or value_hits)
-                    and re.search(r"多少|几|统计|数量|人数|列出|名单|哪些|谁|筛选|查找|查询", analysis_question)
-                ),
+                # Structured hits already show the question can be answered from
+                # table evidence; if the model still returns none, force SQL once.
+                reconsider_none=bool(column_hits or value_hits),
             )
         except QueryAttemptsFailed as failure:
             failed_at = perf_counter()

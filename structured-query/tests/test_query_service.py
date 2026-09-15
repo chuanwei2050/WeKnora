@@ -260,6 +260,28 @@ def test_resolved_dataset_locator_is_removed_from_model_question():
     assert result == "有多少个硕士学历的人员"
 
 
+def test_resolved_sheet_locator_with_zhong_de_is_removed():
+    question = "请统计年度人员明细中的人数"
+
+    result = query_service._question_without_resolved_scope(
+        question,
+        ["年度人员明细"],
+    )
+
+    assert result == "人数"
+
+
+def test_mid_lexeme_particles_are_not_treated_as_locators():
+    labels = ["年度人员明细"]
+    cases = [
+        "请统计年度人员明细内容有多少",
+        "年度人员明细内部有哪些字段",
+        "年度人员明细哪里能看到硕士",
+    ]
+    for question in cases:
+        assert query_service._question_without_resolved_scope(question, labels) == question
+
+
 def test_unmatched_locator_is_preserved():
     question = "其他部门清单里有多少个硕士学历的人员"
 
