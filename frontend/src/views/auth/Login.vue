@@ -4,7 +4,7 @@
       <div class="grid-texture" aria-hidden="true"></div>
       <div class="brand">
         <div class="brand-mark">知</div>
-        <span>智信测评知识平台</span>
+        <span>智信测评知识平台 <small class="brand-version">V1.0</small></span>
       </div>
 
       <div class="identity-content">
@@ -46,7 +46,7 @@
     <section class="form-panel">
       <div class="form-shell">
         <header class="form-header">
-          <p class="mobile-brand">智信测评知识平台</p>
+          <p class="mobile-brand">智信测评知识平台 · V1.0</p>
           <h2>欢迎登录</h2>
           <p>使用管理员分配的账号进入工作空间</p>
         </header>
@@ -110,7 +110,7 @@
         </div>
       </div>
 
-      <p class="form-footer">© 2026 智信测评知识平台</p>
+      <p class="form-footer">智信测评知识平台 V1.0 · © 2026</p>
     </section>
   </main>
 </template>

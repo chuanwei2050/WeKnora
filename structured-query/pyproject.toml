@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "weknora-structured-query"
-version = "0.1.0"
+version = "1.0.0"
 description = "Reusable spreadsheet ingestion and Text-to-SQL service"
 requires-python = ">=3.12"
 dependencies = [
