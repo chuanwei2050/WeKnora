@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -129,6 +131,7 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// handler execution in a SPAN so all child generations (embedding / VLM /
 	// chat / rerank / ASR) nest correctly in the Langfuse UI.
 	mux.Use(langfuse.AsynqMiddleware())
+	mux.Use(documentProcessFailureMiddleware(params.KnowledgeService))
 
 	// Register extract handlers - router will dispatch to appropriate handler
 	mux.HandleFunc(types.TypeChunkExtract, params.ChunkExtractor.Handle)
@@ -189,6 +192,14 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// Register wiki ingest handler
 	mux.HandleFunc(types.TypeWikiIngest, params.WikiIngest.Handle)
 
+	// Recover documents left in parse_status=processing after crashes / lease expiry.
+	go func() {
+		ctx := context.Background()
+		if _, err := params.KnowledgeService.RecoverOrphanedProcessingKnowledge(ctx, 2*time.Hour); err != nil {
+			logger.Errorf(ctx, "failed to recover orphaned processing knowledge: %v", err)
+		}
+	}()
+
 	go func() {
 		// Start the server
 		if err := params.Server.Run(mux); err != nil {
@@ -201,4 +212,31 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 		}
 	}()
 	return mux
+}
+
+// documentProcessFailureMiddleware writes parse_status=failed when document:process
+// exhausts retries, so the UI does not stay stuck on "解析中".
+func documentProcessFailureMiddleware(knowledge interfaces.KnowledgeService) asynq.MiddlewareFunc {
+	return func(next asynq.Handler) asynq.Handler {
+		return asynq.HandlerFunc(func(ctx context.Context, task *asynq.Task) (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("panic error: %v", r)
+					logger.Errorf(ctx, "document process panic: %v", r)
+				}
+				if err == nil || task == nil || task.Type() != types.TypeDocumentProcess || knowledge == nil {
+					return
+				}
+				retryCount, retryOK := asynq.GetRetryCount(ctx)
+				maxRetry, maxOK := asynq.GetMaxRetry(ctx)
+				if !retryOK || !maxOK || retryCount < maxRetry {
+					return
+				}
+				if markErr := knowledge.MarkDocumentProcessFailed(ctx, task.Payload(), err); markErr != nil {
+					logger.Warnf(ctx, "failed to mark document process failed: %v", markErr)
+				}
+			}()
+			return next.ProcessTask(ctx, task)
+		})
+	}
 }

@@ -24,6 +24,10 @@ func (op KBMaintenanceOperation) IsDocumentPipelineMaintenance() bool {
 // documents so leftover queue workers can recognize they were superseded.
 const ParseInterruptedForRechunkMessage = "解析已中断，准备重新解析分块"
 
+// ParseStaleInterruptedMessage is written when a processing document is orphaned
+// (worker crash, lease expiry, or exhausted retries without a status write-back).
+const ParseStaleInterruptedMessage = "解析任务已中断（超时或服务重启），请重试"
+
 type KBMaintenanceProgress struct {
 	RunID              string                 `json:"run_id"`
 	Operation          KBMaintenanceOperation `json:"operation"`

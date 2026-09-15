@@ -508,6 +508,44 @@ func (r *knowledgeRepository) UpdateKnowledgeColumn(
 	return err
 }
 
+// FailStaleProcessingKnowledge marks parse_status=processing rows that have not been
+// updated since olderThan as failed, and moves their pending indexing versions to
+// publish_failed so governed uploads are not left hanging.
+func (r *knowledgeRepository) FailStaleProcessingKnowledge(
+	ctx context.Context,
+	olderThan time.Time,
+	message string,
+) (int64, error) {
+	now := time.Now()
+	var pendingVersionIDs []string
+	if err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("parse_status = ? AND deleted_at IS NULL AND updated_at < ? AND pending_version_id <> '' AND pending_version_id IS NOT NULL",
+			types.ParseStatusProcessing, olderThan).
+		Pluck("pending_version_id", &pendingVersionIDs).Error; err != nil {
+		return 0, err
+	}
+
+	res := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("parse_status = ? AND deleted_at IS NULL AND updated_at < ?", types.ParseStatusProcessing, olderThan).
+		Updates(map[string]any{
+			"parse_status":   types.ParseStatusFailed,
+			"error_message":  message,
+			"updated_at":     now,
+		})
+	if res.Error != nil {
+		return 0, res.Error
+	}
+
+	if len(pendingVersionIDs) > 0 {
+		if err := r.db.WithContext(ctx).Model(&types.KnowledgeVersion{}).
+			Where("id IN ? AND status = ?", pendingVersionIDs, types.KnowledgeVersionIndexing).
+			Update("status", types.KnowledgeVersionPublishFailed).Error; err != nil {
+			return res.RowsAffected, err
+		}
+	}
+	return res.RowsAffected, nil
+}
+
 // MergeKnowledgeMetadata atomically adds metadata keys without overwriting
 // processing fields or metadata concurrently written by another worker.
 func (r *knowledgeRepository) MergeKnowledgeMetadata(

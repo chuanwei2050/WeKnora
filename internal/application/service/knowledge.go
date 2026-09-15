@@ -4922,6 +4922,78 @@ func (s *knowledgeService) InterruptStuckParses(ctx context.Context, kbID string
 	return reset, nil
 }
 
+// MarkDocumentProcessFailed marks knowledge as failed after document:process retries
+// are exhausted. Safe to call repeatedly; ignores documents that are no longer processing.
+func (s *knowledgeService) MarkDocumentProcessFailed(ctx context.Context, payload []byte, cause error) error {
+	var p types.DocumentProcessPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return fmt.Errorf("unmarshal document process payload: %w", err)
+	}
+	if p.TenantID == 0 || strings.TrimSpace(p.KnowledgeID) == "" {
+		return nil
+	}
+
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, p.TenantID, p.KnowledgeID)
+	if err != nil {
+		return err
+	}
+	if knowledge == nil {
+		return nil
+	}
+	switch knowledge.ParseStatus {
+	case types.ParseStatusProcessing, types.ParseStatusPending:
+	default:
+		return nil
+	}
+
+	errMsg := types.ParseStaleInterruptedMessage
+	if cause != nil {
+		msg := strings.TrimSpace(cause.Error())
+		if msg != "" {
+			errMsg = msg
+			if len(errMsg) > 1000 {
+				errMsg = errMsg[:1000]
+			}
+		}
+	}
+
+	versionID := strings.TrimSpace(p.VersionID)
+	if versionID == "" {
+		versionID = strings.TrimSpace(knowledge.PendingVersionID)
+	}
+	knowledge.ParseStatus = types.ParseStatusFailed
+	knowledge.ErrorMessage = errMsg
+	knowledge.UpdatedAt = time.Now()
+	if _, err := s.persistKnowledgeTaskState(ctx, knowledge, versionID); err != nil {
+		return err
+	}
+	if versionID != "" && s.governanceRepo != nil {
+		version, gerr := s.governanceRepo.GetVersion(ctx, p.TenantID, versionID)
+		if gerr == nil && version != nil && version.Status == types.KnowledgeVersionIndexing {
+			_ = s.governanceRepo.UpdateVersionStatus(ctx, p.TenantID, versionID, types.KnowledgeVersionPublishFailed)
+		}
+	}
+	logger.Warnf(ctx, "Marked document process failed: knowledge_id=%s err=%s", p.KnowledgeID, errMsg)
+	return nil
+}
+
+// RecoverOrphanedProcessingKnowledge marks long-stale processing documents as failed.
+// Used on worker startup so crash/lease-expiry orphans do not stay "解析中" forever.
+func (s *knowledgeService) RecoverOrphanedProcessingKnowledge(ctx context.Context, olderThan time.Duration) (int64, error) {
+	if olderThan <= 0 {
+		olderThan = 2 * time.Hour
+	}
+	cutoff := time.Now().Add(-olderThan)
+	n, err := s.repo.FailStaleProcessingKnowledge(ctx, cutoff, types.ParseStaleInterruptedMessage)
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		logger.Warnf(ctx, "Recovered %d orphaned processing knowledge item(s) older than %s", n, olderThan)
+	}
+	return n, nil
+}
+
 // ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.
 func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID string) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start re-parsing knowledge")

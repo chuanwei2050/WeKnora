@@ -102,6 +102,12 @@ type KnowledgeService interface {
 	// InterruptStuckParses marks pending/processing documents in a knowledge base as failed
 	// so they can be safely requeued by a subsequent reparse/rechunk operation.
 	InterruptStuckParses(ctx context.Context, kbID string, message string) (int, error)
+	// MarkDocumentProcessFailed marks a document:process task's knowledge as failed
+	// after asynq retries are exhausted (panic, lease expiry, or unhandled error).
+	MarkDocumentProcessFailed(ctx context.Context, payload []byte, cause error) error
+	// RecoverOrphanedProcessingKnowledge marks parse_status=processing documents that
+	// have not been updated for olderThan as failed, so the UI does not stay stuck.
+	RecoverOrphanedProcessingKnowledge(ctx context.Context, olderThan time.Duration) (int64, error)
 	// CloneKnowledgeBase clones knowledge to another knowledge base.
 	CloneKnowledgeBase(ctx context.Context, srcID, dstID string) error
 	// UpdateImageInfo updates image information for a knowledge chunk.
@@ -226,6 +232,8 @@ type KnowledgeRepository interface {
 	// AminusB returns the difference set of A and B.
 	AminusB(ctx context.Context, Atenant uint64, A string, Btenant uint64, B string) ([]string, error)
 	UpdateKnowledgeColumn(ctx context.Context, id string, column string, value interface{}) error
+	// FailStaleProcessingKnowledge marks orphaned processing documents as failed.
+	FailStaleProcessingKnowledge(ctx context.Context, olderThan time.Time, message string) (int64, error)
 	// CountKnowledgeByKnowledgeBaseID counts the number of knowledge items in a knowledge base.
 	CountKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) (int64, error)
 	// CountKnowledgeByStatus counts the number of knowledge items with the specified parse status.

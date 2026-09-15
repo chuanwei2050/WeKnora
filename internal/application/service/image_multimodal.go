@@ -159,7 +159,7 @@ func (s *ImageMultimodalService) cleanupStaleImageSource(ctx context.Context, pa
 }
 
 // Handle implements asynq handler for TypeImageMultimodal.
-func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) error {
+func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (err error) {
 	retryCount, retryCountOK := asynq.GetRetryCount(ctx)
 	maxRetry, maxRetryOK := asynq.GetMaxRetry(ctx)
 	isLastRetry := retryCountOK && maxRetryOK && retryCount >= maxRetry
@@ -168,6 +168,22 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return fmt.Errorf("unmarshal image multimodal payload: %w", err)
 	}
+
+	// On the final attempt, always decrement the multimodal pending counter and
+	// enqueue post-process. Otherwise a permanent index/OCR failure leaves the
+	// parent document stuck in parse_status=processing forever.
+	defer func() {
+		if err == nil || !isLastRetry || strings.TrimSpace(payload.KnowledgeID) == "" {
+			return
+		}
+		logger.Errorf(ctx, "[ImageMultimodal] permanently failed for %s: %v; finalizing document without this image enrichment",
+			payload.ImageURL, err)
+		if finErr := s.checkAndFinalizeAllImages(ctx, payload); finErr != nil {
+			err = finErr
+			return
+		}
+		err = nil
+	}()
 
 	logger.Infof(ctx, "[ImageMultimodal] Processing image: chunk=%s, url=%s, ocr=%v, caption=%v",
 		payload.ChunkID, payload.ImageURL, payload.EnableOCR, payload.EnableCaption)
@@ -396,8 +412,10 @@ func (s *ImageMultimodalService) handleVLMFailure(
 		return fmt.Errorf("%s failed for %s: %w", operation, payload.ImageURL, cause)
 	}
 
-	logger.Errorf(ctx, "[ImageMultimodal] %s permanently failed for %s; finalizing document without this image enrichment: %v", operation, payload.ImageURL, cause)
-	return s.checkAndFinalizeAllImages(ctx, payload)
+	// Finalization is handled by Handle's defer on last retry so we don't double-decrement
+	// the multimodal pending counter.
+	logger.Errorf(ctx, "[ImageMultimodal] %s permanently failed for %s: %v", operation, payload.ImageURL, cause)
+	return fmt.Errorf("%s permanently failed for %s: %w", operation, payload.ImageURL, cause)
 }
 
 // indexChunks indexes the newly created multimodal chunks into the retrieval engine
