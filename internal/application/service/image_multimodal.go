@@ -24,12 +24,35 @@ import (
 )
 
 const (
+	vlmOCRPrompt = "<system_prompt>\n" +
+		"You are an OCR assistant. Your task is to extract all body text content from this document image and output in pure Markdown format.\n" +
+		"</system_prompt>\n\n" +
+		"<instructions>\n" +
+		"1. Ignore headers and footers.\n" +
+		"2. Use Markdown table syntax for tables.\n" +
+		"3. Use LaTeX format for formulas (wrapped with $ or $$).\n" +
+		"4. Organize content in the original reading order.\n" +
+		"5. Output ONLY the extracted text content. Do NOT include any HTML tags, reasoning, or unrelated comments.\n" +
+		"6. If there is absolutely no recognizable text content in the image, reply ONLY with: No text content.\n" +
+		"</instructions>"
+	vlmOCRScannedPDFPrompt = "<system_prompt>\n" +
+		"You are an OCR and document layout extraction assistant. The input image is a page from a scanned PDF document.\n" +
+		"Your task is to carefully extract all text and layout structure from the image, and output the result in pure Markdown format.\n" +
+		"</system_prompt>\n\n" +
+		"<instructions>\n" +
+		"1. Ignore headers, footers, and page numbers.\n" +
+		"2. Preserve the original document's paragraph and hierarchical structure as much as possible.\n" +
+		"3. If there are tables, use Markdown table syntax to represent them.\n" +
+		"4. If there are mathematical formulas, use LaTeX format wrapped in $ or $$.\n" +
+		"5. Output ONLY the extracted text content. Do NOT include any HTML tags, reasoning, or unrelated comments.\n" +
+		"6. If there is absolutely no recognizable text content in the image, reply ONLY with: No text content.\n" +
+		"</instructions>"
 	vlmCaptionPrompt = "Provide a brief and concise description of the main content of the image in Chinese"
 )
 
 // ImageMultimodalService handles image:multimodal asynq tasks.
 // It reads images from storage (via FileService for provider:// URLs),
-// performs OCR (Paddle via docreader) and VLM caption, and creates child chunks.
+// performs local OCR (RapidOCR via docreader) with VLM OCR fallback, then VLM caption.
 type ImageMultimodalService struct {
 	chunkService   interfaces.ChunkService
 	modelService   interfaces.ModelService
@@ -257,51 +280,92 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 		if payload.EnableOCR {
 			ocrText, ocrErr := s.runPaddleOCR(ctx, ocrBytes, payload.ImageURL)
 			if ocrErr != nil {
-				// OCR is best-effort relative to caption: permanent transport/config
-				// failures must not block VLM caption or burn asynq retries.
-				logger.Warnf(ctx, "[ImageMultimodal] Paddle OCR failed for %s, continuing with caption: %v",
+				// Local OCR is best-effort: fall back to VLM OCR below.
+				logger.Warnf(ctx, "[ImageMultimodal] Local OCR failed for %s, will try VLM OCR: %v",
 					payload.ImageURL, ocrErr)
 			} else {
 				ocrText = sanitizeOCRText(ocrText)
 				if ocrText != "" {
 					imageInfo.OCRText = ocrText
 				} else {
-					logger.Warnf(ctx, "[ImageMultimodal] Paddle OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
+					logger.Warnf(ctx, "[ImageMultimodal] Local OCR returned empty/invalid content for %s, will try VLM OCR",
+						payload.ImageURL)
 				}
 			}
 		}
 
-		if payload.EnableCaption {
+		needVLMOCR := payload.EnableOCR && imageInfo.OCRText == ""
+		if needVLMOCR || payload.EnableCaption {
 			vlmModel, resolveErr := s.resolveVLM(ctx, payload.KnowledgeBaseID)
 			if resolveErr != nil {
-				if imageInfo.OCRText != "" {
-					logger.Warnf(ctx, "[ImageMultimodal] VLM unavailable after OCR for %s, keeping OCR only: %v",
+				if needVLMOCR {
+					logger.Warnf(ctx, "[ImageMultimodal] VLM OCR fallback unavailable for %s: %v",
 						payload.ImageURL, resolveErr)
-				} else {
-					return fmt.Errorf("resolve VLM: %w", resolveErr)
+				}
+				if payload.EnableCaption {
+					if imageInfo.OCRText != "" {
+						logger.Warnf(ctx, "[ImageMultimodal] VLM unavailable after OCR for %s, keeping OCR only: %v",
+							payload.ImageURL, resolveErr)
+					} else {
+						return fmt.Errorf("resolve VLM: %w", resolveErr)
+					}
 				}
 			} else {
 				prepared, skip, prepErr := vlm.PrepareImageForVLM(imgBytes, payload.ImageURL)
 				if prepErr != nil {
-					if imageInfo.OCRText != "" {
-						logger.Warnf(ctx, "[ImageMultimodal] Caption prepare failed after OCR for %s, keeping OCR only: %v",
+					if needVLMOCR {
+						logger.Warnf(ctx, "[ImageMultimodal] VLM OCR prepare failed for %s: %v",
 							payload.ImageURL, prepErr)
-					} else {
-						return s.handleVLMFailure(ctx, payload, "prepare", prepErr, isLastRetry)
+					}
+					if payload.EnableCaption {
+						if imageInfo.OCRText != "" {
+							logger.Warnf(ctx, "[ImageMultimodal] Caption prepare failed after OCR for %s, keeping OCR only: %v",
+								payload.ImageURL, prepErr)
+						} else {
+							return s.handleVLMFailure(ctx, payload, "prepare", prepErr, isLastRetry)
+						}
 					}
 				} else if skip {
-					logger.Warnf(ctx, "[ImageMultimodal] Skipping unsupported image format for VLM caption: %s", payload.ImageURL)
+					logger.Warnf(ctx, "[ImageMultimodal] Skipping unsupported image format for VLM: %s", payload.ImageURL)
 				} else {
-					caption, capErr := vlmModel.Predict(ctx, [][]byte{prepared}, vlmCaptionPrompt)
-					if capErr != nil {
-						if imageInfo.OCRText != "" {
-							logger.Warnf(ctx, "[ImageMultimodal] Caption failed after OCR for %s, keeping OCR only: %v",
-								payload.ImageURL, capErr)
+					if needVLMOCR {
+						prompt := vlmOCRPrompt
+						if payload.ImageSourceType == "scanned_pdf" {
+							prompt = vlmOCRScannedPDFPrompt
+							logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for VLM OCR: %s", payload.ImageURL)
 						} else {
-							return s.handleVLMFailure(ctx, payload, "caption", capErr, isLastRetry)
+							logger.Infof(ctx, "[ImageMultimodal] Falling back to VLM OCR for %s", payload.ImageURL)
 						}
-					} else if caption != "" {
-						imageInfo.Caption = caption
+						ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{prepared}, prompt)
+						if ocrErr != nil {
+							// Keep best-effort: allow caption to proceed even if VLM OCR fails.
+							logger.Warnf(ctx, "[ImageMultimodal] VLM OCR failed for %s, continuing with caption: %v",
+								payload.ImageURL, ocrErr)
+						} else {
+							ocrText = sanitizeOCRText(ocrText)
+							if ocrText != "" {
+								imageInfo.OCRText = ocrText
+								logger.Infof(ctx, "[ImageMultimodal] VLM OCR done for %s, text_len=%d",
+									payload.ImageURL, len(ocrText))
+							} else {
+								logger.Warnf(ctx, "[ImageMultimodal] VLM OCR returned empty/invalid content for %s, discarded",
+									payload.ImageURL)
+							}
+						}
+					}
+
+					if payload.EnableCaption {
+						caption, capErr := vlmModel.Predict(ctx, [][]byte{prepared}, vlmCaptionPrompt)
+						if capErr != nil {
+							if imageInfo.OCRText != "" {
+								logger.Warnf(ctx, "[ImageMultimodal] Caption failed after OCR for %s, keeping OCR only: %v",
+									payload.ImageURL, capErr)
+							} else {
+								return s.handleVLMFailure(ctx, payload, "caption", capErr, isLastRetry)
+							}
+						} else if caption != "" {
+							imageInfo.Caption = caption
+						}
 					}
 				}
 			}
@@ -515,7 +579,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 	return nil
 }
 
-// runPaddleOCR extracts text via docreader's local PaddleOCR backend.
+// runPaddleOCR extracts text via docreader's local OCR backend (RapidOCR by default).
 func (s *ImageMultimodalService) runPaddleOCR(ctx context.Context, imageData []byte, imageURL string) (string, error) {
 	if s.documentReader == nil {
 		return "", fmt.Errorf("document reader is not configured for OCR")
@@ -529,12 +593,12 @@ func (s *ImageMultimodalService) runPaddleOCR(ctx context.Context, imageData []b
 	}
 	ocrCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	logger.Infof(ctx, "[ImageMultimodal] Running Paddle OCR for %s (%d bytes)", imageURL, len(imageData))
+	logger.Infof(ctx, "[ImageMultimodal] Running local OCR for %s (%d bytes)", imageURL, len(imageData))
 	text, err := s.documentReader.OCR(ocrCtx, imageData, fileName)
 	if err != nil {
 		return "", err
 	}
-	logger.Infof(ctx, "[ImageMultimodal] Paddle OCR done for %s, text_len=%d", imageURL, len(text))
+	logger.Infof(ctx, "[ImageMultimodal] Local OCR done for %s, text_len=%d", imageURL, len(text))
 	return text, nil
 }
 

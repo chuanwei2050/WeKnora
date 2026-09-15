@@ -184,9 +184,9 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
         return ListEnginesResponse(engines=engines)
 
     def OCR(self, request: OCRRequest, context):
-        """Extract text from a single image using the local OCR backend (default: paddle)."""
+        """Extract text from a single image using the local OCR backend (default: rapid)."""
         request_id = request.request_id or str(uuid.uuid4())
-        backend = (request.backend or "paddle").strip().lower() or "paddle"
+        backend = (request.backend or "rapid").strip().lower() or "rapid"
 
         with request_id_context(request_id):
             if not request.image_data:

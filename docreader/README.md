@@ -80,9 +80,11 @@ docreader:
 ### OCR 配置
 
 - `OCR_BACKEND`: OCR 引擎后端，可选值：
-  - `paddle`: 使用 PaddleOCR（默认）
-  - `no_ocr`: 禁用 OCR 功能
-  - `api`: 使用外部 OCR API
+  - `rapid`（默认）：RapidOCR + ONNX Runtime（与 FinOpsSys 本地 OCR 同栈，避免 paddle 原生崩溃）
+  - `paddle`: 使用 PaddleOCR（易在 gRPC 多线程下 segfault，不推荐）
+  - `vlm`: 使用远程 VLM 做 OCR
+  - `no_ocr` / `dummy`: 禁用 OCR
+- `OCR_MAX_CONCURRENT`: RapidOCR 进程内最大并发预测数（默认：4，与 `ASYNQ_IMAGE_CONCURRENCY` 对齐）
 - `OCR_API_BASE_URL`: 外部 OCR API 的基础 URL
 - `OCR_API_KEY`: 外部 OCR API 的密钥
 - `OCR_MODEL`: OCR 模型名称
@@ -91,6 +93,12 @@ docreader:
 ```yaml
 environment:
   - OCR_BACKEND=no_ocr
+```
+
+**示例**：显式使用 RapidOCR
+```yaml
+environment:
+  - OCR_BACKEND=rapid
 ```
 
 ### VLM（视觉语言模型）配置
@@ -168,7 +176,7 @@ docreader:
     - MINIO_PUBLIC_ENDPOINT=http://192.168.1.100:9000
     - MINERU_ENDPOINT=http://mineru:8080
     - MAX_FILE_SIZE_MB=2047
-    - OCR_BACKEND=paddle
+    - OCR_BACKEND=rapid
     - VLM_MODEL_BASE_URL=http://ollama:11434
     - VLM_MODEL_NAME=llava
     - VLM_INTERFACE_TYPE=ollama

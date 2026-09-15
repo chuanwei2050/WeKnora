@@ -158,7 +158,8 @@ func (p *GRPCDocumentReader) OCR(ctx context.Context, imageData []byte, fileName
 	resp, err := client.OCR(ctx, &proto.OCRRequest{
 		ImageData: imageData,
 		FileName:  fileName,
-		Backend:   "paddle",
+		// rapid = RapidOCR+ONNX (FinOpsSys-style); paddle segfaults under gRPC workers.
+		Backend: "rapid",
 	})
 	if err != nil {
 		return "", fmt.Errorf("gRPC OCR failed: %w", err)

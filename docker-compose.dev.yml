@@ -185,6 +185,9 @@ services:
       - DOCREADER_LARGE_DOCX_TEXT_ONLY_MB=${DOCREADER_LARGE_DOCX_TEXT_ONLY_MB:-256}
       - MINERU_ENDPOINT=${MINERU_ENDPOINT:-}
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-2047}
+      - OCR_BACKEND=${OCR_BACKEND:-rapid}
+      - OCR_MAX_CONCURRENT=${OCR_MAX_CONCURRENT:-4}
+      - DOCREADER_GRPC_MAX_WORKERS=${DOCREADER_GRPC_MAX_WORKERS:-4}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
       interval: 30s
