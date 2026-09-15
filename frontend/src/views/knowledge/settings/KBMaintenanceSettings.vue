@@ -38,10 +38,16 @@
     </t-alert>
     <t-alert v-else-if="progress.status === 'canceling'" theme="warning" class="active-status">
       <template #message>
-        <div class="active-status-main">
-          <strong>{{ operationLabel(progress.operation) }}</strong>
-          <t-progress :percentage="progress.percent" size="small" />
-          <span class="progress-copy">{{ t('knowledgeEditor.maintenance.canceling', { processed: progress.processed, total: progress.total }) }}</span>
+        <div class="active-status-content">
+          <div class="active-status-main">
+            <strong>{{ operationLabel(progress.operation) }}</strong>
+            <t-progress :percentage="progress.percent" size="small" />
+            <span class="progress-copy">{{ t('knowledgeEditor.maintenance.canceling', { processed: progress.processed, total: progress.total }) }}</span>
+          </div>
+          <t-button class="stop-button" theme="danger" variant="outline" :loading="stopping" @click="stopCurrent">
+            <template #icon><t-icon name="stop-circle" size="16px" /></template>
+            {{ t('knowledgeEditor.maintenance.forceUnlock') }}
+          </t-button>
         </div>
       </template>
     </t-alert>
@@ -59,13 +65,32 @@
           <p>{{ action.description }}</p>
           <p v-if="action.disabledReason" class="disabled-reason">{{ action.disabledReason }}</p>
         </div>
-        <t-button
-          :theme="action.operation === 'reparse' || action.operation === 'rechunk' || action.operation === 'graph' ? 'warning' : 'default'"
-          variant="outline"
-          :loading="submitting === action.operation"
-          :disabled="actionsLocked || !hasFiles || !!action.disabledReason"
-          @click="confirmRun(action)"
-        >{{ action.label }}</t-button>
+        <div class="maintenance-actions">
+          <template v-if="action.operation === 'reparse'">
+            <t-button
+              theme="danger"
+              variant="outline"
+              :loading="stoppingAllParses"
+              :disabled="actionsLocked || !hasParsingDocs"
+              @click="confirmStopAllParses"
+            >{{ t('knowledgeEditor.maintenance.stopAllParses') }}</t-button>
+            <t-button
+              theme="warning"
+              variant="outline"
+              :loading="submitting === action.operation"
+              :disabled="actionsLocked || !hasFiles || !!action.disabledReason"
+              @click="confirmRun(action)"
+            >{{ action.label }}</t-button>
+          </template>
+          <t-button
+            v-else
+            :theme="action.operation === 'rechunk' || action.operation === 'graph' ? 'warning' : 'default'"
+            variant="outline"
+            :loading="submitting === action.operation"
+            :disabled="actionsLocked || !hasFiles || !!action.disabledReason"
+            @click="confirmRun(action)"
+          >{{ action.label }}</t-button>
+        </div>
       </div>
     </div>
   </div>
@@ -78,7 +103,7 @@ import { useI18n } from 'vue-i18n'
 import { getSystemInfo } from '@/api/system'
 import {
   cancelKBMaintenance, getKBGraphRebuildStatus, getKBMaintenanceStatus, getKBRebuildStatus, rebuildKBGraph, rebuildKBIndex,
-  rechunkKB, startKBMaintenance, type KBMaintenanceOperation, type KBMaintenanceProgress, type KnowledgeBaseRebuildStatus,
+  rechunkKB, startKBMaintenance, stopAllKBParses, type KBMaintenanceOperation, type KBMaintenanceProgress, type KnowledgeBaseRebuildStatus,
 } from '@/api/knowledge-base'
 
 const props = defineProps<{
@@ -94,6 +119,7 @@ const progress = ref<KBMaintenanceProgress>({ status: 'idle', total: 0, processe
 const documentStatus = ref<KnowledgeBaseRebuildStatus>({ status: 'idle', total: 0, pending: 0, processing: 0, completed: 0, failed: 0, percent: 0 })
 const submitting = ref<KBMaintenanceOperation | null>(null)
 const stopping = ref(false)
+const stoppingAllParses = ref(false)
 const refreshing = ref(false)
 const statusLoadError = ref(false)
 const structuredQueryEnabled = ref(false)
@@ -102,6 +128,7 @@ let refreshSeq = 0
 const isRunning = computed(() => progress.value.status === 'running' || progress.value.status === 'canceling')
 // While status is unknown (API failure), keep actions locked so users do not start a second rebuild.
 const actionsLocked = computed(() => isRunning.value || statusLoadError.value || refreshing.value)
+const hasParsingDocs = computed(() => (documentStatus.value.pending || 0) + (documentStatus.value.processing || 0) > 0)
 
 type Action = { operation: KBMaintenanceOperation; label: string; description: string; disabledReason?: string }
 const actions = computed<Action[]>(() => [
@@ -162,6 +189,36 @@ async function stopCurrent() {
   } finally { stopping.value = false }
 }
 
+function confirmStopAllParses() {
+  const dialog = DialogPlugin.confirm({
+    header: t('knowledgeEditor.maintenance.stopAllParses'),
+    body: t('knowledgeEditor.maintenance.stopAllParsesConfirm', {
+      count: (documentStatus.value.pending || 0) + (documentStatus.value.processing || 0),
+    }),
+    theme: 'warning',
+    confirmBtn: { content: t('common.confirm'), theme: 'danger' },
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      dialog.hide()
+      if (stoppingAllParses.value) return
+      stoppingAllParses.value = true
+      try {
+        const res = await stopAllKBParses(props.knowledgeBaseId)
+        const count = res?.data?.interrupted ?? 0
+        MessagePlugin.success(t('knowledgeEditor.maintenance.stopAllParsesSubmitted', { count }))
+        await refresh(true)
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : t('knowledgeEditor.maintenance.stopAllParsesFailed')
+        MessagePlugin.error(message)
+        await refresh(true)
+      } finally {
+        stoppingAllParses.value = false
+      }
+    },
+    onCancel: () => dialog.hide(),
+  })
+}
+
 function confirmRun(action: Action) {
   const dialog = DialogPlugin.confirm({
     header: action.label,
@@ -205,6 +262,7 @@ onBeforeUnmount(stopPolling)
 }
 .maintenance-list { border: 1px solid var(--td-component-stroke); border-radius: 8px; overflow: hidden; }
 .maintenance-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 18px 20px; border-bottom: 1px solid var(--td-component-stroke); &:last-child { border-bottom: 0; } }
+.maintenance-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex: 0 0 auto; }
 .maintenance-copy { min-width: 0; label { color: var(--td-text-color-primary); font-weight: 600; } p { margin: 6px 0 0; color: var(--td-text-color-secondary); font-size: 13px; line-height: 1.5; } .disabled-reason { color: var(--td-warning-color); } }
 @media (max-width: 720px) {
   .active-status {
@@ -212,5 +270,6 @@ onBeforeUnmount(stopPolling)
     .stop-button { align-self: flex-end; min-height: 40px; }
   }
   .maintenance-row { align-items: stretch; flex-direction: column; gap: 12px; }
+  .maintenance-actions { justify-content: stretch; .t-button, :deep(.t-button) { flex: 1; } }
 }
 </style>

@@ -102,6 +102,22 @@ type KnowledgeService interface {
 	// InterruptStuckParses marks pending/processing documents in a knowledge base as failed
 	// so they can be safely requeued by a subsequent reparse/rechunk operation.
 	InterruptStuckParses(ctx context.Context, kbID string, message string) (int, error)
+	// InterruptParsesByIDs marks the listed pending/processing documents as failed
+	// (e.g. when the user stops a maintenance job). Completed/failed docs are untouched.
+	InterruptParsesByIDs(ctx context.Context, knowledgeIDs []string, message string) (int, error)
+	// StopParseKnowledge stops a single pending/processing document parse, marks it
+	// failed, purges pipeline asynq/Redis leftovers, and deletes derived artifacts
+	// (chunks/vectors/graph/previews) while keeping the knowledge row and source file.
+	StopParseKnowledge(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+	// StopParseKnowledgeBatch stops pending/processing documents in knowledgeIDs,
+	// then purges pipeline leftovers and derived artifacts for those interrupted IDs.
+	StopParseKnowledgeBatch(ctx context.Context, knowledgeIDs []string) (interrupted int, interruptedIDs []string, err error)
+	// StopAllParsesInKnowledgeBase stops every pending/processing document in a KB
+	// with the same cleanup semantics as StopParseKnowledgeBatch.
+	StopAllParsesInKnowledgeBase(ctx context.Context, kbID string) (interrupted int, interruptedIDs []string, err error)
+	// PurgeDocumentPipelineTasks removes rebuild-related asynq tasks and multimodal
+	// pending redis counters for the given knowledge IDs (best-effort; scoped only).
+	PurgeDocumentPipelineTasks(ctx context.Context, knowledgeIDs []string) (int, error)
 	// MarkDocumentProcessFailed marks a document:process task's knowledge as failed
 	// after asynq retries are exhausted (panic, lease expiry, or unhandled error).
 	MarkDocumentProcessFailed(ctx context.Context, payload []byte, cause error) error

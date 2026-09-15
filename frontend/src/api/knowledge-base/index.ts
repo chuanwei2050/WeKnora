@@ -113,6 +113,13 @@ export function getKBRebuildStatus(kbId: string) {
   return get<{ success: boolean; data: KnowledgeBaseRebuildStatus }>(`/api/v1/knowledge-bases/${kbId}/rebuild-index/status`);
 }
 
+export function stopAllKBParses(kbId: string) {
+  return post<{ success: boolean; data: { interrupted: number; interrupted_ids: string[] } }>(
+    `/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/stop-all-parses`,
+    {},
+  );
+}
+
 export type KBMaintenanceOperation = 'reparse' | 'rechunk' | 'graph' | 'keywords' | 'vector' | 'questions' | 'structured';
 export interface KBMaintenanceProgress {
   run_id?: string;
@@ -255,6 +262,14 @@ export function updateManualKnowledge(id: string, data: { title: string; content
 
 export function reparseKnowledge(id: string) {
   return post(`/api/v1/knowledge/${id}/reparse`);
+}
+
+export function stopParseKnowledge(id: string) {
+  return post(`/api/v1/knowledge/${id}/stop-parse`);
+}
+
+export function batchStopParseKnowledge(kbId: string, ids: string[]) {
+  return post(`/api/v1/knowledge/stop-parse`, { kb_id: kbId, ids });
 }
 
 export function delKnowledgeDetails(id: string) {

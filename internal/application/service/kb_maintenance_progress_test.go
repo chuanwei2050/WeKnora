@@ -7,7 +7,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-func TestApplyKBMaintenanceCancelReparseKeepsLock(t *testing.T) {
+func TestApplyKBMaintenanceCancelReparseReleasesLock(t *testing.T) {
 	now := time.Date(2026, 9, 15, 6, 0, 0, 0, time.UTC)
 	p := &types.KBMaintenanceProgress{
 		Operation: types.KBMaintenanceReparse,
@@ -15,21 +15,21 @@ func TestApplyKBMaintenanceCancelReparseKeepsLock(t *testing.T) {
 		Total:     3,
 	}
 	applyKBMaintenanceCancel(p, now)
-	if p.Status != "canceling" {
-		t.Fatalf("reparse cancel should stay busy as canceling, got %s", p.Status)
+	if p.Status != "canceled" {
+		t.Fatalf("reparse cancel should be canceled immediately, got %s", p.Status)
 	}
-	if p.FinishedAt != nil {
-		t.Fatalf("canceling reparse must not set FinishedAt")
+	if p.FinishedAt == nil {
+		t.Fatalf("canceled reparse must set FinishedAt")
 	}
 	if p.Message != "canceled_by_user" {
 		t.Fatalf("unexpected message %q", p.Message)
 	}
-	if !kbMaintenanceBusy(p.Status) {
-		t.Fatalf("canceling must keep the maintenance lock")
+	if kbMaintenanceBusy(p.Status) {
+		t.Fatalf("canceled must release the maintenance lock")
 	}
 }
 
-func TestApplyKBMaintenanceCancelRechunkKeepsLock(t *testing.T) {
+func TestApplyKBMaintenanceCancelRechunkReleasesLock(t *testing.T) {
 	now := time.Date(2026, 9, 15, 6, 0, 0, 0, time.UTC)
 	p := &types.KBMaintenanceProgress{
 		Operation: types.KBMaintenanceRechunk,
@@ -37,14 +37,14 @@ func TestApplyKBMaintenanceCancelRechunkKeepsLock(t *testing.T) {
 		Total:     2,
 	}
 	applyKBMaintenanceCancel(p, now)
-	if p.Status != "canceling" {
-		t.Fatalf("rechunk cancel should stay busy as canceling, got %s", p.Status)
+	if p.Status != "canceled" {
+		t.Fatalf("rechunk cancel should be canceled immediately, got %s", p.Status)
 	}
-	if p.FinishedAt != nil {
-		t.Fatalf("canceling rechunk must not set FinishedAt")
+	if p.FinishedAt == nil {
+		t.Fatalf("canceled rechunk must set FinishedAt")
 	}
-	if !kbMaintenanceBusy(p.Status) {
-		t.Fatalf("canceling must keep the maintenance lock")
+	if kbMaintenanceBusy(p.Status) {
+		t.Fatalf("canceled must release the maintenance lock")
 	}
 }
 

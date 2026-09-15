@@ -38,7 +38,7 @@ interface KnowledgeItem {
   directory_breadcrumb?: Array<{ id: string; name: string }>;
 }
 
-type DocumentAction = 'edit' | 'reparse' | 'delete' | 'submit' | 'withdraw' | 'approve' | 'reject';
+type DocumentAction = 'edit' | 'reparse' | 'stop-parse' | 'delete' | 'submit' | 'withdraw' | 'approve' | 'reject';
 type DirectoryAction = 'move' | 'download' | 'rename' | 'delete';
 type SortField = 'name' | 'updated_at' | 'size' | 'type' | 'status';
 type SortOrder = 'asc' | 'desc';
@@ -487,7 +487,20 @@ const ariaSort = (field: SortField): 'ascending' | 'descending' | 'none' => {
             <button v-if="canEdit && item.type === 'manual'" class="row-action-btn" type="button" @click="handleAction('edit', item)">
               {{ t('knowledgeBase.rowEdit') }}
             </button>
-            <button v-if="canEdit && item.parse_status !== 'pending_review'" class="row-action-btn" type="button" @click="handleAction('reparse', item)">
+            <button
+              v-if="canEdit && (item.parse_status === 'pending' || item.parse_status === 'processing')"
+              class="row-action-btn"
+              type="button"
+              @click="handleAction('stop-parse', item)"
+            >
+              {{ t('knowledgeBase.rowStopParse') }}
+            </button>
+            <button
+              v-else-if="canEdit && item.parse_status !== 'pending_review'"
+              class="row-action-btn"
+              type="button"
+              @click="handleAction('reparse', item)"
+            >
               {{ t('knowledgeBase.rowRebuild') }}
             </button>
             <FolderMoveCascader

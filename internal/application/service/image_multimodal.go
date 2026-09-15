@@ -199,6 +199,10 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 	if knowledge == nil {
 		return nil
 	}
+	if knowledge.ParseStatus == types.ParseStatusFailed && types.IsDeliberateParseInterrupt(knowledge.ErrorMessage) {
+		logger.Infof(ctx, "[ImageMultimodal] Skipping deliberately interrupted knowledge %s", payload.KnowledgeID)
+		return nil
+	}
 	if knowledge.KnowledgeBaseID != payload.KnowledgeBaseID {
 		return fmt.Errorf("image multimodal task knowledge base mismatch")
 	}

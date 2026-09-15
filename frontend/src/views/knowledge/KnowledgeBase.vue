@@ -48,6 +48,8 @@ import {
   createKnowledgeFromURL,
   listKnowledgeBases,
   reparseKnowledge,
+  stopParseKnowledge,
+  batchStopParseKnowledge,
   batchDeleteKnowledge,
   delKnowledgeDetails,
   createDocumentDirectory,
@@ -240,6 +242,7 @@ const tagPendingDelete = ref<any>(null)
 const tagDeleting = ref(false)
 let rebuildDialog = ref(false)
 let rebuildKnowledgeItem = ref<KnowledgeCard>({ id: '', parse_status: '' })
+const stopParseBusy = ref(false)
 let knowledge = ref<KnowledgeCard>({ id: '', parse_status: '' })
 let knowledgeIndex = ref(-1)
 let knowledgeScroll = ref()
@@ -2424,6 +2427,79 @@ const handleKnowledgeReparse = (index: number, item: KnowledgeCard) => {
   rebuildDialog.value = true;
 };
 
+const isParsingStatus = (status?: string) => status === 'pending' || status === 'processing';
+
+const handleKnowledgeStopParse = (index: number, item: KnowledgeCard) => {
+  if (isFAQ.value) return;
+  if (!canEdit.value) return;
+  if (!item?.id) {
+    MessagePlugin.warning(t('knowledgeEditor.messages.missingId'));
+    return;
+  }
+  if (!isParsingStatus(item.parse_status)) {
+    MessagePlugin.info(t('knowledgeBase.stopParseFailed'));
+    return;
+  }
+  if (cardList.value[index]) {
+    cardList.value[index].isMore = false;
+  }
+  const dialog = DialogPlugin.confirm({
+    header: t('knowledgeBase.rowStopParse'),
+    body: t('knowledgeBase.stopParseConfirm', { fileName: item.file_name || item.title || '' }),
+    confirmBtn: t('common.confirm'),
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      dialog.hide();
+      if (stopParseBusy.value) return;
+      stopParseBusy.value = true;
+      try {
+        await stopParseKnowledge(item.id);
+        MessagePlugin.success(t('knowledgeBase.stopParseSubmitted'));
+        page = 1;
+        loadKnowledgeFiles(kbId.value);
+      } catch (error: any) {
+        MessagePlugin.error(error?.message || t('knowledgeBase.stopParseFailed'));
+      } finally {
+        stopParseBusy.value = false;
+      }
+    },
+  });
+};
+
+const batchStopParseIds = computed(() =>
+  selectedDocumentItems.value
+    .filter((item: KnowledgeCard) => isParsingStatus(item.parse_status))
+    .map((item: KnowledgeCard) => item.id)
+);
+
+const handleBatchStopParse = () => {
+  if (!canEdit.value || batchStopParseIds.value.length === 0 || stopParseBusy.value) return;
+  const ids = [...batchStopParseIds.value];
+  const dialog = DialogPlugin.confirm({
+    header: t('knowledgeBase.rowStopParse'),
+    body: t('knowledgeBase.stopParseConfirmBatch', { count: ids.length }),
+    confirmBtn: t('common.confirm'),
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      dialog.hide();
+      if (stopParseBusy.value) return;
+      stopParseBusy.value = true;
+      try {
+        const res: any = await batchStopParseKnowledge(kbId.value, ids);
+        const count = res?.data?.interrupted ?? ids.length;
+        MessagePlugin.success(t('knowledgeBase.stopParseSubmittedBatch', { count }));
+        ids.forEach(id => selectedIds.value.delete(id));
+        page = 1;
+        loadKnowledgeFiles(kbId.value);
+      } catch (error: any) {
+        MessagePlugin.error(error?.message || t('knowledgeBase.stopParseFailed'));
+      } finally {
+        stopParseBusy.value = false;
+      }
+    },
+  });
+};
+
 const rebuildConfirm = async () => {
   rebuildDialog.value = false;
   const item = rebuildKnowledgeItem.value;
@@ -2664,7 +2740,7 @@ const confirmBatchDelete = async () => {
   }
 };
 
-type DocumentRowAction = 'edit' | 'reparse' | 'delete' | GovernanceReviewAction;
+type DocumentRowAction = 'edit' | 'reparse' | 'stop-parse' | 'delete' | GovernanceReviewAction;
 
 const governanceActionLabelKeys: Record<GovernanceReviewAction, string> = {
   submit: 'knowledgeBase.governanceSubmit',
@@ -2822,6 +2898,7 @@ const handleListAction = (
   }
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') return handleKnowledgeReparse(idx, item);
+  if (action === 'stop-parse') return handleKnowledgeStopParse(idx, item);
   if (action === 'delete') return delCard(idx, item);
 };
 
@@ -3560,7 +3637,15 @@ async function createNewSession(value: string): Promise<void> {
                                 <span>{{ t('knowledgeBase.rowEdit') }}</span>
                               </div>
                               <div
-                                v-if="canEdit && item.parse_status !== 'pending_review'"
+                                v-if="canEdit && (item.parse_status === 'pending' || item.parse_status === 'processing')"
+                                class="card-menu-item"
+                                @click.stop="handleKnowledgeStopParse(index, item)"
+                              >
+                                <t-icon class="icon" name="stop-circle" />
+                                <span>{{ t('knowledgeBase.rowStopParse') }}</span>
+                              </div>
+                              <div
+                                v-else-if="canEdit && item.parse_status !== 'pending_review'"
                                 class="card-menu-item"
                                 @click.stop="handleKnowledgeReparse(index, item)"
                               >
@@ -3834,12 +3919,15 @@ async function createNewSession(value: string): Promise<void> {
                 :directory-targets-loading="moveDirectoryOptionsLoading"
                 :can-edit="canEdit"
                 :can-manage="canManage"
+                :stop-parse-count="batchStopParseIds.length"
+                :stopping-parse="stopParseBusy"
                 @clear="clearSelection"
                 @action="handleBatchAction"
                 @move-folder="handleBatchMoveToFolder"
                 @move-directory="handleBatchMoveDirectory"
                 @download-selection="downloadSelectedEntries"
                 @delete-selection="deleteSelectedEntries"
+                @stop-parse="handleBatchStopParse"
               />
             </div>
           </div>

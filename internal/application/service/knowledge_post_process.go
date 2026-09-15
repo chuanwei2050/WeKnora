@@ -104,6 +104,10 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		logger.Warnf(ctx, "[KnowledgePostProcess] Knowledge %s not found, aborting.", payload.KnowledgeID)
 		return nil
 	}
+	if knowledge.ParseStatus == types.ParseStatusFailed && types.IsDeliberateParseInterrupt(knowledge.ErrorMessage) {
+		logger.Infof(ctx, "[KnowledgePostProcess] Skipping deliberately interrupted knowledge %s", payload.KnowledgeID)
+		return nil
+	}
 	versionID := strings.TrimSpace(payload.VersionID)
 	if versionID != "" && !governedVersionCanUpdateKnowledge(knowledge, versionID) {
 		logger.Infof(ctx, "[KnowledgePostProcess] Skipping stale governed version %s for knowledge %s", versionID, payload.KnowledgeID)

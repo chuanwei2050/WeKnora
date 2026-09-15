@@ -4943,6 +4943,200 @@ func (s *knowledgeService) InterruptStuckParses(ctx context.Context, kbID string
 	if strings.TrimSpace(message) == "" {
 		message = types.ParseInterruptedForRechunkMessage
 	}
+	return s.interruptPendingOrProcessing(ctx, items, message)
+}
+
+// InterruptParsesByIDs marks pending/processing documents in knowledgeIDs as failed.
+// Completed and already-failed documents are left unchanged. Returns how many were interrupted.
+func (s *knowledgeService) InterruptParsesByIDs(ctx context.Context, knowledgeIDs []string, message string) (int, error) {
+	if len(knowledgeIDs) == 0 {
+		return 0, nil
+	}
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	if strings.TrimSpace(message) == "" {
+		message = types.ParseInterruptedByUserCancelMessage
+	}
+	items, err := s.repo.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+	if err != nil {
+		return 0, err
+	}
+	return s.interruptPendingOrProcessing(ctx, items, message)
+}
+
+// StopParseKnowledge stops one pending/processing document parse, purges pipeline
+// tasks/Redis, and deletes derived artifacts (chunks/vectors/graph/previews/images).
+// The knowledge row and source file are retained as failed.
+func (s *knowledgeService) StopParseKnowledge(ctx context.Context, knowledgeID string) (*types.Knowledge, error) {
+	knowledgeID = strings.TrimSpace(knowledgeID)
+	if knowledgeID == "" {
+		return nil, werrors.NewBadRequestError("knowledge id cannot be empty")
+	}
+	knowledge, err := s.GetKnowledgeByID(ctx, knowledgeID)
+	if err != nil {
+		return nil, err
+	}
+	switch knowledge.ParseStatus {
+	case types.ParseStatusPending, types.ParseStatusProcessing:
+	default:
+		return nil, werrors.NewBadRequestError("knowledge is not parsing")
+	}
+
+	if _, err := s.InterruptParsesByIDs(ctx, []string{knowledgeID}, types.ParseInterruptedByUserStopMessage); err != nil {
+		return nil, err
+	}
+	if _, purgeErr := s.PurgeDocumentPipelineTasks(ctx, []string{knowledgeID}); purgeErr != nil {
+		logger.Warnf(ctx, "failed to purge pipeline tasks after stop-parse: knowledge=%s err=%v", knowledgeID, purgeErr)
+	}
+	s.cleanupStoppedParseArtifacts(ctx, knowledgeID)
+	return s.GetKnowledgeByID(ctx, knowledgeID)
+}
+
+// StopParseKnowledgeBatch stops pending/processing documents among knowledgeIDs,
+// purges pipeline leftovers, and cleans derived artifacts for interrupted IDs only.
+func (s *knowledgeService) StopParseKnowledgeBatch(ctx context.Context, knowledgeIDs []string) (int, []string, error) {
+	targets := make([]string, 0, len(knowledgeIDs))
+	seen := make(map[string]struct{}, len(knowledgeIDs))
+	for _, raw := range knowledgeIDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		targets = append(targets, id)
+	}
+	if len(targets) == 0 {
+		return 0, nil, werrors.NewBadRequestError("ids cannot be empty")
+	}
+
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	items, err := s.repo.GetKnowledgeBatch(ctx, tenantID, targets)
+	if err != nil {
+		return 0, nil, err
+	}
+	interruptIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		switch item.ParseStatus {
+		case types.ParseStatusPending, types.ParseStatusProcessing:
+			interruptIDs = append(interruptIDs, item.ID)
+		}
+	}
+	if len(interruptIDs) == 0 {
+		return 0, nil, werrors.NewBadRequestError("no parsing documents to stop")
+	}
+
+	n, err := s.InterruptParsesByIDs(ctx, interruptIDs, types.ParseInterruptedByUserStopMessage)
+	if err != nil {
+		return 0, nil, err
+	}
+	if _, purgeErr := s.PurgeDocumentPipelineTasks(ctx, interruptIDs); purgeErr != nil {
+		logger.Warnf(ctx, "failed to purge pipeline tasks after batch stop-parse: targets=%d err=%v", len(interruptIDs), purgeErr)
+	}
+	for _, id := range interruptIDs {
+		s.cleanupStoppedParseArtifacts(ctx, id)
+	}
+	return n, interruptIDs, nil
+}
+
+// StopAllParsesInKnowledgeBase stops every pending/processing document in the KB.
+func (s *knowledgeService) StopAllParsesInKnowledgeBase(ctx context.Context, kbID string) (int, []string, error) {
+	kbID = strings.TrimSpace(kbID)
+	if kbID == "" {
+		return 0, nil, werrors.NewBadRequestError("knowledge base id cannot be empty")
+	}
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	items, err := s.repo.ListKnowledgeByKnowledgeBaseID(ctx, tenantID, kbID)
+	if err != nil {
+		return 0, nil, err
+	}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		switch item.ParseStatus {
+		case types.ParseStatusPending, types.ParseStatusProcessing:
+			ids = append(ids, item.ID)
+		}
+	}
+	return s.StopParseKnowledgeBatch(ctx, ids)
+}
+
+// cleanupStoppedParseArtifacts removes parse-derived products while keeping the
+// knowledge row and source file. Best-effort: failures are logged, not returned.
+func (s *knowledgeService) cleanupStoppedParseArtifacts(ctx context.Context, knowledgeID string) {
+	if s.chunkService == nil || s.tenantService == nil {
+		return
+	}
+	ctx, err := s.ensureTenantInfo(ctx)
+	if err != nil {
+		logger.Warnf(ctx, "stop-parse artifact cleanup skipped (tenant): knowledge=%s err=%v", knowledgeID, err)
+		return
+	}
+	knowledge, err := s.GetKnowledgeByID(ctx, knowledgeID)
+	if err != nil || knowledge == nil {
+		logger.Warnf(ctx, "stop-parse artifact cleanup skipped (load): knowledge=%s err=%v", knowledgeID, err)
+		return
+	}
+
+	if s.kbService != nil {
+		if kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID); kbErr == nil && kb != nil && kb.IsWikiEnabled() {
+			s.prepareWikiForReparse(ctx, knowledge)
+		}
+	}
+
+	if cleanErr := s.cleanupKnowledgeResources(ctx, knowledge); cleanErr != nil {
+		logger.Warnf(ctx, "stop-parse artifact cleanup partial: knowledge=%s err=%v", knowledgeID, cleanErr)
+	}
+
+	// Persist cleared derived fields; keep failed + user-stop message from interrupt.
+	knowledge.PreviewStatus = "none"
+	knowledge.PreviewFilePath = ""
+	knowledge.PreviewError = ""
+	knowledge.FullPreviewStatus = "none"
+	knowledge.FullPreviewFilePath = ""
+	knowledge.FullPreviewError = ""
+	knowledge.Description = ""
+	knowledge.ProcessedAt = nil
+	knowledge.SummaryStatus = ""
+	knowledge.UpdatedAt = time.Now()
+	if knowledge.ParseStatus != types.ParseStatusFailed {
+		knowledge.ParseStatus = types.ParseStatusFailed
+	}
+	if knowledge.ErrorMessage == "" {
+		knowledge.ErrorMessage = types.ParseInterruptedByUserStopMessage
+	}
+	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+		logger.Warnf(ctx, "stop-parse failed to persist cleaned metadata: knowledge=%s err=%v", knowledgeID, err)
+	}
+}
+
+func (s *knowledgeService) ensureTenantInfo(ctx context.Context) (context.Context, error) {
+	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
+		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
+			return ctx, nil
+		}
+	}
+	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
+	if !ok || tenantID == 0 {
+		return ctx, fmt.Errorf("tenant id missing from context")
+	}
+	if s.tenantService == nil {
+		return ctx, fmt.Errorf("tenant service unavailable")
+	}
+	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
+	if err != nil {
+		return ctx, err
+	}
+	return context.WithValue(ctx, types.TenantInfoContextKey, tenant), nil
+}
+
+func (s *knowledgeService) interruptPendingOrProcessing(ctx context.Context, items []*types.Knowledge, message string) (int, error) {
 	reset := 0
 	now := time.Now()
 	for _, item := range items {
@@ -4963,7 +5157,7 @@ func (s *knowledgeService) InterruptStuckParses(ctx context.Context, kbID string
 		reset++
 	}
 	if reset > 0 {
-		logger.Infof(ctx, "Interrupted %d stuck parse task(s) in knowledge base %s", reset, kbID)
+		logger.Infof(ctx, "Interrupted %d pending/processing parse task(s)", reset)
 	}
 	return reset, nil
 }
@@ -10319,8 +10513,9 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	}
 
 	if knowledge.ParseStatus == types.ParseStatusFailed {
-		if knowledge.ErrorMessage == types.ParseInterruptedForRechunkMessage {
-			logger.Infof(ctx, "Document parse was interrupted for rechunk, skipping leftover job: %s", payload.KnowledgeID)
+		if types.IsDeliberateParseInterrupt(knowledge.ErrorMessage) {
+			logger.Infof(ctx, "Document parse was deliberately interrupted, skipping leftover job: %s (%s)",
+				payload.KnowledgeID, knowledge.ErrorMessage)
 			return nil
 		}
 		logger.Warnf(

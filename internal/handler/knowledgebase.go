@@ -730,30 +730,78 @@ func (h *KnowledgeBaseHandler) GetMaintenanceStatus(c *gin.Context) {
 	if p == nil {
 		p = &types.KBMaintenanceProgress{Status: "idle"}
 	}
+	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, tenantID)
+	// Legacy canceling jobs waited for in-flight docs; force-interrupt, purge rebuild
+	// queue leftovers, and unlock on poll.
+	if p.Status == "canceling" && p.Operation.IsDocumentPipelineMaintenance() {
+		if _, err := h.knowledgeService.InterruptParsesByIDs(ctx, p.TargetKnowledgeIDs, types.ParseInterruptedByUserCancelMessage); err != nil {
+			logger.Warnf(ctx, "failed to interrupt leftover docs while healing canceling maintenance: kb=%s run=%s err=%v", id, p.RunID, err)
+		}
+		if _, err := h.knowledgeService.PurgeDocumentPipelineTasks(ctx, p.TargetKnowledgeIDs); err != nil {
+			logger.Warnf(ctx, "failed to purge rebuild tasks while healing canceling maintenance: kb=%s run=%s err=%v", id, p.RunID, err)
+		}
+		if healed, cancelErr := h.maintenance.Cancel(ctx, tenantID, id, p.RunID); cancelErr != nil {
+			logger.Warnf(ctx, "failed to finalize canceling maintenance: kb=%s run=%s err=%v", id, p.RunID, cancelErr)
+		} else if healed != nil {
+			p = healed
+		}
+	}
 	if (p.Status == "running" || p.Status == "canceling") && p.Operation.IsDocumentPipelineMaintenance() {
-		items, listErr := h.knowledgeService.ListKnowledgeByKnowledgeBaseID(c.Request.Context(), id)
+		items, listErr := h.knowledgeService.ListKnowledgeByKnowledgeBaseID(ctx, id)
 		if listErr == nil {
 			done, failed, active := summarizeDocumentPipelineProgress(items, p.TargetKnowledgeIDs)
 			// Until staging enqueue finishes, targets may still look completed/failed
 			// and must not be treated as finished or advanced into the next phase.
 			finished := p.EnqueueDone && active == 0 && done+failed >= p.Total
 			if finished && p.Total > 0 && p.Status == "running" && p.Operation == types.KBMaintenanceReparse {
-				next, advanced, advanceErr := h.maintenance.AdvancePhase(c.Request.Context(), tenantID, id, p.RunID, types.KBMaintenanceReparse, types.KBMaintenanceStructured, len(p.TargetKnowledgeIDs), p.TargetKnowledgeIDs)
+				next, advanced, advanceErr := h.maintenance.AdvancePhase(ctx, tenantID, id, p.RunID, types.KBMaintenanceReparse, types.KBMaintenanceStructured, len(p.TargetKnowledgeIDs), p.TargetKnowledgeIDs)
 				if advanceErr == nil && advanced {
 					payload, marshalErr := json.Marshal(types.KBMaintenancePayload{TenantID: tenantID, KnowledgeBaseID: id, RunID: next.RunID, Operation: next.Operation})
 					if marshalErr != nil {
-						_ = h.maintenance.Fail(c.Request.Context(), tenantID, id, next.RunID, marshalErr.Error())
+						_ = h.maintenance.Fail(ctx, tenantID, id, next.RunID, marshalErr.Error())
 					} else if _, enqueueErr := h.asynqClient.Enqueue(asynq.NewTask(types.TypeKBMaintenance, payload, asynq.Queue("low"), asynq.MaxRetry(1))); enqueueErr != nil {
-						_ = h.maintenance.Fail(c.Request.Context(), tenantID, id, next.RunID, enqueueErr.Error())
+						_ = h.maintenance.Fail(ctx, tenantID, id, next.RunID, enqueueErr.Error())
 					}
 				}
 			} else {
-				_ = h.maintenance.Update(c.Request.Context(), tenantID, id, p.RunID, done+failed, failed, "", finished)
+				_ = h.maintenance.Update(ctx, tenantID, id, p.RunID, done+failed, failed, "", finished)
 			}
-			p, _ = h.maintenance.Get(c.Request.Context(), tenantID, id)
+			p, _ = h.maintenance.Get(ctx, tenantID, id)
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": p})
+}
+
+// StopAllParses stops every pending/processing document in the knowledge base,
+// cleaning pipeline tasks and derived artifacts while keeping knowledge rows.
+func (h *KnowledgeBaseHandler) StopAllParses(c *gin.Context) {
+	_, id, tenantID, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin {
+		c.Error(apperrors.NewForbiddenError("No permission to stop knowledge parse"))
+		return
+	}
+	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, tenantID)
+	interrupted, interruptedIDs, err := h.knowledgeService.StopAllParsesInKnowledgeBase(ctx, id)
+	if err != nil {
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Knowledge parse stopped",
+		"data": gin.H{
+			"interrupted":     interrupted,
+			"interrupted_ids": interruptedIDs,
+		},
+	})
 }
 
 func (h *KnowledgeBaseHandler) CancelMaintenance(c *gin.Context) {
@@ -771,14 +819,27 @@ func (h *KnowledgeBaseHandler) CancelMaintenance(c *gin.Context) {
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
-	if p == nil || p.Status != "running" {
+	if p == nil || (p.Status != "running" && p.Status != "canceling") {
 		c.Error(apperrors.NewConflictError("no maintenance task is running"))
 		return
 	}
-	p, err = h.maintenance.Cancel(c.Request.Context(), tenantID, id, p.RunID)
+	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, tenantID)
+	// Stop staging first so IsRunning becomes false, then interrupt + purge leftovers.
+	targets := append([]string(nil), p.TargetKnowledgeIDs...)
+	op := p.Operation
+	p, err = h.maintenance.Cancel(ctx, tenantID, id, p.RunID)
 	if err != nil {
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
+	}
+	if op.IsDocumentPipelineMaintenance() {
+		if _, err := h.knowledgeService.InterruptParsesByIDs(ctx, targets, types.ParseInterruptedByUserCancelMessage); err != nil {
+			// Prefer releasing the lock over leaving the UI stuck; leftover docs can be rebuilt later.
+			logger.Warnf(ctx, "failed to interrupt in-flight docs on maintenance cancel: kb=%s run=%s err=%v", id, p.RunID, err)
+		}
+		if _, err := h.knowledgeService.PurgeDocumentPipelineTasks(ctx, targets); err != nil {
+			logger.Warnf(ctx, "failed to purge rebuild pipeline tasks on cancel: kb=%s run=%s err=%v", id, p.RunID, err)
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": p})
 }

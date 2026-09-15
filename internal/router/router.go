@@ -480,6 +480,10 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.PUT("/manual/:id", handler.UpdateManualKnowledge)
 		// 重新解析知识
 		k.POST("/:id/reparse", handler.ReparseKnowledge)
+		// 停止单文档解析
+		k.POST("/:id/stop-parse", handler.StopParseKnowledge)
+		// 批量停止文档解析
+		k.POST("/stop-parse", handler.StopParseKnowledgeBatch)
 		// 获取知识文件
 		k.GET("/:id/download", handler.DownloadKnowledgeFile)
 		k.GET("/:id/download-url", handler.GetKnowledgeDownloadURL)
@@ -547,6 +551,7 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		kb.PUT("/:id", handler.UpdateKnowledgeBase)
 		kb.POST("/:id/rebuild-index", handler.RebuildIndex)
 		kb.GET("/:id/rebuild-index/status", handler.GetRebuildIndexStatus)
+		kb.POST("/:id/stop-all-parses", handler.StopAllParses)
 		kb.POST("/:id/rechunk", handler.RebuildChunks)
 		kb.POST("/:id/maintenance/:operation", handler.StartMaintenance)
 		kb.GET("/:id/maintenance/status", handler.GetMaintenanceStatus)

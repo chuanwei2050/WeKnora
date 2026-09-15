@@ -40,17 +40,12 @@ func kbMaintenanceBusy(status string) bool {
 	return status == "running" || status == "canceling"
 }
 
-// applyKBMaintenanceCancel marks a running job as canceled.
-// Document-pipeline ops (reparse/rechunk) stay "canceling" (lock held) until
-// in-flight documents finish; other operations release the lock immediately.
+// applyKBMaintenanceCancel marks a running job as canceled and releases the
+// maintenance lock immediately. Document-pipeline callers should interrupt and
+// purge target leftovers after Cancel so staging sees IsRunning=false first.
 func applyKBMaintenanceCancel(p *types.KBMaintenanceProgress, now time.Time) {
 	p.Message = "canceled_by_user"
 	p.HeartbeatAt = now
-	if p.Operation.IsDocumentPipelineMaintenance() {
-		p.Status = "canceling"
-		p.FinishedAt = nil
-		return
-	}
 	p.Status = "canceled"
 	p.FinishedAt = &now
 }
@@ -191,7 +186,7 @@ func (s *KBMaintenanceStore) Cancel(ctx context.Context, tenantID uint64, kbID, 
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return err
 		}
-		if p.RunID != runID || p.Status != "running" {
+		if p.RunID != runID || (p.Status != "running" && p.Status != "canceling") {
 			out = &p
 			return nil
 		}

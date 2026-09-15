@@ -15,7 +15,7 @@ const (
 )
 
 // IsDocumentPipelineMaintenance reports whether the operation drives per-document
-// parse/reparse work and must keep the maintenance lock until in-flight documents finish.
+// parse/reparse work (as opposed to chunk-preserving index rebuilds).
 func (op KBMaintenanceOperation) IsDocumentPipelineMaintenance() bool {
 	return op == KBMaintenanceReparse || op == KBMaintenanceRechunk
 }
@@ -28,11 +28,33 @@ const ParseInterruptedForRechunkMessage = "解析已中断，准备重新解析�
 // orphaned pending/processing documents before re-enqueueing them.
 const ParseInterruptedForRebuildMessage = "解析已中断，准备全部重建"
 
+// ParseInterruptedByUserCancelMessage is written when the user stops a
+// document-pipeline maintenance job so leftover workers skip those targets.
+const ParseInterruptedByUserCancelMessage = "解析已中断（用户停止重建）"
+
+// ParseInterruptedByUserStopMessage is written when the user stops a single
+// document (or batch) parse from the knowledge list UI.
+const ParseInterruptedByUserStopMessage = "解析已中断（用户停止）"
+
 // ParseStaleInterruptedMessage is written when a processing document is orphaned
 // (worker crash, lease expiry, or exhausted retries without a status write-back).
 // Prefer MarkDocumentProcessFailed(cause) when the real error is known; this is
 // only the fallback for silent orphans (often multimodal/VLM timeouts).
 const ParseStaleInterruptedMessage = "解析超时未完成（常见于多模态图片处理过久、VLM 超时或 worker 中断），请重试"
+
+// IsDeliberateParseInterrupt reports whether errorMessage marks a deliberate
+// parse interrupt that leftover ProcessDocument workers must skip.
+func IsDeliberateParseInterrupt(errorMessage string) bool {
+	switch errorMessage {
+	case ParseInterruptedForRechunkMessage,
+		ParseInterruptedForRebuildMessage,
+		ParseInterruptedByUserCancelMessage,
+		ParseInterruptedByUserStopMessage:
+		return true
+	default:
+		return false
+	}
+}
 
 type KBMaintenanceProgress struct {
 	RunID              string                 `json:"run_id"`

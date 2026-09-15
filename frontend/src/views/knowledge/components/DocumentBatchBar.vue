@@ -18,6 +18,8 @@ const props = defineProps<{
   directoryTargetsLoading?: boolean;
   canEdit?: boolean;
   canManage?: boolean;
+  stopParseCount?: number;
+  stoppingParse?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -27,6 +29,7 @@ const emit = defineEmits<{
   (e: 'move-directory', directoryId: string): void;
   (e: 'download-selection'): void;
   (e: 'delete-selection'): void;
+  (e: 'stop-parse'): void;
 }>();
 
 const { t } = useI18n();
@@ -59,6 +62,17 @@ const actionLabelKeys: Record<GovernanceRowAction, string> = {
       <div class="batch-bar-actions">
         <t-button v-if="canEdit" variant="outline" size="small" @click="emit('download-selection')">
           {{ t('knowledgeBase.downloadDocumentDirectory') }}
+        </t-button>
+        <t-button
+          v-if="canEdit && (stopParseCount || 0) > 0"
+          theme="primary"
+          variant="outline"
+          size="small"
+          :loading="stoppingParse"
+          :disabled="Boolean(loadingAction) || Boolean(movingFolder) || Boolean(movingDirectory)"
+          @click="emit('stop-parse')"
+        >
+          {{ t('knowledgeBase.rowStopParse') }}（{{ stopParseCount }}）
         </t-button>
         <FolderMoveCascader
           v-if="canEdit"

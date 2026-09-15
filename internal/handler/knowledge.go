@@ -1716,6 +1716,153 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 	})
 }
 
+// StopParseKnowledge godoc
+// @Summary      停止文档解析
+// @Description  中断 pending/processing 文档解析，清理该文档管线 asynq（含 image:multimodal）与 multimodal:pending Redis
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "知识ID"
+// @Success      200  {object}  map[string]interface{}  "停止成功"
+// @Failure      400  {object}  errors.AppError         "请求参数错误或文档不在解析中"
+// @Failure      403  {object}  errors.AppError         "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/{id}/stop-parse [post]
+func (h *KnowledgeHandler) StopParseKnowledge(c *gin.Context) {
+	ctx := c.Request.Context()
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	knowledge, err := h.kgService.StopParseKnowledge(effCtx, id)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"knowledge_id": id})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Knowledge parse stopped",
+		"data":    knowledge,
+	})
+}
+
+type stopParseBatchRequest struct {
+	KBID string   `json:"kb_id" binding:"required"`
+	IDs  []string `json:"ids" binding:"required,min=1"`
+}
+
+// StopParseKnowledgeBatch godoc
+// @Summary      批量停止文档解析
+// @Description  中断所选 pending/processing 文档解析，并清理各自 image:multimodal / multimodal:pending 残留
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      stopParseBatchRequest  true  "kb_id 与 ids"
+// @Success      200      {object}  map[string]interface{}  "停止成功"
+// @Failure      400      {object}  errors.AppError         "请求参数错误或无可停止文档"
+// @Failure      403      {object}  errors.AppError         "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/stop-parse [post]
+func (h *KnowledgeHandler) StopParseKnowledgeBatch(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req stopParseBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+		return
+	}
+
+	seen := make(map[string]struct{}, len(req.IDs))
+	ids := make([]string, 0, len(req.IDs))
+	for _, raw := range req.IDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		c.Error(errors.NewBadRequestError("ids cannot be empty"))
+		return
+	}
+	const maxBatch = 200
+	if len(ids) > maxBatch {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
+		return
+	}
+
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if !permission.HasPermission(types.OrgRoleEditor) {
+		c.Error(errors.NewForbiddenError("No permission to stop knowledge parse"))
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	scopedIDs := make([]string, 0, len(knowledgeList))
+	for _, k := range knowledgeList {
+		if k == nil {
+			continue
+		}
+		if k.KnowledgeBaseID != kbID {
+			c.Error(errors.NewBadRequestError(
+				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",
+					secutils.SanitizeForLog(k.ID), secutils.SanitizeForLog(kbID))))
+			return
+		}
+		scopedIDs = append(scopedIDs, k.ID)
+	}
+
+	interrupted, interruptedIDs, err := h.kgService.StopParseKnowledgeBatch(ctx, scopedIDs)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Knowledge parse stopped",
+		"data": gin.H{
+			"interrupted":     interrupted,
+			"interrupted_ids": interruptedIDs,
+		},
+	})
+}
+
 type knowledgeTagBatchRequest struct {
 	Updates map[string]*string `json:"updates" binding:"required,min=1"`
 	KBID    string             `json:"kb_id"` // Optional: scope to this KB (validates editor access and uses effective tenant for shared KB)
