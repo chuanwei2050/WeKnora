@@ -111,7 +111,10 @@ func newChunkExtractTask(ctx context.Context, client interfaces.TaskEnqueuer, te
 	if err != nil {
 		return err
 	}
-	task := asynq.NewTask(types.TypeChunkExtract, payload, asynq.MaxRetry(3))
+	// Prefer critical so graph LLM calls are not starved by document/wiki work
+	// on the shared default queue. Each chunk remains one task (one model call);
+	// parallelism comes from ASYNQ_CONCURRENCY workers, not batching chunks.
+	task := asynq.NewTask(types.TypeChunkExtract, payload, asynq.Queue("critical"), asynq.MaxRetry(3))
 	info, err := client.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "failed to enqueue task: %v", err)
