@@ -9,15 +9,19 @@ import (
 	"strings"
 )
 
-// defaultJSONChunkSize is the target chunk size in bytes for JSON semantic
-// splitting. Approximates 512 tokens (1 token ≈ 3-4 bytes for mixed content).
+// defaultJSONChunkSize is the fallback target chunk size in bytes for JSON
+// semantic splitting when the caller does not pass a KB-derived size.
+// Approximates 512 tokens (1 token ≈ 3-4 bytes for mixed content).
 const defaultJSONChunkSize = 1536
 
-// minJSONChunkSize is the minimum chunk size. A new chunk is only started
-// when the current chunk has reached at least this size.
-var minJSONChunkSize = defaultJSONChunkSize - 200
+// jsonToMarkdown converts raw JSON bytes into markdown text using the default
+// pre-chunk size. Prefer jsonToMarkdownWithSize when KB chunk_size is known.
+func jsonToMarkdown(data []byte) (string, error) {
+	return jsonToMarkdownWithSize(data, 0)
+}
 
-// jsonToMarkdown converts raw JSON bytes into markdown text
+// jsonToMarkdownWithSize converts raw JSON into fenced ```json blocks sized to
+// maxChunkBytes. When maxChunkBytes <= 0, defaultJSONChunkSize is used.
 //
 // Key properties:
 //   - Every output chunk is a **valid JSON object** (not a fragment).
@@ -26,13 +30,24 @@ var minJSONChunkSize = defaultJSONChunkSize - 200
 //   - Small objects that fit within maxChunkSize are kept intact (not split).
 //   - The output is a series of fenced ```json code blocks separated by \n\n,
 //     which the downstream text chunker can split at block boundaries.
-func jsonToMarkdown(data []byte) (string, error) {
+func jsonToMarkdownWithSize(data []byte, maxChunkBytes int) (string, error) {
 	data = trimBOM(data)
 	if len(data) == 0 {
 		return "", fmt.Errorf("empty JSON content")
 	}
 	if !json.Valid(data) {
 		return "", fmt.Errorf("invalid JSON content")
+	}
+
+	if maxChunkBytes <= 0 {
+		maxChunkBytes = defaultJSONChunkSize
+	}
+	minChunkBytes := maxChunkBytes - 200
+	if minChunkBytes < maxChunkBytes/2 {
+		minChunkBytes = maxChunkBytes / 2
+	}
+	if minChunkBytes < 1 {
+		minChunkBytes = 1
 	}
 
 	var parsed interface{}
@@ -45,13 +60,13 @@ func jsonToMarkdown(data []byte) (string, error) {
 
 	// If the whole thing fits in one chunk, just format it
 	wholeSize := jsonSize(normalized)
-	if wholeSize <= defaultJSONChunkSize {
+	if wholeSize <= maxChunkBytes {
 		formatted := formatValue(normalized)
 		return wrapCodeBlock(formatted), nil
 	}
 
 	// Recursive split
-	chunks := recursiveJSONSplit(normalized, nil, nil)
+	chunks := recursiveJSONSplit(normalized, nil, nil, maxChunkBytes, minChunkBytes)
 
 	// Convert each chunk dict to a fenced code block
 	blocks := make([]string, 0, len(chunks))
@@ -73,7 +88,7 @@ func jsonToMarkdown(data []byte) (string, error) {
 // ---------------------------------------------------------------------------
 
 // recursiveJSONSplit splits a JSON dict into a list of JSON dicts,
-// each fitting within defaultJSONChunkSize. It preserves the full nested
+// each fitting within maxChunkBytes. It preserves the full nested
 // path from root to each leaf by using setNestedDict.
 //
 // This is a Go port of LangChain's RecursiveJsonSplitter._json_split.
@@ -81,6 +96,7 @@ func recursiveJSONSplit(
 	data interface{},
 	currentPath []string,
 	chunks []map[string]interface{},
+	maxChunkBytes, minChunkBytes int,
 ) []map[string]interface{} {
 	if chunks == nil {
 		chunks = []map[string]interface{}{{}}
@@ -105,14 +121,14 @@ func recursiveJSONSplit(
 		// Measure sizes
 		chunkSize := jsonSize(chunks[len(chunks)-1])
 		itemSize := jsonSize(map[string]interface{}{key: value})
-		remaining := defaultJSONChunkSize - chunkSize
+		remaining := maxChunkBytes - chunkSize
 
 		if itemSize <= remaining {
 			// Item fits in the current chunk — add it preserving the path
 			setNestedDict(chunks[len(chunks)-1], newPath, value)
 		} else {
 			// Item doesn't fit
-			if chunkSize >= minJSONChunkSize {
+			if chunkSize >= minChunkBytes {
 				// Current chunk is big enough, start a new one
 				chunks = append(chunks, map[string]interface{}{})
 			}
@@ -121,7 +137,7 @@ func recursiveJSONSplit(
 			normalized := listToDictPreprocess(value)
 			if subDict, isDict := normalized.(map[string]interface{}); isDict && canSplitDict(subDict) {
 				// Recurse into the sub-object
-				chunks = recursiveJSONSplit(subDict, newPath, chunks)
+				chunks = recursiveJSONSplit(subDict, newPath, chunks, maxChunkBytes, minChunkBytes)
 			} else {
 				// Cannot split further (scalar or single-key dict) — place as-is
 				setNestedDict(chunks[len(chunks)-1], newPath, value)
@@ -268,4 +284,17 @@ func sortedKeys(m map[string]interface{}) []string {
 		sort.Strings(keys)
 	}
 	return keys
+}
+
+// jsonPreChunkBytesFromRuneSize converts a KB rune/token-ish chunk size into
+// a JSON pre-chunk byte budget (≈3 bytes per unit for mixed content).
+func jsonPreChunkBytesFromRuneSize(chunkSize int) int {
+	if chunkSize <= 0 {
+		return defaultJSONChunkSize
+	}
+	bytes := chunkSize * 3
+	if bytes < 256 {
+		return 256
+	}
+	return bytes
 }

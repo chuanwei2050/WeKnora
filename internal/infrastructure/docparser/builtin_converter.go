@@ -65,7 +65,7 @@ func (b *SimpleFormatReader) Read(_ context.Context, req *types.ReadRequest) (*t
 		}
 		return &types.ReadResult{MarkdownContent: md}, nil
 	case ft == "json":
-		md, err := jsonToMarkdown(req.FileContent)
+		md, err := jsonToMarkdownWithSize(req.FileContent, jsonPreChunkBytesFromRuneSize(req.ChunkSize))
 		if err != nil {
 			return nil, fmt.Errorf("json conversion failed: %w", err)
 		}

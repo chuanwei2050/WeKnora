@@ -11,6 +11,9 @@ type ReadRequest struct {
 	ParserEngine          string
 	RequestID             string
 	ParserEngineOverrides map[string]string
+	// ChunkSize is the KB chunking target (runes). Used by format-specific
+	// pre-splitters (e.g. JSON) so they do not hardcode a bypass size.
+	ChunkSize int
 }
 
 // ReadResult is the transport-agnostic result of document reading.

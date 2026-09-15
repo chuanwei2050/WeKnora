@@ -3,6 +3,7 @@ import logging
 import os
 import platform
 import subprocess
+import threading
 from typing import Union
 
 import numpy as np
@@ -19,6 +20,8 @@ class PaddleOCRBackend(OCRBackend):
     def __init__(self):
         """Initialize PaddleOCR backend"""
         self.ocr = None
+        # PaddleOCR is not thread-safe; serialize predict across gRPC workers.
+        self._predict_lock = threading.Lock()
         try:
             import paddle
 
@@ -154,8 +157,9 @@ class PaddleOCRBackend(OCRBackend):
             # Convert to numpy array for PaddleOCR processing
             image_array = np.array(image)
 
-            # Perform OCR recognition
-            ocr_result = self.ocr.ocr(image_array, cls=False)
+            # Perform OCR recognition (serialized — concurrent paddle.ocr can segfault)
+            with self._predict_lock:
+                ocr_result = self.ocr.ocr(image_array, cls=False)
 
             # Extract and concatenate text from OCR results
             ocr_text = ""

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -102,14 +104,20 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	}
 	chunks = filterAgentVisibleChunks(chunks, knowledge)
 
-	var summaryContent, columnContent string
+	sort.SliceStable(chunks, func(i, j int) bool {
+		return chunks[i].ChunkIndex < chunks[j].ChunkIndex
+	})
+
+	var summaryParts, columnParts []string
 	for _, chunk := range chunks {
 		if chunk.ChunkType == types.ChunkTypeTableSummary {
-			summaryContent = chunk.Content
+			summaryParts = append(summaryParts, chunk.Content)
 		} else if chunk.ChunkType == types.ChunkTypeTableColumn {
-			columnContent = chunk.Content
+			columnParts = append(columnParts, chunk.Content)
 		}
 	}
+	summaryContent := strings.Join(summaryParts, "")
+	columnContent := strings.Join(columnParts, "")
 
 	if summaryContent == "" || columnContent == "" {
 		return &types.ToolResult{

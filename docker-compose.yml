@@ -236,7 +236,7 @@ services:
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-10}
       - BATCH_EMBED_SIZE=${BATCH_EMBED_SIZE:-24}
       - ASYNQ_CONCURRENCY=${ASYNQ_CONCURRENCY:-16}
-      - ASYNQ_IMAGE_CONCURRENCY=${ASYNQ_IMAGE_CONCURRENCY:-6}
+      - ASYNQ_IMAGE_CONCURRENCY=${ASYNQ_IMAGE_CONCURRENCY:-4}
       - JWT_SECRET=${JWT_SECRET:-}
       # Crypto: 主密钥和盐值，用于 AppSecret 等敏感字段的 AES-256 加密
       # 若不设置则自动生成并持久化到 data-files volume（/data/files/.crypto_state.json）

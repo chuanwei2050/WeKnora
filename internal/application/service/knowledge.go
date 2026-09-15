@@ -2864,6 +2864,20 @@ func buildSplitterConfig(kb *types.KnowledgeBase) chunker.SplitterConfig {
 	return chunkCfg
 }
 
+// effectiveEmbedChunkSize returns the KB size used for embedding-bound caps
+// (JSON pre-chunk, table-summary split). Parent-child mode uses child_chunk_size.
+func effectiveEmbedChunkSize(kb *types.KnowledgeBase) int {
+	if kb == nil {
+		return 512
+	}
+	cfg := buildSplitterConfig(kb)
+	if kb.ChunkingConfig.EnableParentChild {
+		_, child := buildParentChildConfigs(kb.ChunkingConfig, cfg)
+		return child.ChunkSize
+	}
+	return cfg.ChunkSize
+}
+
 // buildParentChildConfigs derives parent and child SplitterConfig from ChunkingConfig.
 // The base config (already validated with defaults) is used for separators.
 func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfig) (parent, child chunker.SplitterConfig) {
@@ -11010,6 +11024,7 @@ func (s *knowledgeService) convert(
 		ParserEngine:          parserEngine,
 		RequestID:             payload.RequestId,
 		ParserEngineOverrides: overrides,
+		ChunkSize:             effectiveEmbedChunkSize(kb),
 	}
 
 	if !isURL {

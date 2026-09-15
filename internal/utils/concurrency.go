@@ -9,7 +9,7 @@ const (
 	defaultConcurrencyPoolSize   = 5
 	defaultBatchEmbedSize        = 20
 	defaultAsynqConcurrency      = 12
-	defaultAsynqImageConcurrency = 6
+	defaultAsynqImageConcurrency = 4
 )
 
 // ConcurrencyPoolSize returns the ants goroutine-pool size used for embedding

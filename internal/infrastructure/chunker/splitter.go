@@ -160,8 +160,9 @@ func SplitText(text string, cfg SplitterConfig) []Chunk {
 	// Step 1: Find protected spans
 	protected := protectedSpans(text)
 
-	// Step 2: Split non-protected regions by separators, keep protected as atomic units
-	units := buildUnitsWithProtection(text, protected, separators)
+	// Step 2: Split non-protected regions by separators, keep protected as atomic units.
+	// Cap follows KB ChunkSize so markdown tables/code fences cannot create 8k+ chunks.
+	units := buildUnitsWithProtection(text, protected, separators, chunkSize)
 
 	// Step 3: Merge units into chunks with overlap
 	return mergeUnits(units, chunkSize, chunkOverlap, cfg.InheritHeading)
@@ -170,10 +171,12 @@ func SplitText(text string, cfg SplitterConfig) []Chunk {
 // buildUnitsWithProtection splits text into units, preserving protected spans as atomic.
 // Start/End positions in the returned units are rune offsets (not byte offsets),
 // because downstream merge logic indexes content via []rune slicing.
-// If a protected span exceeds maxProtectedSize, it will be forcibly split to prevent
-// creating chunks that are too large for downstream processing (e.g., embedding APIs).
-func buildUnitsWithProtection(text string, protected []span, separators []string) []splitUnit {
-	const maxProtectedSize = 7500 // Maximum size for a protected unit (留余量给标题等)
+// If a protected span exceeds maxSize (KB chunk size), it is forcibly split so
+// downstream embedding stays within the configured limit.
+func buildUnitsWithProtection(text string, protected []span, separators []string, maxSize int) []splitUnit {
+	if maxSize <= 0 {
+		maxSize = 512
+	}
 
 	var units []splitUnit
 	bytePos := 0
@@ -200,33 +203,8 @@ func buildUnitsWithProtection(text string, protected []span, separators []string
 		protRuneLen := runeLen(protText)
 
 		// If protected content is too large, forcibly split it
-		if protRuneLen > maxProtectedSize {
-			// Split into smaller chunks at line breaks or spaces
-			runes := []rune(protText)
-			offset := 0
-			for offset < len(runes) {
-				chunkEnd := offset + maxProtectedSize
-				if chunkEnd > len(runes) {
-					chunkEnd = len(runes)
-				} else {
-					// Try to break at a newline or space
-					for i := chunkEnd - 1; i > offset && i > chunkEnd-200; i-- {
-						if runes[i] == '\n' || runes[i] == ' ' {
-							chunkEnd = i + 1
-							break
-						}
-					}
-				}
-
-				chunkText := string(runes[offset:chunkEnd])
-				chunkLen := chunkEnd - offset
-				units = append(units, splitUnit{
-					text:  chunkText,
-					start: runePos + offset,
-					end:   runePos + offset + chunkLen,
-				})
-				offset = chunkEnd
-			}
+		if protRuneLen > maxSize {
+			units = append(units, forceSplitRunes(protText, runePos, maxSize)...)
 		} else {
 			// Normal case: keep protected content as a single unit
 			units = append(units, splitUnit{
@@ -257,8 +235,42 @@ func buildUnitsWithProtection(text string, protected []span, separators []string
 	return units
 }
 
+// forceSplitRunes splits text into units of at most maxSize runes, preferring
+// breaks at newlines or spaces near the boundary.
+func forceSplitRunes(text string, runePos, maxSize int) []splitUnit {
+	runes := []rune(text)
+	var units []splitUnit
+	offset := 0
+	for offset < len(runes) {
+		chunkEnd := offset + maxSize
+		if chunkEnd > len(runes) {
+			chunkEnd = len(runes)
+		} else {
+			lookback := 200
+			if lookback > maxSize {
+				lookback = maxSize
+			}
+			for i := chunkEnd - 1; i > offset && i > chunkEnd-lookback; i-- {
+				if runes[i] == '\n' || runes[i] == ' ' {
+					chunkEnd = i + 1
+					break
+				}
+			}
+		}
+		chunkLen := chunkEnd - offset
+		units = append(units, splitUnit{
+			text:  string(runes[offset:chunkEnd]),
+			start: runePos + offset,
+			end:   runePos + offset + chunkLen,
+		})
+		offset = chunkEnd
+	}
+	return units
+}
+
 // mergeUnits combines split units into chunks with overlap tracking.
-// Enforces an absolute maximum chunk size to prevent exceeding downstream limits (e.g., embedding APIs).
+// Enforces an absolute maximum equal to chunkSize (KB config) so protected
+// table rows / code fences cannot produce oversized embedding inputs.
 // Active contextual prefixes (chapter heading path, then Markdown table headers) are prepended
 // to new chunks so that every chunk carries its own header context.
 func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int, inheritHeading bool) []Chunk {
@@ -266,7 +278,10 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int, inheritHeading b
 		return nil
 	}
 
-	const absoluteMaxSize = 7500
+	absoluteMaxSize := chunkSize
+	if absoluteMaxSize <= 0 {
+		absoluteMaxSize = 512
+	}
 
 	ht := newHeaderTracker()
 	var hdt *headingTracker
@@ -296,30 +311,13 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int, inheritHeading b
 			}
 			ht.update(u.text)
 
-			// Split this oversized unit into smaller chunks
-			runes := []rune(u.text)
-			offset := 0
-			for offset < len(runes) {
-				chunkEnd := offset + absoluteMaxSize
-				if chunkEnd > len(runes) {
-					chunkEnd = len(runes)
-				} else {
-					for i := chunkEnd - 1; i > offset && i > chunkEnd-200; i-- {
-						if runes[i] == '\n' || runes[i] == ' ' {
-							chunkEnd = i + 1
-							break
-						}
-					}
-				}
-
-				chunkText := string(runes[offset:chunkEnd])
+			for _, part := range forceSplitRunes(u.text, u.start, absoluteMaxSize) {
 				chunks = append(chunks, Chunk{
-					Content: chunkText,
+					Content: part.text,
 					Seq:     len(chunks),
-					Start:   u.start + offset,
-					End:     u.start + chunkEnd,
+					Start:   part.start,
+					End:     part.end,
 				})
-				offset = chunkEnd
 			}
 			continue
 		}

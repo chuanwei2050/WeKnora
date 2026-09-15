@@ -14,6 +14,7 @@ import (
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -124,6 +125,16 @@ func newChunkExtractTask(ctx context.Context, client interfaces.TaskEnqueuer, te
 	return nil
 }
 
+// isDataTableSummaryEnabled reports whether CSV/XLSX table-summary tasks run.
+// Set ENABLE_DATA_TABLE_SUMMARY=false to skip (RAG still indexes Excel markdown chunks).
+func isDataTableSummaryEnabled() bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("ENABLE_DATA_TABLE_SUMMARY")))
+	if v == "" {
+		return true
+	}
+	return v == "1" || v == "true" || v == "yes" || v == "on"
+}
+
 // NewTableExtractTask creates a new table extract task
 func NewDataTableSummaryTask(
 	ctx context.Context,
@@ -133,6 +144,10 @@ func NewDataTableSummaryTask(
 	summaryModel string,
 	embeddingModel string,
 ) error {
+	if !isDataTableSummaryEnabled() {
+		logger.Infof(ctx, "Data table summary disabled (ENABLE_DATA_TABLE_SUMMARY), skip knowledge=%s", knowledgeID)
+		return nil
+	}
 	taskPayload := DataTableSummaryPayload{
 		TenantID:       tenantID,
 		KnowledgeID:    knowledgeID,
@@ -522,6 +537,7 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 // extractionResources 封装提取过程所需的所有资源
 type extractionResources struct {
 	knowledge      *types.Knowledge
+	kb             *types.KnowledgeBase
 	tenant         *types.Tenant
 	chatModel      chat.Chat
 	embeddingModel embedding.Embedder
@@ -543,6 +559,12 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 	if fileType != "csv" && fileType != "xlsx" && fileType != "xls" {
 		logger.Warnf(ctx, "knowledge %s is not a CSV or Excel file, skipping table summary", payload.KnowledgeID)
 		return nil, fmt.Errorf("unsupported file type: %s", fileType)
+	}
+
+	kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+	if err != nil {
+		logger.Errorf(ctx, "failed to get knowledge base for table summary: %v", err)
+		return nil, err
 	}
 
 	// 获取租户信息
@@ -577,6 +599,7 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 
 	return &extractionResources{
 		knowledge:      knowledge,
+		kb:             kb,
 		tenant:         tenantInfo,
 		chatModel:      chatModel,
 		embeddingModel: embeddingModel,
@@ -694,45 +717,60 @@ func (s *DataTableSummaryService) persistTableSchemaAsync(ctx context.Context, k
 	}()
 }
 
-// buildChunks 构建chunk对象
-// tableDescription和columnDescriptions分别生成一个chunk
+// buildChunks builds table-summary / column chunks, splitting by KB chunking_config
+// so long LLM descriptions cannot bypass the configured embed size.
 func (s *DataTableSummaryService) buildChunks(resources *extractionResources, tableDescription string, columnDescription string) []*types.Chunk {
-	chunks := make([]*types.Chunk, 0, 2)
-
-	// 表格摘要chunk
-	summaryChunk := &types.Chunk{
-		ID:              uuid.New().String(),
-		TenantID:        resources.knowledge.TenantID,
-		KnowledgeID:     resources.knowledge.ID,
-		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,
-		TagID:           resources.knowledge.TagID,
-		Content:         tableDescription,
-		ChunkIndex:      0,
-		IsEnabled:       true,
-		ChunkType:       types.ChunkTypeTableSummary,
-		Status:          int(types.ChunkStatusStored),
+	cfg := chunker.DefaultConfig()
+	if resources.kb != nil {
+		base := buildSplitterConfig(resources.kb)
+		if resources.kb.ChunkingConfig.EnableParentChild {
+			_, cfg = buildParentChildConfigs(resources.kb.ChunkingConfig, base)
+		} else {
+			cfg = base
+		}
 	}
-	chunks = append(chunks, summaryChunk)
+	// No overlap so DataSchemaTool can concatenate parts losslessly.
+	cfg.ChunkOverlap = 0
 
-	// 列描述chunk（所有列的描述合并为一个chunk）
-	columnChunk := &types.Chunk{
-		ID:              uuid.New().String(),
-		TenantID:        resources.knowledge.TenantID,
-		KnowledgeID:     resources.knowledge.ID,
-		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,
-		TagID:           resources.knowledge.TagID,
-		Content:         columnDescription,
-		ChunkIndex:      1,
-		IsEnabled:       true,
-		ChunkType:       types.ChunkTypeTableColumn,
-		ParentChunkID:   summaryChunk.ID,
-		Status:          int(types.ChunkStatusStored),
+	chunks := make([]*types.Chunk, 0, 4)
+	idx := 0
+	var prevID string
+	var summaryParentID string
+
+	appendSplit := func(text, chunkType, parentID string) {
+		parts := chunker.SplitText(text, cfg)
+		if len(parts) == 0 && strings.TrimSpace(text) != "" {
+			parts = []chunker.Chunk{{Content: text}}
+		}
+		for _, p := range parts {
+			c := &types.Chunk{
+				ID:              uuid.New().String(),
+				TenantID:        resources.knowledge.TenantID,
+				KnowledgeID:     resources.knowledge.ID,
+				KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,
+				TagID:           resources.knowledge.TagID,
+				Content:         p.Content,
+				ChunkIndex:      idx,
+				IsEnabled:       true,
+				ChunkType:       chunkType,
+				ParentChunkID:   parentID,
+				Status:          int(types.ChunkStatusStored),
+			}
+			if prevID != "" {
+				c.PreChunkID = prevID
+				chunks[len(chunks)-1].NextChunkID = c.ID
+			}
+			chunks = append(chunks, c)
+			if summaryParentID == "" && chunkType == types.ChunkTypeTableSummary {
+				summaryParentID = c.ID
+			}
+			prevID = c.ID
+			idx++
+		}
 	}
-	chunks = append(chunks, columnChunk)
 
-	summaryChunk.NextChunkID = columnChunk.ID
-	columnChunk.PreChunkID = summaryChunk.ID
-
+	appendSplit(tableDescription, types.ChunkTypeTableSummary, "")
+	appendSplit(columnDescription, types.ChunkTypeTableColumn, summaryParentID)
 	return chunks
 }
 

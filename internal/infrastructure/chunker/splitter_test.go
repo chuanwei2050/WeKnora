@@ -242,7 +242,7 @@ func TestSplitText_OverlapChunks_NonNegativeStart(t *testing.T) {
 
 func TestBuildUnitsWithProtection_RuneOffsets(t *testing.T) {
 	text := "你好世界"
-	units := buildUnitsWithProtection(text, nil, []string{"\n"})
+	units := buildUnitsWithProtection(text, nil, []string{"\n"}, 512)
 
 	if len(units) != 1 {
 		t.Fatalf("expected 1 unit, got %d", len(units))
@@ -263,7 +263,7 @@ func TestBuildUnitsWithProtection_RuneOffsets(t *testing.T) {
 func TestBuildUnitsWithProtection_WithProtectedSpan(t *testing.T) {
 	text := "前面![alt](url)后面"
 	protected := protectedSpans(text)
-	units := buildUnitsWithProtection(text, protected, []string{"\n"})
+	units := buildUnitsWithProtection(text, protected, []string{"\n"}, 512)
 
 	textRunes := []rune(text)
 	for i, u := range units {
@@ -1135,6 +1135,32 @@ func TestSplitTextParentChild_WithTableHeaders(t *testing.T) {
 		}
 		if child.End > len(textRunes) {
 			t.Errorf("child[%d]: End %d exceeds text rune count %d", i, child.End, len(textRunes))
+		}
+	}
+}
+
+func TestSplitText_LargeProtectedTableRespectsChunkSize(t *testing.T) {
+	// Wide markdown table rows are "protected"; they must still respect KB chunk_size.
+	var row strings.Builder
+	row.WriteString("| ")
+	for i := 0; i < 80; i++ {
+		if i > 0 {
+			row.WriteString(" | ")
+		}
+		row.WriteString(fmt.Sprintf("列%d很长的内容ABCDEF", i))
+	}
+	row.WriteString(" |\n")
+	text := "| h |\n| --- |\n" + strings.Repeat(row.String(), 5)
+
+	cfg := SplitterConfig{ChunkSize: 384, ChunkOverlap: 0, Separators: []string{"\n\n", "\n"}}
+	chunks := SplitText(text, cfg)
+	if len(chunks) == 0 {
+		t.Fatal("expected chunks")
+	}
+	for i, c := range chunks {
+		n := utf8.RuneCountInString(c.Content)
+		if n > cfg.ChunkSize {
+			t.Fatalf("chunk[%d] rune len %d exceeds KB chunk_size %d", i, n, cfg.ChunkSize)
 		}
 	}
 }
