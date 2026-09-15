@@ -112,18 +112,19 @@ func TestIntegrationFolderScopeReadsAllPages(t *testing.T) {
 
 	folders, err := service.ListIntegrationFolders(t.Context(), 1, "kb-1")
 	require.NoError(t, err)
-	require.Equal(t, []string{"ordinary-1"}, folderIDs(folders))
+	require.Equal(t, []string{"ordinary-1", types.IntegrationPublicFolderID("kb-1")}, folderIDs(folders))
 
 	ids, err := service.ResolveIntegrationFolderIDs(t.Context(), 1, []string{"kb-1", "kb-2"}, []string{"ordinary-1"}, nil)
 	require.NoError(t, err)
 	require.Equal(t, []string{"ordinary-1", "ordinary-child"}, ids)
 }
 
-func TestListIntegrationFoldersReturnsOnlyOrdinaryRootFolders(t *testing.T) {
+func TestListIntegrationFoldersReturnsOrdinaryRootsAndVirtualPublicFolder(t *testing.T) {
 	service := integrationFolderServiceFixture()
 	folders, err := service.ListIntegrationFolders(t.Context(), 1, "kb-1")
 	require.NoError(t, err)
-	require.Equal(t, []string{"ordinary-1"}, folderIDs(folders))
+	require.Equal(t, []string{"ordinary-1", types.IntegrationPublicFolderID("kb-1")}, folderIDs(folders))
+	require.True(t, folders[1].IsPublic)
 }
 
 func folderIDs(folders []*types.KnowledgeTag) []string {

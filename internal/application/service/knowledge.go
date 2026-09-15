@@ -92,18 +92,26 @@ func documentPreviewTimeout(fileSize int64) time.Duration {
 	return 5 * time.Minute
 }
 
-// ListIntegrationFolders returns selectable ordinary root folders for the integration API.
+// ListIntegrationFolders returns ordinary root folders and the stable virtual
+// public folder required by integration clients to validate their search scope.
 func (s *knowledgeService) ListIntegrationFolders(ctx context.Context, tenantID uint64, kbID string) ([]*types.KnowledgeTag, error) {
 	tags, err := s.listAllIntegrationTags(ctx, tenantID, kbID)
 	if err != nil {
 		return nil, err
 	}
-	result := make([]*types.KnowledgeTag, 0, len(tags))
+	result := make([]*types.KnowledgeTag, 0, len(tags)+1)
 	for _, tag := range tags {
 		if tag != nil && !tag.IsPublic && tag.ParentID == nil && tag.Name != types.UntaggedTagName {
 			result = append(result, tag)
 		}
 	}
+	result = append(result, &types.KnowledgeTag{
+		ID:              types.IntegrationPublicFolderID(kbID),
+		TenantID:        tenantID,
+		KnowledgeBaseID: kbID,
+		Name:            types.IntegrationPublicFolderName,
+		IsPublic:        true,
+	})
 	return result, nil
 }
 
