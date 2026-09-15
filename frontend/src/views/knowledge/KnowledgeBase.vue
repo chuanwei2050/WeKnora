@@ -2472,11 +2472,67 @@ const batchStopParseIds = computed(() =>
     .map((item: KnowledgeCard) => item.id)
 );
 
+const canBatchRebuildItem = (item: KnowledgeCard) => {
+  if (!item?.id) return false;
+  if (item.parse_status === 'pending_review') return false;
+  if (isParsingStatus(item.parse_status)) return false;
+  return true;
+};
+
+const batchRebuildIds = computed(() =>
+  selectedDocumentItems.value
+    .filter((item: KnowledgeCard) => canBatchRebuildItem(item))
+    .map((item: KnowledgeCard) => item.id)
+);
+
+const rebuildBusy = ref(false);
+
+const handleBatchRebuild = () => {
+  if (!canEdit.value || batchRebuildIds.value.length === 0 || rebuildBusy.value || stopParseBusy.value) return;
+  const ids = [...batchRebuildIds.value];
+  const dialog = DialogPlugin.confirm({
+    header: t('knowledgeBase.batchRebuild'),
+    body: t('knowledgeBase.rebuildConfirmBatch', { count: ids.length }),
+    confirmBtn: t('common.confirm'),
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      dialog.hide();
+      if (rebuildBusy.value) return;
+      rebuildBusy.value = true;
+      let success = 0;
+      let failed = 0;
+      try {
+        for (const id of ids) {
+          try {
+            await reparseKnowledge(id);
+            success += 1;
+            selectedIds.value.delete(id);
+          } catch {
+            failed += 1;
+          }
+        }
+        if (failed === 0) {
+          MessagePlugin.success(t('knowledgeBase.rebuildSubmittedBatch', { count: success }));
+        } else if (success > 0) {
+          MessagePlugin.warning(t('knowledgeBase.rebuildSubmittedBatchPartial', { success, failed }));
+        } else {
+          MessagePlugin.error(t('knowledgeBase.rebuildFailed'));
+        }
+        page = 1;
+        loadKnowledgeFiles(kbId.value);
+        scheduleWikiStatusProbes();
+      } finally {
+        rebuildBusy.value = false;
+      }
+    },
+  });
+};
+
 const handleBatchStopParse = () => {
-  if (!canEdit.value || batchStopParseIds.value.length === 0 || stopParseBusy.value) return;
+  if (!canEdit.value || batchStopParseIds.value.length === 0 || stopParseBusy.value || rebuildBusy.value) return;
   const ids = [...batchStopParseIds.value];
   const dialog = DialogPlugin.confirm({
-    header: t('knowledgeBase.rowStopParse'),
+    header: t('knowledgeBase.batchStopParse'),
     body: t('knowledgeBase.stopParseConfirmBatch', { count: ids.length }),
     confirmBtn: t('common.confirm'),
     cancelBtn: t('common.cancel'),
@@ -3919,6 +3975,8 @@ async function createNewSession(value: string): Promise<void> {
                 :directory-targets-loading="moveDirectoryOptionsLoading"
                 :can-edit="canEdit"
                 :can-manage="canManage"
+                :rebuild-count="batchRebuildIds.length"
+                :rebuilding="rebuildBusy"
                 :stop-parse-count="batchStopParseIds.length"
                 :stopping-parse="stopParseBusy"
                 @clear="clearSelection"
@@ -3927,6 +3985,7 @@ async function createNewSession(value: string): Promise<void> {
                 @move-directory="handleBatchMoveDirectory"
                 @download-selection="downloadSelectedEntries"
                 @delete-selection="deleteSelectedEntries"
+                @rebuild="handleBatchRebuild"
                 @stop-parse="handleBatchStopParse"
               />
             </div>

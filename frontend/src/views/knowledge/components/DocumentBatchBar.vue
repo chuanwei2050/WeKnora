@@ -20,6 +20,8 @@ const props = defineProps<{
   canManage?: boolean;
   stopParseCount?: number;
   stoppingParse?: boolean;
+  rebuildCount?: number;
+  rebuilding?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -30,6 +32,7 @@ const emit = defineEmits<{
   (e: 'download-selection'): void;
   (e: 'delete-selection'): void;
   (e: 'stop-parse'): void;
+  (e: 'rebuild'): void;
 }>();
 
 const { t } = useI18n();
@@ -64,15 +67,26 @@ const actionLabelKeys: Record<GovernanceRowAction, string> = {
           {{ t('knowledgeBase.downloadDocumentDirectory') }}
         </t-button>
         <t-button
+          v-if="canEdit && (rebuildCount || 0) > 0"
+          theme="warning"
+          variant="outline"
+          size="small"
+          :loading="rebuilding"
+          :disabled="Boolean(loadingAction) || Boolean(movingFolder) || Boolean(movingDirectory) || Boolean(stoppingParse)"
+          @click="emit('rebuild')"
+        >
+          {{ t('knowledgeBase.batchRebuild') }}（{{ rebuildCount }}）
+        </t-button>
+        <t-button
           v-if="canEdit && (stopParseCount || 0) > 0"
-          theme="primary"
+          theme="danger"
           variant="outline"
           size="small"
           :loading="stoppingParse"
-          :disabled="Boolean(loadingAction) || Boolean(movingFolder) || Boolean(movingDirectory)"
+          :disabled="Boolean(loadingAction) || Boolean(movingFolder) || Boolean(movingDirectory) || Boolean(rebuilding)"
           @click="emit('stop-parse')"
         >
-          {{ t('knowledgeBase.rowStopParse') }}（{{ stopParseCount }}）
+          {{ t('knowledgeBase.batchStopParse') }}（{{ stopParseCount }}）
         </t-button>
         <FolderMoveCascader
           v-if="canEdit"
