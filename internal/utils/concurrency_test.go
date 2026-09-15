@@ -24,3 +24,17 @@ func TestAsynqConcurrencyFromEnv(t *testing.T) {
 		t.Fatalf("AsynqConcurrency() = %d, want 16", got)
 	}
 }
+
+func TestAsynqImageConcurrencyDefault(t *testing.T) {
+	t.Setenv("ASYNQ_IMAGE_CONCURRENCY", "")
+	if got := AsynqImageConcurrency(); got != defaultAsynqImageConcurrency {
+		t.Fatalf("AsynqImageConcurrency() = %d, want %d", got, defaultAsynqImageConcurrency)
+	}
+}
+
+func TestAsynqImageConcurrencyFromEnv(t *testing.T) {
+	t.Setenv("ASYNQ_IMAGE_CONCURRENCY", "3")
+	if got := AsynqImageConcurrency(); got != 3 {
+		t.Fatalf("AsynqImageConcurrency() = %d, want 3", got)
+	}
+}

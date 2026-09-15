@@ -11158,7 +11158,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			continue
 		}
 
-		task := asynq.NewTask(types.TypeImageMultimodal, payloadBytes, asynq.MaxRetry(3))
+		task := asynq.NewTask(types.TypeImageMultimodal, payloadBytes, asynq.Queue(types.ImageMultimodalQueue), asynq.MaxRetry(3))
 		if _, err := s.task.Enqueue(task); err != nil {
 			logger.Warnf(ctx, "Failed to enqueue image multimodal task for %s: %v", img.ServingURL, err)
 		} else {

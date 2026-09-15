@@ -22,6 +22,7 @@ var rebuildPipelineTaskTypes = map[string]struct{}{
 var rebuildPipelineQueues = []string{
 	"default",
 	types.LargeDocumentQueue,
+	types.ImageMultimodalQueue,
 	"low",
 	"critical",
 }

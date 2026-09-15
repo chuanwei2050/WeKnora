@@ -6,9 +6,10 @@ import (
 )
 
 const (
-	defaultConcurrencyPoolSize = 5
-	defaultBatchEmbedSize      = 20
-	defaultAsynqConcurrency    = 12
+	defaultConcurrencyPoolSize   = 5
+	defaultBatchEmbedSize        = 20
+	defaultAsynqConcurrency      = 12
+	defaultAsynqImageConcurrency = 6
 )
 
 // ConcurrencyPoolSize returns the ants goroutine-pool size used for embedding
@@ -26,6 +27,12 @@ func BatchEmbedSize() int {
 // AsynqConcurrency returns the number of concurrent asynq task workers.
 func AsynqConcurrency() int {
 	return intFromEnv("ASYNQ_CONCURRENCY", defaultAsynqConcurrency, 1, 128)
+}
+
+// AsynqImageConcurrency returns workers dedicated to image:multimodal (VLM OCR/caption).
+// Kept lower than the shared pool so concurrent VLM calls do not overwhelm the endpoint.
+func AsynqImageConcurrency() int {
+	return intFromEnv("ASYNQ_IMAGE_CONCURRENCY", defaultAsynqImageConcurrency, 1, 16)
 }
 
 func intFromEnv(key string, defaultVal, minVal, maxVal int) int {

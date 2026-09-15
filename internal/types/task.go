@@ -41,6 +41,9 @@ type DocumentPreviewPayload struct {
 const (
 	LargeDocumentThresholdBytes int64 = 256 * 1024 * 1024
 	LargeDocumentQueue                = "document-large"
+	// ImageMultimodalQueue isolates VLM OCR/caption work so it cannot saturate
+	// the shared asynq worker pool (see AsynqImageConcurrency).
+	ImageMultimodalQueue = "image"
 )
 
 // ExtractChunkPayload represents the extract chunk task payload

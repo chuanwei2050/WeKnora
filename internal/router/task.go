@@ -25,6 +25,7 @@ type AsynqTaskParams struct {
 
 	Server               *asynq.Server
 	LargeDocumentServer  *LargeDocumentServer
+	ImageMultimodalServer *ImageMultimodalServer
 	KnowledgeService     interfaces.KnowledgeService
 	KnowledgeBaseService interfaces.KnowledgeBaseService
 	TagService           interfaces.KnowledgeTagService
@@ -39,6 +40,10 @@ type AsynqTaskParams struct {
 }
 
 type LargeDocumentServer struct{ *asynq.Server }
+
+// ImageMultimodalServer runs image:multimodal tasks on a dedicated queue with
+// a lower concurrency cap so VLM OCR/caption does not starve or overload.
+type ImageMultimodalServer struct{ *asynq.Server }
 
 func getAsynqRedisClientOpt() *asynq.RedisClientOpt {
 	db := 0
@@ -114,6 +119,18 @@ func NewLargeDocumentAsynqServer() *LargeDocumentServer {
 		asynq.Config{
 			Concurrency:    1,
 			Queues:         map[string]int{types.LargeDocumentQueue: 1},
+			StrictPriority: true,
+			RetryDelayFunc: asynqRetryDelayFunc,
+		},
+	)}
+}
+
+func NewImageMultimodalAsynqServer() *ImageMultimodalServer {
+	return &ImageMultimodalServer{Server: asynq.NewServer(
+		getAsynqRedisClientOpt(),
+		asynq.Config{
+			Concurrency:    apputils.AsynqImageConcurrency(),
+			Queues:         map[string]int{types.ImageMultimodalQueue: 1},
 			StrictPriority: true,
 			RetryDelayFunc: asynqRetryDelayFunc,
 		},
@@ -211,6 +228,11 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	go func() {
 		if err := params.LargeDocumentServer.Run(mux); err != nil {
 			log.Fatalf("could not run large document server: %v", err)
+		}
+	}()
+	go func() {
+		if err := params.ImageMultimodalServer.Run(mux); err != nil {
+			log.Fatalf("could not run image multimodal server: %v", err)
 		}
 	}()
 	return mux

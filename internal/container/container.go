@@ -249,6 +249,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		must(container.Provide(router.NewAsyncqClient, dig.As(new(interfaces.TaskEnqueuer))))
 		must(container.Provide(router.NewAsynqServer))
 		must(container.Provide(router.NewLargeDocumentAsynqServer))
+		must(container.Provide(router.NewImageMultimodalAsynqServer))
 	} else {
 		syncExec := router.NewSyncTaskExecutor()
 		must(container.Provide(func() interfaces.TaskEnqueuer { return syncExec }))
