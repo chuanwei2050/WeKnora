@@ -1,119 +1,120 @@
 """
 Excel Parser Module
 
-This module provides functionality to parse Excel files (.xlsx, .xls) into
-structured Document objects with text content and chunks. It supports multiple
-sheets and handles various Excel formats using pandas.
+Parses .xlsx/.xls into markdown tables via python-calamine (Rust), then returns
+plain markdown for the Go app to chunk. Does not emit per-row chunks.
 """
 import logging
+from datetime import date, datetime, time
 from io import BytesIO
-from typing import List
+from typing import Any, List, Sequence
 
-import pandas as pd
+from python_calamine import CalamineWorkbook
 
-from docreader.models.document import Chunk, Document
+from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
 
 logger = logging.getLogger(__name__)
 
 
+def _cell_to_str(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, datetime):
+        return value.isoformat(sep=" ", timespec="seconds")
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, time):
+        return value.isoformat(timespec="seconds")
+    text = str(value).strip()
+    return text.replace("\r\n", " ").replace("\n", " ").replace("|", "\\|")
+
+
+def _is_empty_row(row: Sequence[Any]) -> bool:
+    for value in row:
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return False
+    return True
+
+
+def _to_markdown_table(rows: List[List[str]]) -> str:
+    if not rows:
+        return ""
+
+    width = max(len(row) for row in rows)
+    normalized = [row + [""] * (width - len(row)) for row in rows]
+
+    while width > 0 and all(not row[width - 1] for row in normalized):
+        width -= 1
+        for row in normalized:
+            row.pop()
+    if width == 0:
+        return ""
+
+    header = normalized[0]
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join("---" for _ in header) + " |",
+    ]
+    for row in normalized[1:]:
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines)
+
+
+def _open_workbook(content: bytes) -> CalamineWorkbook:
+    buffer = BytesIO(content)
+    if hasattr(CalamineWorkbook, "from_filelike"):
+        return CalamineWorkbook.from_filelike(buffer)
+    return CalamineWorkbook.from_object(buffer)
+
+
 class ExcelParser(BaseParser):
     """Parser for Excel files (.xlsx, .xls).
-    
-    This parser extracts text content from Excel files by processing all sheets
-    and converting each row into a structured text format. Each row becomes a
-    separate chunk with key-value pairs.
-    
-    Features:
-        - Supports multiple sheets in a single Excel file
-        - Automatically removes completely empty rows
-        - Converts each row to "column: value" format
-        - Creates individual chunks for each row for better granularity
-        
-    Example:
-        >>> parser = ExcelParser()
-        >>> with open("data.xlsx", "rb") as f:
-        ...     content = f.read()
-        ...     document = parser.parse_into_text(content)
-        >>> print(document.content)
-        Name: John,Age: 30,City: NYC
-        Name: Jane,Age: 25,City: LA
+
+    Converts each sheet into a markdown section:
+        ## SheetName
+        | col1 | col2 |
+        | --- | --- |
+        | a | b |
+
+    First non-empty row is treated as the table header. Completely empty rows
+    are skipped. Chunking is left to the Go app.
     """
-    
+
     def parse_into_text(self, content: bytes) -> Document:
-        """Parse Excel file bytes into a Document object.
-        
-        Args:
-            content: Raw bytes of the Excel file
-            
-        Returns:
-            Document: Parsed document containing:
-                - content: Full text with all rows from all sheets
-                - chunks: List of Chunk objects, one per row
-                
-        Note:
-            - Empty rows (all NaN values) are automatically skipped
-            - Each row is formatted as: "col1: val1,col2: val2,..."
-            - Chunks maintain sequential ordering across all sheets
-        """
-        chunks: List[Chunk] = []
-        text: List[str] = []
-        start, end = 0, 0
+        workbook = _open_workbook(content)
+        parts: List[str] = []
 
-        # Load Excel file from bytes into pandas ExcelFile object
-        excel_file = pd.ExcelFile(BytesIO(content))
-        
-        # Process each sheet in the Excel file
-        for excel_sheet_name in excel_file.sheet_names:
-            # Parse the sheet into a DataFrame
-            df = excel_file.parse(sheet_name=excel_sheet_name)
-            # Remove rows where all values are NaN (completely empty rows)
-            df.dropna(how="all", inplace=True)
-
-            # Process each row in the DataFrame
-            for _, row in df.iterrows():
-                page_content = []
-                # Build key-value pairs for non-null values
-                for k, v in row.items():
-                    if pd.notna(v):  # Skip NaN/null values
-                        page_content.append(f"{k}: {v}")
-                
-                # Skip rows with no valid content
-                if not page_content:
+        for sheet_name in workbook.sheet_names:
+            parts.append(f"## {sheet_name}")
+            raw_rows = workbook.get_sheet_by_name(sheet_name).to_python()
+            rows: List[List[str]] = []
+            for raw in raw_rows:
+                if _is_empty_row(raw):
                     continue
-                
-                # Format row as comma-separated key-value pairs
-                content_row = ",".join(page_content) + "\n"
-                end += len(content_row)
-                text.append(content_row)
-                
-                # Create a chunk for this row with position tracking
-                chunks.append(
-                    Chunk(content=content_row, seq=len(chunks), start=start, end=end)
-                )
-                start = end
+                rows.append([_cell_to_str(value) for value in raw])
 
-        # Combine all text and return as Document
-        return Document(content="".join(text), chunks=chunks)
+            table = _to_markdown_table(rows)
+            if table:
+                parts.append("")
+                parts.append(table)
+            parts.append("")
+
+        markdown = "\n".join(parts).strip()
+        if markdown:
+            markdown += "\n"
+        return Document(content=markdown)
 
 
 if __name__ == "__main__":
-    # Example usage: Parse an Excel file and display results
     logging.basicConfig(level=logging.DEBUG)
-
-    # Specify the path to your Excel file
     your_file = "/path/to/your/file.xlsx"
-    parser = ExcelParser()
-    
-    # Read and parse the Excel file
+    parser = ExcelParser(file_name=your_file)
     with open(your_file, "rb") as f:
-        content = f.read()
-        document = parser.parse_into_text(content)
-        
-        # Display the full document content
-        logger.error(document.content)
-
-        # Display the first chunk as an example
-        for chunk in document.chunks:
-            logger.error(chunk.content)
-            break  # Only show the first chunk
+        document = parser.parse_into_text(f.read())
+        logger.error(document.content[:2000])
