@@ -409,6 +409,8 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		if config.ChunkingConfig.ChunkSize > 0 || config.ChunkingConfig.ChunkOverlap > 0 || len(config.ChunkingConfig.Separators) > 0 {
 			kb.ChunkingConfig = config.ChunkingConfig
 		}
+		// Deprecated field; multimodal is gated solely by VLMConfig.Enabled.
+		kb.ChunkingConfig.EnableMultimodal = false
 		if config.ImageProcessingConfig != (types.ImageProcessingConfig{}) {
 			kb.ImageProcessingConfig = config.ImageProcessingConfig
 		}

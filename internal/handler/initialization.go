@@ -342,6 +342,9 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		kb.ChunkingConfig.ChildChunkSize = req.DocumentSplitting.ChildChunkSize
 	}
 
+	// Strip deprecated chunking_config.enable_multimodal; multimodal is VLMConfig only.
+	kb.ChunkingConfig.EnableMultimodal = false
+
 	// 更新多模态配置
 	if req.Multimodal.Enabled {
 		// VLM model already set above

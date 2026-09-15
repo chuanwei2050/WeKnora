@@ -10908,8 +10908,10 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	processOpts := ProcessChunksOptions{
 		EnableQuestionGeneration: payload.EnableQuestionGeneration,
 		QuestionCount:            payload.QuestionCount,
-		EnableMultimodel:         payload.EnableMultimodel,
-		StoredImages:             storedImages,
+		// Re-check KB toggle at process time so turning multimodal off mid-rebuild
+		// stops OCR/caption even when the asynq payload was enqueued while it was on.
+		EnableMultimodel: payload.EnableMultimodel && kb.IsMultimodalEnabled(),
+		StoredImages:     storedImages,
 	}
 
 	if convertResult != nil {

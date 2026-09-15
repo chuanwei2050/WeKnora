@@ -319,7 +319,8 @@ type ChunkingConfig struct {
 	ChunkOverlap int `yaml:"chunk_overlap" json:"chunk_overlap"`
 	// Separators
 	Separators []string `yaml:"separators"    json:"separators"`
-	// EnableMultimodal (deprecated, kept for backward compatibility with old data)
+	// EnableMultimodal is deprecated and ignored. Multimodal is controlled only by
+	// VLMConfig.Enabled. Field retained so old JSON still unmarshals without error.
 	EnableMultimodal bool `yaml:"enable_multimodal,omitempty" json:"enable_multimodal,omitempty"`
 	// ParserEngineRules is kept only for backward-compatible data decoding.
 	// Parser selection is platform-managed and runtime code ignores this field.
@@ -904,20 +905,11 @@ func (kb *KnowledgeBase) NeedsEmbeddingModel() bool {
 	return kb != nil && kb.IndexingStrategy.NeedsEmbedding()
 }
 
-// IsMultimodalEnabled 判断多模态是否启用（兼容新老版本配置）
-// 新版本：VLMConfig.IsEnabled()
-// 老版本：ChunkingConfig.EnableMultimodal
+// IsMultimodalEnabled reports whether image multimodal (OCR/caption) is enabled.
+// Sole source of truth: VLMConfig.Enabled (legacy chunking_config.enable_multimodal is ignored).
 func (kb *KnowledgeBase) IsMultimodalEnabled() bool {
 	if kb == nil {
 		return false
 	}
-	// 新版本配置优先
-	if kb.VLMConfig.IsEnabled() {
-		return true
-	}
-	// 兼容老版本：chunking_config 中的 enable_multimodal 字段
-	if kb.ChunkingConfig.EnableMultimodal {
-		return true
-	}
-	return false
+	return kb.VLMConfig.IsEnabled()
 }
