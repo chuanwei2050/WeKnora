@@ -53,6 +53,17 @@ git checkout --quiet -B development origin/development
 git reset --quiet --hard "$remote_revision"
 
 export WEKNORA_VERSION="development-${remote_revision:0:12}-jenkins"
+# Preserve an explicitly configured internal proxy, while upgrading legacy
+# public defaults whose comma separator does not fail over on transport errors.
+configured_goproxy="$(sed -n 's/^GOPROXY_ARG=//p' "$shared_dir/.env" | tail -n 1)"
+case "$configured_goproxy" in
+  ""|"https://goproxy.cn,direct"|"https://proxy.golang.org,direct")
+    export GOPROXY_ARG="https://goproxy.cn|https://proxy.golang.com.cn|direct"
+    ;;
+  *)
+    export GOPROXY_ARG="$configured_goproxy"
+    ;;
+esac
 structured_query_key="$(sed -n 's/^WEKNORA_STRUCTURED_QUERY_API_KEY=//p' "$shared_dir/.env" | tail -n 1)"
 if [[ -z "$structured_query_key" ]]; then
   structured_query_key="$(openssl rand -hex 32)"

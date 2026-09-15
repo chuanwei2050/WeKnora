@@ -34,7 +34,10 @@ services:
       args:
         - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
         - APT_MIRROR_ARG=${APT_MIRROR:-}
-        - GOPROXY_ARG=${GOPROXY_ARG:-https://proxy.golang.org,direct}
+        # Use domestic proxies by default. The pipe separator tells Go to fall
+        # back on transport failures (for example an unexpected EOF), not only
+        # on 404/410 responses.
+        - "GOPROXY_ARG=${GOPROXY_ARG:-https://goproxy.cn|https://proxy.golang.com.cn|direct}"
         - UV_IMAGE=${UV_IMAGE:-ghcr.io/astral-sh/uv@sha256:75bc2f1d328b6d5bf38bf7120dcfebf619b932bd78570c8ea1ae93db25b25ace}
     container_name: WeKnora-app
     ports:

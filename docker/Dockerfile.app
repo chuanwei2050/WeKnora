@@ -31,12 +31,25 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
     apt-get update && \
     apt-get install -y git build-essential libsqlite3-dev
 
-# Install migrate tool
-RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1
+# Keep dependency and compiler caches stable across Dockerfile layer misses.
+# Downloads are retried because public proxies can close large responses early.
+RUN --mount=type=cache,id=weknora-go-mod,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,id=weknora-go-build,target=/root/.cache/go-build,sharing=locked \
+    for attempt in 1 2 3; do \
+        go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1 && break; \
+        if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done
 
 # Copy go mod and sum files
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod go mod download
+RUN --mount=type=cache,id=weknora-go-mod,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,id=weknora-go-build,target=/root/.cache/go-build,sharing=locked \
+    for attempt in 1 2 3; do \
+        go mod download && break; \
+        if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done
 COPY cmd/download cmd/download
 RUN go run cmd/download/duckdb/duckdb.go
 COPY . .
@@ -54,9 +67,14 @@ ENV BUILD_TIME=${BUILD_TIME_ARG}
 ENV GO_VERSION=${GO_VERSION_ARG}
 
 # Build the application with version info
-RUN --mount=type=cache,target=/go/pkg/mod make build-prod
-RUN --mount=type=cache,target=/go/pkg/mod go build -o /app/WeKnora-backfill-structured-query ./cmd/backfill-structured-query
-RUN --mount=type=cache,target=/go/pkg/mod cp -r /go/pkg/mod/github.com/yanyiwu/ /app/yanyiwu/
+RUN --mount=type=cache,id=weknora-go-mod,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,id=weknora-go-build,target=/root/.cache/go-build,sharing=locked \
+    make build-prod
+RUN --mount=type=cache,id=weknora-go-mod,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,id=weknora-go-build,target=/root/.cache/go-build,sharing=locked \
+    go build -o /app/WeKnora-backfill-structured-query ./cmd/backfill-structured-query
+RUN --mount=type=cache,id=weknora-go-mod,target=/go/pkg/mod,sharing=locked \
+    cp -r /go/pkg/mod/github.com/yanyiwu/ /app/yanyiwu/
 
 # Final stage
 FROM debian:12.12-slim
