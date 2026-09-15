@@ -113,7 +113,7 @@ export type KBMaintenanceOperation = 'reparse' | 'graph' | 'keywords' | 'vector'
 export interface KBMaintenanceProgress {
   run_id?: string;
   operation?: KBMaintenanceOperation;
-  status: 'idle' | 'running' | 'completed' | 'completed_with_failures' | 'failed';
+  status: 'idle' | 'running' | 'completed' | 'completed_with_failures' | 'failed' | 'canceled';
   total: number;
   processed: number;
   failed: number;
@@ -125,6 +125,10 @@ export interface KBMaintenanceProgress {
 
 export function getKBMaintenanceStatus(kbId: string) {
   return get<{ success: boolean; data: KBMaintenanceProgress }>(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/maintenance/status`);
+}
+
+export function cancelKBMaintenance(kbId: string) {
+  return post<{ success: boolean; data: KBMaintenanceProgress }>(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/maintenance/cancel`, {});
 }
 
 export function startKBMaintenance(kbId: string, operation: Exclude<KBMaintenanceOperation, 'reparse' | 'graph'>) {

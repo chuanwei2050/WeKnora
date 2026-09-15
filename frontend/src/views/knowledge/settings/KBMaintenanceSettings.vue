@@ -13,12 +13,17 @@
         <strong>{{ operationLabel(progress.operation) }}</strong>
         <t-progress :percentage="progress.percent" size="small" />
         <span>{{ t('knowledgeEditor.maintenance.running', { processed: progress.processed, total: progress.total }) }}</span>
+        <t-button class="stop-button" theme="danger" variant="outline" size="small" :loading="stopping" @click="stopCurrent">
+          {{ t('knowledgeEditor.maintenance.stop') }}
+        </t-button>
       </template>
     </t-alert>
     <t-alert v-else-if="progress.status === 'completed_with_failures'" theme="warning" class="active-status"
       :message="t('knowledgeEditor.maintenance.completedWithFailures', { failed: progress.failed })" />
     <t-alert v-else-if="progress.status === 'completed'" theme="success" class="active-status"
       :message="t('knowledgeEditor.maintenance.completed', { name: operationLabel(progress.operation) })" />
+    <t-alert v-else-if="progress.status === 'canceled'" theme="warning" class="active-status"
+      :message="t('knowledgeEditor.maintenance.canceled')" />
 
     <div class="maintenance-list">
       <div v-for="action in actions" :key="action.operation" class="maintenance-row">
@@ -45,7 +50,7 @@ import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { getSystemInfo } from '@/api/system'
 import {
-  getKBGraphRebuildStatus, getKBMaintenanceStatus, getKBRebuildStatus, rebuildKBGraph, rebuildKBIndex,
+  cancelKBMaintenance, getKBGraphRebuildStatus, getKBMaintenanceStatus, getKBRebuildStatus, rebuildKBGraph, rebuildKBIndex,
   startKBMaintenance, type KBMaintenanceOperation, type KBMaintenanceProgress, type KnowledgeBaseRebuildStatus,
 } from '@/api/knowledge-base'
 
@@ -61,6 +66,7 @@ const { t } = useI18n()
 const progress = ref<KBMaintenanceProgress>({ status: 'idle', total: 0, processed: 0, failed: 0, percent: 0 })
 const documentStatus = ref<KnowledgeBaseRebuildStatus>({ status: 'idle', total: 0, pending: 0, processing: 0, completed: 0, failed: 0, percent: 0 })
 const submitting = ref<KBMaintenanceOperation | null>(null)
+const stopping = ref(false)
 const structuredQueryEnabled = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 const isRunning = computed(() => progress.value.status === 'running')
@@ -95,6 +101,19 @@ async function refresh() {
 }
 function startPolling() { stopPolling(); timer = setInterval(() => void refresh(), 2000) }
 
+async function stopCurrent() {
+  stopping.value = true
+  try {
+    progress.value = (await cancelKBMaintenance(props.knowledgeBaseId)).data
+    MessagePlugin.success(t('knowledgeEditor.maintenance.stopSubmitted'))
+    stopPolling()
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : t('knowledgeEditor.maintenance.stopFailed')
+    MessagePlugin.error(message)
+    await refresh()
+  } finally { stopping.value = false }
+}
+
 function confirmRun(action: Action) {
   const dialog = DialogPlugin.confirm({
     header: action.label,
@@ -126,7 +145,7 @@ onBeforeUnmount(stopPolling)
 
 <style scoped lang="less">
 .section-header { margin-bottom: 20px; h2 { margin: 0 0 8px; font-size: 20px; } .section-description { margin: 0; color: var(--td-text-color-secondary); } .document-status { margin: 8px 0 0; color: var(--td-text-color-placeholder); font-size: 13px; } }
-.active-status { margin-bottom: 16px; :deep(.t-progress) { margin: 8px 0 4px; max-width: 560px; } }
+.active-status { margin-bottom: 16px; :deep(.t-progress) { margin: 8px 0 4px; max-width: 560px; } .stop-button { margin-top: 10px; } }
 .maintenance-list { border: 1px solid var(--td-component-stroke); border-radius: 8px; overflow: hidden; }
 .maintenance-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 18px 20px; border-bottom: 1px solid var(--td-component-stroke); &:last-child { border-bottom: 0; } }
 .maintenance-copy { min-width: 0; label { color: var(--td-text-color-primary); font-weight: 600; } p { margin: 6px 0 0; color: var(--td-text-color-secondary); font-size: 13px; line-height: 1.5; } .disabled-reason { color: var(--td-warning-color); } }

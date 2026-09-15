@@ -4168,6 +4168,10 @@ func (s *knowledgeService) ProcessKBMaintenance(ctx context.Context, task *asynq
 		}
 	}
 	for _, knowledge := range items {
+		if !store.IsRunning(ctx, payload.TenantID, payload.KnowledgeBaseID, payload.RunID) {
+			logger.Infof(ctx, "Maintenance run %s stopped after %d items", payload.RunID, processed)
+			return nil
+		}
 		if knowledge == nil || (payload.Operation != types.KBMaintenanceStructured && knowledge.ParseStatus != types.ParseStatusCompleted) {
 			continue
 		}

@@ -129,6 +129,45 @@ func (s *KBMaintenanceStore) Get(ctx context.Context, tenantID uint64, kbID stri
 	return &p, nil
 }
 
+func (s *KBMaintenanceStore) Cancel(ctx context.Context, tenantID uint64, kbID, runID string) (*types.KBMaintenanceProgress, error) {
+	key := kbMaintenanceKey(tenantID, kbID)
+	var out *types.KBMaintenanceProgress
+	err := s.redis.Watch(ctx, func(tx *redis.Tx) error {
+		raw, err := tx.Get(ctx, key).Bytes()
+		if err != nil {
+			return err
+		}
+		var p types.KBMaintenanceProgress
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return err
+		}
+		if p.RunID != runID || p.Status != "running" {
+			out = &p
+			return nil
+		}
+		now := time.Now().UTC()
+		p.Status = "canceled"
+		p.Message = "canceled_by_user"
+		p.FinishedAt = &now
+		p.HeartbeatAt = now
+		b, err := json.Marshal(&p)
+		if err != nil {
+			return err
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error { pipe.Set(ctx, key, b, kbMaintenanceTTL); return nil })
+		if err == nil {
+			out = &p
+		}
+		return err
+	}, key)
+	return out, err
+}
+
+func (s *KBMaintenanceStore) IsRunning(ctx context.Context, tenantID uint64, kbID, runID string) bool {
+	p, err := s.Get(ctx, tenantID, kbID)
+	return err == nil && p != nil && p.RunID == runID && p.Status == "running"
+}
+
 func (s *KBMaintenanceStore) Update(ctx context.Context, tenantID uint64, kbID, runID string, processed, failed int, message string, finished bool) error {
 	key := kbMaintenanceKey(tenantID, kbID)
 	return s.redis.Watch(ctx, func(tx *redis.Tx) error {

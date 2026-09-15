@@ -89,6 +89,10 @@ func NewChunkExtractTask(
 	chunkID string,
 	modelID string,
 ) error {
+	return newChunkExtractTask(ctx, client, tenantID, chunkID, modelID, "")
+}
+
+func newChunkExtractTask(ctx context.Context, client interfaces.TaskEnqueuer, tenantID uint64, chunkID, modelID, maintenanceRunID string) error {
 	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
 		logger.Warn(ctx, "NEO4J is not enabled, skip chunk extract task")
 		return nil
@@ -97,9 +101,10 @@ func NewChunkExtractTask(
 		return fmt.Errorf("task enqueuer is not configured")
 	}
 	taskPayload := types.ExtractChunkPayload{
-		TenantID: tenantID,
-		ChunkID:  chunkID,
-		ModelID:  modelID,
+		TenantID:         tenantID,
+		ChunkID:          chunkID,
+		ModelID:          modelID,
+		MaintenanceRunID: maintenanceRunID,
 	}
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payload, err := json.Marshal(taskPayload)
@@ -206,6 +211,10 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) (err er
 		return err
 	}
 	kbID = chunk.KnowledgeBaseID
+	if p.MaintenanceRunID != "" && s.rebuildProgress != nil && !NewKBMaintenanceStore(s.rebuildProgress.redis).IsRunning(ctx, p.TenantID, kbID, p.MaintenanceRunID) {
+		logger.Infof(ctx, "skip graph extraction for canceled maintenance run %s", p.MaintenanceRunID)
+		return nil
+	}
 	kb, err := s.knowledgeBaseRepo.GetKnowledgeBaseByID(ctx, chunk.KnowledgeBaseID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get knowledge base: %v", err)

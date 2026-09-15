@@ -46,9 +46,10 @@ const (
 // ExtractChunkPayload represents the extract chunk task payload
 type ExtractChunkPayload struct {
 	TracingContext
-	TenantID uint64 `json:"tenant_id"`
-	ChunkID  string `json:"chunk_id"`
-	ModelID  string `json:"model_id"`
+	TenantID         uint64 `json:"tenant_id"`
+	ChunkID          string `json:"chunk_id"`
+	ModelID          string `json:"model_id"`
+	MaintenanceRunID string `json:"maintenance_run_id,omitempty"`
 }
 
 // DocumentProcessPayload represents the document process task payload
@@ -213,11 +214,12 @@ type ImageMultimodalPayload struct {
 // KnowledgePostProcessPayload represents the knowledge post process task payload.
 type KnowledgePostProcessPayload struct {
 	TracingContext
-	TenantID        uint64 `json:"tenant_id"`
-	KnowledgeID     string `json:"knowledge_id"`
-	KnowledgeBaseID string `json:"knowledge_base_id"`
-	VersionID       string `json:"version_id,omitempty"` // governed version being processed
-	Language        string `json:"language,omitempty"`   // Request locale for {{language}} in prompt templates
+	TenantID         uint64 `json:"tenant_id"`
+	KnowledgeID      string `json:"knowledge_id"`
+	KnowledgeBaseID  string `json:"knowledge_base_id"`
+	VersionID        string `json:"version_id,omitempty"` // governed version being processed
+	Language         string `json:"language,omitempty"`   // Request locale for {{language}} in prompt templates
+	MaintenanceRunID string `json:"maintenance_run_id,omitempty"`
 }
 
 type KnowledgePublishPayload struct {

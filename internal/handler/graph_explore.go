@@ -216,6 +216,7 @@ func (h *GraphExploreHandler) Rebuild(c *gin.Context) {
 	for _, item := range completed {
 		payload, err := json.Marshal(types.KnowledgePostProcessPayload{
 			TenantID: tenantID, KnowledgeID: item.ID, KnowledgeBaseID: kbID,
+			MaintenanceRunID: maintenance.RunID,
 		})
 		if err != nil {
 			_ = h.maintenance.Fail(c.Request.Context(), tenantID, kbID, maintenance.RunID, err.Error())

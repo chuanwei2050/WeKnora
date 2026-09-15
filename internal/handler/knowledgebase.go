@@ -731,6 +731,33 @@ func (h *KnowledgeBaseHandler) GetMaintenanceStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": p})
 }
 
+func (h *KnowledgeBaseHandler) CancelMaintenance(c *gin.Context) {
+	_, id, tenantID, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin {
+		c.Error(apperrors.NewForbiddenError("No permission to stop maintenance"))
+		return
+	}
+	p, err := h.maintenance.Get(c.Request.Context(), tenantID, id)
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+	if p == nil || p.Status != "running" {
+		c.Error(apperrors.NewConflictError("no maintenance task is running"))
+		return
+	}
+	p, err = h.maintenance.Cancel(c.Request.Context(), tenantID, id, p.RunID)
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": p})
+}
+
 type knowledgeBaseRebuildStatus struct {
 	Status     string `json:"status"`
 	Total      int    `json:"total"`

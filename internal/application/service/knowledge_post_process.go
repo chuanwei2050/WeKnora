@@ -85,6 +85,10 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	}
 
 	logger.Infof(ctx, "[KnowledgePostProcess] Orchestrating post processing for knowledge: %s", payload.KnowledgeID)
+	if payload.MaintenanceRunID != "" && !NewKBMaintenanceStore(s.redisClient).IsRunning(ctx, payload.TenantID, payload.KnowledgeBaseID, payload.MaintenanceRunID) {
+		logger.Infof(ctx, "[KnowledgePostProcess] Skipping canceled maintenance run %s", payload.MaintenanceRunID)
+		return nil
+	}
 
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	if payload.Language != "" {
@@ -198,7 +202,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 				continue
 			}
 			graphCandidates++
-			err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.GraphExtractionModelID())
+			err := newChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.GraphExtractionModelID(), payload.MaintenanceRunID)
 			if err != nil {
 				logger.Errorf(ctx, "[KnowledgePostProcess] Failed to create chunk extract task for %s: %v", chunk.ID, err)
 				if enqueueErr == nil {
