@@ -813,6 +813,14 @@ func (h *KnowledgeBaseHandler) StopAllParses(c *gin.Context) {
 		return
 	}
 	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, tenantID)
+	// Cancel document-pipeline maintenance first so status polls cannot
+	// auto-advance into structured after the user stops all parses.
+	if p, getErr := h.maintenance.Get(ctx, tenantID, id); getErr == nil && p != nil &&
+		(p.Status == "running" || p.Status == "canceling") && p.Operation.IsDocumentPipelineMaintenance() {
+		if _, cancelErr := h.maintenance.Cancel(ctx, tenantID, id, p.RunID); cancelErr != nil {
+			logger.Warnf(ctx, "failed to cancel maintenance while stopping all parses: kb=%s run=%s err=%v", id, p.RunID, cancelErr)
+		}
+	}
 	interrupted, interruptedIDs, err := h.knowledgeService.StopAllParsesInKnowledgeBase(ctx, id)
 	if err != nil {
 		if appErr, ok := apperrors.IsAppError(err); ok {
