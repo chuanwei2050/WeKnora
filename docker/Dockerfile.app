@@ -2,6 +2,7 @@
 # through a network shell script. Air-gapped builders must preload this image or
 # override UV_IMAGE with an approved internal mirror digest.
 ARG UV_IMAGE=ghcr.io/astral-sh/uv@sha256:75bc2f1d328b6d5bf38bf7120dcfebf619b932bd78570c8ea1ae93db25b25ace
+ARG APP_RUNTIME_IMAGE=weknora-ci/app-runtime:bookworm-v1
 FROM ${UV_IMAGE} AS uv
 
 # Build stage
@@ -76,60 +77,16 @@ RUN --mount=type=cache,id=weknora-go-mod,target=/go/pkg/mod,sharing=locked \
 RUN --mount=type=cache,id=weknora-go-mod,target=/go/pkg/mod,sharing=locked \
     cp -r /go/pkg/mod/github.com/yanyiwu/ /app/yanyiwu/
 
-# Final stage
-FROM debian:12.12-slim
+# Final stage: fixed OS dependencies live in a separately versioned image.
+FROM ${APP_RUNTIME_IMAGE}
 
 WORKDIR /app
-
-ARG APK_MIRROR_ARG
-ARG APT_MIRROR_ARG
-
-# Create a non-root user first
-RUN useradd -m -s /bin/bash appuser
-
-# First, install ca-certificates. Use the configured mirror when provided so
-# public trial builds do not stall on the default Debian endpoint.
-RUN if [ -n "$APK_MIRROR_ARG" ]; then \
-        sed -i -E "s@https?://(deb|security).debian.org@http://${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
-    elif [ -n "$APT_MIRROR_ARG" ]; then \
-        sed -i -E "s@https?://(deb|security).debian.org@http://${APT_MIRROR_ARG#*://}@g" /etc/apt/sources.list.d/debian.sources; \
-    fi && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
-
-COPY docker/fonts-weknora-cjk.conf /etc/fonts/conf.d/64-weknora-cjk.conf
-
-# Then switch to mirror if specified and install other packages
-RUN if [ -n "$APK_MIRROR_ARG" ]; then \
-        sed -i -E "s@https?://(deb|security).debian.org@http://${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
-    fi && \
-    if [ -n "$APT_MIRROR_ARG" ]; then \
-        sed -i -E "s@https?://[^ /]+@${APT_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
-    fi && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-        build-essential postgresql-client default-mysql-client tzdata sed curl bash vim wget \
-        libsqlite3-0 \
-        python3 python3-pip python3-dev libffi-dev libssl-dev \
-        nodejs npm \
-        gosu \
-        ffmpeg fonts-noto-cjk libreoffice-calc libreoffice-impress libreoffice-writer && \
-    fc-cache -f && \
-    python3 -m pip install --break-system-packages --upgrade pip setuptools wheel && \
-    chown -R appuser:appuser /home/appuser && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
 
 # Keep MCP stdio support available without any runtime download. The source
 # image is explicit so it can be mirrored and verified as part of the offline
 # image set.
 COPY --from=uv /usr/local/bin/uv /usr/local/bin/uv
 COPY --from=uv /usr/local/bin/uvx /usr/local/bin/uvx
-
-# Create data directories and set permissions
-RUN mkdir -p /data/files && \
-    chown -R appuser:appuser /app /data/files
 
 # Copy migrate tool from builder stage
 COPY --from=builder /go/bin/migrate /usr/local/bin/

@@ -71,6 +71,22 @@ if [[ -z "$structured_query_key" ]]; then
 fi
 export WEKNORA_STRUCTURED_QUERY_API_KEY="$structured_query_key"
 export WEKNORA_STRUCTURED_QUERY_ENABLED=true
+
+# The runtime image is content-addressed by the files that define its system
+# dependencies. Business-code commits reuse it without running apt-get again.
+runtime_key="$(sha256sum docker/Dockerfile.app-runtime docker/fonts-weknora-cjk.conf | sha256sum | cut -c1-16)"
+export APP_RUNTIME_IMAGE="weknora-ci/app-runtime:$runtime_key"
+if $app_changed && ! docker image inspect "$APP_RUNTIME_IMAGE" >/dev/null 2>&1; then
+  configured_apt_mirror="$(sed -n 's/^APT_MIRROR=//p' "$shared_dir/.env" | tail -n 1)"
+  configured_apk_mirror="$(sed -n 's/^APK_MIRROR_ARG=//p' "$shared_dir/.env" | tail -n 1)"
+  docker build \
+    --file docker/Dockerfile.app-runtime \
+    --build-arg "APT_MIRROR_ARG=$configured_apt_mirror" \
+    --build-arg "APK_MIRROR_ARG=$configured_apk_mirror" \
+    --tag "$APP_RUNTIME_IMAGE" \
+    .
+fi
+
 if ! $structured_query_changed; then
   docker tag "$(docker inspect --format '{{.Image}}' WeKnora-structured-query-api)" \
     "weknora-structured-query:$WEKNORA_VERSION"

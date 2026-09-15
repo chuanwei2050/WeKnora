@@ -132,6 +132,21 @@ build_app_image() {
     
     # 获取版本信息
     get_version_info
+
+    local runtime_key
+    local runtime_image
+    runtime_key=$(sha256sum docker/Dockerfile.app-runtime docker/fonts-weknora-cjk.conf | sha256sum | cut -c1-16)
+    runtime_image="weknora-ci/app-runtime:$runtime_key"
+    if ! docker image inspect "$runtime_image" >/dev/null 2>&1; then
+        log_info "构建应用运行时基础镜像 ($runtime_image)..."
+        docker build \
+            --platform "$PLATFORM" \
+            --build-arg APK_MIRROR_ARG=${APK_MIRROR_ARG:-} \
+            --build-arg APT_MIRROR_ARG=${APT_MIRROR:-} \
+            -f docker/Dockerfile.app-runtime \
+            -t "$runtime_image" \
+            . || return 1
+    fi
     
     docker build \
         --platform $PLATFORM \
@@ -139,6 +154,7 @@ build_app_image() {
         --build-arg GOPROXY_ARG=${GOPROXY:-"https://goproxy.cn|https://proxy.golang.com.cn|direct"} \
         --build-arg GOSUMDB_ARG=${GOSUMDB:-"off"} \
         --build-arg UV_IMAGE=${UV_IMAGE:-"ghcr.io/astral-sh/uv@sha256:75bc2f1d328b6d5bf38bf7120dcfebf619b932bd78570c8ea1ae93db25b25ace"} \
+        --build-arg APP_RUNTIME_IMAGE="$runtime_image" \
         --build-arg VERSION_ARG="$VERSION" \
         --build-arg COMMIT_ID_ARG="$COMMIT_ID" \
         --build-arg BUILD_TIME_ARG="$BUILD_TIME" \
