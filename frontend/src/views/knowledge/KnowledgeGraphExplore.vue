@@ -32,7 +32,7 @@ export interface GraphOverview {
     entity_count: number
     edge_count: number
     entity_types?: Record<string, number>
-    truncated?: boolean
+    truncatedated?: boolean
   }
   top_entities?: string[]
 }
@@ -729,7 +729,7 @@ onUnmounted(() => {
               {{ t('knowledgeGraphExplore.export') }}
             </t-button>
           </t-dropdown>
-          <span v-if="overview?.stats?.truncated" class="kg-toolbar-limit">{{ truncatedHint }}</span>
+          <span v-if="overview?.stats?.truncatedated" class="kg-toolbar-limit">{{ truncatedHint }}</span>
         </div>
 
         <div class="kg-canvas" :class="{ 'is-fullscreen': isFullscreen }">
