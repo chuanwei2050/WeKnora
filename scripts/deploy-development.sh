@@ -5,14 +5,19 @@ readonly repo_dir="/srv/weknora/current"
 readonly shared_dir="/srv/weknora/shared"
 readonly deployed_revision_file="$shared_dir/deployed-development-revision"
 
-exec 9>"$shared_dir/deploy.lock"
-flock -n 9 || {
-  echo "Another WeKnora deployment is already running"
-  exit 0
-}
+if [[ "${WEKNORA_DEPLOY_LOCK_PID:-}" == "$$" ]]; then
+  unset WEKNORA_DEPLOY_LOCK_PID
+else
+  exec 9>"$shared_dir/deploy.lock"
+  flock -n 9 || {
+    echo "Another WeKnora deployment is already running"
+    exit 0
+  }
+fi
 
 cd "$repo_dir"
 
+running_script_hash="$(sha256sum "$0" | cut -d' ' -f1)"
 git fetch --quiet origin development
 remote_revision="$(git rev-parse origin/development)"
 deployed_revision="$(cat "$deployed_revision_file" 2>/dev/null || true)"
@@ -51,6 +56,16 @@ fi
 
 git checkout --quiet -B development origin/development
 git reset --quiet --hard "$remote_revision"
+
+# The deployment entry starts this script before it fetches the target revision.
+# Reload it after checkout when the script itself changed, so rollout logic and
+# the files it deploys always come from the same commit. The lock fd survives
+# exec; the PID marker prevents reacquiring and briefly releasing that lock.
+checked_out_script_hash="$(sha256sum "$0" | cut -d' ' -f1)"
+if [[ "$running_script_hash" != "$checked_out_script_hash" ]]; then
+  export WEKNORA_DEPLOY_LOCK_PID="$$"
+  exec "$0"
+fi
 
 export WEKNORA_VERSION="development-${remote_revision:0:12}-jenkins"
 # Preserve an explicitly configured internal proxy, while upgrading legacy
