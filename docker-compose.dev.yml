@@ -174,7 +174,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.docreader
-    image: wechatopenai/weknora-docreader:${WEKNORA_VERSION:-latest}
+    image: ${WEKNORA_DOCREADER_IMAGE:-wechatopenai/weknora-docreader:dev-local}
     container_name: WeKnora-docreader-dev
     ports:
       - "${DOCREADER_PORT:-50051}:50051"

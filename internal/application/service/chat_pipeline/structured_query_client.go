@@ -66,10 +66,17 @@ func (p *PluginDataAnalysis) queryStructuredNamespace(ctx context.Context, manag
 	cfg := p.config.StructuredQuery
 	payload := structuredquery.Request{Namespace: namespace, Question: manage.Query}
 	ids := manage.SearchTargets.KnowledgeIDsForKB(namespace)
-	if ids == nil {
+	hasTagScope := false
+	for _, target := range manage.SearchTargets {
+		if target != nil && target.KnowledgeBaseID == namespace && len(target.TagIDs) > 0 {
+			hasTagScope = true
+			break
+		}
+	}
+	if ids == nil && hasTagScope {
 		knowledges, err := p.knowledgeService.ListKnowledgeByKnowledgeBaseID(ctx, namespace)
 		if err != nil {
-			return nil, fmt.Errorf("list structured datasets: %w", err)
+			return nil, fmt.Errorf("list scoped structured datasets: %w", err)
 		}
 		allowedTags := map[string]struct{}{}
 		for _, target := range manage.SearchTargets {
@@ -83,16 +90,14 @@ func (p *PluginDataAnalysis) queryStructuredNamespace(ctx context.Context, manag
 			if knowledge == nil || knowledge.EnableStatus != "enabled" || knowledge.ParseStatus != types.ParseStatusCompleted {
 				continue
 			}
-			if len(allowedTags) > 0 {
-				if _, allowed := allowedTags[knowledge.TagID]; !allowed {
-					continue
-				}
+			if _, allowed := allowedTags[knowledge.TagID]; !allowed {
+				continue
 			}
 			if datasetID := knowledge.GetMetadata()["structured_dataset_id"]; datasetID != "" {
 				payload.DatasetIDs = append(payload.DatasetIDs, datasetID)
 			}
 		}
-	} else {
+	} else if ids != nil {
 		for _, id := range ids {
 			knowledge, err := p.knowledgeService.GetKnowledgeByID(ctx, id)
 			if err != nil || knowledge == nil || knowledge.EnableStatus != "enabled" || knowledge.ParseStatus != types.ParseStatusCompleted {
@@ -103,7 +108,7 @@ func (p *PluginDataAnalysis) queryStructuredNamespace(ctx context.Context, manag
 			}
 		}
 	}
-	if len(payload.DatasetIDs) == 0 {
+	if (ids != nil || hasTagScope) && len(payload.DatasetIDs) == 0 {
 		// A knowledge base may be part of the normal RAG scope without having
 		// any tabular dataset.  This is an expected route-none case, not a
 		// structured-query failure.  Skip the sidecar request entirely so a

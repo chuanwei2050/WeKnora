@@ -21,6 +21,7 @@ const (
 	TypeWikiIngest           = "wiki:ingest"            // Wiki 页面同步任务
 	TypeDocumentPreview      = "document:preview"       // 大文档完整预览异步转换
 	TypeFeishuPublish        = "feishu:publish"         // 飞书知识库发布同步任务
+	TypeKBMaintenance        = "kb:maintenance"         // 知识库局部索引维护任务
 )
 
 // FeishuPublishPayload identifies a queued Feishu publish run. Secrets must not be included.

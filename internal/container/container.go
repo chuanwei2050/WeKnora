@@ -195,6 +195,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Graph rebuild progress must be registered before chunk extract / graph handlers.
 	must(container.Provide(service.NewGraphRebuildProgressStore))
+	must(container.Provide(service.NewKBMaintenanceStore))
 
 	// Extract services - register individual extracters with names
 	must(container.Provide(service.NewChunkExtractService, dig.Name("chunkExtractor")))

@@ -31,6 +31,7 @@ type KnowledgeBaseHandler struct {
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
 	asynqClient       interfaces.TaskEnqueuer
+	maintenance       *service.KBMaintenanceStore
 }
 
 // NewKnowledgeBaseHandler creates a new knowledge base handler instance
@@ -40,6 +41,7 @@ func NewKnowledgeBaseHandler(
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
 	asynqClient interfaces.TaskEnqueuer,
+	maintenance *service.KBMaintenanceStore,
 ) *KnowledgeBaseHandler {
 	return &KnowledgeBaseHandler{
 		service:           service,
@@ -47,6 +49,7 @@ func NewKnowledgeBaseHandler(
 		kbShareService:    kbShareService,
 		agentShareService: agentShareService,
 		asynqClient:       asynqClient,
+		maintenance:       maintenance,
 	}
 }
 
@@ -554,7 +557,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 // all enabled derived data and indexes.
 func (h *KnowledgeBaseHandler) RebuildIndex(c *gin.Context) {
 	ctx := c.Request.Context()
-	_, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	_, id, tenantID, permission, err := h.validateAndGetKnowledgeBase(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -568,12 +571,163 @@ func (h *KnowledgeBaseHandler) RebuildIndex(c *gin.Context) {
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
-	enqueued, err := reparseKnowledgeBaseItems(ctx, items, h.knowledgeService.ReparseKnowledge)
+	targetIDs := make([]string, 0)
+	for _, item := range items {
+		if item != nil && item.ParseStatus == types.ParseStatusCompleted {
+			targetIDs = append(targetIDs, item.ID)
+		}
+	}
+	progress, acquired, err := h.maintenance.TryStart(ctx, tenantID, id, types.KBMaintenanceReparse, len(targetIDs), targetIDs)
 	if err != nil {
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
+	if !acquired {
+		c.JSON(http.StatusConflict, gin.H{"success": false, "error": gin.H{"message": "another maintenance task is running"}, "data": progress})
+		return
+	}
+	enqueued, err := reparseKnowledgeBaseItems(ctx, items, h.knowledgeService.ReparseKnowledge)
+	if err != nil {
+		_ = h.maintenance.Fail(ctx, tenantID, id, progress.RunID, err.Error())
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+	if enqueued == 0 {
+		_ = h.maintenance.Update(ctx, tenantID, id, progress.RunID, 0, 0, "", true)
+	}
 	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": gin.H{"document_count": enqueued}})
+}
+
+// StartMaintenance starts a non-destructive, chunk-preserving maintenance job.
+func (h *KnowledgeBaseHandler) StartMaintenance(c *gin.Context) {
+	ctx := c.Request.Context()
+	kb, id, tenantID, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin {
+		c.Error(apperrors.NewForbiddenError("No permission to maintain knowledge base"))
+		return
+	}
+	operation := types.KBMaintenanceOperation(c.Param("operation"))
+	if operation != types.KBMaintenanceKeywords && operation != types.KBMaintenanceVector && operation != types.KBMaintenanceQuestions && operation != types.KBMaintenanceStructured {
+		c.Error(apperrors.NewBadRequestError("unsupported maintenance operation"))
+		return
+	}
+	if operation == types.KBMaintenanceQuestions && (kb.QuestionGenerationConfig == nil || !kb.QuestionGenerationConfig.Enabled) {
+		c.Error(apperrors.NewBadRequestError("question generation is not enabled"))
+		return
+	}
+	if operation == types.KBMaintenanceKeywords && !kb.IsKeywordEnabled() {
+		c.Error(apperrors.NewBadRequestError("keyword indexing is not enabled"))
+		return
+	}
+	if operation == types.KBMaintenanceVector && !kb.IsVectorEnabled() {
+		c.Error(apperrors.NewBadRequestError("vector indexing is not enabled"))
+		return
+	}
+	items, err := h.knowledgeService.ListKnowledgeByKnowledgeBaseID(ctx, id)
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+	targetIDs := make([]string, 0)
+	for _, item := range items {
+		if item != nil && item.ParseStatus == types.ParseStatusCompleted {
+			targetIDs = append(targetIDs, item.ID)
+		}
+	}
+	progress, acquired, err := h.maintenance.TryStart(ctx, tenantID, id, operation, len(targetIDs), targetIDs)
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+	if !acquired {
+		c.JSON(http.StatusConflict, gin.H{"success": false, "error": gin.H{"message": "another maintenance task is running"}, "data": progress})
+		return
+	}
+	payload, err := json.Marshal(types.KBMaintenancePayload{TenantID: tenantID, KnowledgeBaseID: id, RunID: progress.RunID, Operation: operation})
+	if err != nil {
+		_ = h.maintenance.Fail(ctx, tenantID, id, progress.RunID, err.Error())
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+	if _, err = h.asynqClient.Enqueue(asynq.NewTask(types.TypeKBMaintenance, payload, asynq.Queue("low"), asynq.MaxRetry(1))); err != nil {
+		_ = h.maintenance.Fail(ctx, tenantID, id, progress.RunID, err.Error())
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": progress})
+}
+
+func (h *KnowledgeBaseHandler) GetMaintenanceStatus(c *gin.Context) {
+	_, id, tenantID, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin {
+		c.Error(apperrors.NewForbiddenError("No permission to view maintenance status"))
+		return
+	}
+	p, err := h.maintenance.Get(c.Request.Context(), tenantID, id)
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+	if p == nil {
+		p = &types.KBMaintenanceProgress{Status: "idle"}
+	}
+	if p.Status == "running" && p.Operation == types.KBMaintenanceReparse {
+		items, listErr := h.knowledgeService.ListKnowledgeByKnowledgeBaseID(c.Request.Context(), id)
+		if listErr == nil {
+			targets := make(map[string]struct{}, len(p.TargetKnowledgeIDs))
+			for _, targetID := range p.TargetKnowledgeIDs {
+				targets[targetID] = struct{}{}
+			}
+			done, failed, active := 0, 0, 0
+			for _, item := range items {
+				if item == nil {
+					continue
+				}
+				if _, targeted := targets[item.ID]; !targeted {
+					continue
+				}
+				switch item.ParseStatus {
+				case types.ParseStatusCompleted:
+					switch item.SummaryStatus {
+					case types.SummaryStatusPending, types.SummaryStatusProcessing:
+						active++
+					case types.SummaryStatusFailed:
+						failed++
+					default:
+						done++
+					}
+				case types.ParseStatusFailed:
+					failed++
+				case types.ParseStatusPending, types.ParseStatusProcessing:
+					active++
+				}
+			}
+			finished := active == 0 && done+failed >= p.Total
+			if finished && p.Total > 0 {
+				next, advanced, advanceErr := h.maintenance.AdvancePhase(c.Request.Context(), tenantID, id, p.RunID, types.KBMaintenanceReparse, types.KBMaintenanceStructured, len(p.TargetKnowledgeIDs), p.TargetKnowledgeIDs)
+				if advanceErr == nil && advanced {
+					payload, marshalErr := json.Marshal(types.KBMaintenancePayload{TenantID: tenantID, KnowledgeBaseID: id, RunID: next.RunID, Operation: next.Operation})
+					if marshalErr != nil {
+						_ = h.maintenance.Fail(c.Request.Context(), tenantID, id, next.RunID, marshalErr.Error())
+					} else if _, enqueueErr := h.asynqClient.Enqueue(asynq.NewTask(types.TypeKBMaintenance, payload, asynq.Queue("low"), asynq.MaxRetry(1))); enqueueErr != nil {
+						_ = h.maintenance.Fail(c.Request.Context(), tenantID, id, next.RunID, enqueueErr.Error())
+					}
+				}
+			} else {
+				_ = h.maintenance.Update(c.Request.Context(), tenantID, id, p.RunID, done+failed, failed, "", finished)
+			}
+			p, _ = h.maintenance.Get(c.Request.Context(), tenantID, id)
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": p})
 }
 
 type knowledgeBaseRebuildStatus struct {

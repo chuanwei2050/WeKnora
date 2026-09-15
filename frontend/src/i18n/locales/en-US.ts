@@ -1886,6 +1886,7 @@ export default {
       share: 'Sharing',
       indexing: 'Indexing Strategy',
 			aliases: 'Qualification Aliases',
+      maintenance: 'Rebuild & Maintenance',
     },
     basic: {
       title: 'Basic Information',
@@ -1959,6 +1960,25 @@ export default {
       failed: 'Failed to submit reprocessing tasks',
       progress: '{completed}/{total} completed, {pending} pending, {processing} processing',
       failedCount: '{count} document(s) failed. See the document list for details.',
+    },
+    maintenance: {
+      title: 'Rebuild & Maintenance',
+      description: 'Manage derived knowledge-base data. While one task is running, all other maintenance operations are locked to prevent conflicts.',
+      running: '{processed}/{total} processed',
+      completed: '{name} completed',
+      completedWithFailures: 'Task completed with {failed} failed document(s). Check service logs for details.',
+      submitted: '{name} submitted', submitFailed: 'Failed to submit maintenance task',
+      confirm: 'Run “{name}”? Other rebuild operations will be locked until it finishes.',
+      graphDisabled: 'Enable the knowledge graph first', keywordDisabled: 'Enable keyword retrieval first', vectorDisabled: 'Enable vector retrieval first',
+      questionsDisabled: 'Enable chunk question generation in Advanced Settings first', structuredDisabled: 'Structured query service is disabled',
+      actions: {
+        reparse: { label: 'Re-chunk and Rebuild All', description: 'Reparse every document and rebuild summaries, chunk questions, keyword/ES, vectors, structured data, and the enabled graph.' },
+        graph: { label: 'Rebuild Knowledge Graph', description: 'Clear the graph and extract it again from all eligible chunks using the current configuration.' },
+        keywords: { label: 'Rebuild Keyword/ES Index', description: 'Keep existing chunks and rebuild only the keyword retrieval channel without recomputing vectors.' },
+        vector: { label: 'Rebuild Vector Index', description: 'Keep existing chunks and recompute embeddings only for the vector retrieval channel.' },
+        questions: { label: 'Regenerate Chunk Questions', description: 'Remove old question indexes, regenerate questions with the current count, and index them.' },
+        structured: { label: 'Rebuild Structured Data (SQL)', description: 'Upload tables again and apply the current extraction, field formatting, and analysis rules.' },
+      },
     },
     wikiBrowser: {
       viewInGraph: 'View in Graph',

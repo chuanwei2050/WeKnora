@@ -86,6 +86,12 @@ func (s *knowledgeService) BackfillStructuredFile(ctx context.Context, knowledge
 func submitStructuredFileRequest(ctx context.Context, cfg *config.StructuredQueryConfig, knowledge *types.Knowledge, fileService interface {
 	GetFile(context.Context, string) (io.ReadCloser, error)
 }, merger any) (structuredDatasetAccepted, error) {
+	return submitStructuredFileRequestWithKey(ctx, cfg, knowledge, fileService, merger, knowledge.ID+"-"+knowledge.FileHash)
+}
+
+func submitStructuredFileRequestWithKey(ctx context.Context, cfg *config.StructuredQueryConfig, knowledge *types.Knowledge, fileService interface {
+	GetFile(context.Context, string) (io.ReadCloser, error)
+}, merger any, idempotencyKey string) (structuredDatasetAccepted, error) {
 	reader, err := fileService.GetFile(ctx, knowledge.FilePath)
 	if err != nil {
 		return structuredDatasetAccepted{}, fmt.Errorf("open upload: %w", err)
@@ -112,7 +118,7 @@ func submitStructuredFileRequest(ctx context.Context, cfg *config.StructuredQuer
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("X-API-Key", cfg.APIKey)
 	req.Header.Set("X-Tenant-ID", strconv.FormatUint(knowledge.TenantID, 10))
-	req.Header.Set("Idempotency-Key", knowledge.ID+"-"+knowledge.FileHash)
+	req.Header.Set("Idempotency-Key", idempotencyKey)
 	resp, err := (&http.Client{Timeout: timeout}).Do(req)
 	if err != nil {
 		return structuredDatasetAccepted{}, fmt.Errorf("upload: %w", err)

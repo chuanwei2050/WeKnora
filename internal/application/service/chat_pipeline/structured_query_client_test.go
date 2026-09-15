@@ -28,11 +28,12 @@ func (emptyStructuredKnowledgeFixture) ListKnowledgeByKnowledgeBaseID(context.Co
 	return nil, nil
 }
 
-func TestStructuredQuerySkipsNamespaceWithoutDatasets(t *testing.T) {
+func TestStructuredQueryUsesNamespaceWithoutPerRequestDatasetScan(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
-		http.Error(w, "unexpected structured query", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"route":"none","columns":[],"rows":[],"model_calls":0,"timings":{},"sources":[]}`))
 	}))
 	defer server.Close()
 
@@ -53,8 +54,8 @@ func TestStructuredQuerySkipsNamespaceWithoutDatasets(t *testing.T) {
 	if err := plugin.OnEvent(context.Background(), types.DATA_ANALYSIS, manage, func() *PluginError { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if requestCount != 0 {
-		t.Fatalf("namespace without structured datasets must not call sidecar, got %d requests", requestCount)
+	if requestCount != 1 {
+		t.Fatalf("whole-KB query must delegate readiness to the structured namespace, got %d requests", requestCount)
 	}
 }
 
@@ -65,8 +66,8 @@ func TestStructuredQueryStartsBeforeRetrievalAndMergesLater(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if ids, exists := payload["dataset_ids"].([]any); !exists || len(ids) != 1 || ids[0] != "dataset-1" {
-			t.Fatalf("request must carry the authorized dataset ids: %#v", payload)
+		if _, exists := payload["dataset_ids"]; exists {
+			t.Fatalf("whole-KB request must not scan and materialize dataset ids: %#v", payload)
 		}
 		if r.Header.Get("X-Tenant-ID") != "7" {
 			t.Fatalf("tenant header missing: %q", r.Header.Get("X-Tenant-ID"))

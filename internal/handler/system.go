@@ -62,16 +62,17 @@ func requirePlatformAdminForSystem(c *gin.Context) bool {
 
 // GetSystemInfoResponse defines the response structure for system info
 type GetSystemInfoResponse struct {
-	Version             string `json:"version"`
-	Edition             string `json:"edition"`
-	CommitID            string `json:"commit_id,omitempty"`
-	BuildTime           string `json:"build_time,omitempty"`
-	GoVersion           string `json:"go_version,omitempty"`
-	KeywordIndexEngine  string `json:"keyword_index_engine,omitempty"`
-	VectorStoreEngine   string `json:"vector_store_engine,omitempty"`
-	GraphDatabaseEngine string `json:"graph_database_engine,omitempty"`
-	MinioEnabled        bool   `json:"minio_enabled,omitempty"`
-	DBVersion           string `json:"db_version,omitempty"`
+	Version                string `json:"version"`
+	Edition                string `json:"edition"`
+	CommitID               string `json:"commit_id,omitempty"`
+	BuildTime              string `json:"build_time,omitempty"`
+	GoVersion              string `json:"go_version,omitempty"`
+	KeywordIndexEngine     string `json:"keyword_index_engine,omitempty"`
+	VectorStoreEngine      string `json:"vector_store_engine,omitempty"`
+	GraphDatabaseEngine    string `json:"graph_database_engine,omitempty"`
+	MinioEnabled           bool   `json:"minio_enabled,omitempty"`
+	DBVersion              string `json:"db_version,omitempty"`
+	StructuredQueryEnabled bool   `json:"structured_query_enabled"`
 }
 
 // 编译时注入的版本信息
@@ -115,16 +116,17 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	}
 
 	response := GetSystemInfoResponse{
-		Version:             Version,
-		Edition:             Edition,
-		CommitID:            CommitID,
-		BuildTime:           BuildTime,
-		GoVersion:           GoVersion,
-		KeywordIndexEngine:  keywordIndexEngine,
-		VectorStoreEngine:   vectorStoreEngine,
-		GraphDatabaseEngine: graphDatabaseEngine,
-		MinioEnabled:        minioEnabled,
-		DBVersion:           dbVersion,
+		Version:                Version,
+		Edition:                Edition,
+		CommitID:               CommitID,
+		BuildTime:              BuildTime,
+		GoVersion:              GoVersion,
+		KeywordIndexEngine:     keywordIndexEngine,
+		VectorStoreEngine:      vectorStoreEngine,
+		GraphDatabaseEngine:    graphDatabaseEngine,
+		MinioEnabled:           minioEnabled,
+		DBVersion:              dbVersion,
+		StructuredQueryEnabled: h.cfg != nil && h.cfg.StructuredQuery != nil && h.cfg.StructuredQuery.Enabled,
 	}
 
 	logger.Info(ctx, "System info retrieved successfully")

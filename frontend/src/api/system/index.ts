@@ -11,6 +11,7 @@ export interface SystemInfo {
   graph_database_engine?: string
   minio_enabled?: boolean
   db_version?: string
+  structured_query_enabled?: boolean
 }
 
 export interface ToolDefinition {

@@ -156,6 +156,7 @@ type KnowledgeService interface {
 	ProcessFAQImport(ctx context.Context, t *asynq.Task) error
 	// ProcessQuestionGeneration handles Asynq question generation tasks
 	ProcessQuestionGeneration(ctx context.Context, t *asynq.Task) error
+	ProcessKBMaintenance(ctx context.Context, t *asynq.Task) error
 	// ProcessSummaryGeneration handles Asynq summary generation tasks
 	ProcessSummaryGeneration(ctx context.Context, t *asynq.Task) error
 	// ProcessKBClone handles Asynq knowledge base clone tasks

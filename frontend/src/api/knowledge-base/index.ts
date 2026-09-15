@@ -109,6 +109,36 @@ export function getKBRebuildStatus(kbId: string) {
   return get<{ success: boolean; data: KnowledgeBaseRebuildStatus }>(`/api/v1/knowledge-bases/${kbId}/rebuild-index/status`);
 }
 
+export type KBMaintenanceOperation = 'reparse' | 'graph' | 'keywords' | 'vector' | 'questions' | 'structured';
+export interface KBMaintenanceProgress {
+  run_id?: string;
+  operation?: KBMaintenanceOperation;
+  status: 'idle' | 'running' | 'completed' | 'completed_with_failures' | 'failed';
+  total: number;
+  processed: number;
+  failed: number;
+  percent: number;
+  message?: string;
+  started_at?: string;
+  finished_at?: string;
+}
+
+export function getKBMaintenanceStatus(kbId: string) {
+  return get<{ success: boolean; data: KBMaintenanceProgress }>(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/maintenance/status`);
+}
+
+export function startKBMaintenance(kbId: string, operation: Exclude<KBMaintenanceOperation, 'reparse' | 'graph'>) {
+  return post<{ success: boolean; data: KBMaintenanceProgress }>(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/maintenance/${operation}`, {});
+}
+
+export function rebuildKBGraph(kbId: string) {
+  return post(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/rebuild-graph`, {});
+}
+
+export function getKBGraphRebuildStatus(kbId: string) {
+  return get(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/graph/rebuild-status`);
+}
+
 export function deleteKnowledgeBase(id: string) {
   return del(`/api/v1/knowledge-bases/${id}`);
 }

@@ -4130,6 +4130,207 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 	return nil
 }
 
+// ProcessKBMaintenance rebuilds one derived artifact while preserving parsed chunks.
+func (s *knowledgeService) ProcessKBMaintenance(ctx context.Context, task *asynq.Task) error {
+	var payload types.KBMaintenancePayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return err
+	}
+	store := NewKBMaintenanceStore(s.redisClient)
+	fail := func(err error) error {
+		_ = store.Fail(ctx, payload.TenantID, payload.KnowledgeBaseID, payload.RunID, err.Error())
+		return err
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	tenant, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
+	if err != nil {
+		return fail(err)
+	}
+	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID)
+	if err != nil {
+		return fail(err)
+	}
+	items, err := s.ListKnowledgeByKnowledgeBaseID(ctx, payload.KnowledgeBaseID)
+	if err != nil {
+		return fail(err)
+	}
+	processed, failed := 0, 0
+	progress, _ := store.Get(ctx, payload.TenantID, payload.KnowledgeBaseID)
+	if progress == nil || progress.RunID != payload.RunID || progress.Operation != payload.Operation || progress.Status != "running" {
+		logger.Infof(ctx, "Skipping stale maintenance task run=%s operation=%s", payload.RunID, payload.Operation)
+		return nil
+	}
+	targets := map[string]struct{}{}
+	if progress != nil {
+		for _, id := range progress.TargetKnowledgeIDs {
+			targets[id] = struct{}{}
+		}
+	}
+	for _, knowledge := range items {
+		if knowledge == nil || (payload.Operation != types.KBMaintenanceStructured && knowledge.ParseStatus != types.ParseStatusCompleted) {
+			continue
+		}
+		if len(targets) > 0 {
+			if _, targeted := targets[knowledge.ID]; !targeted {
+				continue
+			}
+		}
+		var itemErr error
+		switch payload.Operation {
+		case types.KBMaintenanceQuestions:
+			oldSourceIDs, sourceErr := s.generatedQuestionSourceIDs(ctx, knowledge.ID)
+			if sourceErr != nil {
+				itemErr = sourceErr
+				break
+			}
+			count := 3
+			if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.QuestionCount > 0 {
+				count = kb.QuestionGenerationConfig.QuestionCount
+			}
+			childPayload, marshalErr := json.Marshal(types.QuestionGenerationPayload{TenantID: payload.TenantID, KnowledgeBaseID: kb.ID, KnowledgeID: knowledge.ID, VersionID: knowledge.CurrentVersionID, QuestionCount: count})
+			if marshalErr != nil {
+				itemErr = marshalErr
+			} else {
+				itemErr = s.ProcessQuestionGeneration(ctx, asynq.NewTask(types.TypeQuestionGeneration, childPayload))
+				if itemErr == nil {
+					itemErr = s.deleteObsoleteGeneratedQuestionIndexes(ctx, tenant, kb, knowledge.ID, oldSourceIDs)
+				}
+			}
+		case types.KBMaintenanceKeywords, types.KBMaintenanceVector:
+			itemErr = s.rebuildKnowledgeRetriever(ctx, tenant, kb, knowledge, payload.Operation)
+		case types.KBMaintenanceStructured:
+			if isStructuredFile(knowledge.FileName) {
+				if s.config.StructuredQuery == nil || !s.config.StructuredQuery.Enabled {
+					itemErr = fmt.Errorf("structured query is disabled")
+				} else {
+					_, itemErr = submitStructuredFileRequestWithKey(ctx, s.config.StructuredQuery, knowledge, s.resolveFileServiceForPath(ctx, kb, knowledge.FilePath), s.repo, knowledge.ID+"-"+knowledge.FileHash+"-"+payload.RunID)
+				}
+			}
+		default:
+			return fail(fmt.Errorf("unsupported maintenance operation: %s", payload.Operation))
+		}
+		processed++
+		if itemErr != nil {
+			failed++
+			logger.Errorf(ctx, "maintenance %s failed for knowledge %s: %v", payload.Operation, knowledge.ID, itemErr)
+		}
+		_ = store.Update(ctx, payload.TenantID, payload.KnowledgeBaseID, payload.RunID, processed, failed, "", false)
+	}
+	current, _ := store.Get(ctx, payload.TenantID, payload.KnowledgeBaseID)
+	if current != nil && current.Operation == payload.Operation {
+		return store.Update(ctx, payload.TenantID, payload.KnowledgeBaseID, payload.RunID, processed, failed, "", true)
+	}
+	return nil
+}
+
+func (s *knowledgeService) generatedQuestionSourceIDs(ctx context.Context, knowledgeID string) ([]string, error) {
+	chunks, err := s.chunkService.ListChunksByKnowledgeID(ctx, knowledgeID)
+	if err != nil {
+		return nil, err
+	}
+	sourceIDs := make([]string, 0)
+	for _, chunk := range chunks {
+		if chunk == nil {
+			continue
+		}
+		meta, metaErr := chunk.DocumentMetadata()
+		if metaErr != nil {
+			return nil, metaErr
+		}
+		if meta == nil {
+			continue
+		}
+		for _, question := range meta.GeneratedQuestions {
+			sourceIDs = append(sourceIDs, fmt.Sprintf("%s-%s", chunk.ID, question.ID))
+		}
+	}
+	return sourceIDs, nil
+}
+
+func (s *knowledgeService) deleteObsoleteGeneratedQuestionIndexes(ctx context.Context, tenant *types.Tenant, kb *types.KnowledgeBase, knowledgeID string, oldSourceIDs []string) error {
+	newSourceIDs, err := s.generatedQuestionSourceIDs(ctx, knowledgeID)
+	if err != nil {
+		return err
+	}
+	current := make(map[string]struct{}, len(newSourceIDs))
+	for _, id := range newSourceIDs {
+		current[id] = struct{}{}
+	}
+	obsolete := make([]string, 0)
+	for _, id := range oldSourceIDs {
+		if _, exists := current[id]; !exists {
+			obsolete = append(obsolete, id)
+		}
+	}
+	if len(obsolete) == 0 {
+		return nil
+	}
+	engine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenant.GetEffectiveEngines())
+	if err != nil {
+		return err
+	}
+	embedder, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	if err != nil {
+		return err
+	}
+	return engine.DeleteBySourceIDList(ctx, obsolete, embedder.GetDimensions(), kb.Type)
+}
+
+func (s *knowledgeService) rebuildKnowledgeRetriever(ctx context.Context, tenant *types.Tenant, kb *types.KnowledgeBase, knowledge *types.Knowledge, operation types.KBMaintenanceOperation) error {
+	retrieverType := types.KeywordsRetrieverType
+	if operation == types.KBMaintenanceVector {
+		retrieverType = types.VectorRetrieverType
+	}
+	engineParams := make([]types.RetrieverEngineParams, 0, 1)
+	for _, param := range tenant.GetEffectiveEngines() {
+		if param.RetrieverType == retrieverType {
+			engineParams = append(engineParams, param)
+		}
+	}
+	if len(engineParams) == 0 {
+		return fmt.Errorf("%s retriever is not configured", retrieverType)
+	}
+	engine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, engineParams)
+	if err != nil {
+		return err
+	}
+	var embedder embedding.Embedder
+	if retrieverType == types.VectorRetrieverType {
+		embedder, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+		if err != nil {
+			return err
+		}
+	}
+	chunks, err := s.chunkService.ListChunksByKnowledgeID(ctx, knowledge.ID)
+	if err != nil {
+		return err
+	}
+	indexInfo := make([]*types.IndexInfo, 0, len(chunks))
+	titlePrefix := ""
+	if title := strings.TrimSpace(knowledge.Title); title != "" {
+		titlePrefix = title + "\n"
+	}
+	for _, chunk := range chunks {
+		if chunk == nil || chunk.ChunkType == types.ChunkTypeParentText || chunk.ChunkType == types.ChunkTypeEntity || chunk.ChunkType == types.ChunkTypeRelationship {
+			continue
+		}
+		indexInfo = append(indexInfo, documentChunkIndexInfo(chunk, titlePrefix+chunk.Content, chunk.ID))
+		meta, metaErr := chunk.DocumentMetadata()
+		if metaErr != nil {
+			return metaErr
+		}
+		if meta != nil {
+			for _, question := range meta.GeneratedQuestions {
+				entry := documentChunkIndexInfo(chunk, question.Question, fmt.Sprintf("%s-%s", chunk.ID, question.ID))
+				entry.IsGeneratedQuestion = true
+				indexInfo = append(indexInfo, entry)
+			}
+		}
+	}
+	return engine.BatchIndex(ctx, embedder, indexInfo)
+}
+
 // generateQuestionsWithContext generates questions for a chunk with surrounding context
 func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	chatModel chat.Chat, content, prevContent, nextContent, docName string, questionCount int,

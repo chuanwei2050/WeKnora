@@ -26,6 +26,7 @@ type GraphExploreHandler struct {
 	tripleReviewRepo interfaces.GraphTripleReviewRepository
 	rebuildProgress  *service.GraphRebuildProgressStore
 	asynqClient      interfaces.TaskEnqueuer
+	maintenance      *service.KBMaintenanceStore
 }
 
 func NewGraphExploreHandler(
@@ -36,6 +37,7 @@ func NewGraphExploreHandler(
 	tripleReviewRepo interfaces.GraphTripleReviewRepository,
 	rebuildProgress *service.GraphRebuildProgressStore,
 	asynqClient interfaces.TaskEnqueuer,
+	maintenance *service.KBMaintenanceStore,
 ) *GraphExploreHandler {
 	return &GraphExploreHandler{
 		kbService:        kbService,
@@ -45,6 +47,7 @@ func NewGraphExploreHandler(
 		tripleReviewRepo: tripleReviewRepo,
 		rebuildProgress:  rebuildProgress,
 		asynqClient:      asynqClient,
+		maintenance:      maintenance,
 	}
 }
 
@@ -137,6 +140,16 @@ func (h *GraphExploreHandler) RebuildStatus(c *gin.Context) {
 	if progress == nil {
 		progress = &types.GraphRebuildProgress{Status: types.GraphRebuildIdle}
 	}
+	if maintenance, _ := h.maintenance.Get(c.Request.Context(), tenantID, kb.ID); maintenance != nil && maintenance.Status == "running" && maintenance.Operation == types.KBMaintenanceGraph {
+		_ = h.maintenance.Update(c.Request.Context(), tenantID, kb.ID, maintenance.RunID, progress.Processed, 0, progress.Message, false)
+		if progress.Status == types.GraphRebuildCompleted || progress.Status == types.GraphRebuildAwaitingReview || progress.Status == types.GraphRebuildFailed {
+			failed := 0
+			if progress.Status == types.GraphRebuildFailed {
+				failed = 1
+			}
+			_ = h.maintenance.Update(c.Request.Context(), tenantID, kb.ID, maintenance.RunID, progress.Processed, failed, progress.Message, true)
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": progress})
 }
 
@@ -180,8 +193,18 @@ func (h *GraphExploreHandler) Rebuild(c *gin.Context) {
 		extractTotal += service.CountEligibleGraphExtractChunks(kb, chunks)
 		completed = append(completed, item)
 	}
+	maintenance, acquired, err := h.maintenance.TryStart(c.Request.Context(), tenantID, kbID, types.KBMaintenanceGraph, extractTotal, nil)
+	if err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if !acquired {
+		c.JSON(http.StatusConflict, gin.H{"success": false, "error": gin.H{"message": "another maintenance task is running"}, "data": maintenance})
+		return
+	}
 
 	if err := h.graphRepo.DeleteCanonicalKnowledgeBase(c.Request.Context(), tenantID, kbID); err != nil {
+		_ = h.maintenance.Fail(c.Request.Context(), tenantID, kbID, maintenance.RunID, err.Error())
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
@@ -195,11 +218,13 @@ func (h *GraphExploreHandler) Rebuild(c *gin.Context) {
 			TenantID: tenantID, KnowledgeID: item.ID, KnowledgeBaseID: kbID,
 		})
 		if err != nil {
+			_ = h.maintenance.Fail(c.Request.Context(), tenantID, kbID, maintenance.RunID, err.Error())
 			c.Error(errors.NewInternalServerError(err.Error()))
 			return
 		}
 		task := asynq.NewTask(types.TypeKnowledgePostProcess, payload, asynq.Queue("default"), asynq.MaxRetry(3))
 		if _, err = h.asynqClient.Enqueue(task); err != nil {
+			_ = h.maintenance.Fail(c.Request.Context(), tenantID, kbID, maintenance.RunID, err.Error())
 			c.Error(errors.NewInternalServerError(err.Error()))
 			return
 		}
@@ -208,6 +233,9 @@ func (h *GraphExploreHandler) Rebuild(c *gin.Context) {
 	requireReview := kb.ExtractConfig != nil && kb.ExtractConfig.RequireTripleReview
 	if err := h.rebuildProgress.Start(c.Request.Context(), tenantID, kbID, extractTotal, enqueued, requireReview); err != nil {
 		logger.Warnf(c.Request.Context(), "rebuild-graph: failed to persist progress: %v", err)
+	}
+	if extractTotal == 0 {
+		_ = h.maintenance.Update(c.Request.Context(), tenantID, kbID, maintenance.RunID, 0, 0, "", true)
 	}
 	c.JSON(http.StatusAccepted, gin.H{
 		"success": true,

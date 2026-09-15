@@ -247,28 +247,6 @@
                     :config="formData.chunkingConfig"
                     @update:config="handleChunkingConfigUpdate"
                   />
-                  <div v-if="mode === 'edit' && kbId" class="reprocess-panel">
-                    <div class="reprocess-copy">
-                      <h3>{{ $t('knowledgeEditor.reprocess.title') }}</h3>
-                      <p>{{ $t('knowledgeEditor.reprocess.description') }}</p>
-                      <div v-if="reprocessProgress && reprocessProgress.total > 0" class="reprocess-progress">
-                        <t-progress :percentage="reprocessProgress.percent" size="small" />
-                        <p>{{ reprocessProgressText }}</p>
-                        <p v-if="reprocessProgress.failed > 0" class="reprocess-failure">
-                          {{ $t('knowledgeEditor.reprocess.failedCount', { count: reprocessProgress.failed }) }}
-                        </p>
-                      </div>
-                    </div>
-                    <t-button
-                      theme="warning"
-                      variant="outline"
-                      :loading="reprocessing"
-                      :disabled="!hasFiles || reprocessProgress?.status === 'running'"
-                      @click="confirmReprocess"
-                    >
-                      {{ $t('knowledgeEditor.reprocess.action') }}
-                    </t-button>
-                  </div>
                 </div>
 
                 <!-- 多模态配置 -->
@@ -331,6 +309,17 @@
                     :graph-extract="formData.nodeExtractConfig"
                     :knowledge-base-id="kbId"
                     @update:graphExtract="handleNodeExtractUpdate"
+                  />
+                </div>
+
+                <div v-if="!isFAQ && mode === 'edit' && kbId" v-show="currentSection === 'maintenance'" class="section">
+                  <KBMaintenanceSettings
+                    :knowledge-base-id="kbId"
+                    :has-files="hasFiles"
+                    :graph-enabled="!!formData?.indexingStrategy?.graphEnabled && !!formData?.nodeExtractConfig?.enabled"
+                    :vector-enabled="!!formData?.indexingStrategy?.vectorEnabled"
+                    :keyword-enabled="!!formData?.indexingStrategy?.keywordEnabled"
+                    :question-generation-enabled="!!formData?.questionGenerationConfig?.enabled"
                   />
                 </div>
 
@@ -412,9 +401,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
-import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKnowledgeBase, rebuildKBIndex, getKBRebuildStatus, type KnowledgeBaseRebuildStatus } from '@/api/knowledge-base'
+import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKnowledgeBase, rebuildKBIndex } from '@/api/knowledge-base'
 import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
 import { useUIStore } from '@/stores/ui'
 import KBChunkingSettings from './settings/KBChunkingSettings.vue'
@@ -422,6 +411,7 @@ import KBAdvancedSettings from './settings/KBAdvancedSettings.vue'
 import GraphSettings from './settings/GraphSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
 import FeishuPublishSettings from './settings/FeishuPublishSettings.vue'
+import KBMaintenanceSettings from './settings/KBMaintenanceSettings.vue'
 import { createEmptyGraphExtractDefaults, restoreKnownPresetSchema } from '@/constants/software-testing-graph-preset'
 import { useI18n } from 'vue-i18n'
 import { listTenantUsers, type AdminUser } from '@/api/admin'
@@ -447,43 +437,6 @@ const emit = defineEmits<{
 const currentSection = ref<string>('basic')
 const saving = ref(false)
 const loading = ref(false)
-const reprocessing = ref(false)
-const reprocessProgress = ref<KnowledgeBaseRebuildStatus | null>(null)
-let reprocessPollTimer: ReturnType<typeof setInterval> | null = null
-const reprocessProgressText = computed(() => {
-  const progress = reprocessProgress.value
-  if (!progress) return ''
-  return t('knowledgeEditor.reprocess.progress', {
-    completed: progress.completed,
-    total: progress.total,
-    pending: progress.pending,
-    processing: progress.processing,
-  })
-})
-
-const stopReprocessPolling = () => {
-  if (reprocessPollTimer) {
-    clearInterval(reprocessPollTimer)
-    reprocessPollTimer = null
-  }
-}
-
-const loadReprocessStatus = async () => {
-  if (!props.kbId) return
-  try {
-    const result = await getKBRebuildStatus(props.kbId)
-    reprocessProgress.value = result.data
-    if (reprocessProgress.value?.status !== 'running') stopReprocessPolling()
-  } catch {
-    stopReprocessPolling()
-  }
-}
-
-const startReprocessPolling = () => {
-  stopReprocessPolling()
-  void loadReprocessStatus()
-  reprocessPollTimer = setInterval(() => void loadReprocessStatus(), 2000)
-}
 const hasFiles = ref(false)
 const initialIndexingStrategy = ref<any>(null)
 const initialGraphFingerprint = ref('')
@@ -531,6 +484,7 @@ const navItems = computed(() => {
       { key: 'advanced', icon: 'setting', label: t('knowledgeEditor.sidebar.advanced') }
     )
     if (props.mode === 'edit' && props.kbId) {
+      items.push({ key: 'maintenance', icon: 'refresh', label: t('knowledgeEditor.sidebar.maintenance') })
       items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource'), badge: dsCount.value || undefined })
       items.push({ key: 'feishu-sync', icon: 'cloud-upload', label: t('knowledgeEditor.sidebar.feishuSync') })
     }
@@ -542,7 +496,7 @@ const advancedSettingsRef = ref<InstanceType<typeof KBAdvancedSettings>>()
 const feishuPublishRef = ref<{ hasUnsavedChanges?: () => boolean } | null>(null)
 
 const hideGlobalSave = computed(() =>
-  currentSection.value === 'feishu-sync' || currentSection.value === 'datasource'
+  currentSection.value === 'feishu-sync' || currentSection.value === 'datasource' || currentSection.value === 'maintenance'
 )
 
 const confirmDiscardFeishuChanges = (): Promise<boolean> => {
@@ -1106,33 +1060,6 @@ const buildSubmitData = () => {
 }
 
 // 提交表单
-const confirmReprocess = () => {
-  if (!props.kbId || reprocessing.value || !hasFiles.value) return
-  const knowledgeBaseId = props.kbId
-  const dialog = DialogPlugin.confirm({
-    header: t('knowledgeEditor.reprocess.confirmTitle'),
-    body: t('knowledgeEditor.reprocess.confirmBody'),
-    confirmBtn: t('knowledgeEditor.reprocess.confirmAction'),
-    cancelBtn: t('common.cancel'),
-    onConfirm: async () => {
-      dialog.destroy()
-      reprocessing.value = true
-      try {
-        const result = await rebuildKBIndex(knowledgeBaseId)
-        const count = result?.data?.document_count ?? 0
-        MessagePlugin.success(t('knowledgeEditor.reprocess.submitted', { count }))
-        startReprocessPolling()
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : t('knowledgeEditor.reprocess.failed')
-        MessagePlugin.error(message)
-      } finally {
-        reprocessing.value = false
-      }
-    },
-    onCancel: () => dialog.destroy(),
-  })
-}
-
 const handleSubmit = async () => {
   if (!validateForm()) {
     return
@@ -1302,7 +1229,6 @@ const doSubmit = async () => {
 
 // 重置所有状态
 const resetState = () => {
-  stopReprocessPolling()
   currentSection.value = 'basic'
   formData.value = null
   hasFiles.value = false
@@ -1311,8 +1237,6 @@ const resetState = () => {
   graphConfigDraft.value = null
   saving.value = false
   loading.value = false
-  reprocessing.value = false
-  reprocessProgress.value = null
   chunkingDirty.value = false
 }
 
@@ -1342,8 +1266,6 @@ watch(() => props.visible, async (newVal) => {
     // 根据模式加载数据
     if (props.mode === 'edit' && props.kbId) {
       await loadKBData()
-      await loadReprocessStatus()
-      if (reprocessProgress.value?.status === 'running') startReprocessPolling()
     } else {
       // 创建模式：初始化空表单
       formData.value = initFormData(props.initialType || 'document')
@@ -1358,7 +1280,6 @@ watch(() => props.visible, async (newVal) => {
   }
 })
 
-onBeforeUnmount(stopReprocessPolling)
 
 </script>
 
@@ -1792,45 +1713,6 @@ onBeforeUnmount(stopReprocessPolling)
   justify-content: flex-end;
   gap: 12px;
   flex-shrink: 0;
-}
-
-.reprocess-panel {
-  margin-top: 24px;
-  padding: 18px 20px;
-  border: 1px solid var(--td-warning-color-3);
-  border-radius: 8px;
-  background: var(--td-warning-color-1);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-
-  .reprocess-copy {
-    min-width: 0;
-    flex: 1;
-  }
-
-  .reprocess-progress {
-    margin-top: 12px;
-    max-width: 520px;
-  }
-
-  .reprocess-failure {
-    color: var(--td-error-color);
-  }
-
-  h3 {
-    margin: 0 0 6px;
-    color: var(--td-text-color-primary);
-    font-size: 15px;
-  }
-
-  p {
-    margin: 0;
-    color: var(--td-text-color-secondary);
-    font-size: 13px;
-    line-height: 1.6;
-  }
 }
 
 // 过渡动画
