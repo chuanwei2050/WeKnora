@@ -82,14 +82,16 @@ function stopPolling() { if (timer) { clearInterval(timer); timer = null } }
 async function refresh() {
   try {
     if (progress.value.status === 'running' && progress.value.operation === 'graph') await getKBGraphRebuildStatus(props.knowledgeBaseId)
-    const [maintenanceResponse, rebuildResponse] = await Promise.all([
-      getKBMaintenanceStatus(props.knowledgeBaseId),
-      getKBRebuildStatus(props.knowledgeBaseId),
-    ])
-    progress.value = maintenanceResponse.data
-    documentStatus.value = rebuildResponse.data
+    progress.value = (await getKBMaintenanceStatus(props.knowledgeBaseId)).data
+    try {
+      documentStatus.value = (await getKBRebuildStatus(props.knowledgeBaseId)).data
+    } catch {
+      // Document counts are supplementary; a transient failure must not stop maintenance polling.
+    }
     if (progress.value.status !== 'running') stopPolling()
-  } catch { stopPolling() }
+  } catch {
+    // Keep the active timer alive so transient maintenance-status failures can recover.
+  }
 }
 function startPolling() { stopPolling(); timer = setInterval(() => void refresh(), 2000) }
 

@@ -552,10 +552,10 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	})
 }
 
-// RebuildIndex reparses every processable document using the knowledge base's
-// current settings. Including failed or interrupted documents makes the
-// operation a recovery path after dependency outages. ReparseKnowledge owns
-// cleanup and rebuilding of chunks and all enabled derived data and indexes.
+// RebuildIndex reparses every completed or failed document using the knowledge
+// base's current settings. Pending and processing documents are excluded to
+// avoid racing their existing queue jobs. ReparseKnowledge owns cleanup and
+// rebuilding of chunks and all enabled derived data and indexes.
 func (h *KnowledgeBaseHandler) RebuildIndex(c *gin.Context) {
 	ctx := c.Request.Context()
 	_, id, tenantID, permission, err := h.validateAndGetKnowledgeBase(c)
@@ -825,15 +825,15 @@ func reparseKnowledgeBaseItems(
 }
 
 // isKnowledgeBaseReparseCandidate keeps the explicit "rebuild all" operation
-// recoverable. A previous infrastructure failure can leave documents failed,
-// pending, or processing; excluding those documents makes every later rebuild
-// permanently operate on only the small completed subset.
+// recoverable after an infrastructure failure. Pending and processing items
+// may still have live queue jobs, so rebuilding them would risk concurrent
+// cleanup and index writes.
 func isKnowledgeBaseReparseCandidate(item *types.Knowledge) bool {
 	if item == nil {
 		return false
 	}
 	switch item.ParseStatus {
-	case types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusCompleted, types.ParseStatusFailed:
+	case types.ParseStatusCompleted, types.ParseStatusFailed:
 		return true
 	default:
 		return false

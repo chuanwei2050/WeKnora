@@ -21,7 +21,7 @@ func (e *rebuildRecorder) reparse(_ context.Context, id string) (*types.Knowledg
 	return &types.Knowledge{ID: id}, nil
 }
 
-func TestReparseKnowledgeBaseItemsIncludesRecoverableStatusesAndSupportsEmpty(t *testing.T) {
+func TestReparseKnowledgeBaseItemsIncludesFailedAndSupportsEmpty(t *testing.T) {
 	e := &rebuildRecorder{}
 	count, err := reparseKnowledgeBaseItems(context.Background(), nil, e.reparse)
 	if err != nil || count != 0 || e.calls != 0 {
@@ -35,7 +35,7 @@ func TestReparseKnowledgeBaseItemsIncludesRecoverableStatusesAndSupportsEmpty(t 
 		{ID: "draft", ParseStatus: types.ParseStatusDraft},
 	}
 	count, err = reparseKnowledgeBaseItems(context.Background(), items, e.reparse)
-	if err != nil || count != 4 || e.calls != 4 {
+	if err != nil || count != 2 || e.calls != 2 {
 		t.Fatalf("filtered rebuild = %d calls=%d err=%v", count, e.calls, err)
 	}
 }
