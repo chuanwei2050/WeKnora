@@ -1969,6 +1969,7 @@ export default {
       stop: 'Stop rebuild',
       stopSubmitted: 'Stopped taking new work; the current item will finish safely',
       stopFailed: 'Failed to stop rebuild',
+      canceling: 'Stopping rebuild: {processed}/{total} finished. Other maintenance stays locked until in-flight documents complete.',
       canceled: 'Rebuild stopped. Completed results were kept.',
       completed: '{name} completed',
       completedWithFailures: 'Task completed with {failed} failed document(s). Check service logs for details.',

@@ -19,11 +19,11 @@ if not current then
   return {1, ARGV[1]}
 end
 local decoded = cjson.decode(current)
-if decoded.status ~= "running" then
-  redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[2])
-  return {1, ARGV[1]}
+if decoded.status == "running" or decoded.status == "canceling" then
+  return {0, current}
 end
-return {0, current}
+redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[2])
+return {1, ARGV[1]}
 `)
 
 type KBMaintenanceStore struct{ redis *redis.Client }
@@ -34,6 +34,55 @@ func NewKBMaintenanceStore(client *redis.Client) *KBMaintenanceStore {
 
 func kbMaintenanceKey(tenantID uint64, kbID string) string {
 	return fmt.Sprintf("kb:maintenance:%d:%s", tenantID, kbID)
+}
+
+func kbMaintenanceBusy(status string) bool {
+	return status == "running" || status == "canceling"
+}
+
+// applyKBMaintenanceCancel marks a running job as canceled.
+// Reparse stays "canceling" (lock held) until in-flight documents finish;
+// other operations release the lock immediately as "canceled".
+func applyKBMaintenanceCancel(p *types.KBMaintenanceProgress, now time.Time) {
+	p.Message = "canceled_by_user"
+	p.HeartbeatAt = now
+	if p.Operation == types.KBMaintenanceReparse {
+		p.Status = "canceling"
+		p.FinishedAt = nil
+		return
+	}
+	p.Status = "canceled"
+	p.FinishedAt = &now
+}
+
+// applyKBMaintenanceUpdate mutates progress in place.
+// Returns false when the record must stay untouched (terminal canceled or run mismatch handled by caller).
+func applyKBMaintenanceUpdate(p *types.KBMaintenanceProgress, processed, failed int, message string, finished bool, now time.Time) bool {
+	if p.Status == "canceled" {
+		return false
+	}
+	p.Processed, p.Failed, p.Message, p.HeartbeatAt = processed, failed, message, now
+	if p.Total > 0 {
+		p.Percent = processed * 100 / p.Total
+	}
+	if p.Percent > 100 {
+		p.Percent = 100
+	}
+	if !finished {
+		return true
+	}
+	p.FinishedAt = &now
+	p.Percent = 100
+	if p.Status == "canceling" {
+		p.Status = "canceled"
+		return true
+	}
+	if failed > 0 {
+		p.Status = "completed_with_failures"
+	} else {
+		p.Status = "completed"
+	}
+	return true
 }
 
 func (s *KBMaintenanceStore) TryStart(ctx context.Context, tenantID uint64, kbID string, operation types.KBMaintenanceOperation, total int, targetKnowledgeIDs []string) (*types.KBMaintenanceProgress, bool, error) {
@@ -145,11 +194,7 @@ func (s *KBMaintenanceStore) Cancel(ctx context.Context, tenantID uint64, kbID, 
 			out = &p
 			return nil
 		}
-		now := time.Now().UTC()
-		p.Status = "canceled"
-		p.Message = "canceled_by_user"
-		p.FinishedAt = &now
-		p.HeartbeatAt = now
+		applyKBMaintenanceCancel(&p, time.Now().UTC())
 		b, err := json.Marshal(&p)
 		if err != nil {
 			return err
@@ -182,22 +227,8 @@ func (s *KBMaintenanceStore) Update(ctx context.Context, tenantID uint64, kbID, 
 		if p.RunID != runID {
 			return nil
 		}
-		p.Processed, p.Failed, p.Message, p.HeartbeatAt = processed, failed, message, time.Now().UTC()
-		if p.Total > 0 {
-			p.Percent = processed * 100 / p.Total
-		}
-		if p.Percent > 100 {
-			p.Percent = 100
-		}
-		if finished {
-			now := time.Now().UTC()
-			p.FinishedAt = &now
-			p.Percent = 100
-			if failed > 0 {
-				p.Status = "completed_with_failures"
-			} else {
-				p.Status = "completed"
-			}
+		if !applyKBMaintenanceUpdate(&p, processed, failed, message, finished, time.Now().UTC()) {
+			return nil
 		}
 		b, err := json.Marshal(&p)
 		if err != nil {

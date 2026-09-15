@@ -23,6 +23,15 @@
         </div>
       </template>
     </t-alert>
+    <t-alert v-else-if="progress.status === 'canceling'" theme="warning" class="active-status">
+      <template #message>
+        <div class="active-status-main">
+          <strong>{{ operationLabel(progress.operation) }}</strong>
+          <t-progress :percentage="progress.percent" size="small" />
+          <span class="progress-copy">{{ t('knowledgeEditor.maintenance.canceling', { processed: progress.processed, total: progress.total }) }}</span>
+        </div>
+      </template>
+    </t-alert>
     <t-alert v-else-if="progress.status === 'completed_with_failures'" theme="warning" class="active-status"
       :message="t('knowledgeEditor.maintenance.completedWithFailures', { failed: progress.failed })" />
     <t-alert v-else-if="progress.status === 'completed'" theme="success" class="active-status"
@@ -74,7 +83,7 @@ const submitting = ref<KBMaintenanceOperation | null>(null)
 const stopping = ref(false)
 const structuredQueryEnabled = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
-const isRunning = computed(() => progress.value.status === 'running')
+const isRunning = computed(() => progress.value.status === 'running' || progress.value.status === 'canceling')
 
 type Action = { operation: KBMaintenanceOperation; label: string; description: string; disabledReason?: string }
 const actions = computed<Action[]>(() => [
@@ -99,7 +108,7 @@ async function refresh() {
     } catch {
       // Document counts are supplementary; a transient failure must not stop maintenance polling.
     }
-    if (progress.value.status !== 'running') stopPolling()
+    if (progress.value.status !== 'running' && progress.value.status !== 'canceling') stopPolling()
   } catch {
     // Keep the active timer alive so transient maintenance-status failures can recover.
   }
@@ -111,7 +120,8 @@ async function stopCurrent() {
   try {
     progress.value = (await cancelKBMaintenance(props.knowledgeBaseId)).data
     MessagePlugin.success(t('knowledgeEditor.maintenance.stopSubmitted'))
-    stopPolling()
+    if (progress.value.status === 'canceling') startPolling()
+    else stopPolling()
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : t('knowledgeEditor.maintenance.stopFailed')
     MessagePlugin.error(message)

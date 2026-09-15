@@ -2508,6 +2508,7 @@ export default {
       stop: "停止重建",
       stopSubmitted: "已停止领取后续任务，当前处理项将安全收尾",
       stopFailed: "停止重建失败",
+      canceling: "正在停止重建：已完成 {processed}/{total}。在途文档收尾前，其他维护操作仍会锁定。",
       canceled: "重建已停止，已完成的结果会保留。",
       completed: "{name}已完成",
       completedWithFailures: "任务完成，其中 {failed} 篇失败，请查看服务日志。",

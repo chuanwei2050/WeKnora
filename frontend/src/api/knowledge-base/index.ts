@@ -113,7 +113,7 @@ export type KBMaintenanceOperation = 'reparse' | 'graph' | 'keywords' | 'vector'
 export interface KBMaintenanceProgress {
   run_id?: string;
   operation?: KBMaintenanceOperation;
-  status: 'idle' | 'running' | 'completed' | 'completed_with_failures' | 'failed' | 'canceled';
+  status: 'idle' | 'running' | 'canceling' | 'completed' | 'completed_with_failures' | 'failed' | 'canceled';
   total: number;
   processed: number;
   failed: number;

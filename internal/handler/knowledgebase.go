@@ -680,7 +680,7 @@ func (h *KnowledgeBaseHandler) GetMaintenanceStatus(c *gin.Context) {
 	if p == nil {
 		p = &types.KBMaintenanceProgress{Status: "idle"}
 	}
-	if p.Status == "running" && p.Operation == types.KBMaintenanceReparse {
+	if (p.Status == "running" || p.Status == "canceling") && p.Operation == types.KBMaintenanceReparse {
 		items, listErr := h.knowledgeService.ListKnowledgeByKnowledgeBaseID(c.Request.Context(), id)
 		if listErr == nil {
 			targets := make(map[string]struct{}, len(p.TargetKnowledgeIDs))
@@ -712,7 +712,7 @@ func (h *KnowledgeBaseHandler) GetMaintenanceStatus(c *gin.Context) {
 				}
 			}
 			finished := active == 0 && done+failed >= p.Total
-			if finished && p.Total > 0 {
+			if finished && p.Total > 0 && p.Status == "running" {
 				next, advanced, advanceErr := h.maintenance.AdvancePhase(c.Request.Context(), tenantID, id, p.RunID, types.KBMaintenanceReparse, types.KBMaintenanceStructured, len(p.TargetKnowledgeIDs), p.TargetKnowledgeIDs)
 				if advanceErr == nil && advanced {
 					payload, marshalErr := json.Marshal(types.KBMaintenancePayload{TenantID: tenantID, KnowledgeBaseID: id, RunID: next.RunID, Operation: next.Operation})

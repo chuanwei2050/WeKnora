@@ -4222,7 +4222,7 @@ func (s *knowledgeService) ProcessKBMaintenance(ctx context.Context, task *asynq
 		_ = store.Update(ctx, payload.TenantID, payload.KnowledgeBaseID, payload.RunID, processed, failed, "", false)
 	}
 	current, _ := store.Get(ctx, payload.TenantID, payload.KnowledgeBaseID)
-	if current != nil && current.Operation == payload.Operation {
+	if current != nil && current.RunID == payload.RunID && current.Status == "running" && current.Operation == payload.Operation {
 		return store.Update(ctx, payload.TenantID, payload.KnowledgeBaseID, payload.RunID, processed, failed, "", true)
 	}
 	return nil
