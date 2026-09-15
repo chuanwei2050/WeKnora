@@ -2493,7 +2493,7 @@ export default {
       description: "按当前配置重新解析和分块，并重新生成摘要、块问题、ES 与向量索引；已启用的知识图谱也会同步重建。",
       action: "重新分块并重建索引",
       confirmTitle: "重新处理全部文档",
-      confirmBody: "该操作会清理现有分块及其派生数据，重新解析全部已完成文档，并重建摘要、块问题、ES、向量索引及已启用的知识图谱。处理期间检索结果可能暂时不完整，是否继续？",
+      confirmBody: "该操作会清理现有分块及其派生数据，重新解析全部可处理文档（包括失败或中断的文档），并重建摘要、块问题、ES、向量索引及已启用的知识图谱。处理期间检索结果可能暂时不完整，是否继续？",
       confirmAction: "确认重新处理",
       submitted: "已提交 {count} 篇文档的重新处理任务",
       failed: "提交重新处理任务失败",
@@ -2503,6 +2503,7 @@ export default {
     maintenance: {
       title: "重建与维护",
       description: "集中管理知识库派生数据。任一任务运行期间，其他维护操作都会锁定以避免数据冲突。",
+      documentStatus: "当前共 {total} 篇可重建文档：{completed} 篇已完成，{failed} 篇失败，{pending} 篇等待，{processing} 篇处理中。派生数据维护仅处理已完成文档。",
       running: "已处理 {processed}/{total}",
       completed: "{name}已完成",
       completedWithFailures: "任务完成，其中 {failed} 篇失败，请查看服务日志。",

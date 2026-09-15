@@ -21,15 +21,21 @@ func (e *rebuildRecorder) reparse(_ context.Context, id string) (*types.Knowledg
 	return &types.Knowledge{ID: id}, nil
 }
 
-func TestReparseKnowledgeBaseItemsFiltersCompletedAndSupportsEmpty(t *testing.T) {
+func TestReparseKnowledgeBaseItemsIncludesRecoverableStatusesAndSupportsEmpty(t *testing.T) {
 	e := &rebuildRecorder{}
 	count, err := reparseKnowledgeBaseItems(context.Background(), nil, e.reparse)
 	if err != nil || count != 0 || e.calls != 0 {
 		t.Fatalf("empty rebuild = %d calls=%d err=%v", count, e.calls, err)
 	}
-	items := []*types.Knowledge{{ID: "ready", ParseStatus: types.ParseStatusCompleted}, {ID: "pending", ParseStatus: types.ParseStatusPending}}
+	items := []*types.Knowledge{
+		{ID: "ready", ParseStatus: types.ParseStatusCompleted},
+		{ID: "pending", ParseStatus: types.ParseStatusPending},
+		{ID: "processing", ParseStatus: types.ParseStatusProcessing},
+		{ID: "failed", ParseStatus: types.ParseStatusFailed},
+		{ID: "draft", ParseStatus: types.ParseStatusDraft},
+	}
 	count, err = reparseKnowledgeBaseItems(context.Background(), items, e.reparse)
-	if err != nil || count != 1 || e.calls != 1 {
+	if err != nil || count != 4 || e.calls != 4 {
 		t.Fatalf("filtered rebuild = %d calls=%d err=%v", count, e.calls, err)
 	}
 }

@@ -3,6 +3,9 @@
     <div class="section-header">
       <h2>{{ t('knowledgeEditor.maintenance.title') }}</h2>
       <p class="section-description">{{ t('knowledgeEditor.maintenance.description') }}</p>
+      <p v-if="documentStatus.total > 0" class="document-status">
+        {{ t('knowledgeEditor.maintenance.documentStatus', documentStatus) }}
+      </p>
     </div>
 
     <t-alert v-if="progress.status === 'running'" theme="info" class="active-status">
@@ -42,8 +45,8 @@ import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { getSystemInfo } from '@/api/system'
 import {
-  getKBGraphRebuildStatus, getKBMaintenanceStatus, rebuildKBGraph, rebuildKBIndex,
-  startKBMaintenance, type KBMaintenanceOperation, type KBMaintenanceProgress,
+  getKBGraphRebuildStatus, getKBMaintenanceStatus, getKBRebuildStatus, rebuildKBGraph, rebuildKBIndex,
+  startKBMaintenance, type KBMaintenanceOperation, type KBMaintenanceProgress, type KnowledgeBaseRebuildStatus,
 } from '@/api/knowledge-base'
 
 const props = defineProps<{
@@ -56,6 +59,7 @@ const props = defineProps<{
 }>()
 const { t } = useI18n()
 const progress = ref<KBMaintenanceProgress>({ status: 'idle', total: 0, processed: 0, failed: 0, percent: 0 })
+const documentStatus = ref<KnowledgeBaseRebuildStatus>({ status: 'idle', total: 0, pending: 0, processing: 0, completed: 0, failed: 0, percent: 0 })
 const submitting = ref<KBMaintenanceOperation | null>(null)
 const structuredQueryEnabled = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
@@ -78,7 +82,12 @@ function stopPolling() { if (timer) { clearInterval(timer); timer = null } }
 async function refresh() {
   try {
     if (progress.value.status === 'running' && progress.value.operation === 'graph') await getKBGraphRebuildStatus(props.knowledgeBaseId)
-    progress.value = (await getKBMaintenanceStatus(props.knowledgeBaseId)).data
+    const [maintenanceResponse, rebuildResponse] = await Promise.all([
+      getKBMaintenanceStatus(props.knowledgeBaseId),
+      getKBRebuildStatus(props.knowledgeBaseId),
+    ])
+    progress.value = maintenanceResponse.data
+    documentStatus.value = rebuildResponse.data
     if (progress.value.status !== 'running') stopPolling()
   } catch { stopPolling() }
 }
@@ -114,7 +123,7 @@ onBeforeUnmount(stopPolling)
 </script>
 
 <style scoped lang="less">
-.section-header { margin-bottom: 20px; h2 { margin: 0 0 8px; font-size: 20px; } .section-description { margin: 0; color: var(--td-text-color-secondary); } }
+.section-header { margin-bottom: 20px; h2 { margin: 0 0 8px; font-size: 20px; } .section-description { margin: 0; color: var(--td-text-color-secondary); } .document-status { margin: 8px 0 0; color: var(--td-text-color-placeholder); font-size: 13px; } }
 .active-status { margin-bottom: 16px; :deep(.t-progress) { margin: 8px 0 4px; max-width: 560px; } }
 .maintenance-list { border: 1px solid var(--td-component-stroke); border-radius: 8px; overflow: hidden; }
 .maintenance-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 18px 20px; border-bottom: 1px solid var(--td-component-stroke); &:last-child { border-bottom: 0; } }

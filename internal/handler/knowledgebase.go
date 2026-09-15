@@ -552,9 +552,10 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	})
 }
 
-// RebuildIndex reparses every completed document using the knowledge base's
-// current settings. ReparseKnowledge owns cleanup and rebuilding of chunks and
-// all enabled derived data and indexes.
+// RebuildIndex reparses every processable document using the knowledge base's
+// current settings. Including failed or interrupted documents makes the
+// operation a recovery path after dependency outages. ReparseKnowledge owns
+// cleanup and rebuilding of chunks and all enabled derived data and indexes.
 func (h *KnowledgeBaseHandler) RebuildIndex(c *gin.Context) {
 	ctx := c.Request.Context()
 	_, id, tenantID, permission, err := h.validateAndGetKnowledgeBase(c)
@@ -571,9 +572,9 @@ func (h *KnowledgeBaseHandler) RebuildIndex(c *gin.Context) {
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
-	targetIDs := make([]string, 0)
+	targetIDs := make([]string, 0, len(items))
 	for _, item := range items {
-		if item != nil && item.ParseStatus == types.ParseStatusCompleted {
+		if isKnowledgeBaseReparseCandidate(item) {
 			targetIDs = append(targetIDs, item.ID)
 		}
 	}
@@ -812,7 +813,7 @@ func reparseKnowledgeBaseItems(
 ) (int, error) {
 	enqueued := 0
 	for _, item := range items {
-		if item == nil || item.ParseStatus != types.ParseStatusCompleted {
+		if !isKnowledgeBaseReparseCandidate(item) {
 			continue
 		}
 		if _, err := reparse(ctx, item.ID); err != nil {
@@ -821,6 +822,22 @@ func reparseKnowledgeBaseItems(
 		enqueued++
 	}
 	return enqueued, nil
+}
+
+// isKnowledgeBaseReparseCandidate keeps the explicit "rebuild all" operation
+// recoverable. A previous infrastructure failure can leave documents failed,
+// pending, or processing; excluding those documents makes every later rebuild
+// permanently operate on only the small completed subset.
+func isKnowledgeBaseReparseCandidate(item *types.Knowledge) bool {
+	if item == nil {
+		return false
+	}
+	switch item.ParseStatus {
+	case types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusCompleted, types.ParseStatusFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 // DeleteKnowledgeBase godoc

@@ -1954,7 +1954,7 @@ export default {
       description: 'Parse and chunk again with the current settings, then regenerate summaries, chunk questions, Elasticsearch and vector indexes. The knowledge graph is also rebuilt when enabled.',
       action: 'Re-chunk and Rebuild Indexes',
       confirmTitle: 'Reprocess All Documents',
-      confirmBody: 'This clears current chunks and derived data, reparses every completed document, and rebuilds summaries, chunk questions, Elasticsearch, vector indexes, and the enabled knowledge graph. Search results may be incomplete while processing. Continue?',
+      confirmBody: 'This clears current chunks and derived data, reparses every processable document (including failed or interrupted documents), and rebuilds summaries, chunk questions, Elasticsearch, vector indexes, and the enabled knowledge graph. Search results may be incomplete while processing. Continue?',
       confirmAction: 'Reprocess',
       submitted: 'Reprocessing submitted for {count} documents',
       failed: 'Failed to submit reprocessing tasks',
@@ -1964,6 +1964,7 @@ export default {
     maintenance: {
       title: 'Rebuild & Maintenance',
       description: 'Manage derived knowledge-base data. While one task is running, all other maintenance operations are locked to prevent conflicts.',
+      documentStatus: '{total} rebuildable documents: {completed} completed, {failed} failed, {pending} pending, and {processing} processing. Derived-data maintenance only processes completed documents.',
       running: '{processed}/{total} processed',
       completed: '{name} completed',
       completedWithFailures: 'Task completed with {failed} failed document(s). Check service logs for details.',
