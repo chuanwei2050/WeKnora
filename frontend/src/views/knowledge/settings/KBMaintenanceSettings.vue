@@ -8,7 +8,20 @@
       </p>
     </div>
 
-    <t-alert v-if="progress.status === 'running'" theme="info" class="active-status">
+    <t-alert v-if="statusLoadError" theme="warning" class="active-status">
+      <template #message>
+        <div class="active-status-content">
+          <div class="active-status-main">
+            <strong>{{ t('knowledgeEditor.maintenance.statusLoadFailed') }}</strong>
+            <span class="progress-copy">{{ t('knowledgeEditor.maintenance.statusLoadFailedHint') }}</span>
+          </div>
+          <t-button theme="primary" variant="outline" :loading="refreshing" @click="refresh(true)">
+            {{ t('knowledgeEditor.maintenance.retryStatus') }}
+          </t-button>
+        </div>
+      </template>
+    </t-alert>
+    <t-alert v-else-if="progress.status === 'running'" theme="info" class="active-status">
       <template #message>
         <div class="active-status-content">
           <div class="active-status-main">
@@ -50,7 +63,7 @@
           :theme="action.operation === 'reparse' || action.operation === 'rechunk' || action.operation === 'graph' ? 'warning' : 'default'"
           variant="outline"
           :loading="submitting === action.operation"
-          :disabled="isRunning || !hasFiles || !!action.disabledReason"
+          :disabled="actionsLocked || !hasFiles || !!action.disabledReason"
           @click="confirmRun(action)"
         >{{ action.label }}</t-button>
       </div>
@@ -81,9 +94,14 @@ const progress = ref<KBMaintenanceProgress>({ status: 'idle', total: 0, processe
 const documentStatus = ref<KnowledgeBaseRebuildStatus>({ status: 'idle', total: 0, pending: 0, processing: 0, completed: 0, failed: 0, percent: 0 })
 const submitting = ref<KBMaintenanceOperation | null>(null)
 const stopping = ref(false)
+const refreshing = ref(false)
+const statusLoadError = ref(false)
 const structuredQueryEnabled = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
+let refreshSeq = 0
 const isRunning = computed(() => progress.value.status === 'running' || progress.value.status === 'canceling')
+// While status is unknown (API failure), keep actions locked so users do not start a second rebuild.
+const actionsLocked = computed(() => isRunning.value || statusLoadError.value || refreshing.value)
 
 type Action = { operation: KBMaintenanceOperation; label: string; description: string; disabledReason?: string }
 const actions = computed<Action[]>(() => [
@@ -100,33 +118,47 @@ function operationLabel(operation?: KBMaintenanceOperation) {
   return operation ? t(`knowledgeEditor.maintenance.actions.${operation}.label`) : ''
 }
 function stopPolling() { if (timer) { clearInterval(timer); timer = null } }
-async function refresh() {
+async function refresh(force = false) {
+  if (refreshing.value && !force) return
+  const seq = ++refreshSeq
+  refreshing.value = true
   try {
     if (progress.value.status === 'running' && progress.value.operation === 'graph') await getKBGraphRebuildStatus(props.knowledgeBaseId)
-    progress.value = (await getKBMaintenanceStatus(props.knowledgeBaseId)).data
+    const next = (await getKBMaintenanceStatus(props.knowledgeBaseId)).data
+    if (seq !== refreshSeq) return
+    progress.value = next
+    statusLoadError.value = false
     try {
       documentStatus.value = (await getKBRebuildStatus(props.knowledgeBaseId)).data
     } catch {
       // Document counts are supplementary; a transient failure must not stop maintenance polling.
     }
-    if (progress.value.status !== 'running' && progress.value.status !== 'canceling') stopPolling()
+    if (seq !== refreshSeq) return
+    if (progress.value.status === 'running' || progress.value.status === 'canceling') startPolling()
+    else stopPolling()
   } catch {
-    // Keep the active timer alive so transient maintenance-status failures can recover.
+    if (seq !== refreshSeq) return
+    statusLoadError.value = true
+    // Keep polling so a transient failure can recover when re-entering settings.
+    startPolling()
+  } finally {
+    if (seq === refreshSeq) refreshing.value = false
   }
 }
-function startPolling() { stopPolling(); timer = setInterval(() => void refresh(), 2000) }
+function startPolling() { if (timer) return; timer = setInterval(() => void refresh(), 2000) }
 
 async function stopCurrent() {
   stopping.value = true
   try {
     progress.value = (await cancelKBMaintenance(props.knowledgeBaseId)).data
+    statusLoadError.value = false
     MessagePlugin.success(t('knowledgeEditor.maintenance.stopSubmitted'))
     if (progress.value.status === 'canceling') startPolling()
     else stopPolling()
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : t('knowledgeEditor.maintenance.stopFailed')
     MessagePlugin.error(message)
-    await refresh()
+    await refresh(true)
   } finally { stopping.value = false }
 }
 
@@ -143,11 +175,11 @@ function confirmRun(action: Action) {
         else if (action.operation === 'graph') await rebuildKBGraph(props.knowledgeBaseId)
         else await startKBMaintenance(props.knowledgeBaseId, action.operation)
         MessagePlugin.success(t('knowledgeEditor.maintenance.submitted', { name: action.label }))
-        await refresh(); startPolling()
+        await refresh(true)
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string' ? error.message : t('knowledgeEditor.maintenance.submitFailed'))
         MessagePlugin.error(message)
-        await refresh()
+        await refresh(true)
       } finally { submitting.value = null }
     },
     onCancel: () => dialog.hide(),
@@ -155,7 +187,7 @@ function confirmRun(action: Action) {
 }
 onMounted(async () => {
   try { structuredQueryEnabled.value = !!(await getSystemInfo()).data?.structured_query_enabled } catch { structuredQueryEnabled.value = false }
-  await refresh(); if (isRunning.value) startPolling()
+  await refresh(true)
 })
 onBeforeUnmount(stopPolling)
 </script>
