@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	defaultTimeout = 180 * time.Second
+	defaultTimeout = 300 * time.Second
 	defaultMaxToks = 5000
 	defaultTemp    = float32(0.1)
 )
