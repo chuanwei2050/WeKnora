@@ -98,6 +98,7 @@ func TestStructuredAnswerOutputRulesAreAppendedWithoutChangingEvidence(t *testin
 	}
 	for _, rule := range []string{
 		"SQL", "物理表名", "内部标识", "字段别名", "原始载荷", "自然语言",
+		"禁止直接展示结构化查询过程或原始结果形态",
 		"统计、聚合、排序和计算类问题以 SQL 结果为准",
 		"普通事实和列举类问题不得因 SQL 未命中而忽略其他证据",
 		"实际表述", "不得臆造同义", "无关相邻记录",
