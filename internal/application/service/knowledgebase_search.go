@@ -252,13 +252,15 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	// request scope again before fusion, reranking, or reference generation.
 	vectorResults = filterRetrievedIndexesByScope(vectorResults, searchKBIDs, params.KnowledgeIDs, params.TagIDs)
 	keywordResults = filterRetrievedIndexesByScope(keywordResults, searchKBIDs, params.KnowledgeIDs, params.TagIDs)
-	vectorRecallSaturated := len(vectorResults) >= vectorMatchCount
 	if len(params.AdditionalVectorQueries) > 0 {
 		// Merge independently ranked vector-query lists by rank, not raw model
 		// score. This prevents either wording from monopolizing the vector channel.
 		vectorResults = fuseVectorRetrievalLists(retrieveResults)
 		vectorResults = filterRetrievedIndexesByScope(vectorResults, searchKBIDs, params.KnowledgeIDs, params.TagIDs)
 	}
+	// Saturation must use the authoritative fused vector list, not the
+	// pre-fuse concatenation of split multi-query budgets.
+	vectorRecallSaturated := len(vectorResults) >= vectorMatchCount
 	if len(vectorResults) == 0 && len(keywordResults) == 0 {
 		logger.Info(ctx, "No search results found")
 		return nil, nil

@@ -116,7 +116,11 @@ func deduplicateByScore(results []*types.IndexWithScore) []*types.IndexWithScore
 	}
 	deduped := make([]*types.IndexWithScore, 0, len(chunkInfoMap))
 	for _, info := range chunkInfoMap {
-		info.ScoreDomain = types.RetrievalScoreDomainRelevance
+		// Preserve multi-query RRF scores; only default unset/raw similarity
+		// domains to relevance so normalizedRetrievalQuality can rescale RRF.
+		if info.ScoreDomain != types.RetrievalScoreDomainRRF {
+			info.ScoreDomain = types.RetrievalScoreDomainRelevance
+		}
 		deduped = append(deduped, info)
 	}
 	slices.SortFunc(deduped, sortByScoreDesc)

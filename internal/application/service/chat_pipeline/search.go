@@ -605,16 +605,21 @@ func (p *PluginSearch) searchByTargets(
 					queryEmbedding = emb
 				}
 				if len(additionalVectorQueries) > 0 {
+					// Rewrite embed is best-effort. If the limiter is exhausted,
+					// continue with the primary embedding instead of dropping the
+					// whole KB group's HybridSearch.
 					if !limiter.Acquire(ctx) {
-						finishSkippedDirectTurns()
-						return
-					}
-					rewriteEmbedding, rewriteErr := p.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, additionalVectorQueries[0].Text)
-					limiter.Release()
-					if rewriteErr != nil {
-						pipelineWarn(ctx, "Search", "rewrite_embed_error", map[string]interface{}{"model_key": modelKey, "error": rewriteErr.Error()})
+						pipelineWarn(ctx, "Search", "rewrite_embed_limiter_skip", map[string]interface{}{"model_key": modelKey})
+						additionalVectorQueries = nil
 					} else {
-						additionalVectorQueries[0].Embedding = rewriteEmbedding
+						rewriteEmbedding, rewriteErr := p.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, additionalVectorQueries[0].Text)
+						limiter.Release()
+						if rewriteErr != nil {
+							pipelineWarn(ctx, "Search", "rewrite_embed_error", map[string]interface{}{"model_key": modelKey, "error": rewriteErr.Error()})
+							additionalVectorQueries = nil
+						} else {
+							additionalVectorQueries[0].Embedding = rewriteEmbedding
+						}
 					}
 				}
 			}
