@@ -144,6 +144,7 @@ func (s *KBMaintenanceStore) AdvancePhase(ctx context.Context, tenantID uint64, 
 		current.FinishedAt = nil
 		current.HeartbeatAt = now
 		current.TargetKnowledgeIDs = targetKnowledgeIDs
+		current.EnqueueDone = true
 		b, err := json.Marshal(&current)
 		if err != nil {
 			return err
@@ -211,6 +212,36 @@ func (s *KBMaintenanceStore) Cancel(ctx context.Context, tenantID uint64, kbID, 
 func (s *KBMaintenanceStore) IsRunning(ctx context.Context, tenantID uint64, kbID, runID string) bool {
 	p, err := s.Get(ctx, tenantID, kbID)
 	return err == nil && p != nil && p.RunID == runID && p.Status == "running"
+}
+
+// MarkEnqueueDone flips enqueue_done after document-pipeline staging finishes.
+// No-op when the run id no longer matches or the job already left running/canceling.
+func (s *KBMaintenanceStore) MarkEnqueueDone(ctx context.Context, tenantID uint64, kbID, runID string) error {
+	key := kbMaintenanceKey(tenantID, kbID)
+	return s.redis.Watch(ctx, func(tx *redis.Tx) error {
+		raw, err := tx.Get(ctx, key).Bytes()
+		if err != nil {
+			return err
+		}
+		var p types.KBMaintenanceProgress
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return err
+		}
+		if p.RunID != runID || !kbMaintenanceBusy(p.Status) {
+			return nil
+		}
+		if p.EnqueueDone {
+			return nil
+		}
+		p.EnqueueDone = true
+		p.HeartbeatAt = time.Now().UTC()
+		b, err := json.Marshal(&p)
+		if err != nil {
+			return err
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error { pipe.Set(ctx, key, b, kbMaintenanceTTL); return nil })
+		return err
+	}, key)
 }
 
 func (s *KBMaintenanceStore) Update(ctx context.Context, tenantID uint64, kbID, runID string, processed, failed int, message string, finished bool) error {

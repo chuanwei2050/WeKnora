@@ -125,6 +125,7 @@ export interface KBMaintenanceProgress {
   message?: string;
   started_at?: string;
   finished_at?: string;
+  enqueue_done?: boolean;
 }
 
 export function getKBMaintenanceStatus(kbId: string) {

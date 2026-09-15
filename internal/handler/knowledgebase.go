@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
@@ -18,7 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"github.com/Tencent/WeKnora/internal/utils"
+	apputils "github.com/Tencent/WeKnora/internal/utils"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
@@ -552,13 +553,13 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	})
 }
 
-// RebuildIndex reparses every completed or failed document using the knowledge
-// base's current settings. Pending and processing documents are excluded to
-// avoid racing their existing queue jobs. ReparseKnowledge owns cleanup and
-// rebuilding of chunks and all enabled derived data and indexes.
-// After documents finish, GetMaintenanceStatus advances into the structured phase.
+// RebuildIndex stops orphaned pending/processing documents, then reparses every
+// completed or failed document using the knowledge base's current settings.
+// ReparseKnowledge owns cleanup and rebuilding of chunks and all enabled
+// derived data and indexes. After documents finish, GetMaintenanceStatus
+// advances into the structured phase.
 func (h *KnowledgeBaseHandler) RebuildIndex(c *gin.Context) {
-	h.startDocumentPipelineMaintenance(c, types.KBMaintenanceReparse, false)
+	h.startDocumentPipelineMaintenance(c, types.KBMaintenanceReparse, true)
 }
 
 // RebuildChunks stops stuck pending/processing documents, then reparses and
@@ -600,8 +601,12 @@ func (h *KnowledgeBaseHandler) startDocumentPipelineMaintenance(c *gin.Context, 
 		c.JSON(http.StatusConflict, gin.H{"success": false, "error": gin.H{"message": "another maintenance task is running"}, "data": progress})
 		return
 	}
+	interruptMsg := types.ParseInterruptedForRechunkMessage
+	if operation == types.KBMaintenanceReparse {
+		interruptMsg = types.ParseInterruptedForRebuildMessage
+	}
 	if resetStuck {
-		if _, err := h.knowledgeService.InterruptStuckParses(ctx, id, types.ParseInterruptedForRechunkMessage); err != nil {
+		if _, err := h.knowledgeService.InterruptStuckParses(ctx, id, interruptMsg); err != nil {
 			_ = h.maintenance.Fail(ctx, tenantID, id, progress.RunID, err.Error())
 			c.Error(apperrors.NewInternalServerError(err.Error()))
 			return
@@ -613,16 +618,35 @@ func (h *KnowledgeBaseHandler) startDocumentPipelineMaintenance(c *gin.Context, 
 			return
 		}
 	}
-	enqueued, err := reparseKnowledgeBaseItems(ctx, items, h.knowledgeService.ReparseKnowledge)
-	if err != nil {
-		_ = h.maintenance.Fail(ctx, tenantID, id, progress.RunID, err.Error())
-		c.Error(apperrors.NewInternalServerError(err.Error()))
-		return
-	}
-	if enqueued == 0 {
-		_ = h.maintenance.Update(ctx, tenantID, id, progress.RunID, 0, 0, "", true)
-	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": gin.H{"document_count": enqueued}})
+	// Pace cleanup+enqueue in the background. A synchronous loop of dozens of
+	// ReparseKnowledge calls floods asynq and can stall the HTTP API; workers
+	// then die with parse_status stuck on "processing".
+	bgCtx := context.WithoutCancel(ctx)
+	runID := progress.RunID
+	go func() {
+		reparse := func(ctx context.Context, knowledgeID string) (*types.Knowledge, error) {
+			if !h.maintenance.IsRunning(ctx, tenantID, id, runID) {
+				return nil, context.Canceled
+			}
+			return h.knowledgeService.ReparseKnowledge(ctx, knowledgeID)
+		}
+		enqueued, enqueueErr := reparseKnowledgeBaseItemsPaced(bgCtx, items, reparse, documentPipelineEnqueueConcurrency())
+		_ = h.maintenance.MarkEnqueueDone(bgCtx, tenantID, id, runID)
+		if enqueueErr != nil {
+			if stderrors.Is(enqueueErr, context.Canceled) {
+				logger.Infof(bgCtx, "document pipeline maintenance enqueue stopped: kb=%s run=%s", id, runID)
+				return
+			}
+			logger.Errorf(bgCtx, "document pipeline maintenance enqueue failed: kb=%s run=%s err=%v", id, runID, enqueueErr)
+			_ = h.maintenance.Fail(bgCtx, tenantID, id, runID, enqueueErr.Error())
+			return
+		}
+		if enqueued == 0 {
+			_ = h.maintenance.Update(bgCtx, tenantID, id, runID, 0, 0, "", true)
+		}
+		logger.Infof(bgCtx, "document pipeline maintenance enqueued: kb=%s run=%s count=%d", id, runID, enqueued)
+	}()
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": gin.H{"document_count": len(targetIDs)}})
 }
 
 // StartMaintenance starts a non-destructive, chunk-preserving maintenance job.
@@ -710,7 +734,9 @@ func (h *KnowledgeBaseHandler) GetMaintenanceStatus(c *gin.Context) {
 		items, listErr := h.knowledgeService.ListKnowledgeByKnowledgeBaseID(c.Request.Context(), id)
 		if listErr == nil {
 			done, failed, active := summarizeDocumentPipelineProgress(items, p.TargetKnowledgeIDs)
-			finished := active == 0 && done+failed >= p.Total
+			// Until staging enqueue finishes, targets may still look completed/failed
+			// and must not be treated as finished or advanced into the next phase.
+			finished := p.EnqueueDone && active == 0 && done+failed >= p.Total
 			if finished && p.Total > 0 && p.Status == "running" && p.Operation == types.KBMaintenanceReparse {
 				next, advanced, advanceErr := h.maintenance.AdvancePhase(c.Request.Context(), tenantID, id, p.RunID, types.KBMaintenanceReparse, types.KBMaintenanceStructured, len(p.TargetKnowledgeIDs), p.TargetKnowledgeIDs)
 				if advanceErr == nil && advanced {
@@ -837,17 +863,84 @@ func reparseKnowledgeBaseItems(
 	items []*types.Knowledge,
 	reparse func(context.Context, string) (*types.Knowledge, error),
 ) (int, error) {
-	enqueued := 0
-	for _, item := range items {
-		if !isKnowledgeBaseReparseCandidate(item) {
-			continue
-		}
-		if _, err := reparse(ctx, item.ID); err != nil {
-			return enqueued, err
-		}
-		enqueued++
+	return reparseKnowledgeBaseItemsPaced(ctx, items, reparse, 1)
+}
+
+// documentPipelineEnqueueConcurrency caps how many ReparseKnowledge cleanups
+// run at once when starting a full rebuild / rechunk. Actual document workers
+// remain governed by ASYNQ_CONCURRENCY.
+func documentPipelineEnqueueConcurrency() int {
+	n := apputils.AsynqConcurrency()
+	if n > 4 {
+		return 4
 	}
-	return enqueued, nil
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+func reparseKnowledgeBaseItemsPaced(
+	ctx context.Context,
+	items []*types.Knowledge,
+	reparse func(context.Context, string) (*types.Knowledge, error),
+	pace int,
+) (int, error) {
+	if pace < 1 {
+		pace = 1
+	}
+	candidates := make([]*types.Knowledge, 0, len(items))
+	for _, item := range items {
+		if isKnowledgeBaseReparseCandidate(item) {
+			candidates = append(candidates, item)
+		}
+	}
+	if len(candidates) == 0 {
+		return 0, nil
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sem := make(chan struct{}, pace)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	enqueued := 0
+	var firstErr error
+
+	for _, item := range candidates {
+		if ctx.Err() != nil {
+			break
+		}
+		mu.Lock()
+		errSeen := firstErr != nil
+		mu.Unlock()
+		if errSeen {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(knowledgeID string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if ctx.Err() != nil {
+				return
+			}
+			_, err := reparse(ctx, knowledgeID)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+					cancel()
+				}
+				return
+			}
+			enqueued++
+		}(item.ID)
+	}
+	wg.Wait()
+	return enqueued, firstErr
 }
 
 // isKnowledgeBaseReparseCandidate keeps the explicit "rebuild all" operation
@@ -1045,7 +1138,7 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 	// Generate task ID if not provided
 	taskID := req.TaskID
 	if taskID == "" {
-		taskID = utils.GenerateTaskID("kb_clone", tenantID, req.SourceID)
+		taskID = apputils.GenerateTaskID("kb_clone", tenantID, req.SourceID)
 	}
 
 	// Create KB clone payload

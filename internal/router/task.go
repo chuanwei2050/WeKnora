@@ -193,9 +193,11 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	mux.HandleFunc(types.TypeWikiIngest, params.WikiIngest.Handle)
 
 	// Recover documents left in parse_status=processing after crashes / lease expiry.
+	// 30m is short enough to clear rebuild floods after a worker hang, without
+	// failing healthy long-running large-document jobs mid-flight too eagerly.
 	go func() {
 		ctx := context.Background()
-		if _, err := params.KnowledgeService.RecoverOrphanedProcessingKnowledge(ctx, 2*time.Hour); err != nil {
+		if _, err := params.KnowledgeService.RecoverOrphanedProcessingKnowledge(ctx, 30*time.Minute); err != nil {
 			logger.Errorf(ctx, "failed to recover orphaned processing knowledge: %v", err)
 		}
 	}()
