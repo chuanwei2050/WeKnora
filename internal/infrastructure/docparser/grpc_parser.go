@@ -3,6 +3,7 @@ package docparser
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -141,6 +142,31 @@ func (p *GRPCDocumentReader) ListEngines(ctx context.Context, overrides map[stri
 		})
 	}
 	return result, nil
+}
+
+func (p *GRPCDocumentReader) OCR(ctx context.Context, imageData []byte, fileName string) (string, error) {
+	p.mu.RLock()
+	client := p.client
+	p.mu.RUnlock()
+	if client == nil {
+		return "", errNotConnected
+	}
+	if len(imageData) == 0 {
+		return "", fmt.Errorf("image data is empty")
+	}
+
+	resp, err := client.OCR(ctx, &proto.OCRRequest{
+		ImageData: imageData,
+		FileName:  fileName,
+		Backend:   "paddle",
+	})
+	if err != nil {
+		return "", fmt.Errorf("gRPC OCR failed: %w", err)
+	}
+	if msg := strings.TrimSpace(resp.GetError()); msg != "" {
+		return "", fmt.Errorf("docreader OCR error: %s", msg)
+	}
+	return resp.GetText(), nil
 }
 
 func fromProtoReadResponse(resp *proto.ReadResponse) *types.ReadResult {

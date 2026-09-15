@@ -7,6 +7,8 @@ option go_package = "github.com/Tencent/WeKnora/internal/docreader/proto";
 service DocReader {
   rpc Read(ReadRequest) returns (ReadResponse) {}
   rpc ListEngines(ListEnginesRequest) returns (ListEnginesResponse) {}
+  // OCR extracts text from a single image via the local PaddleOCR backend.
+  rpc OCR(OCRRequest) returns (OCRResponse) {}
 }
 
 message ReadConfig {
@@ -58,4 +60,18 @@ message ParserEngineInfo {
 
 message ListEnginesResponse {
   repeated ParserEngineInfo engines = 1;
+}
+
+message OCRRequest {
+  bytes  image_data = 1;
+  string file_name = 2;
+  string request_id = 3;
+  // backend selects OCR engine; empty/default = paddle.
+  string backend = 4;
+}
+
+message OCRResponse {
+  string text = 1;
+  string error = 2;
+  string backend = 3;
 }

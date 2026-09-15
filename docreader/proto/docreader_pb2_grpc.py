@@ -5,7 +5,7 @@ import warnings
 
 from docreader.proto import docreader_pb2 as docreader__pb2
 
-GRPC_GENERATED_VERSION = '1.78.0'
+GRPC_GENERATED_VERSION = '1.76.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -44,6 +44,11 @@ class DocReaderStub(object):
                 request_serializer=docreader__pb2.ListEnginesRequest.SerializeToString,
                 response_deserializer=docreader__pb2.ListEnginesResponse.FromString,
                 _registered_method=True)
+        self.OCR = channel.unary_unary(
+                '/docreader.DocReader/OCR',
+                request_serializer=docreader__pb2.OCRRequest.SerializeToString,
+                response_deserializer=docreader__pb2.OCRResponse.FromString,
+                _registered_method=True)
 
 
 class DocReaderServicer(object):
@@ -61,6 +66,13 @@ class DocReaderServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def OCR(self, request, context):
+        """OCR extracts text from a single image via the local PaddleOCR backend.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_DocReaderServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -73,6 +85,11 @@ def add_DocReaderServicer_to_server(servicer, server):
                     servicer.ListEngines,
                     request_deserializer=docreader__pb2.ListEnginesRequest.FromString,
                     response_serializer=docreader__pb2.ListEnginesResponse.SerializeToString,
+            ),
+            'OCR': grpc.unary_unary_rpc_method_handler(
+                    servicer.OCR,
+                    request_deserializer=docreader__pb2.OCRRequest.FromString,
+                    response_serializer=docreader__pb2.OCRResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -129,6 +146,33 @@ class DocReader(object):
             '/docreader.DocReader/ListEngines',
             docreader__pb2.ListEnginesRequest.SerializeToString,
             docreader__pb2.ListEnginesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def OCR(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/docreader.DocReader/OCR',
+            docreader__pb2.OCRRequest.SerializeToString,
+            docreader__pb2.OCRResponse.FromString,
             options,
             channel_credentials,
             insecure,

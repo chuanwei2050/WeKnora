@@ -71,6 +71,10 @@ func (p *WeKnoraCloudSignedDocumentReader) ListEngines(ctx context.Context, over
 	}}, nil
 }
 
+func (p *WeKnoraCloudSignedDocumentReader) OCR(ctx context.Context, imageData []byte, fileName string) (string, error) {
+	return "", fmt.Errorf("OCR is not supported on WeKnoraCloud docreader")
+}
+
 func (p *WeKnoraCloudSignedDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
 	logger.Infof(ctx, "[WeKnoraCloud] read start file=%q type=%q engine=%q hasURL=%v contentLen=%d requestID=%q",
 		req.FileName, req.FileType, req.ParserEngine, strings.TrimSpace(req.URL) != "", len(req.FileContent), req.RequestID)

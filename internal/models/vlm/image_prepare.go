@@ -11,10 +11,10 @@ import (
 
 const (
 	// Max edge length sent to remote VLMs. Larger images are downscaled.
-	vlmMaxImageEdge = 1536
-	// Images larger than this (after optional decode) are re-encoded as JPEG.
-	vlmMaxImageBytes = 900 * 1024
-	vlmJPEGQuality   = 75
+	vlmMaxImageEdge = 1024
+	// Images larger than this are re-encoded as JPEG even if already under the edge cap.
+	vlmMaxImageBytes = 200 * 1024
+	vlmJPEGQuality   = 70
 )
 
 // PrepareImageForVLM normalizes image bytes for OpenAI-compatible vision APIs.

@@ -163,6 +163,10 @@ func (p *HTTPDocumentReader) ListEngines(ctx context.Context, overrides map[stri
 	return result, nil
 }
 
+func (p *HTTPDocumentReader) OCR(ctx context.Context, imageData []byte, fileName string) (string, error) {
+	return "", fmt.Errorf("OCR is only supported over gRPC docreader transport")
+}
+
 func fromHTTPReadResponse(resp *httpReadResponse) *types.ReadResult {
 	result := &types.ReadResult{
 		MarkdownContent: resp.MarkdownContent,

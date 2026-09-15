@@ -22,7 +22,10 @@ from docreader.proto.docreader_pb2 import (
     ImageRef,
     ListEnginesResponse,
     ParserEngineInfo,
+    OCRRequest,
+    OCRResponse,
 )
+from docreader.ocr import OCREngine
 from docreader.utils.request import init_logging_request_id, request_id_context
 
 _SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
@@ -179,6 +182,31 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
             for e in engines_data
         ]
         return ListEnginesResponse(engines=engines)
+
+    def OCR(self, request: OCRRequest, context):
+        """Extract text from a single image using the local OCR backend (default: paddle)."""
+        request_id = request.request_id or str(uuid.uuid4())
+        backend = (request.backend or "paddle").strip().lower() or "paddle"
+
+        with request_id_context(request_id):
+            if not request.image_data:
+                return OCRResponse(error="image_data is required", backend=backend)
+            try:
+                engine = OCREngine.get_instance(backend)
+                text = engine.predict(bytes(request.image_data)) or ""
+                text = to_valid_utf8_text(text)
+                logger.info(
+                    "OCR(%s): file=%s, image_bytes=%d, text_len=%d",
+                    backend,
+                    request.file_name or "",
+                    len(request.image_data),
+                    len(text),
+                )
+                return OCRResponse(text=text, backend=backend)
+            except Exception as e:
+                logger.error("OCR failed: %s", e)
+                logger.info("Traceback: %s", traceback.format_exc())
+                return OCRResponse(error=str(e), backend=backend)
 
 
 def main():

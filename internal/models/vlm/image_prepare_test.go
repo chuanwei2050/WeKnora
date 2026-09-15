@@ -59,6 +59,29 @@ func TestPrepareImageForVLMCompressesLargePNG(t *testing.T) {
 	}
 }
 
+func TestPrepareImageForVLMCompressesOversizeBytes(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 900, 900))
+	for y := 0; y < 900; y++ {
+		for x := 0; x < 900; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(x * y), G: uint8(x + y), B: uint8(x ^ y), A: 255})
+		}
+	}
+	var raw bytes.Buffer
+	if err := jpeg.Encode(&raw, img, &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw.Bytes()) <= vlmMaxImageBytes {
+		t.Fatalf("fixture too small to exercise byte cap: %d", len(raw.Bytes()))
+	}
+	out, skip, err := PrepareImageForVLM(raw.Bytes(), "noisy.png")
+	if err != nil || skip {
+		t.Fatalf("compress err=%v skip=%v", err, skip)
+	}
+	if len(out) >= len(raw.Bytes()) {
+		t.Fatalf("expected smaller jpeg, in=%d out=%d", len(raw.Bytes()), len(out))
+	}
+}
+
 func TestPrepareImageForVLMKeepsSmallPNG(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 32, 32))
 	var raw bytes.Buffer

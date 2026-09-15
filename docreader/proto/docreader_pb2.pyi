@@ -106,3 +106,25 @@ class ListEnginesResponse(_message.Message):
     ENGINES_FIELD_NUMBER: _ClassVar[int]
     engines: _containers.RepeatedCompositeFieldContainer[ParserEngineInfo]
     def __init__(self, engines: _Optional[_Iterable[_Union[ParserEngineInfo, _Mapping]]] = ...) -> None: ...
+
+class OCRRequest(_message.Message):
+    __slots__ = ("image_data", "file_name", "request_id", "backend")
+    IMAGE_DATA_FIELD_NUMBER: _ClassVar[int]
+    FILE_NAME_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    BACKEND_FIELD_NUMBER: _ClassVar[int]
+    image_data: bytes
+    file_name: str
+    request_id: str
+    backend: str
+    def __init__(self, image_data: _Optional[bytes] = ..., file_name: _Optional[str] = ..., request_id: _Optional[str] = ..., backend: _Optional[str] = ...) -> None: ...
+
+class OCRResponse(_message.Message):
+    __slots__ = ("text", "error", "backend")
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    BACKEND_FIELD_NUMBER: _ClassVar[int]
+    text: str
+    error: str
+    backend: str
+    def __init__(self, text: _Optional[str] = ..., error: _Optional[str] = ..., backend: _Optional[str] = ...) -> None: ...

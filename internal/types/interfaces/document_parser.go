@@ -22,4 +22,6 @@ type DocumentReader interface {
 	// Returns engines the remote service supports, allowing auto-discovery of
 	// newly added engines without Go code changes.
 	ListEngines(ctx context.Context, overrides map[string]string) ([]types.ParserEngineInfo, error)
+	// OCR extracts text from image bytes via the docreader OCR backend (PaddleOCR).
+	OCR(ctx context.Context, imageData []byte, fileName string) (string, error)
 }
