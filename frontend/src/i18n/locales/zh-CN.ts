@@ -2502,8 +2502,8 @@ export default {
     },
     maintenance: {
       title: "重建与维护",
-      description: "集中管理知识库派生数据。任一任务运行期间，其他维护操作都会锁定以避免数据冲突。",
-      documentStatus: "当前共 {total} 篇任务相关文档：{completed} 篇已完成，{failed} 篇失败，{pending} 篇等待，{processing} 篇处理中。全部重建处理已完成和失败文档；重新解析分块会先停止卡住的解析；其他维护仅处理已完成文档。",
+      description: "",
+      documentStatus: "当前共 {total} 篇任务相关文档：{completed} 篇已完成，{failed} 篇失败，{pending} 篇等待，{processing} 篇处理中。",
       running: "已处理 {processed}/{total}",
       stop: "停止重建",
       stopSubmitted: "已停止领取后续任务，当前处理项将安全收尾",
