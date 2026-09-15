@@ -70,6 +70,9 @@ type DocumentProcessPayload struct {
 	EnableQuestionGeneration bool     `json:"enable_question_generation"` // 是否启用问题生成
 	QuestionCount            int      `json:"question_count,omitempty"`   // 每个chunk生成的问题数量
 	Language                 string   `json:"language,omitempty"`         // Request locale for {{language}} in prompt templates
+	// NeedCleanup asks ProcessDocument to delete old chunks/indexes before reparse.
+	// Used by bulk rebuild so HTTP enqueue stays light.
+	NeedCleanup bool `json:"need_cleanup,omitempty"`
 }
 
 // FAQImportPayload represents the FAQ import task payload (including dry run mode)

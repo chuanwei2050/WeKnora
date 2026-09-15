@@ -5002,7 +5002,9 @@ func (s *knowledgeService) RecoverOrphanedProcessingKnowledge(ctx context.Contex
 	return n, nil
 }
 
-// ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.
+// ReparseKnowledge resets knowledge status and enqueues async reparse.
+// Destructive cleanup of old chunks/indexes is deferred to ProcessDocument via NeedCleanup
+// so bulk rebuild HTTP handlers stay light.
 func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID string) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start re-parsing knowledge")
 
@@ -5160,15 +5162,9 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 		}
 		existing.PendingVersionID = version.ID
 	}
-	if !kb.Governance.Enabled || strings.TrimSpace(existing.PendingVersionID) == "" {
-		logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
-		if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
-			logger.ErrorWithFields(ctx, err, map[string]interface{}{
-				"knowledge_id": knowledgeID,
-			})
-			return nil, err
-		}
-	}
+	// Defer destructive cleanup to ProcessDocument (NeedCleanup) so bulk rebuild
+	// HTTP/enqueue stays light and does not block on per-document index deletes.
+	needCleanup := !kb.Governance.Enabled || strings.TrimSpace(existing.PendingVersionID) == ""
 
 	// Step 2: Update knowledge status and metadata
 	existing.ParseStatus = "pending"
@@ -5224,6 +5220,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			EnableQuestionGeneration: enableQuestionGeneration,
 			QuestionCount:            questionCount,
 			Language:                 lang,
+			NeedCleanup:              needCleanup,
 		}
 
 		langfuse.InjectTracing(ctx, &taskPayload)
@@ -5278,6 +5275,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			EnableQuestionGeneration: enableQuestionGeneration,
 			QuestionCount:            questionCount,
 			Language:                 lang,
+			NeedCleanup:              needCleanup,
 		}
 
 		langfuse.InjectTracing(ctx, &taskPayload)
@@ -5325,6 +5323,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			EnableQuestionGeneration: enableQuestionGeneration,
 			QuestionCount:            questionCount,
 			Language:                 lang,
+			NeedCleanup:              needCleanup,
 		}
 
 		langfuse.InjectTracing(ctx, &taskPayload)
@@ -10322,6 +10321,24 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	if !persistDocumentState() {
 		logger.Errorf(ctx, "failed to update knowledge status to processing")
 		return nil
+	}
+
+	// Reparse/rebuild: delete old chunks/indexes inside the worker (not HTTP path).
+	if payload.NeedCleanup && !kb.Governance.Enabled {
+		logger.Infof(ctx, "ProcessDocument: cleaning up existing resources for knowledge: %s", payload.KnowledgeID)
+		if err := s.cleanupKnowledgeResources(ctx, knowledge); err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"knowledge_id": payload.KnowledgeID,
+			})
+			knowledge.ParseStatus = "failed"
+			knowledge.ErrorMessage = fmt.Sprintf("清理旧索引/分块失败: %v", err)
+			if len(knowledge.ErrorMessage) > 1000 {
+				knowledge.ErrorMessage = knowledge.ErrorMessage[:1000]
+			}
+			knowledge.UpdatedAt = time.Now()
+			persistDocumentState()
+			return nil
+		}
 	}
 
 	// 检查多模态配置（仅对文件导入）

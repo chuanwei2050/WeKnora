@@ -92,18 +92,29 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 
 	// Add images
 	for _, imgBytes := range imgBytesList {
-		if len(imgBytes) > 0 {
-			mimeType := detectImageMIME(imgBytes)
-			b64 := base64.StdEncoding.EncodeToString(imgBytes)
-			dataURI := fmt.Sprintf("data:%s;base64,%s", mimeType, b64)
-			parts = append(parts, openai.ChatMessagePart{
-				Type: openai.ChatMessagePartTypeImageURL,
-				ImageURL: &openai.ChatMessageImageURL{
-					URL:    dataURI,
-					Detail: openai.ImageURLDetailAuto,
-				},
-			})
+		if len(imgBytes) == 0 {
+			continue
 		}
+		prepared, skip, prepErr := PrepareImageForVLM(imgBytes, "")
+		if prepErr != nil {
+			return "", fmt.Errorf("prepare image for VLM: %w", prepErr)
+		}
+		if skip || len(prepared) == 0 {
+			continue
+		}
+		mimeType := detectImageMIME(prepared)
+		b64 := base64.StdEncoding.EncodeToString(prepared)
+		dataURI := fmt.Sprintf("data:%s;base64,%s", mimeType, b64)
+		parts = append(parts, openai.ChatMessagePart{
+			Type: openai.ChatMessagePartTypeImageURL,
+			ImageURL: &openai.ChatMessageImageURL{
+				URL:    dataURI,
+				Detail: openai.ImageURLDetailAuto,
+			},
+		})
+	}
+	if len(parts) == 1 {
+		return "", fmt.Errorf("OpenAI VLM request: no usable images after prepare")
 	}
 
 	req := openai.ChatCompletionRequest{

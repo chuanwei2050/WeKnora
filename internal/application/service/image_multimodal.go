@@ -215,13 +215,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 		return nil
 	}
 
-	vlmModel, err := s.resolveVLM(ctx, payload.KnowledgeBaseID)
-	if err != nil {
-		return fmt.Errorf("resolve VLM: %w", err)
-	}
-
-	// Read image bytes: try provider:// via tenant-resolved FileService,
-	// then legacy local path, then HTTP URL.
+	// Read image bytes first so WMF/EMF can be handled without resolving VLM.
 	var imgBytes []byte
 	if types.ParseProviderScheme(payload.ImageURL) != "" {
 		fileSvc := s.resolveFileServiceForPayload(ctx, payload)
@@ -229,7 +223,6 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 			logger.Warnf(ctx, "[ImageMultimodal] Resolve tenant file service failed, fallback to URL/local: tenant=%d kb=%s",
 				payload.TenantID, payload.KnowledgeBaseID)
 		} else {
-			// provider:// scheme — read via FileService
 			reader, getErr := fileSvc.GetFile(ctx, payload.ImageURL)
 			if getErr != nil {
 				logger.Warnf(ctx, "[ImageMultimodal] FileService.GetFile(%s) failed: %v", payload.ImageURL, getErr)
@@ -264,17 +257,43 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 		OriginalURL: payload.ImageURL,
 	}
 
-	if payload.EnableOCR {
-		prompt := vlmOCRPrompt
-		if payload.ImageSourceType == "scanned_pdf" {
-			prompt = vlmOCRScannedPDFPrompt
-			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
+	// WMF/EMF: extract embedded text records directly; do not call VLM.
+	if vlm.IsMetafileImage(imgBytes, payload.ImageURL) {
+		if text := vlm.ExtractMetafileText(imgBytes); text != "" {
+			imageInfo.OCRText = text
+			logger.Infof(ctx, "[ImageMultimodal] Extracted %d chars from metafile without VLM: %s",
+				len(text), payload.ImageURL)
+		} else {
+			logger.Infof(ctx, "[ImageMultimodal] Metafile has no extractable text, skipping VLM: %s", payload.ImageURL)
+			return s.checkAndFinalizeAllImages(ctx, payload)
+		}
+	} else {
+		vlmModel, resolveErr := s.resolveVLM(ctx, payload.KnowledgeBaseID)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve VLM: %w", resolveErr)
 		}
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
-		if ocrErr != nil {
-			return s.handleVLMFailure(ctx, payload, "OCR", ocrErr, isLastRetry)
-		} else {
+		prepared, skip, prepErr := vlm.PrepareImageForVLM(imgBytes, payload.ImageURL)
+		if prepErr != nil {
+			return s.handleVLMFailure(ctx, payload, "prepare", prepErr, isLastRetry)
+		}
+		if skip {
+			logger.Warnf(ctx, "[ImageMultimodal] Skipping unsupported image format for VLM: %s", payload.ImageURL)
+			return s.checkAndFinalizeAllImages(ctx, payload)
+		}
+		imgBytes = prepared
+
+		if payload.EnableOCR {
+			prompt := vlmOCRPrompt
+			if payload.ImageSourceType == "scanned_pdf" {
+				prompt = vlmOCRScannedPDFPrompt
+				logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
+			}
+
+			ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+			if ocrErr != nil {
+				return s.handleVLMFailure(ctx, payload, "OCR", ocrErr, isLastRetry)
+			}
 			ocrText = sanitizeOCRText(ocrText)
 			if ocrText != "" {
 				imageInfo.OCRText = ocrText
@@ -282,14 +301,14 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 				logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
 			}
 		}
-	}
 
-	if payload.EnableCaption {
-		caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
-		if capErr != nil {
-			return s.handleVLMFailure(ctx, payload, "caption", capErr, isLastRetry)
-		} else if caption != "" {
-			imageInfo.Caption = caption
+		if payload.EnableCaption {
+			caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
+			if capErr != nil {
+				return s.handleVLMFailure(ctx, payload, "caption", capErr, isLastRetry)
+			} else if caption != "" {
+				imageInfo.Caption = caption
+			}
 		}
 	}
 

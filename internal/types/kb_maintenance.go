@@ -30,7 +30,9 @@ const ParseInterruptedForRebuildMessage = "解析已中断，准备全部重建"
 
 // ParseStaleInterruptedMessage is written when a processing document is orphaned
 // (worker crash, lease expiry, or exhausted retries without a status write-back).
-const ParseStaleInterruptedMessage = "解析任务已中断（超时或服务重启），请重试"
+// Prefer MarkDocumentProcessFailed(cause) when the real error is known; this is
+// only the fallback for silent orphans (often multimodal/VLM timeouts).
+const ParseStaleInterruptedMessage = "解析超时未完成（常见于多模态图片处理过久、VLM 超时或 worker 中断），请重试"
 
 type KBMaintenanceProgress struct {
 	RunID              string                 `json:"run_id"`

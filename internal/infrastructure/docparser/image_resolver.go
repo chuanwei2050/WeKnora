@@ -180,6 +180,10 @@ func extFromMime(mime string) string {
 		return ".bmp"
 	case "image/svg+xml":
 		return ".svg"
+	case "image/x-emf", "image/emf":
+		return ".emf"
+	case "image/x-wmf", "image/wmf":
+		return ".wmf"
 	default:
 		return ""
 	}
