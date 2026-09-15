@@ -268,6 +268,10 @@ def rank_tables_with_profile_evidence(
         column_scores[str(hit["table_id"])].append(float(hit.get("score", 0)))
     for hit in value_hits:
         value_scores[str(hit["table_id"])].append(float(hit.get("score", 0)))
+    max_value_lexical_score = max(
+        (float(hit.get("lexical_score", 0)) for hit in value_hits),
+        default=0.0,
+    )
     by_table = {str(hit["table_id"]): dict(hit) for hit in table_hits}
     for table_id in column_scores.keys() | value_scores.keys():
         by_table.setdefault(
@@ -280,9 +284,31 @@ def rank_tables_with_profile_evidence(
         # stronger schema evidence merely because it contains more indexed rows.
         strongest_columns = sorted(column_scores[table_id], reverse=True)[:3]
         strongest_values = sorted(value_scores[table_id], reverse=True)[:3]
+        # RRF compresses scores by design, but an almost exact stored value must
+        # still outrank a generic token found only in a file title. Use only the
+        # strongest raw lexical value per table and normalize it globally so the
+        # boost is bounded and independent of Profile size.
+        strongest_value_lexical = max(
+            (
+                float(value.get("lexical_score", 0))
+                for value in value_hits
+                if str(value["table_id"]) == table_id
+            ),
+            default=0.0,
+        )
+        value_lexical_boost = (
+            strongest_value_lexical / max_value_lexical_score
+            if max_value_lexical_score
+            else 0.0
+        )
         ranked.append({
             **hit,
-            "score": float(hit.get("score", 0)) + 2 * sum(strongest_columns) + sum(strongest_values),
+            "score": (
+                float(hit.get("score", 0))
+                + 2 * sum(strongest_columns)
+                + sum(strongest_values)
+                + value_lexical_boost
+            ),
         })
     return sorted(ranked, key=lambda hit: (-float(hit["score"]), str(hit["table_id"])))
 

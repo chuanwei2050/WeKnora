@@ -207,6 +207,10 @@ type SearchResult struct {
 
 	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+	// TagID is authoritative database metadata used for request-scope
+	// enforcement after external index results are hydrated. It is internal and
+	// must not expand the public search response contract.
+	TagID string `gorm:"-" json:"-"`
 	// DirectoryID identifies the right-hand document directory for navigation.
 	// It is display metadata only and never changes retrieval scope.
 	DirectoryID *string `json:"directory_id,omitempty"`
@@ -230,21 +234,25 @@ func (r *SearchResult) ContextualContent() string {
 
 // SearchParams represents the search parameters
 type SearchParams struct {
-	QueryText            string    `json:"query_text"`
-	KeywordQueryText     string    `json:"keyword_query_text,omitempty"`
-	QueryEmbedding       []float32 `json:"query_embedding,omitempty"`
-	VectorThreshold      float64   `json:"vector_threshold"`
-	KeywordThreshold     float64   `json:"keyword_threshold"`
-	MatchCount           int       `json:"match_count"`
-	VectorMatchCount     int       `json:"vector_match_count,omitempty"`
-	KeywordMatchCount    int       `json:"keyword_match_count,omitempty"`
-	RerankCandidateCount int       `json:"-"`
-	RRFVectorWeight      float64   `json:"rrf_vector_weight,omitempty"`
-	DisableKeywordsMatch bool      `json:"disable_keywords_match"`
-	DisableVectorMatch   bool      `json:"disable_vector_match"`
-	KnowledgeIDs         []string  `json:"knowledge_ids"`
-	TagIDs               []string  `json:"tag_ids"` // Tag IDs for filtering (used for FAQ priority filtering)
-	OnlyRecommended      bool      `json:"only_recommended"`
+	QueryText        string    `json:"query_text"`
+	KeywordQueryText string    `json:"keyword_query_text,omitempty"`
+	QueryEmbedding   []float32 `json:"query_embedding,omitempty"`
+	// AdditionalVectorQueries participate only in vector retrieval. Their TopK
+	// is carved out of VectorMatchCount, so adding a query never expands the
+	// vector recall or downstream candidate budgets.
+	AdditionalVectorQueries []VectorQuery `json:"-"`
+	VectorThreshold         float64       `json:"vector_threshold"`
+	KeywordThreshold        float64       `json:"keyword_threshold"`
+	MatchCount              int           `json:"match_count"`
+	VectorMatchCount        int           `json:"vector_match_count,omitempty"`
+	KeywordMatchCount       int           `json:"keyword_match_count,omitempty"`
+	RerankCandidateCount    int           `json:"-"`
+	RRFVectorWeight         float64       `json:"rrf_vector_weight,omitempty"`
+	DisableKeywordsMatch    bool          `json:"disable_keywords_match"`
+	DisableVectorMatch      bool          `json:"disable_vector_match"`
+	KnowledgeIDs            []string      `json:"knowledge_ids"`
+	TagIDs                  []string      `json:"tag_ids"` // Tag IDs for filtering (used for FAQ priority filtering)
+	OnlyRecommended         bool          `json:"only_recommended"`
 	// KnowledgeBaseIDs overrides the single KB ID passed to HybridSearch,
 	// allowing a single retrieval call to span multiple KBs that share the
 	// same embedding model. When empty, HybridSearch uses its own id parameter.
@@ -253,6 +261,13 @@ type SearchParams struct {
 	// in processSearchResults. Used by the chat pipeline where context assembly
 	// is handled separately in the merge stage.
 	SkipContextEnrichment bool `json:"skip_context_enrichment,omitempty"`
+}
+
+// VectorQuery is an additional semantic representation of the same user
+// request. Keyword retrieval remains anchored to SearchParams.KeywordQueryText.
+type VectorQuery struct {
+	Text      string    `json:"text"`
+	Embedding []float32 `json:"embedding"`
 }
 
 // Value implements the driver.Valuer interface, used to convert SearchResult to database value

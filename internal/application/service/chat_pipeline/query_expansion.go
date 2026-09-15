@@ -28,8 +28,18 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 	if len(expansions) == 0 {
 		return nil
 	}
+	return p.runQueryVariants(ctx, chatManage, limiter, expansions, "expansion", false)
+}
 
-	pipelineInfo(ctx, "Search", "expansion_start", map[string]interface{}{
+func (p *PluginSearch) runQueryVariants(
+	ctx context.Context,
+	chatManage *types.ChatManage,
+	limiter *retrievalkernel.Limiter,
+	expansions []string,
+	action string,
+	vectorOnly bool,
+) []*types.SearchResult {
+	pipelineInfo(ctx, "Search", action+"_start", map[string]interface{}{
 		"variants": len(expansions),
 	})
 	expTopK := expansionCandidateLimit(chatManage)
@@ -40,7 +50,7 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 	var muExp sync.Mutex
 	var wgExp sync.WaitGroup
 	jobs := min(len(expansions)*len(chatManage.SearchTargets), maxQueryExpansionCalls)
-	pipelineInfo(ctx, "Search", "expansion_concurrency", map[string]interface{}{
+	pipelineInfo(ctx, "Search", action+"_concurrency", map[string]interface{}{
 		"jobs": jobs,
 		"cap":  4,
 	})
@@ -62,6 +72,9 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 				fusionBudget := searchutil.SplitBudget(expTopK, jobs, index)
 				vectorBudget := searchutil.SplitBudget(chatManage.VectorRecallTopK, jobs, index)
 				keywordBudget := searchutil.SplitBudget(chatManage.KeywordRecallTopK, jobs, index)
+				if vectorOnly {
+					keywordBudget = 0
+				}
 				if fusionBudget == 0 || (vectorBudget == 0 && keywordBudget == 0) {
 					return
 				}
@@ -75,7 +88,7 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 					RerankCandidateCount:  chatManage.RerankCandidateTopK,
 					RRFVectorWeight:       chatManage.RRFVectorWeight,
 					DisableVectorMatch:    vectorBudget == 0,
-					DisableKeywordsMatch:  keywordBudget == 0,
+					DisableKeywordsMatch:  vectorOnly || keywordBudget == 0,
 					SkipContextEnrichment: true, // Pipeline handles context assembly in merge stage
 				}
 				// Apply knowledge ID filter if this is a partial KB search
@@ -84,7 +97,7 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 				}
 				res, err := p.knowledgeBaseService.HybridSearch(ctx, t.KnowledgeBaseID, paramsExp)
 				if err != nil {
-					pipelineWarn(ctx, "Search", "expansion_error", map[string]interface{}{
+					pipelineWarn(ctx, "Search", action+"_error", map[string]interface{}{
 						"kb_id": t.KnowledgeBaseID,
 						"error": err.Error(),
 					})
@@ -100,7 +113,7 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 						}
 					}
 					res = p.filterGovernedSearchResults(ctx, chatManage.TenantID, types.SearchTargets{t}, res)
-					pipelineInfo(ctx, "Search", "expansion_hits", map[string]interface{}{
+					pipelineInfo(ctx, "Search", action+"_hits", map[string]interface{}{
 						"kb_id":       t.KnowledgeBaseID,
 						"query_bytes": len([]byte(q)),
 						"hits":        len(res),
@@ -123,7 +136,7 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 	}
 	wgExp.Wait()
 	if len(expResults) > 0 {
-		pipelineInfo(ctx, "Search", "expansion_done", map[string]interface{}{
+		pipelineInfo(ctx, "Search", action+"_done", map[string]interface{}{
 			"added": len(expResults),
 		})
 	}
@@ -137,7 +150,7 @@ func expansionCandidateLimit(chatManage *types.ChatManage) int {
 // expandQueries generates query variants locally without LLM to improve keyword recall.
 // Uses simple techniques: word reordering, stopword removal, key phrase extraction.
 func (p *PluginSearch) expandQueries(ctx context.Context, chatManage *types.ChatManage) []string {
-	query := strings.TrimSpace(chatManage.RewriteQuery)
+	query := authoritativeRetrievalQuery(chatManage)
 	if query == "" {
 		return nil
 	}

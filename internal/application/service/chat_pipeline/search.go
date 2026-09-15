@@ -73,7 +73,7 @@ func (p *PluginSearch) ActivationEvents() []types.EventType {
 func normalizePipelineRetrievalRequest(chatManage *types.ChatManage) (retrievalkernel.NormalizedRequest, error) {
 	return retrievalkernel.NormalizeRequest(retrievalkernel.Request{
 		TenantID:           chatManage.TenantID,
-		Queries:            []string{chatManage.RewriteQuery},
+		Queries:            []string{authoritativeRetrievalQuery(chatManage)},
 		Targets:            chatManage.SearchTargets,
 		CandidateLimit:     chatManage.EmbeddingTopK,
 		VectorRecallLimit:  chatManage.VectorRecallTopK,
@@ -86,7 +86,7 @@ func (p *PluginSearch) applyQualificationAliases(ctx context.Context, chatManage
 		return
 	}
 	chatManage.QualificationAliasesApplied = true
-	chatManage.WebQuery = chatManage.RewriteQuery
+	chatManage.WebQuery = authoritativeRetrievalQuery(chatManage)
 	kbIDs := chatManage.SearchTargets.GetAllKnowledgeBaseIDs()
 	if len(kbIDs) == 0 {
 		kbIDs = chatManage.KnowledgeBaseIDs
@@ -159,7 +159,7 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 
 	pipelineInfo(ctx, "Search", "input", map[string]interface{}{
 		"session_id":          chatManage.SessionID,
-		"query_bytes":         len([]byte(chatManage.RewriteQuery)),
+		"query_bytes":         len([]byte(authoritativeRetrievalQuery(chatManage))),
 		"keyword_query_bytes": len([]byte(chatManage.KeywordQuery)),
 		"search_targets":      len(chatManage.SearchTargets),
 		"tenant_id":           chatManage.TenantID,
@@ -499,7 +499,7 @@ func (p *PluginSearch) searchByTargets(
 		return nil
 	}
 
-	queryText := strings.TrimSpace(chatManage.RewriteQuery)
+	queryText := authoritativeRetrievalQuery(chatManage)
 	keywordQueryText := strings.TrimSpace(chatManage.KeywordQuery)
 	if keywordQueryText == "" {
 		keywordQueryText = queryText
@@ -584,6 +584,10 @@ func (p *PluginSearch) searchByTargets(
 
 			// Compute embedding once for this model group.
 			var queryEmbedding []float32
+			var additionalVectorQueries []types.VectorQuery
+			if rewrite := supplementalRewriteQuery(chatManage); rewrite != "" {
+				additionalVectorQueries = []types.VectorQuery{{Text: rewrite}}
+			}
 			if modelKey != "" {
 				if !limiter.Acquire(ctx) {
 					finishSkippedDirectTurns()
@@ -599,6 +603,19 @@ func (p *PluginSearch) searchByTargets(
 					})
 				} else {
 					queryEmbedding = emb
+				}
+				if len(additionalVectorQueries) > 0 {
+					if !limiter.Acquire(ctx) {
+						finishSkippedDirectTurns()
+						return
+					}
+					rewriteEmbedding, rewriteErr := p.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, additionalVectorQueries[0].Text)
+					limiter.Release()
+					if rewriteErr != nil {
+						pipelineWarn(ctx, "Search", "rewrite_embed_error", map[string]interface{}{"model_key": modelKey, "error": rewriteErr.Error()})
+					} else {
+						additionalVectorQueries[0].Embedding = rewriteEmbedding
+					}
 				}
 			}
 
@@ -645,21 +662,22 @@ func (p *PluginSearch) searchByTargets(
 					}
 
 					params := types.SearchParams{
-						QueryText:             queryText,
-						KeywordQueryText:      keywordQueryText,
-						QueryEmbedding:        queryEmbedding,
-						KnowledgeBaseIDs:      fullKBIDs,
-						TagIDs:                fullTagIDs,
-						VectorThreshold:       chatManage.VectorThreshold,
-						KeywordThreshold:      chatManage.KeywordThreshold,
-						MatchCount:            fusionBudget,
-						VectorMatchCount:      vectorBudget,
-						RerankCandidateCount:  chatManage.RerankCandidateTopK,
-						KeywordMatchCount:     keywordBudget,
-						DisableVectorMatch:    vectorBudget == 0,
-						DisableKeywordsMatch:  keywordBudget == 0,
-						RRFVectorWeight:       chatManage.RRFVectorWeight,
-						SkipContextEnrichment: true,
+						QueryText:               queryText,
+						KeywordQueryText:        keywordQueryText,
+						QueryEmbedding:          queryEmbedding,
+						AdditionalVectorQueries: additionalVectorQueries,
+						KnowledgeBaseIDs:        fullKBIDs,
+						TagIDs:                  fullTagIDs,
+						VectorThreshold:         chatManage.VectorThreshold,
+						KeywordThreshold:        chatManage.KeywordThreshold,
+						MatchCount:              fusionBudget,
+						VectorMatchCount:        vectorBudget,
+						RerankCandidateCount:    chatManage.RerankCandidateTopK,
+						KeywordMatchCount:       keywordBudget,
+						DisableVectorMatch:      vectorBudget == 0,
+						DisableKeywordsMatch:    keywordBudget == 0,
+						RRFVectorWeight:         chatManage.RRFVectorWeight,
+						SkipContextEnrichment:   true,
 					}
 					res, err := p.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], params)
 					if err != nil {
@@ -694,7 +712,7 @@ func (p *PluginSearch) searchByTargets(
 						return
 					}
 					defer limiter.Release()
-					p.searchSingleTarget(ctx, chatManage, t, queryText, queryEmbedding, taskCount, index, directBudget, &mu, &results)
+					p.searchSingleTarget(ctx, chatManage, t, queryText, queryEmbedding, additionalVectorQueries, taskCount, index, directBudget, &mu, &results)
 				}(target, budgetIndex)
 			}
 
@@ -874,6 +892,7 @@ func (p *PluginSearch) searchSingleTarget(
 	t *types.SearchTarget,
 	queryText string,
 	queryEmbedding []float32,
+	additionalVectorQueries []types.VectorQuery,
 	taskCount, taskIndex int,
 	directBudget *directLoadBudget,
 	mu *sync.Mutex,
@@ -919,19 +938,20 @@ func (p *PluginSearch) searchSingleTarget(
 		return
 	}
 	params := types.SearchParams{
-		QueryText:             queryText,
-		KeywordQueryText:      keywordQueryText,
-		QueryEmbedding:        queryEmbedding,
-		VectorThreshold:       chatManage.VectorThreshold,
-		KeywordThreshold:      chatManage.KeywordThreshold,
-		MatchCount:            fusionBudget,
-		VectorMatchCount:      vectorBudget,
-		KeywordMatchCount:     keywordBudget,
-		RerankCandidateCount:  chatManage.RerankCandidateTopK,
-		RRFVectorWeight:       chatManage.RRFVectorWeight,
-		DisableVectorMatch:    vectorBudget == 0,
-		DisableKeywordsMatch:  keywordBudget == 0,
-		SkipContextEnrichment: true,
+		QueryText:               queryText,
+		KeywordQueryText:        keywordQueryText,
+		QueryEmbedding:          queryEmbedding,
+		AdditionalVectorQueries: additionalVectorQueries,
+		VectorThreshold:         chatManage.VectorThreshold,
+		KeywordThreshold:        chatManage.KeywordThreshold,
+		MatchCount:              fusionBudget,
+		VectorMatchCount:        vectorBudget,
+		KeywordMatchCount:       keywordBudget,
+		RerankCandidateCount:    chatManage.RerankCandidateTopK,
+		RRFVectorWeight:         chatManage.RRFVectorWeight,
+		DisableVectorMatch:      vectorBudget == 0,
+		DisableKeywordsMatch:    keywordBudget == 0,
+		SkipContextEnrichment:   true,
 	}
 	params.TagIDs = t.TagIDs
 	if t.Type == types.SearchTargetTypeKnowledge {

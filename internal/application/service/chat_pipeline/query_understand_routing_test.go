@@ -252,6 +252,49 @@ func TestQueryUnderstandKeepsOriginalQueryForKeywordRetrieval(t *testing.T) {
 	}
 }
 
+func TestAuthoritativeRetrievalQueryKeepsOriginalAsPrimary(t *testing.T) {
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{Query: "列出具备该资格的人员"},
+		PipelineState: types.PipelineState{
+			RewriteQuery:    "列出某部门具备该资格的人员",
+			RoutingDecision: &types.RoutingDecision{Classification: types.QuestionComplexity{Subtype: types.SubtypeExplicitFact}},
+		},
+	}
+	if got := authoritativeRetrievalQuery(manage); got != manage.Query {
+		t.Fatalf("authoritative query = %q, want original %q", got, manage.Query)
+	}
+	if got := supplementalRewriteQuery(manage); got != manage.RewriteQuery {
+		t.Fatalf("supplemental query = %q, want rewrite %q", got, manage.RewriteQuery)
+	}
+}
+
+func TestAuthoritativeRetrievalQueryDoesNotDuplicateEquivalentRewrite(t *testing.T) {
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{Query: "公司有哪些证书？"},
+		PipelineState:   types.PipelineState{RewriteQuery: "公司有哪些证书？"},
+	}
+	if got := authoritativeRetrievalQuery(manage); got != manage.Query {
+		t.Fatalf("authoritative query = %q, want a single original query %q", got, manage.Query)
+	}
+	if got := supplementalRewriteQuery(manage); got != "" {
+		t.Fatalf("equivalent rewrite unexpectedly produced supplemental query %q", got)
+	}
+}
+
+func TestAuthoritativeRetrievalQueryFallsBackForImageOnlyRequest(t *testing.T) {
+	manage := &types.ChatManage{PipelineState: types.PipelineState{RewriteQuery: "图片中的设备型号"}}
+	if got := authoritativeRetrievalQuery(manage); got != manage.RewriteQuery {
+		t.Fatalf("authoritative query = %q, want rewrite %q", got, manage.RewriteQuery)
+	}
+}
+
+func TestRoutingChatOptionsAreDeterministic(t *testing.T) {
+	thinking := false
+	if got := routingChatOptions(&thinking, 200).Temperature; got != 0 {
+		t.Fatalf("routing temperature = %v, want 0", got)
+	}
+}
+
 func TestQueryUnderstandPlainTextFallbackUpdatesKeywordQuery(t *testing.T) {
 	manage := &types.ChatManage{}
 	(&PluginQueryUnderstand{}).parseOutput(manage, "精简后的检索词")

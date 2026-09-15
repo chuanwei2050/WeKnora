@@ -246,6 +246,19 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 
 	// Separate and fuse retrieval results
 	vectorResults, keywordResults := classifyRetrievalResults(ctx, retrieveResults)
+	// Retriever indexes are external boundaries and may temporarily contain stale
+	// metadata (for example after a folder search switch changes). Never trust an
+	// engine-side filter as the final authorization decision: enforce the complete
+	// request scope again before fusion, reranking, or reference generation.
+	vectorResults = filterRetrievedIndexesByScope(vectorResults, searchKBIDs, params.KnowledgeIDs, params.TagIDs)
+	keywordResults = filterRetrievedIndexesByScope(keywordResults, searchKBIDs, params.KnowledgeIDs, params.TagIDs)
+	vectorRecallSaturated := len(vectorResults) >= vectorMatchCount
+	if len(params.AdditionalVectorQueries) > 0 {
+		// Merge independently ranked vector-query lists by rank, not raw model
+		// score. This prevents either wording from monopolizing the vector channel.
+		vectorResults = fuseVectorRetrievalLists(retrieveResults)
+		vectorResults = filterRetrievedIndexesByScope(vectorResults, searchKBIDs, params.KnowledgeIDs, params.TagIDs)
+	}
 	if len(vectorResults) == 0 && len(keywordResults) == 0 {
 		logger.Info(ctx, "No search results found")
 		return nil, nil
@@ -268,7 +281,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 
 	// FAQ-specific post-processing: iterative retrieval or negative question filtering
 	deduplicatedChunks = s.applyFAQPostProcessing(
-		ctx, kb, deduplicatedChunks, vectorResults, retrieveEngine, retrieveParams, params, vectorMatchCount,
+		ctx, kb, deduplicatedChunks, vectorResults, retrieveEngine, retrieveParams, params, vectorMatchCount, vectorRecallSaturated,
 	)
 
 	// Limit to MatchCount
@@ -280,6 +293,10 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	// Hydration above replaces index metadata with authoritative database rows.
+	// Enforce the same scope once more so stale index tag metadata cannot leak a
+	// document from a folder whose search switch has been disabled.
+	results = filterSearchResultsByScope(results, searchKBIDs, params.KnowledgeIDs, params.TagIDs)
 	markKeywordLeader(results, keywordResults)
 	return results, nil
 }
@@ -352,23 +369,37 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 			logger.Infof(ctx, "Query embedding generated successfully, embedding vector length: %d", len(queryEmbedding))
 		}
 
-		vectorParams := types.RetrieveParams{
-			Query:            params.QueryText,
-			Embedding:        queryEmbedding,
-			KnowledgeBaseIDs: searchKBIDs,
-			TopK:             vectorMatchCount,
-			Threshold:        params.VectorThreshold,
-			RetrieverType:    types.VectorRetrieverType,
-			KnowledgeIDs:     vectorKnowledgeIDs,
-			TagIDs:           params.TagIDs,
+		vectorQueries := make([]types.VectorQuery, 0, 1+len(params.AdditionalVectorQueries))
+		vectorQueries = append(vectorQueries, types.VectorQuery{Text: params.QueryText, Embedding: queryEmbedding})
+		for _, query := range params.AdditionalVectorQueries {
+			if strings.TrimSpace(query.Text) == "" {
+				continue
+			}
+			if len(query.Embedding) == 0 {
+				embedded, embedErr := s.GetQueryEmbedding(ctx, kb.ID, query.Text)
+				if embedErr != nil {
+					logger.Warnf(ctx, "Skipping additional vector query after embedding failure: %v", embedErr)
+					continue
+				}
+				query.Embedding = embedded
+			}
+			vectorQueries = append(vectorQueries, query)
 		}
-
-		// For FAQ knowledge base, use FAQ index
-		if kb.Type == types.KnowledgeBaseTypeFAQ {
-			vectorParams.KnowledgeType = types.KnowledgeTypeFAQ
+		for index, query := range vectorQueries {
+			queryBudget := splitVectorQueryBudget(vectorMatchCount, len(vectorQueries), index)
+			if queryBudget == 0 {
+				continue
+			}
+			vectorParams := types.RetrieveParams{
+				Query: query.Text, Embedding: query.Embedding, KnowledgeBaseIDs: searchKBIDs,
+				TopK: queryBudget, Threshold: params.VectorThreshold,
+				RetrieverType: types.VectorRetrieverType, KnowledgeIDs: vectorKnowledgeIDs, TagIDs: params.TagIDs,
+			}
+			if kb.Type == types.KnowledgeBaseTypeFAQ {
+				vectorParams.KnowledgeType = types.KnowledgeTypeFAQ
+			}
+			retrieveParams = append(retrieveParams, vectorParams)
 		}
-
-		retrieveParams = append(retrieveParams, vectorParams)
 		logger.Info(ctx, "Vector retrieval parameters setup completed")
 	}
 
@@ -393,6 +424,10 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	}
 
 	return retrieveParams, nil
+}
+
+func splitVectorQueryBudget(total, queryCount, index int) int {
+	return searchutil.SplitBudget(total, queryCount, index)
 }
 
 func (s *knowledgeBaseService) compatibleVectorKnowledgeIDs(

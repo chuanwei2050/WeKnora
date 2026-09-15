@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"slices"
 
@@ -26,6 +27,47 @@ func classifyRetrievalResults(ctx context.Context, retrieveResults []*types.Retr
 		}
 	}
 	return
+}
+
+// fuseVectorRetrievalLists combines multiple independently ranked vector
+// queries using reciprocal rank. It is used only for multi-query vector recall;
+// the keyword/ES result lists are deliberately excluded.
+func fuseVectorRetrievalLists(retrieveResults []*types.RetrieveResult) []*types.IndexWithScore {
+	const rankOffset = 60
+	byChunk := make(map[string]*types.IndexWithScore)
+	scores := make(map[string]float64)
+	for _, retrieval := range retrieveResults {
+		if retrieval == nil || retrieval.RetrieverType != types.VectorRetrieverType {
+			continue
+		}
+		seen := make(map[string]struct{}, len(retrieval.Results))
+		for index, result := range retrieval.Results {
+			if result == nil {
+				continue
+			}
+			if _, exists := seen[result.ChunkID]; exists {
+				continue
+			}
+			seen[result.ChunkID] = struct{}{}
+			scores[result.ChunkID] += 1 / float64(rankOffset+index+1)
+			if _, exists := byChunk[result.ChunkID]; !exists {
+				byChunk[result.ChunkID] = result
+			}
+		}
+	}
+	merged := make([]*types.IndexWithScore, 0, len(byChunk))
+	for chunkID, result := range byChunk {
+		result.Score = scores[chunkID]
+		result.ScoreDomain = types.RetrievalScoreDomainRRF
+		merged = append(merged, result)
+	}
+	slices.SortFunc(merged, func(a, b *types.IndexWithScore) int {
+		if byScore := sortByScoreDesc(a, b); byScore != 0 {
+			return byScore
+		}
+		return strings.Compare(a.ChunkID, b.ChunkID)
+	})
+	return merged
 }
 
 // fuseOrDeduplicate either fuses vector+keyword results via RRF or deduplicates vector-only results.

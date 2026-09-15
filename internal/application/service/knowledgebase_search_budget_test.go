@@ -32,3 +32,15 @@ func TestResolveRetrievalMatchCountsKeepsDefaultsAndCap(t *testing.T) {
 		t.Fatalf("capped retrieval counts = %d/%d, want 500/500", vector, keyword)
 	}
 }
+
+func TestVectorQueriesShareConfiguredRecallBudget(t *testing.T) {
+	total := 51
+	original := splitVectorQueryBudget(total, 2, 0)
+	rewrite := splitVectorQueryBudget(total, 2, 1)
+	if original+rewrite != total {
+		t.Fatalf("split vector budgets sum to %d, want %d", original+rewrite, total)
+	}
+	if original < rewrite {
+		t.Fatalf("odd remainder should stay with original query: original=%d rewrite=%d", original, rewrite)
+	}
+}

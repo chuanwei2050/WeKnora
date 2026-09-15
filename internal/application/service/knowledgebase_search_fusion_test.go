@@ -7,6 +7,25 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+func TestFuseVectorRetrievalListsUsesRankAcrossQueries(t *testing.T) {
+	originalLeader := &types.IndexWithScore{ChunkID: "original", Score: 0.7}
+	rewriteLeader := &types.IndexWithScore{ChunkID: "rewrite", Score: 0.99}
+	shared := &types.IndexWithScore{ChunkID: "shared", Score: 0.8}
+	results := []*types.RetrieveResult{
+		{RetrieverType: types.VectorRetrieverType, Results: []*types.IndexWithScore{originalLeader, shared}},
+		{RetrieverType: types.VectorRetrieverType, Results: []*types.IndexWithScore{rewriteLeader, shared}},
+		{RetrieverType: types.KeywordsRetrieverType, Results: []*types.IndexWithScore{{ChunkID: "keyword"}}},
+	}
+
+	got := fuseVectorRetrievalLists(results)
+	if len(got) != 3 || got[0].ChunkID != "shared" {
+		t.Fatalf("unexpected multi-query vector fusion: %+v", got)
+	}
+	if got[1].ChunkID != "original" || got[2].ChunkID != "rewrite" {
+		t.Fatalf("raw similarity incorrectly overrode query rank: %+v", got)
+	}
+}
+
 func TestPreserveRetrieverLeadersKeepsKeywordOnlyExactMatch(t *testing.T) {
 	vectorResults := make([]*types.IndexWithScore, 30)
 	keywordResults := make([]*types.IndexWithScore, 30)

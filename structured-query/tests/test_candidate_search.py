@@ -57,6 +57,24 @@ def test_real_value_can_recall_a_table_without_a_table_name_match():
     assert ranked[0]["table_id"] == "detail"
 
 
+def test_strong_stored_value_outranks_a_generic_file_title_match():
+    ranked = rank_tables_with_profile_evidence(
+        [
+            {"kind": "table", "table_id": "topic", "score": 1.6},
+            {"kind": "table", "table_id": "records", "score": .8},
+        ],
+        [],
+        [
+            {
+                "kind": "value", "table_id": "records", "column_id": "field",
+                "score": .17, "lexical_score": 27,
+            },
+        ],
+    )
+
+    assert ranked[0]["table_id"] == "records"
+
+
 def test_value_evidence_is_bounded_per_column():
     hits = [
         {"column_id": "dominant", "score": 1 - index / 100} for index in range(10)

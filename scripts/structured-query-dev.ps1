@@ -59,7 +59,7 @@ function Wait-ForHttp([string]$Url, [int]$TimeoutSeconds) {
 }
 
 if ($Action -eq 'stop') {
-    Stop-ManagedProcess '结构化查询 worker' $workerPidFile 'structured_query worker'
+    Stop-ManagedProcess '结构化查询 worker' $workerPidFile 'watchfiles.*structured_query\.__main__\.main'
     Stop-ManagedProcess '结构化查询 API' $apiPidFile 'structured_query.api:app'
     exit 0
 }
@@ -75,7 +75,7 @@ foreach ($name in $required) {
 }
 
 New-Item -ItemType Directory -Force -Path $runtimeDir, $logDir | Out-Null
-Stop-ManagedProcess '结构化查询 worker' $workerPidFile 'structured_query worker'
+Stop-ManagedProcess '结构化查询 worker' $workerPidFile 'watchfiles.*structured_query\.__main__\.main'
 Stop-ManagedProcess '结构化查询 API' $apiPidFile 'structured_query.api:app'
 
 $dbHost = if ($config['DB_HOST'] -and $config['DB_HOST'] -notin @('localhost', 'postgres', 'WeKnora-postgres-dev')) { $config['DB_HOST'] } else { '127.0.0.1' }
@@ -90,6 +90,7 @@ $serviceKey = $config['WEKNORA_STRUCTURED_QUERY_API_KEY']
 
 $processEnv = @{
     PYTHONPATH = (Join-Path $projectRoot 'structured-query\src')
+    PATH = ((Join-Path $projectRoot 'structured-query\.venv312\Scripts') + [IO.Path]::PathSeparator + $env:PATH)
     STRUCTURED_QUERY_POSTGRES_DSN = "postgresql+psycopg://${escapedUser}:${escapedPassword}@${dbHost}:${dbPort}/${escapedDatabase}"
     STRUCTURED_QUERY_REDIS_URL = "redis://${redisAuth}127.0.0.1:6379/${redisDb}"
     STRUCTURED_QUERY_S3_ENDPOINT = 'http://127.0.0.1:9000'
@@ -109,7 +110,11 @@ $common = @{
     Environment = $processEnv
     PassThru = $true
 }
-$api = Start-Process @common -ArgumentList @('-m', 'uvicorn', 'structured_query.api:app', '--host', '127.0.0.1', '--port', '8090') `
+$api = Start-Process @common -ArgumentList @(
+    '-m', 'uvicorn', 'structured_query.api:app',
+    '--host', '127.0.0.1', '--port', '8090',
+    '--reload', '--reload-dir', 'src'
+) `
     -RedirectStandardOutput (Join-Path $logDir 'structured-query-api.log') `
     -RedirectStandardError (Join-Path $logDir 'structured-query-api-error.log')
 [IO.File]::WriteAllText($apiPidFile, [string]$api.Id)
@@ -125,7 +130,10 @@ if ($api.HasExited) {
     throw "结构化查询 API 进程已退出（端口 8090 可能被其他进程占用），请查看 $logDir\structured-query-api-error.log"
 }
 
-$worker = Start-Process @common -ArgumentList @('-m', 'structured_query', 'worker') `
+$worker = Start-Process @common -ArgumentList @(
+    '-m', 'watchfiles', '--filter', 'python', '--target-type', 'function',
+    '--args', 'worker', 'structured_query.__main__.main', 'src'
+) `
     -RedirectStandardOutput (Join-Path $logDir 'structured-query-worker.log') `
     -RedirectStandardError (Join-Path $logDir 'structured-query-worker-error.log')
 [IO.File]::WriteAllText($workerPidFile, [string]$worker.Id)
@@ -135,5 +143,5 @@ if ($worker.HasExited) {
     throw "结构化查询 worker 启动失败，请查看 $logDir\structured-query-worker-error.log"
 }
 
-Write-Host '结构化查询 API 已就绪: http://127.0.0.1:8090'
-Write-Host "结构化查询 worker 已启动 (PID: $($worker.Id))"
+Write-Host '结构化查询 API 已就绪并监听源码变更: http://127.0.0.1:8090'
+Write-Host "结构化查询 worker 已启动并监听源码变更 (PID: $($worker.Id))"

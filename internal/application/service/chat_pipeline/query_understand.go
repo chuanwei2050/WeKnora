@@ -368,7 +368,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 
 func routingChatOptions(thinking *bool, maxTokens int) *chat.ChatOptions {
 	return &chat.ChatOptions{
-		Temperature:         0.3,
+		Temperature:         0,
 		MaxCompletionTokens: maxTokens,
 		Thinking:            thinking,
 		Format:              utils.GenerateSchema[queryUnderstandOutput](),
@@ -610,6 +610,32 @@ func keywordRetrievalQuery(chatManage *types.ChatManage) string {
 		return query
 	}
 	return strings.TrimSpace(chatManage.RewriteQuery)
+}
+
+// authoritativeRetrievalQuery keeps the primary vector query and every
+// Elasticsearch retrieval path anchored to the user's wording.
+func authoritativeRetrievalQuery(chatManage *types.ChatManage) string {
+	if chatManage == nil {
+		return ""
+	}
+	original := strings.TrimSpace(chatManage.Query)
+	rewritten := strings.TrimSpace(chatManage.RewriteQuery)
+	if original == "" {
+		return rewritten
+	}
+	return original
+}
+
+func supplementalRewriteQuery(chatManage *types.ChatManage) string {
+	if chatManage == nil {
+		return ""
+	}
+	original := strings.TrimSpace(chatManage.Query)
+	rewritten := strings.TrimSpace(chatManage.RewriteQuery)
+	if rewritten == "" || rewritten == original || original == "" {
+		return ""
+	}
+	return rewritten
 }
 
 // parseStrictRoutingOutput accepts only a single JSON object with validated

@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/retrievalkernel"
@@ -109,6 +110,19 @@ func TestExpandQueriesCapsVariants(t *testing.T) {
 	}}
 	if got := plugin.expandQueries(t.Context(), manage); len(got) > 3 {
 		t.Fatalf("expansion variants exceeded request budget: %v", got)
+	}
+}
+
+func TestExpandQueriesUsesOriginalInsteadOfModelRewrite(t *testing.T) {
+	plugin := &PluginSearch{}
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{Query: "公司有什么证书"},
+		PipelineState:   types.PipelineState{RewriteQuery: "某部门的软件测试证书"},
+	}
+	for _, query := range plugin.expandQueries(t.Context(), manage) {
+		if strings.Contains(query, "某部门") || strings.Contains(query, "软件测试") {
+			t.Fatalf("ES expansion leaked model rewrite into query: %q", query)
+		}
 	}
 }
 

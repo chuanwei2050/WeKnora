@@ -68,7 +68,7 @@ func TestExplicitFileIndexFailureUsesBoundedDirectFallback(t *testing.T) {
 	target := &types.SearchTarget{Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb", KnowledgeIDs: []string{"knowledge"}}
 	var mu sync.Mutex
 	var results []*types.SearchResult
-	plugin.searchSingleTarget(context.Background(), manage, target, "question", nil, 1, 0, nil, &mu, &results)
+	plugin.searchSingleTarget(context.Background(), manage, target, "question", nil, nil, 1, 0, nil, &mu, &results)
 	if len(results) != 1 || results[0].Metadata["direct_load_reason"] != "index_unavailable" {
 		t.Fatalf("index failure did not use bounded fallback: %+v", results)
 	}
@@ -107,12 +107,36 @@ func TestExplicitFileNormalQuestionUsesScopedHybridSearch(t *testing.T) {
 	var mu sync.Mutex
 	var results []*types.SearchResult
 
-	plugin.searchSingleTarget(context.Background(), manage, target, "question", []float32{1}, 1, 0, nil, &mu, &results)
+	plugin.searchSingleTarget(context.Background(), manage, target, "question", []float32{1}, nil, 1, 0, nil, &mu, &results)
 	if kb.calls != 1 || chunks.calls != 0 || len(results) != 1 {
 		t.Fatalf("normal explicit-file search used wrong path: hybrid=%d direct=%d results=%+v", kb.calls, chunks.calls, results)
 	}
 	if len(kb.params.KnowledgeIDs) != 1 || kb.params.KnowledgeIDs[0] != "knowledge" {
 		t.Fatalf("hybrid search was not scoped to the explicit file: %+v", kb.params.KnowledgeIDs)
+	}
+}
+
+func TestAdditionalVectorQueryKeepsExistingSearchBudgets(t *testing.T) {
+	kb := &explicitFileKBService{}
+	plugin := &PluginSearch{knowledgeBaseService: kb, knowledgeService: explicitFileKnowledgeService{}}
+	manage := &types.ChatManage{PipelineRequest: types.PipelineRequest{
+		EmbeddingTopK: 30, VectorRecallTopK: 50, KeywordRecallTopK: 50, RerankCandidateTopK: 20,
+	}}
+	target := &types.SearchTarget{Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb", KnowledgeIDs: []string{"knowledge"}}
+	rewrite := []types.VectorQuery{{Text: "改写问题", Embedding: []float32{2}}}
+	var mu sync.Mutex
+	var results []*types.SearchResult
+
+	plugin.searchSingleTarget(context.Background(), manage, target, "原问题", []float32{1}, rewrite, 1, 0, nil, &mu, &results)
+
+	if kb.params.MatchCount != 30 || kb.params.VectorMatchCount != 50 || kb.params.KeywordMatchCount != 50 || kb.params.RerankCandidateCount != 20 {
+		t.Fatalf("adding a vector query changed search budgets: %+v", kb.params)
+	}
+	if kb.params.KeywordQueryText != "原问题" {
+		t.Fatalf("keyword/ES query changed to %q", kb.params.KeywordQueryText)
+	}
+	if len(kb.params.AdditionalVectorQueries) != 1 || kb.params.AdditionalVectorQueries[0].Text != "改写问题" {
+		t.Fatalf("additional vector query was not passed through: %+v", kb.params.AdditionalVectorQueries)
 	}
 }
 
@@ -125,7 +149,7 @@ func TestExplicitFileNonIndexFailureDoesNotDirectLoad(t *testing.T) {
 	var mu sync.Mutex
 	var results []*types.SearchResult
 
-	plugin.searchSingleTarget(context.Background(), manage, target, "question", nil, 1, 0, nil, &mu, &results)
+	plugin.searchSingleTarget(context.Background(), manage, target, "question", nil, nil, 1, 0, nil, &mu, &results)
 	if len(results) != 0 || chunks.calls != 0 {
 		t.Fatalf("non-index failure must fail closed: direct=%d results=%+v", chunks.calls, results)
 	}
@@ -166,7 +190,7 @@ func TestExplicitFileSummarizeUsesBoundedDirectContextWithoutPerfectScore(t *tes
 	var mu sync.Mutex
 	var results []*types.SearchResult
 
-	plugin.searchSingleTarget(context.Background(), manage, target, "summarize", nil, 1, 0, nil, &mu, &results)
+	plugin.searchSingleTarget(context.Background(), manage, target, "summarize", nil, nil, 1, 0, nil, &mu, &results)
 	if kb.calls != 0 || chunks.calls != 1 || len(results) != 1 {
 		t.Fatalf("summarize used wrong path: hybrid=%d direct=%d results=%+v", kb.calls, chunks.calls, results)
 	}
@@ -188,9 +212,9 @@ func TestExplicitFilesShareRequestDirectLoadBudget(t *testing.T) {
 	var results []*types.SearchResult
 
 	budget := newDirectLoadBudget()
-	plugin.searchSingleTarget(context.Background(), manage, target, "summarize", nil, 2, 0, budget, &mu, &results)
+	plugin.searchSingleTarget(context.Background(), manage, target, "summarize", nil, nil, 2, 0, budget, &mu, &results)
 	chunkService.chunks = explicitChunks(20)
-	plugin.searchSingleTarget(context.Background(), manage, target, "summarize", nil, 2, 1, budget, &mu, &results)
+	plugin.searchSingleTarget(context.Background(), manage, target, "summarize", nil, nil, 2, 1, budget, &mu, &results)
 
 	if kb.calls != 1 {
 		t.Fatalf("over-budget file was not searched: hybrid=%d", kb.calls)
@@ -210,9 +234,9 @@ func TestExplicitFilesReuseUnusedRequestBudget(t *testing.T) {
 	var mu sync.Mutex
 	var results []*types.SearchResult
 
-	plugin.searchSingleTarget(context.Background(), manage, target, "summarize", nil, 2, 0, budget, &mu, &results)
+	plugin.searchSingleTarget(context.Background(), manage, target, "summarize", nil, nil, 2, 0, budget, &mu, &results)
 	chunkService.chunks = explicitChunks(10)
-	plugin.searchSingleTarget(context.Background(), manage, target, "summarize", nil, 2, 1, budget, &mu, &results)
+	plugin.searchSingleTarget(context.Background(), manage, target, "summarize", nil, nil, 2, 1, budget, &mu, &results)
 
 	if kb.calls != 0 || budget.chunks != 50 || len(results) != 50 {
 		t.Fatalf("unused request budget was not reused: hybrid=%d budget=%d results=%d", kb.calls, budget.chunks, len(results))

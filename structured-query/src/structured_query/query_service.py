@@ -90,6 +90,7 @@ def execute_with_one_repair(
     verify_columns: set[str] | None = None,
     literal_support_probe: Callable[[str, str], bool] | None = None,
     repair_schema_context: str | None = None,
+    reconsider_none: bool = False,
 ) -> QueryAttemptOutcome:
     attempts: list[str] = []
     error_codes: list[str] = []
@@ -116,6 +117,17 @@ def execute_with_one_repair(
             continue
         model_seconds += perf_counter() - stage_started
         if generation.route == "none":
+            if attempt_number == 0 and reconsider_none:
+                error_codes.append("route_none_with_relevant_profiles")
+                repair = (
+                    "error_code=route_none_with_relevant_profiles\n"
+                    "候选表、字段或真实值与问题存在检索关联。请使用完整 Schema 重新判断"
+                    "结构化记录能否回答。候选值相关不能替代主体与记录粒度一致性："
+                    "若问题要求统计、列出或筛选表中记录，且完整 Schema 有对应字段或值，"
+                    "应返回 route=sql；若仅在下属明细中命中关键词，却要判断上级主体的"
+                    "整体事实，应返回 route=none。"
+                )
+                continue
             return QueryAttemptOutcome(
                 "none", "", attempts, error_codes, attempt_number + 1, None,
                 int(model_seconds * 1000), int(validation_seconds * 1000), int(execution_seconds * 1000),
@@ -231,6 +243,67 @@ def _match_profile_metadata_scope(question: str, datasets: list[Dataset]) -> tup
     return [item[0] for item in candidates], [item[2] for item in candidates]
 
 
+def _question_without_resolved_scope(question: str, scope_labels: list[str]) -> str:
+    """Remove a uniquely resolved leading dataset locator from the model question."""
+    if not scope_labels:
+        return question
+    for match in re.finditer(r"[里中内]", question):
+        prefix = question[: match.start()]
+        suffix = question[match.end() :].lstrip("的，,：: ")
+        if not suffix:
+            continue
+        normalized_prefix = _normalize_scope_text(prefix)
+        locator_ending = re.search(r"(?:清单|名单|表格|文件|数据集|数据库)$", normalized_prefix)
+        if locator_ending and any(
+            len(_longest_shared_segment(normalized_prefix, _normalize_scope_text(label))) >= 4
+            for label in scope_labels
+        ):
+            return suffix
+    return question
+
+
+def _select_current_broad_tables(
+    tables: list[DataTable],
+    datasets_by_version: dict[UUID, Dataset],
+) -> dict[tuple[str, ...], DataTable]:
+    """Choose a current full-size snapshot for each equivalent schema.
+
+    Row count remains the coverage signal, but tiny row-count changes between
+    snapshots must not make an older file outrank a newly activated replacement.
+    Materially smaller departmental subsets are still excluded.
+    """
+    tables_by_signature: dict[tuple[str, ...], list[DataTable]] = {}
+    for table in tables:
+        signature = tuple(
+            column.original_name
+            for column in sorted(table.columns, key=lambda item: item.ordinal)
+        )
+        tables_by_signature.setdefault(signature, []).append(table)
+
+    selected: dict[tuple[str, ...], DataTable] = {}
+    for signature, equivalents in tables_by_signature.items():
+        largest_row_count = max(table.row_count for table in equivalents)
+        coverage_floor = largest_row_count - max(1, (largest_row_count + 99) // 100)
+        full_size = [table for table in equivalents if table.row_count >= coverage_floor]
+
+        def activation_key(table: DataTable) -> tuple[datetime, datetime, str]:
+            dataset = datasets_by_version[table.version_id]
+            version = next(
+                item for item in dataset.versions if item.id == table.version_id
+            )
+            minimum = datetime.min.replace(tzinfo=timezone.utc)
+            activated_at = version.activated_at or minimum
+            created_at = version.created_at or dataset.created_at or minimum
+            if activated_at.tzinfo is None:
+                activated_at = activated_at.replace(tzinfo=timezone.utc)
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            return activated_at, created_at, str(table.id)
+
+        selected[signature] = max(full_size, key=activation_key)
+    return selected
+
+
 def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
     started = perf_counter()
     with session_factory()() as session:
@@ -245,6 +318,9 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
         scoped_datasets, scope_labels = _match_profile_metadata_scope(request.question, datasets)
         if scoped_datasets:
             datasets = scoped_datasets
+        analysis_question = _question_without_resolved_scope(
+            request.question, scope_labels
+        )
         datasets_by_version = {dataset.active_version_id: dataset for dataset in datasets}
         active_versions = [dataset.active_version_id for dataset in datasets if dataset.active_version_id]
         if not active_versions:
@@ -255,7 +331,7 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
             tenant_id=tenant_id,
             namespace=request.namespace,
             version_ids=active_versions,
-            question=request.question,
+            question=analysis_question,
         )
         table_hits = candidates.table_hits
         column_hits = candidates.column_hits
@@ -300,14 +376,9 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
                 .options(selectinload(DataTable.columns))
                 .where(DataTable.version_id.in_(active_versions))
             ))
-            broadest_by_signature = {}
-            for table in scope_tables:
-                signature = tuple(
-                    column.original_name for column in sorted(table.columns, key=lambda item: item.ordinal)
-                )
-                current = broadest_by_signature.get(signature)
-                if current is None or table.row_count > current.row_count:
-                    broadest_by_signature[signature] = table
+            broadest_by_signature = _select_current_broad_tables(
+                scope_tables, datasets_by_version
+            )
             selected_tables = [
                 broadest_by_signature.get(
                     tuple(column.original_name for column in sorted(table.columns, key=lambda item: item.ordinal)),
@@ -355,10 +426,10 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
             selected_tables,
             datasets_by_version,
             {str(hit["column_id"]) for hit in column_hits if hit.get("column_id")},
-            request.question,
+            analysis_question,
             full_schema_context,
         )
-        evidence_values = _compact_evidence_values(value_hits, request.question)
+        evidence_values = _compact_evidence_values(value_hits, analysis_question)
         selected_datasets = [datasets_by_version[table.version_id] for table in selected_tables]
         datasource_ids = {dataset.data_source_id for dataset in selected_datasets}
         source_types = {dataset.source_type for dataset in selected_datasets}
@@ -472,7 +543,7 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
         try:
             outcome = execute_with_one_repair(
                 tenant_id,
-                request.question,
+                analysis_question,
                 schema_context,
                 evidence_values,
                 allowed,
@@ -487,6 +558,10 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
                 verify_columns,
                 probe_literal,
                 full_schema_context,
+                reconsider_none=bool(
+                    (column_hits or value_hits)
+                    and re.search(r"多少|几|统计|数量|人数|列出|名单|哪些|谁|筛选|查找|查询", analysis_question)
+                ),
             )
         except QueryAttemptsFailed as failure:
             failed_at = perf_counter()
@@ -518,7 +593,8 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
             )
             session.add(QueryTrace(
                 tenant_id=tenant_id, namespace=request.namespace,
-                dataset_ids=[], sql_attempts=[], error_codes=[],
+                dataset_ids=[str(item.id) for item in selected_datasets],
+                sql_attempts=[], error_codes=outcome.error_codes,
                 model_calls=outcome.model_calls, timings=timings.model_dump(),
             ))
             session.commit()

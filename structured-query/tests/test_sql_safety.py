@@ -43,6 +43,49 @@ def test_allows_near_duplicate_categories_when_user_names_both():
     assert result.tables == {"people"}
 
 
+def test_rejects_cross_metric_or_leakage_for_separate_counts():
+    sql = """
+        SELECT '软件评测师' AS metric_1, COUNT(*) AS count_1
+        FROM people
+        WHERE certificate ILIKE '%软件评测师%'
+           OR certificate ILIKE '%计算机软件产品检验员%'
+           OR certificate ILIKE '%ISTQB%'
+        UNION ALL
+        SELECT '计算机软件产品检验员' AS metric_2, COUNT(*) AS count_2
+        FROM people WHERE certificate ILIKE '%计算机软件产品检验员%'
+        UNION ALL
+        SELECT 'ISTQB' AS metric_3, COUNT(*) AS count_3
+        FROM people WHERE certificate ILIKE '%ISTQB%'
+    """
+    with pytest.raises(UnsafeSQL) as failure:
+        validate_read_only_sql(
+            sql,
+            {"people"},
+            question_text="具有软件评测师（软考）或计算机软件产品检验员或ISTQB证书分别多少人",
+        )
+    assert failure.value.code == "cross_metric_condition_leakage"
+    assert "每个 UNION 分支" in failure.value.repair_hint
+
+
+def test_allows_independent_union_branches_for_separate_counts():
+    sql = """
+        SELECT '软件评测师' AS metric_1, COUNT(*) AS count_1
+        FROM people WHERE certificate ILIKE '%软件评测师%'
+        UNION ALL
+        SELECT '计算机软件产品检验员' AS metric_2, COUNT(*) AS count_2
+        FROM people WHERE certificate ILIKE '%计算机软件产品检验员%'
+        UNION ALL
+        SELECT 'ISTQB' AS metric_3, COUNT(*) AS count_3
+        FROM people WHERE certificate ILIKE '%ISTQB%'
+    """
+    result = validate_read_only_sql(
+        sql,
+        {"people"},
+        question_text="具有软件评测师（软考）或计算机软件产品检验员或ISTQB证书分别多少人",
+    )
+    assert result.tables == {"people"}
+
+
 @pytest.mark.parametrize(
     "sql,error",
     [

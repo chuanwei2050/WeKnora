@@ -14,11 +14,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${ROOT_DIR}"
 
-# Resolve version
+# Resolve version. VERSION is the release source of truth so a stale Git tag
+# cannot silently rename a formally versioned package.
 if [ -n "${1:-}" ]; then
     VERSION="$1"
-elif command -v git >/dev/null 2>&1; then
-    VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev")
+elif [ -f "VERSION" ]; then
+    VERSION=$(tr -d '\n\r' < VERSION)
 else
     VERSION="dev"
 fi

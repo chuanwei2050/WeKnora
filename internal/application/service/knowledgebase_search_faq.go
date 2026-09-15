@@ -6,6 +6,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"slices"
 )
@@ -22,6 +23,7 @@ func (s *knowledgeBaseService) applyFAQPostProcessing(
 	retrieveParams []types.RetrieveParams,
 	params types.SearchParams,
 	matchCount int,
+	vectorRecallSaturated bool,
 ) []*types.IndexWithScore {
 	if kb.Type != types.KnowledgeBaseTypeFAQ {
 		return chunks
@@ -29,7 +31,7 @@ func (s *knowledgeBaseService) applyFAQPostProcessing(
 
 	// Check if we need iterative retrieval for FAQ with separate indexing
 	// Only use iterative retrieval if we don't have enough unique chunks after first deduplication
-	needsIterativeRetrieval := len(chunks) < params.MatchCount && len(vectorResults) == matchCount
+	needsIterativeRetrieval := len(chunks) < params.MatchCount && vectorRecallSaturated
 	if needsIterativeRetrieval {
 		logger.Info(ctx, "Not enough unique chunks, using iterative retrieval for FAQ")
 		return s.iterativeRetrieveWithDeduplication(
@@ -72,9 +74,19 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 	for i := 0; i < maxIterations; i++ {
 		// Update TopK in retrieve params
 		updatedParams := make([]types.RetrieveParams, len(retrieveParams))
+		vectorParamCount := 0
+		for _, retrieveParam := range retrieveParams {
+			if retrieveParam.RetrieverType == types.VectorRetrieverType {
+				vectorParamCount++
+			}
+		}
+		vectorIndex := 0
 		for j := range retrieveParams {
 			updatedParams[j] = retrieveParams[j]
-			updatedParams[j].TopK = currentTopK
+			if updatedParams[j].RetrieverType == types.VectorRetrieverType {
+				updatedParams[j].TopK = searchutil.SplitBudget(currentTopK, vectorParamCount, vectorIndex)
+				vectorIndex++
+			}
 		}
 
 		// Execute retrieval

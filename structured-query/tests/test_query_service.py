@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -150,6 +151,32 @@ def test_none_route_stops_before_sql_validation_and_execution(monkeypatch):
     assert outcome.sql == ""
 
 
+def test_none_route_is_reconsidered_with_full_schema_when_profiles_are_relevant(monkeypatch):
+    generations = iter([
+        SQLGeneration(route="none", sql=""),
+        SQLGeneration(route="sql", sql="SELECT name FROM people"),
+    ])
+    calls = []
+
+    def generate(*args, **kwargs):
+        calls.append((args, kwargs))
+        return next(generations)
+
+    monkeypatch.setattr(query_service, "generate_sql", generate)
+    outcome = query_service.execute_with_one_repair(
+        "tenant-a", "列出记录", "COMPACT", ["matching value"], {"people"},
+        "postgres", lambda _sql: ExecutionResult(["name"], [["张三"]]),
+        repair_schema_context="FULL", reconsider_none=True,
+    )
+
+    assert outcome.route == "sql"
+    assert outcome.model_calls == 2
+    assert outcome.error_codes == ["route_none_with_relevant_profiles"]
+    assert calls[1][0][2] == "FULL"
+    assert "route_none_with_relevant_profiles" in calls[1][1]["repair"]
+    assert "主体与记录粒度一致性" in calls[1][1]["repair"]
+
+
 def _dataset(file_name, *sheet_names):
     version_id = uuid4()
     version = SimpleNamespace(
@@ -162,6 +189,53 @@ def _dataset(file_name, *sheet_names):
     )
 
 
+def _equivalent_table(row_count, activated_at):
+    version_id = uuid4()
+    table = SimpleNamespace(
+        id=uuid4(), version_id=version_id, row_count=row_count,
+        columns=[SimpleNamespace(original_name="姓名", ordinal=1)],
+    )
+    version = SimpleNamespace(
+        id=version_id, activated_at=activated_at, created_at=activated_at,
+    )
+    dataset = SimpleNamespace(
+        versions=[version], created_at=activated_at,
+    )
+    return table, dataset
+
+
+def test_equivalent_schema_prefers_new_snapshot_when_coverage_is_effectively_equal():
+    old_table, old_dataset = _equivalent_table(
+        294, datetime(2026, 7, 1, tzinfo=timezone.utc)
+    )
+    new_table, new_dataset = _equivalent_table(
+        293, datetime(2026, 9, 1, tzinfo=timezone.utc)
+    )
+
+    selected = query_service._select_current_broad_tables(
+        [old_table, new_table],
+        {old_table.version_id: old_dataset, new_table.version_id: new_dataset},
+    )
+
+    assert selected[("姓名",)] is new_table
+
+
+def test_equivalent_schema_does_not_replace_full_table_with_new_subset():
+    full_table, full_dataset = _equivalent_table(
+        294, datetime(2026, 7, 1, tzinfo=timezone.utc)
+    )
+    subset_table, subset_dataset = _equivalent_table(
+        120, datetime(2026, 9, 1, tzinfo=timezone.utc)
+    )
+
+    selected = query_service._select_current_broad_tables(
+        [full_table, subset_table],
+        {full_table.version_id: full_dataset, subset_table.version_id: subset_dataset},
+    )
+
+    assert selected[("姓名",)] is full_table
+
+
 def test_profile_metadata_scope_resolves_unique_dataset_without_phrase_rules():
     target = _dataset("数科事业部实验室相关人员资质清单202607V3.0.xlsx", "人员资质统计")
     unrelated = _dataset("软件测评相关人员资质清单202607V3.0.xlsx", "人员资质统计")
@@ -172,6 +246,39 @@ def test_profile_metadata_scope_resolves_unique_dataset_without_phrase_rules():
 
     assert selected == [target]
     assert labels == [target.original_file_name]
+
+
+def test_resolved_dataset_locator_is_removed_from_model_question():
+    question = "数科事业部人力资源清单里有多少个硕士学历的人员"
+
+    result = query_service._question_without_resolved_scope(
+        question,
+        ["数科事业部实验室相关人员资质清单202607V3.0.xlsx"],
+    )
+
+    assert result == "有多少个硕士学历的人员"
+
+
+def test_unmatched_locator_is_preserved():
+    question = "其他部门清单里有多少个硕士学历的人员"
+
+    result = query_service._question_without_resolved_scope(
+        question,
+        ["数科事业部实验室相关人员资质清单202607V3.0.xlsx"],
+    )
+
+    assert result == question
+
+
+def test_scope_like_prefix_with_real_filter_is_preserved():
+    question = "数科事业部硕士人员中有多少人"
+
+    result = query_service._question_without_resolved_scope(
+        question,
+        ["数科事业部实验室相关人员资质清单202607V3.0.xlsx"],
+    )
+
+    assert result == question
 
 
 def test_profile_metadata_scope_does_not_treat_shared_topic_as_file_scope():

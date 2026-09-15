@@ -35,14 +35,22 @@ def generate_sql(
     scope_context = (
         "\n【Profile 元数据命中的数据集范围】"
         + json.dumps(dataset_scope, ensure_ascii=False)
-        + "（只用于选文件/工作表，禁止转成 WHERE 条件）"
+        + "（该范围已由系统根据持久化元数据唯一解析，视为选表的权威结果；"
+        "只用于选文件/工作表，禁止转成 WHERE 条件，也不得因用户的范围简称与"
+        "文件全名不完全一致而返回 route=none。请仅判断问题要求的记录操作能否由 Schema 回答。）"
         if dataset_scope
         else ""
     )
     prompt = f"""你是结构化查询路由器和 {dialect} Text-to-SQL 生成器。
 先判断问题是否需要对结构化记录进行明细检索、筛选、排序、分组、比较、计算或聚合，并且给出的 Schema 是否足以回答。
 需要且可回答时返回 route="sql" 和一条只读 SQL；普通叙述性问答、概念解释、闲聊或 Schema 不足时返回 route="none"、sql=""，立即结束结构化链路。
+用户输入可能是关键词、标题式短语或省略句，不要求具备疑问词、谓语或问号。只要语义是在查找、列举、筛选、统计或比较符合条件的记录，就属于结构化操作；不得仅因表达不是完整问句而返回 route="none"。
 只有当给出的 Profile/Schema 证据不足以回答结构化问题时，才返回 route="none"；不要根据问题主题预先排除结构化查询，是否走 SQL 由可用证据和问题所需操作共同决定。
+按以下优先级判断可回答性：
+1. 先核对问题主体与表的记录粒度。结构化表只能证明表中每行所代表实体的属性、明细或聚合结果；Schema 或候选值碰巧出现问题关键词，不代表该表能够证明更高层级主体的整体事实。
+2. 若问题询问某个整体主体的能力、资质、制度、状态或其他事实，而候选表只记录该主体下属的人员、项目、产品、证书或其他明细，主体粒度不一致，必须返回 route="none"。下属记录中出现相关文字，只能证明该下属记录具有相关属性，不能外推为上级主体具有该事实。
+3. 若问题明确要求统计、列出或筛选表中记录，并且 Schema 存在对应字段、真实候选值或可直接计算的列，则属于结构化查询，必须返回 route="sql"；不得因数据集名称与用户简称不完全一致、问题使用字段近义表达或答案需要聚合而返回 route="none"。
+只有 Schema 存在与被询问主体同粒度的记录及明确字段，或问题本身要求查询这些下属明细时，才可返回 route="sql"。
 route="sql" 时只可使用给出的物理表名和物理列名。
 输出列如需别名，只能使用 metric_1、metric_2、name_1 这类 ASCII 别名；禁止中文别名、全角逗号和其他全角 SQL 标点。
 M-Schema 字段格式为“(物理列名:原始语义名, 类型, ...)”：SQL 中必须逐字使用冒号左侧的物理列名；冒号右侧只用于理解，绝不能作为 SQL 标识符。
@@ -69,6 +77,7 @@ SQL 别名必须使用 ASCII 标识符；禁止生成中文别名。多个 SELEC
 【问题】
 {question}{scope_context}{repair_context}
 """
+    policy, query_context = prompt.split("\n【Schema】\n", maxsplit=1)
     try:
         model = get_runtime_model_config(tenant_id).chat
         response = OpenAI(
@@ -82,7 +91,10 @@ SQL 别名必须使用 ASCII 标识符；禁止生成中文别名。多个 SELEC
             max_completion_tokens=get_settings().sql_max_completion_tokens,
             extra_body={"chat_template_kwargs": {"enable_thinking": False}},
             response_format={"type": "json_schema", "json_schema": {"name": "sql_generation", "strict": True, "schema": SQLGeneration.model_json_schema()}},
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": policy},
+                {"role": "user", "content": f"【Schema】\n{query_context}"},
+            ],
         )
     except APITimeoutError as error:
         raise ModelGenerationError("model_timeout", retryable=False) from error

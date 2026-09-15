@@ -142,6 +142,7 @@ def validate_read_only_sql(
             literal_support_probe=literal_support_probe,
         )
     _reject_unrequested_near_duplicate_or(statement, question_text)
+    _reject_cross_metric_or_leakage(statement, question_text)
     return ValidatedSQL(sql=statement.sql(dialect=dialect), tables=frozenset(tables))
 
 
@@ -182,6 +183,57 @@ def _reject_unrequested_near_duplicate_or(
                 "ambiguous_synonym_expansion",
                 "两个近似名称可能属于不同业务类别；结合限定词和 Profile 只保留一个标准值，不得用 OR 扩大口径",
             )
+
+
+def _reject_cross_metric_or_leakage(
+    statement: exp.Expression, question_text: str
+) -> None:
+    """Reject a sibling metric's category leaking into another UNION branch.
+
+    For questions asking for separate counts, models commonly emit one UNION
+    branch per metric.  A failure mode is to put all requested categories in
+    the first branch's OR predicate, thereby labelling the union count as the
+    first metric.  Projection labels give us enough explicit structure to
+    reject that SQL without guessing any business synonym.
+    """
+    if "分别" not in question_text or not isinstance(statement, exp.SetOperation):
+        return
+    selects = list(statement.find_all(exp.Select))
+    if len(selects) < 2:
+        return
+
+    labels_by_select = [_direct_projection_labels(select) for select in selects]
+    all_labels = {label for labels in labels_by_select for label in labels}
+    if len(all_labels) < 2:
+        return
+
+    for select, own_labels in zip(selects, labels_by_select, strict=True):
+        where = select.args.get("where")
+        if where is None or where.find(exp.Or) is None:
+            continue
+        filter_literals = {
+            _normalize_value_text(literal.this)
+            for literal in where.find_all(exp.Literal)
+            if literal.is_string
+        }
+        sibling_labels = all_labels - own_labels
+        if any(
+            label and any(label in literal for literal in filter_literals)
+            for label in sibling_labels
+        ):
+            raise UnsafeSQL(
+                "cross_metric_condition_leakage",
+                "问题要求分别统计；每个 UNION 分支只能使用该分支指标自己的筛选条件，不得把其他指标通过 OR 合并进来",
+            )
+
+
+def _direct_projection_labels(select: exp.Select) -> set[str]:
+    labels: set[str] = set()
+    for projection in select.expressions:
+        expression = projection.this if isinstance(projection, exp.Alias) else projection
+        if isinstance(expression, exp.Literal) and expression.is_string:
+            labels.add(_normalize_value_text(expression.this))
+    return labels
 
 
 def _normalize_value_text(value: str) -> str:
