@@ -173,8 +173,9 @@ def test_none_route_is_reconsidered_with_full_schema_when_profiles_are_relevant(
     assert outcome.model_calls == 2
     assert outcome.error_codes == ["route_none_with_relevant_profiles"]
     assert calls[1][0][2] == "FULL"
-    assert "route_none_with_relevant_profiles" in calls[1][1]["repair"]
-    assert "主体与记录粒度一致性" in calls[1][1]["repair"]
+    assert calls[1][1]["force_sql"] is True
+    assert calls[1][1]["repair"] == "error_code=route_none_with_relevant_profiles"
+    assert calls[0][1].get("force_sql") is False
 
 
 def _dataset(file_name, *sheet_names):

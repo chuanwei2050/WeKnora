@@ -48,32 +48,59 @@ func (c Client) Query(ctx context.Context, tenantID uint64, request Request) (*R
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, strings.TrimRight(c.BaseURL, "/")+"/v1/query", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", c.APIKey)
-	req.Header.Set("X-Tenant-ID", fmt.Sprint(tenantID))
 	httpClient := c.HTTP
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, strings.TrimRight(c.BaseURL, "/")+"/v1/query", bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-API-Key", c.APIKey)
+		req.Header.Set("X-Tenant-ID", fmt.Sprint(tenantID))
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			if attempt == 0 && requestCtx.Err() == nil {
+				continue
+			}
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(message)))
+			if attempt == 0 && requestCtx.Err() == nil && shouldRetryStructuredQueryStatus(resp.StatusCode, string(message)) {
+				continue
+			}
+			return nil, lastErr
+		}
+		payload, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		var result Response
+		if err := json.Unmarshal(payload, &result); err != nil {
+			return nil, err
+		}
+		if result.Route != "sql" && result.Route != "none" {
+			return nil, fmt.Errorf("unexpected structured route %q", result.Route)
+		}
+		return &result, nil
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(message)))
+	return nil, lastErr
+}
+
+func shouldRetryStructuredQueryStatus(status int, body string) bool {
+	if status == http.StatusTooManyRequests || status >= 500 {
+		return true
 	}
-	var result Response
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&result); err != nil {
-		return nil, err
+	if status != http.StatusUnprocessableEntity {
+		return false
 	}
-	if result.Route != "sql" && result.Route != "none" {
-		return nil, fmt.Errorf("unexpected structured route %q", result.Route)
-	}
-	return &result, nil
+	return strings.Contains(body, "model_unavailable") || strings.Contains(body, "model_timeout")
 }

@@ -95,6 +95,7 @@ def execute_with_one_repair(
     attempts: list[str] = []
     error_codes: list[str] = []
     repair: str | None = None
+    force_sql = False
     model_seconds = validation_seconds = execution_seconds = 0.0
     for attempt_number in range(2):
         stage_started = perf_counter()
@@ -104,6 +105,7 @@ def execute_with_one_repair(
                 repair_schema_context if repair and repair_schema_context else schema_context,
                 evidence_values,
                 repair=repair, dialect=dialect, dataset_scope=dataset_scope,
+                force_sql=force_sql,
             )
         except ModelGenerationError as error:
             model_seconds += perf_counter() - stage_started
@@ -119,14 +121,10 @@ def execute_with_one_repair(
         if generation.route == "none":
             if attempt_number == 0 and reconsider_none:
                 error_codes.append("route_none_with_relevant_profiles")
-                repair = (
-                    "error_code=route_none_with_relevant_profiles\n"
-                    "候选表、字段或真实值与问题存在检索关联。请使用完整 Schema 重新判断"
-                    "结构化记录能否回答。候选值相关不能替代主体与记录粒度一致性："
-                    "若问题要求统计、列出或筛选表中记录，且完整 Schema 有对应字段或值，"
-                    "应返回 route=sql；若仅在下属明细中命中关键词，却要判断上级主体的"
-                    "整体事实，应返回 route=none。"
-                )
+                # Profiles already indicate a record-op question; do not re-ask the
+                # model to choose none. Constrain the next call to SQL only.
+                force_sql = True
+                repair = "error_code=route_none_with_relevant_profiles"
                 continue
             return QueryAttemptOutcome(
                 "none", "", attempts, error_codes, attempt_number + 1, None,

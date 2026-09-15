@@ -37,3 +37,37 @@ func TestClientQueryRejectsUnexpectedRoute(t *testing.T) {
 		t.Fatal("expected unexpected route error")
 	}
 }
+
+func TestClientQueryRetriesModelUnavailableOnce(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"detail":"model_unavailable"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"route":"sql","sql":"SELECT 1","columns":["n"],"rows":[[1]],"model_calls":1,"timings":{},"sources":[]}`))
+	}))
+	defer server.Close()
+
+	response, err := (Client{BaseURL: server.URL, APIKey: "secret", Timeout: time.Second}).Query(
+		context.Background(), 1, Request{Namespace: "kb", Question: "count"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 || response.Route != "sql" {
+		t.Fatalf("attempts=%d response=%#v", attempts, response)
+	}
+}
+
+func TestShouldRetryStructuredQueryStatus(t *testing.T) {
+	if !shouldRetryStructuredQueryStatus(http.StatusUnprocessableEntity, `{"detail":"model_unavailable"}`) {
+		t.Fatal("model_unavailable should retry")
+	}
+	if shouldRetryStructuredQueryStatus(http.StatusUnprocessableEntity, `{"detail":"unsafe_sql"}`) {
+		t.Fatal("non-model 422 must not retry")
+	}
+}

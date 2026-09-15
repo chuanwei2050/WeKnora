@@ -15,6 +15,14 @@ class SQLGeneration(BaseModel):
     sql: str
 
 
+class ForcedSQLGeneration(BaseModel):
+    """Schema used when the caller already decided the question needs SQL."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sql: str
+
+
 class ModelGenerationError(RuntimeError):
     def __init__(self, code: str, *, retryable: bool) -> None:
         super().__init__(code)
@@ -30,6 +38,7 @@ def generate_sql(
     repair: str | None = None,
     dialect: str = "postgres",
     dataset_scope: list[str] | None = None,
+    force_sql: bool = False,
 ) -> SQLGeneration:
     repair_context = f"\n前一次 SQL 及错误：\n{repair}" if repair else ""
     scope_context = (
@@ -41,17 +50,27 @@ def generate_sql(
         if dataset_scope
         else ""
     )
-    prompt = f"""你是结构化查询路由器和 {dialect} Text-to-SQL 生成器。
-先判断问题是否需要对结构化记录进行明细检索、筛选、排序、分组、比较、计算或聚合，并且给出的 Schema 是否足以回答。
-需要且可回答时返回 route="sql" 和一条只读 SQL；普通叙述性问答、概念解释、闲聊或 Schema 不足时返回 route="none"、sql=""，立即结束结构化链路。
-用户输入可能是关键词、标题式短语或省略句，不要求具备疑问词、谓语或问号。只要语义是在查找、列举、筛选、统计或比较符合条件的记录，就属于结构化操作；不得仅因表达不是完整问句而返回 route="none"。
-只有当给出的 Profile/Schema 证据不足以回答结构化问题时，才返回 route="none"；不要根据问题主题预先排除结构化查询，是否走 SQL 由可用证据和问题所需操作共同决定。
-按以下优先级判断可回答性：
-1. 先核对问题主体与表的记录粒度。结构化表只能证明表中每行所代表实体的属性、明细或聚合结果；Schema 或候选值碰巧出现问题关键词，不代表该表能够证明更高层级主体的整体事实。
-2. 若问题询问某个整体主体的能力、资质、制度、状态或其他事实，而候选表只记录该主体下属的人员、项目、产品、证书或其他明细，主体粒度不一致，必须返回 route="none"。下属记录中出现相关文字，只能证明该下属记录具有相关属性，不能外推为上级主体具有该事实。
-3. 若问题明确要求统计、列出或筛选表中记录，并且 Schema 存在对应字段、真实候选值或可直接计算的列，则属于结构化查询，必须返回 route="sql"；不得因数据集名称与用户简称不完全一致、问题使用字段近义表达或答案需要聚合而返回 route="none"。
-只有 Schema 存在与被询问主体同粒度的记录及明确字段，或问题本身要求查询这些下属明细时，才可返回 route="sql"。
-route="sql" 时只可使用给出的物理表名和物理列名。
+    if force_sql:
+        route_policy = f"""你是 {dialect} Text-to-SQL 生成器。
+系统已确认该问题需要对结构化记录做明细检索、筛选、排序、分组、比较、计算或聚合，且 Schema 足以支持。
+不要再判断是否跳过 SQL；必须输出一条只读 SQL。
+"""
+        response_schema = ForcedSQLGeneration.model_json_schema()
+        schema_name = "forced_sql_generation"
+    else:
+        # Route criteria mirror the former RAG needs_table_query judgment:
+        # classify by required record operation, not by topic vocabulary.
+        route_policy = f"""你是结构化查询路由器和 {dialect} Text-to-SQL 生成器。
+先独立判断问题是否需要对结构化记录做明细检索、筛选、排序/排名、分组、计算、聚合、计数或比较；这不限于统计。只要是在问满足一个或多个条件的记录有多少、分别多少、列出谁/哪些，就属于结构化操作。
+需要且给出的 Schema 足以支持时返回 route="sql" 和一条只读 SQL。
+仅当问题可用相关段落回答（概念解释、建议、叙事摘要，或没有记录处理需求的普通事实问答），或 Profile/Schema 证据不足以支持该记录操作时，返回 route="none"、sql=""，立即结束结构化链路。
+仅提及文件名或主题本身不要求 SQL。不要根据问题主题预先排除结构化查询。不确定时，若 Schema 有对应字段或候选值能支持记录操作，优先 route="sql"，不要猜 none。
+用户输入可能是关键词、标题式短语或省略句，不要求具备疑问词、谓语或问号；不得仅因表达不是完整问句而返回 route="none"。
+不得因数据集名称与用户简称不完全一致、问题使用字段近义表达或答案需要聚合而返回 route="none"。
+"""
+        response_schema = SQLGeneration.model_json_schema()
+        schema_name = "sql_generation"
+    prompt = f"""{route_policy}route="sql" 时只可使用给出的物理表名和物理列名。
 输出列如需别名，只能使用 metric_1、metric_2、name_1 这类 ASCII 别名；禁止中文别名、全角逗号和其他全角 SQL 标点。
 M-Schema 字段格式为“(物理列名:原始语义名, 类型, ...)”：SQL 中必须逐字使用冒号左侧的物理列名；冒号右侧只用于理解，绝不能作为 SQL 标识符。
 所有筛选值必须逐字采用 Schema Examples 或真实候选值中的数据库值；用户问题中的近义词、错别字或词序变体只能用于匹配，不能原样发明为筛选值。字符串可能是包含多项内容的长文本时使用 ILIKE，并把真实值作为通配内容。
@@ -78,32 +97,39 @@ SQL 别名必须使用 ASCII 标识符；禁止生成中文别名。多个 SELEC
 {question}{scope_context}{repair_context}
 """
     policy, query_context = prompt.split("\n【Schema】\n", maxsplit=1)
-    try:
-        model = get_runtime_model_config(tenant_id).chat
-        response = OpenAI(
-            base_url=model.base_url,
-            api_key=model.api_key or "not-needed",
-            timeout=get_settings().model_request_timeout_seconds,
-            max_retries=0,
-        ).chat.completions.create(
-            model=model.name,
-            temperature=0,
-            max_completion_tokens=get_settings().sql_max_completion_tokens,
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-            response_format={"type": "json_schema", "json_schema": {"name": "sql_generation", "strict": True, "schema": SQLGeneration.model_json_schema()}},
-            messages=[
-                {"role": "system", "content": policy},
-                {"role": "user", "content": f"【Schema】\n{query_context}"},
-            ],
-        )
-    except APITimeoutError as error:
-        raise ModelGenerationError("model_timeout", retryable=False) from error
-    except APIConnectionError as error:
-        raise ModelGenerationError("model_unavailable", retryable=False) from error
-    except (APIStatusError, httpx.HTTPError, ValueError, KeyError) as error:
-        raise ModelGenerationError("model_config_or_request_failed", retryable=False) from error
+    response = None
+    for connection_attempt in range(2):
+        try:
+            model = get_runtime_model_config(tenant_id).chat
+            response = OpenAI(
+                base_url=model.base_url,
+                api_key=model.api_key or "not-needed",
+                timeout=get_settings().model_request_timeout_seconds,
+                max_retries=0,
+            ).chat.completions.create(
+                model=model.name,
+                temperature=0,
+                max_completion_tokens=get_settings().sql_max_completion_tokens,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+                response_format={"type": "json_schema", "json_schema": {"name": schema_name, "strict": True, "schema": response_schema}},
+                messages=[
+                    {"role": "system", "content": policy},
+                    {"role": "user", "content": f"【Schema】\n{query_context}"},
+                ],
+            )
+            break
+        except APITimeoutError as error:
+            raise ModelGenerationError("model_timeout", retryable=False) from error
+        except APIConnectionError as error:
+            if connection_attempt == 0:
+                continue
+            raise ModelGenerationError("model_unavailable", retryable=False) from error
+        except (APIStatusError, httpx.HTTPError, ValueError, KeyError) as error:
+            raise ModelGenerationError("model_config_or_request_failed", retryable=False) from error
     try:
         content = response.choices[0].message.content or "{}"
+        if force_sql:
+            return SQLGeneration(route="sql", sql=ForcedSQLGeneration.model_validate_json(content).sql)
         return SQLGeneration.model_validate_json(content)
     except (AttributeError, IndexError, ValidationError) as error:
         raise ModelGenerationError("invalid_model_response", retryable=True) from error
