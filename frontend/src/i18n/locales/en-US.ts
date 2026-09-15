@@ -1957,6 +1957,8 @@ export default {
       confirmAction: 'Reprocess',
       submitted: 'Reprocessing submitted for {count} documents',
       failed: 'Failed to submit reprocessing tasks',
+      progress: '{completed}/{total} completed, {pending} pending, {processing} processing',
+      failedCount: '{count} document(s) failed. See the document list for details.',
     },
     wikiBrowser: {
       viewInGraph: 'View in Graph',

@@ -546,6 +546,7 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		// 更新知识库
 		kb.PUT("/:id", handler.UpdateKnowledgeBase)
 		kb.POST("/:id/rebuild-index", handler.RebuildIndex)
+		kb.GET("/:id/rebuild-index/status", handler.GetRebuildIndexStatus)
 		// 删除知识库
 		kb.DELETE("/:id", handler.DeleteKnowledgeBase)
 		// 置顶/取消置顶知识库

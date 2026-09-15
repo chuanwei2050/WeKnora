@@ -95,6 +95,20 @@ export function rebuildKBIndex(kbId: string) {
   return post(`/api/v1/knowledge-bases/${kbId}/rebuild-index`, {});
 }
 
+export interface KnowledgeBaseRebuildStatus {
+  status: 'idle' | 'running' | 'completed' | 'completed_with_failures';
+  total: number;
+  pending: number;
+  processing: number;
+  completed: number;
+  failed: number;
+  percent: number;
+}
+
+export function getKBRebuildStatus(kbId: string) {
+  return get<{ success: boolean; data: KnowledgeBaseRebuildStatus }>(`/api/v1/knowledge-bases/${kbId}/rebuild-index/status`);
+}
+
 export function deleteKnowledgeBase(id: string) {
   return del(`/api/v1/knowledge-bases/${id}`);
 }

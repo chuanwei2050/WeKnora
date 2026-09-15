@@ -576,6 +576,81 @@ func (h *KnowledgeBaseHandler) RebuildIndex(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": gin.H{"document_count": enqueued}})
 }
 
+type knowledgeBaseRebuildStatus struct {
+	Status     string `json:"status"`
+	Total      int    `json:"total"`
+	Pending    int    `json:"pending"`
+	Processing int    `json:"processing"`
+	Completed  int    `json:"completed"`
+	Failed     int    `json:"failed"`
+	Percent    int    `json:"percent"`
+}
+
+// GetRebuildIndexStatus reports the observable document-processing progress for
+// a knowledge base. It is derived from persisted document states, so the UI can
+// recover the status after a refresh without relying on an in-memory task ID.
+func (h *KnowledgeBaseHandler) GetRebuildIndexStatus(c *gin.Context) {
+	ctx := c.Request.Context()
+	_, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin {
+		c.Error(apperrors.NewForbiddenError("No permission to view rebuild status"))
+		return
+	}
+	items, err := h.knowledgeService.ListKnowledgeByKnowledgeBaseID(ctx, id)
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": summarizeKnowledgeBaseRebuildStatus(items)})
+}
+
+func summarizeKnowledgeBaseRebuildStatus(items []*types.Knowledge) knowledgeBaseRebuildStatus {
+	result := knowledgeBaseRebuildStatus{Status: "idle"}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		switch item.ParseStatus {
+		case types.ParseStatusPending:
+			result.Pending++
+		case types.ParseStatusProcessing:
+			result.Processing++
+		case types.ParseStatusCompleted:
+			switch item.SummaryStatus {
+			case types.SummaryStatusPending:
+				result.Pending++
+			case types.SummaryStatusProcessing:
+				result.Processing++
+			case types.SummaryStatusFailed:
+				result.Failed++
+			default:
+				result.Completed++
+			}
+		case types.ParseStatusFailed:
+			result.Failed++
+		default:
+			continue
+		}
+		result.Total++
+	}
+	if result.Total == 0 {
+		return result
+	}
+	result.Percent = (result.Completed + result.Failed) * 100 / result.Total
+	if result.Pending+result.Processing > 0 {
+		result.Status = "running"
+	} else if result.Failed > 0 {
+		result.Status = "completed_with_failures"
+	} else {
+		result.Status = "completed"
+	}
+	return result
+}
+
 func reparseKnowledgeBaseItems(
 	ctx context.Context,
 	items []*types.Knowledge,

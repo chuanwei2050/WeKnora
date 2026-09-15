@@ -2496,6 +2496,8 @@ export default {
       confirmAction: "确认重新处理",
       submitted: "已提交 {count} 篇文档的重新处理任务",
       failed: "提交重新处理任务失败",
+      progress: "已完成 {completed}/{total}，等待 {pending}，处理中 {processing}",
+      failedCount: "其中 {count} 篇处理失败，可在文档列表查看原因",
     },
     wikiBrowser: {
       viewInGraph: '在图谱中查看',

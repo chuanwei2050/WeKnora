@@ -251,12 +251,19 @@
                     <div class="reprocess-copy">
                       <h3>{{ $t('knowledgeEditor.reprocess.title') }}</h3>
                       <p>{{ $t('knowledgeEditor.reprocess.description') }}</p>
+                      <div v-if="reprocessProgress && reprocessProgress.total > 0" class="reprocess-progress">
+                        <t-progress :percentage="reprocessProgress.percent" size="small" />
+                        <p>{{ reprocessProgressText }}</p>
+                        <p v-if="reprocessProgress.failed > 0" class="reprocess-failure">
+                          {{ $t('knowledgeEditor.reprocess.failedCount', { count: reprocessProgress.failed }) }}
+                        </p>
+                      </div>
                     </div>
                     <t-button
                       theme="warning"
                       variant="outline"
                       :loading="reprocessing"
-                      :disabled="!hasFiles"
+                      :disabled="!hasFiles || reprocessProgress?.status === 'running'"
                       @click="confirmReprocess"
                     >
                       {{ $t('knowledgeEditor.reprocess.action') }}
@@ -405,9 +412,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
-import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKnowledgeBase, rebuildKBIndex } from '@/api/knowledge-base'
+import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKnowledgeBase, rebuildKBIndex, getKBRebuildStatus, type KnowledgeBaseRebuildStatus } from '@/api/knowledge-base'
 import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
 import { useUIStore } from '@/stores/ui'
 import KBChunkingSettings from './settings/KBChunkingSettings.vue'
@@ -441,6 +448,42 @@ const currentSection = ref<string>('basic')
 const saving = ref(false)
 const loading = ref(false)
 const reprocessing = ref(false)
+const reprocessProgress = ref<KnowledgeBaseRebuildStatus | null>(null)
+let reprocessPollTimer: ReturnType<typeof setInterval> | null = null
+const reprocessProgressText = computed(() => {
+  const progress = reprocessProgress.value
+  if (!progress) return ''
+  return t('knowledgeEditor.reprocess.progress', {
+    completed: progress.completed,
+    total: progress.total,
+    pending: progress.pending,
+    processing: progress.processing,
+  })
+})
+
+const stopReprocessPolling = () => {
+  if (reprocessPollTimer) {
+    clearInterval(reprocessPollTimer)
+    reprocessPollTimer = null
+  }
+}
+
+const loadReprocessStatus = async () => {
+  if (!props.kbId) return
+  try {
+    const result = await getKBRebuildStatus(props.kbId)
+    reprocessProgress.value = result.data
+    if (reprocessProgress.value?.status !== 'running') stopReprocessPolling()
+  } catch {
+    stopReprocessPolling()
+  }
+}
+
+const startReprocessPolling = () => {
+  stopReprocessPolling()
+  void loadReprocessStatus()
+  reprocessPollTimer = setInterval(() => void loadReprocessStatus(), 2000)
+}
 const hasFiles = ref(false)
 const initialIndexingStrategy = ref<any>(null)
 const initialGraphFingerprint = ref('')
@@ -1078,6 +1121,7 @@ const confirmReprocess = () => {
         const result = await rebuildKBIndex(knowledgeBaseId)
         const count = result?.data?.document_count ?? 0
         MessagePlugin.success(t('knowledgeEditor.reprocess.submitted', { count }))
+        startReprocessPolling()
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : t('knowledgeEditor.reprocess.failed')
         MessagePlugin.error(message)
@@ -1258,6 +1302,7 @@ const doSubmit = async () => {
 
 // 重置所有状态
 const resetState = () => {
+  stopReprocessPolling()
   currentSection.value = 'basic'
   formData.value = null
   hasFiles.value = false
@@ -1267,6 +1312,7 @@ const resetState = () => {
   saving.value = false
   loading.value = false
   reprocessing.value = false
+  reprocessProgress.value = null
   chunkingDirty.value = false
 }
 
@@ -1296,6 +1342,8 @@ watch(() => props.visible, async (newVal) => {
     // 根据模式加载数据
     if (props.mode === 'edit' && props.kbId) {
       await loadKBData()
+      await loadReprocessStatus()
+      if (reprocessProgress.value?.status === 'running') startReprocessPolling()
     } else {
       // 创建模式：初始化空表单
       formData.value = initFormData(props.initialType || 'document')
@@ -1309,6 +1357,8 @@ watch(() => props.visible, async (newVal) => {
     }, 300)
   }
 })
+
+onBeforeUnmount(stopReprocessPolling)
 
 </script>
 
@@ -1757,6 +1807,16 @@ watch(() => props.visible, async (newVal) => {
 
   .reprocess-copy {
     min-width: 0;
+    flex: 1;
+  }
+
+  .reprocess-progress {
+    margin-top: 12px;
+    max-width: 520px;
+  }
+
+  .reprocess-failure {
+    color: var(--td-error-color);
   }
 
   h3 {
