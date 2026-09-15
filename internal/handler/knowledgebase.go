@@ -611,6 +611,11 @@ func (h *KnowledgeBaseHandler) startDocumentPipelineMaintenance(c *gin.Context, 
 			c.Error(apperrors.NewInternalServerError(err.Error()))
 			return
 		}
+		// Purge before ReparseKnowledge clears interrupt markers; otherwise
+		// leftover document:process / multimodal workers race NeedCleanup.
+		if _, err := h.knowledgeService.PurgeDocumentPipelineTasks(ctx, targetIDs); err != nil {
+			logger.Warnf(ctx, "failed to purge pipeline leftovers before rebuild staging: kb=%s run=%s err=%v", id, progress.RunID, err)
+		}
 		items, err = h.knowledgeService.ListKnowledgeByKnowledgeBaseID(ctx, id)
 		if err != nil {
 			_ = h.maintenance.Fail(ctx, tenantID, id, progress.RunID, err.Error())
@@ -623,12 +628,27 @@ func (h *KnowledgeBaseHandler) startDocumentPipelineMaintenance(c *gin.Context, 
 	// then die with parse_status stuck on "processing".
 	bgCtx := context.WithoutCancel(ctx)
 	runID := progress.RunID
+	stagingTargets := append([]string(nil), targetIDs...)
 	go func() {
 		reparse := func(ctx context.Context, knowledgeID string) (*types.Knowledge, error) {
 			if !h.maintenance.IsRunning(ctx, tenantID, id, runID) {
 				return nil, context.Canceled
 			}
-			return h.knowledgeService.ReparseKnowledge(ctx, knowledgeID)
+			knowledge, err := h.knowledgeService.ReparseKnowledge(ctx, knowledgeID)
+			if err != nil {
+				return nil, err
+			}
+			// Cancel may race past the first IsRunning check; undo this enqueue.
+			if !h.maintenance.IsRunning(ctx, tenantID, id, runID) {
+				if _, interruptErr := h.knowledgeService.InterruptParsesByIDs(ctx, []string{knowledgeID}, types.ParseInterruptedByUserCancelMessage); interruptErr != nil {
+					logger.Warnf(ctx, "failed to interrupt raced reparse after cancel: knowledge=%s err=%v", knowledgeID, interruptErr)
+				}
+				if _, purgeErr := h.knowledgeService.PurgeDocumentPipelineTasks(ctx, []string{knowledgeID}); purgeErr != nil {
+					logger.Warnf(ctx, "failed to purge raced reparse after cancel: knowledge=%s err=%v", knowledgeID, purgeErr)
+				}
+				return nil, context.Canceled
+			}
+			return knowledge, nil
 		}
 		enqueued, enqueueErr := reparseKnowledgeBaseItemsPaced(bgCtx, items, reparse, documentPipelineEnqueueConcurrency())
 		_ = h.maintenance.MarkEnqueueDone(bgCtx, tenantID, id, runID)
@@ -638,6 +658,13 @@ func (h *KnowledgeBaseHandler) startDocumentPipelineMaintenance(c *gin.Context, 
 				return
 			}
 			logger.Errorf(bgCtx, "document pipeline maintenance enqueue failed: kb=%s run=%s err=%v", id, runID, enqueueErr)
+			// Partial staging must not leave workers running after Fail unlocks.
+			if _, interruptErr := h.knowledgeService.InterruptParsesByIDs(bgCtx, stagingTargets, types.ParseInterruptedByUserCancelMessage); interruptErr != nil {
+				logger.Warnf(bgCtx, "failed to interrupt partial staging targets: kb=%s run=%s err=%v", id, runID, interruptErr)
+			}
+			if _, purgeErr := h.knowledgeService.PurgeDocumentPipelineTasks(bgCtx, stagingTargets); purgeErr != nil {
+				logger.Warnf(bgCtx, "failed to purge partial staging targets: kb=%s run=%s err=%v", id, runID, purgeErr)
+			}
 			_ = h.maintenance.Fail(bgCtx, tenantID, id, runID, enqueueErr.Error())
 			return
 		}
@@ -753,7 +780,8 @@ func (h *KnowledgeBaseHandler) GetMaintenanceStatus(c *gin.Context) {
 			// Until staging enqueue finishes, targets may still look completed/failed
 			// and must not be treated as finished or advanced into the next phase.
 			finished := p.EnqueueDone && active == 0 && done+failed >= p.Total
-			if finished && p.Total > 0 && p.Status == "running" && p.Operation == types.KBMaintenanceReparse {
+			userStopped := documentPipelineHasUserStop(items, p.TargetKnowledgeIDs)
+			if finished && p.Total > 0 && p.Status == "running" && p.Operation == types.KBMaintenanceReparse && !userStopped {
 				next, advanced, advanceErr := h.maintenance.AdvancePhase(ctx, tenantID, id, p.RunID, types.KBMaintenanceReparse, types.KBMaintenanceStructured, len(p.TargetKnowledgeIDs), p.TargetKnowledgeIDs)
 				if advanceErr == nil && advanced {
 					payload, marshalErr := json.Marshal(types.KBMaintenancePayload{TenantID: tenantID, KnowledgeBaseID: id, RunID: next.RunID, Operation: next.Operation})
@@ -1040,6 +1068,7 @@ func summarizeDocumentPipelineProgress(items []*types.Knowledge, targetIDs []str
 	for _, targetID := range targetIDs {
 		targets[targetID] = struct{}{}
 	}
+	seen := make(map[string]struct{}, len(targetIDs))
 	for _, item := range items {
 		if item == nil {
 			continue
@@ -1047,6 +1076,7 @@ func summarizeDocumentPipelineProgress(items []*types.Knowledge, targetIDs []str
 		if _, targeted := targets[item.ID]; !targeted {
 			continue
 		}
+		seen[item.ID] = struct{}{}
 		switch item.ParseStatus {
 		case types.ParseStatusCompleted:
 			switch item.SummaryStatus {
@@ -1063,7 +1093,36 @@ func summarizeDocumentPipelineProgress(items []*types.Knowledge, targetIDs []str
 			active++
 		}
 	}
+	// Deleted targets never appear in the list; count them failed so progress
+	// can finish and release the maintenance lock.
+	for _, targetID := range targetIDs {
+		if _, ok := seen[targetID]; !ok {
+			failed++
+		}
+	}
 	return done, failed, active
+}
+
+// documentPipelineHasUserStop reports whether any maintenance target was
+// deliberately stopped/canceled by the user. Used to block reparse→structured
+// auto-advance after list/batch stop-parse.
+func documentPipelineHasUserStop(items []*types.Knowledge, targetIDs []string) bool {
+	targets := make(map[string]struct{}, len(targetIDs))
+	for _, targetID := range targetIDs {
+		targets[targetID] = struct{}{}
+	}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if _, targeted := targets[item.ID]; !targeted {
+			continue
+		}
+		if item.ParseStatus == types.ParseStatusFailed && types.IsUserStoppedParseInterrupt(item.ErrorMessage) {
+			return true
+		}
+	}
+	return false
 }
 
 // DeleteKnowledgeBase godoc

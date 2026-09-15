@@ -56,6 +56,18 @@ func IsDeliberateParseInterrupt(errorMessage string) bool {
 	}
 }
 
+// IsUserStoppedParseInterrupt reports whether errorMessage was written by an
+// explicit user stop (list/batch stop-parse or cancel maintenance), as opposed
+// to a transitional rebuild/rechunk interrupt marker.
+func IsUserStoppedParseInterrupt(errorMessage string) bool {
+	switch errorMessage {
+	case ParseInterruptedByUserCancelMessage, ParseInterruptedByUserStopMessage:
+		return true
+	default:
+		return false
+	}
+}
+
 type KBMaintenanceProgress struct {
 	RunID              string                 `json:"run_id"`
 	Operation          KBMaintenanceOperation `json:"operation"`

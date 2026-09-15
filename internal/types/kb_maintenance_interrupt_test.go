@@ -21,3 +21,15 @@ func TestIsDeliberateParseInterrupt(t *testing.T) {
 		}
 	}
 }
+
+func TestIsUserStoppedParseInterrupt(t *testing.T) {
+	if !IsUserStoppedParseInterrupt(ParseInterruptedByUserStopMessage) {
+		t.Fatal("user stop message must be recognized")
+	}
+	if !IsUserStoppedParseInterrupt(ParseInterruptedByUserCancelMessage) {
+		t.Fatal("user cancel message must be recognized")
+	}
+	if IsUserStoppedParseInterrupt(ParseInterruptedForRebuildMessage) {
+		t.Fatal("rebuild interrupt is transitional, not a user stop")
+	}
+}
