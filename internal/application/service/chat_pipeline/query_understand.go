@@ -144,7 +144,7 @@ func conservativeRoutingDecision(chatManage *types.ChatManage, reason types.Degr
 }
 
 func conservativeRoutingClassification(chatManage *types.ChatManage) types.QuestionComplexity {
-	if chatManage != nil && types.NeedsEntityRelation(chatManage.Query) {
+	if chatManage != nil && (types.NeedsEntityRelation(chatManage.Query) || types.NeedsEntityRelation(chatManage.RewriteQuery)) {
 		// A parse failure must not erase an explicit relation request. This is a
 		// deterministic boundary hint, not a model-derived confidence score.
 		return types.QuestionComplexity{

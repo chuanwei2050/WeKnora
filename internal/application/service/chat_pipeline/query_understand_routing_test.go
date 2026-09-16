@@ -310,6 +310,12 @@ func TestShouldUseGraphRequiresRelationSignal(t *testing.T) {
 	if !ShouldUseGraph(&types.ChatManage{PipelineRequest: types.PipelineRequest{Query: "A 和 B 是什么关系？"}}) {
 		t.Fatal("relation question should trigger graph fallback")
 	}
+	if !ShouldUseGraph(&types.ChatManage{
+		PipelineRequest: types.PipelineRequest{Query: "再看看他们"},
+		PipelineState:   types.PipelineState{RewriteQuery: "A 和 B 是什么关系？"},
+	}) {
+		t.Fatal("rewrite-resolved relation question should trigger graph fallback")
+	}
 	manage := &types.ChatManage{PipelineRequest: types.PipelineRequest{Query: "A 和 B 是什么关系？"}}
 	manage.RoutingDecision = &types.RoutingDecision{
 		Classification: types.QuestionComplexity{NeedsEntityRelation: false},
