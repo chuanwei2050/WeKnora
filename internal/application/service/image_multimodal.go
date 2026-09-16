@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
+	sharedprompt "github.com/Tencent/WeKnora/internal/prompt"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -21,33 +22,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
-)
-
-const (
-	vlmOCRPrompt = "<system_prompt>\n" +
-		"You are an OCR assistant. Your task is to extract all body text content from this document image and output in pure Markdown format.\n" +
-		"</system_prompt>\n\n" +
-		"<instructions>\n" +
-		"1. Ignore headers and footers.\n" +
-		"2. Use Markdown table syntax for tables.\n" +
-		"3. Use LaTeX format for formulas (wrapped with $ or $$).\n" +
-		"4. Organize content in the original reading order.\n" +
-		"5. Output ONLY the extracted text content. Do NOT include any HTML tags, reasoning, or unrelated comments.\n" +
-		"6. If there is absolutely no recognizable text content in the image, reply ONLY with: No text content.\n" +
-		"</instructions>"
-	vlmOCRScannedPDFPrompt = "<system_prompt>\n" +
-		"You are an OCR and document layout extraction assistant. The input image is a page from a scanned PDF document.\n" +
-		"Your task is to carefully extract all text and layout structure from the image, and output the result in pure Markdown format.\n" +
-		"</system_prompt>\n\n" +
-		"<instructions>\n" +
-		"1. Ignore headers, footers, and page numbers.\n" +
-		"2. Preserve the original document's paragraph and hierarchical structure as much as possible.\n" +
-		"3. If there are tables, use Markdown table syntax to represent them.\n" +
-		"4. If there are mathematical formulas, use LaTeX format wrapped in $ or $$.\n" +
-		"5. Output ONLY the extracted text content. Do NOT include any HTML tags, reasoning, or unrelated comments.\n" +
-		"6. If there is absolutely no recognizable text content in the image, reply ONLY with: No text content.\n" +
-		"</instructions>"
-	vlmCaptionPrompt = "Provide a brief and concise description of the main content of the image in Chinese"
 )
 
 // ImageMultimodalService handles image:multimodal asynq tasks.
@@ -329,14 +303,14 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 					logger.Warnf(ctx, "[ImageMultimodal] Skipping unsupported image format for VLM: %s", payload.ImageURL)
 				} else {
 					if needVLMOCR {
-						prompt := vlmOCRPrompt
+						ocrPrompt := sharedprompt.VLMOCR
 						if payload.ImageSourceType == "scanned_pdf" {
-							prompt = vlmOCRScannedPDFPrompt
+							ocrPrompt = sharedprompt.VLMOCRScannedPDF
 							logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for VLM OCR: %s", payload.ImageURL)
 						} else {
 							logger.Infof(ctx, "[ImageMultimodal] Falling back to VLM OCR for %s", payload.ImageURL)
 						}
-						ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{prepared}, prompt)
+						ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{prepared}, ocrPrompt)
 						if ocrErr != nil {
 							// Keep best-effort: allow caption to proceed even if VLM OCR fails.
 							logger.Warnf(ctx, "[ImageMultimodal] VLM OCR failed for %s, continuing with caption: %v",
@@ -355,7 +329,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 					}
 
 					if payload.EnableCaption {
-						caption, capErr := vlmModel.Predict(ctx, [][]byte{prepared}, vlmCaptionPrompt)
+						caption, capErr := vlmModel.Predict(ctx, [][]byte{prepared}, sharedprompt.VLMCaption)
 						if capErr != nil {
 							if imageInfo.OCRText != "" {
 								logger.Warnf(ctx, "[ImageMultimodal] Caption failed after OCR for %s, keeping OCR only: %v",

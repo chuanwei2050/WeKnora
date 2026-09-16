@@ -873,6 +873,75 @@ type promptTemplateFile struct {
 	Templates []PromptTemplate `yaml:"templates"`
 }
 
+type promptPartialsFile struct {
+	Partials map[string]string `yaml:"partials"`
+}
+
+// partialRefPattern matches {{partial:name}} include markers expanded at load time.
+// Keep this distinct from runtime placeholders like {{language}} / {{contexts}}.
+var partialRefPattern = regexp.MustCompile(`\{\{partial:([a-zA-Z0-9_]+)\}\}`)
+
+// expandPromptPartials replaces {{partial:name}} with shared fragments.
+// Expansion is single-level (partials cannot reference other partials).
+func expandPromptPartials(text string, partials map[string]string) (string, error) {
+	if text == "" || !strings.Contains(text, "{{partial:") {
+		return text, nil
+	}
+	if len(partials) == 0 {
+		return "", fmt.Errorf("prompt references {{partial:*}} but partials.yaml is missing or empty")
+	}
+	var missing []string
+	out := partialRefPattern.ReplaceAllStringFunc(text, func(match string) string {
+		sub := partialRefPattern.FindStringSubmatch(match)
+		if len(sub) != 2 {
+			return match
+		}
+		name := sub[1]
+		body, ok := partials[name]
+		if !ok {
+			missing = append(missing, name)
+			return match
+		}
+		return strings.TrimRight(body, "\n")
+	})
+	if len(missing) > 0 {
+		return "", fmt.Errorf("unknown prompt partial(s): %s", strings.Join(missing, ", "))
+	}
+	return out, nil
+}
+
+func loadPromptPartials(templatesDir string) (map[string]string, error) {
+	filePath := filepath.Join(templatesDir, "partials.yaml")
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return nil, nil
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read partials.yaml: %w", err)
+	}
+	var file promptPartialsFile
+	if err := yaml.Unmarshal(data, &file); err != nil {
+		return nil, fmt.Errorf("failed to parse partials.yaml: %w", err)
+	}
+	return file.Partials, nil
+}
+
+func expandTemplatesPartials(templates []PromptTemplate, partials map[string]string) error {
+	for i := range templates {
+		content, err := expandPromptPartials(templates[i].Content, partials)
+		if err != nil {
+			return fmt.Errorf("template %q content: %w", templates[i].ID, err)
+		}
+		templates[i].Content = content
+		user, err := expandPromptPartials(templates[i].User, partials)
+		if err != nil {
+			return fmt.Errorf("template %q user: %w", templates[i].ID, err)
+		}
+		templates[i].User = user
+	}
+	return nil
+}
+
 // loadPromptTemplates 从目录加载提示词模板
 func loadPromptTemplates(configDir string) (*PromptTemplatesConfig, error) {
 	templatesDir := filepath.Join(configDir, "prompt_templates")
@@ -880,6 +949,11 @@ func loadPromptTemplates(configDir string) (*PromptTemplatesConfig, error) {
 	// 检查目录是否存在
 	if _, err := os.Stat(templatesDir); os.IsNotExist(err) {
 		return nil, nil // 目录不存在，返回nil让调用者使用配置文件中的模板
+	}
+
+	partials, err := loadPromptPartials(templatesDir)
+	if err != nil {
+		return nil, err
 	}
 
 	config := &PromptTemplatesConfig{}
@@ -914,6 +988,10 @@ func loadPromptTemplates(configDir string) (*PromptTemplatesConfig, error) {
 		var file promptTemplateFile
 		if err := yaml.Unmarshal(data, &file); err != nil {
 			return nil, fmt.Errorf("failed to parse %s: %w", filename, err)
+		}
+
+		if err := expandTemplatesPartials(file.Templates, partials); err != nil {
+			return nil, fmt.Errorf("failed to expand partials in %s: %w", filename, err)
 		}
 
 		*target = file.Templates

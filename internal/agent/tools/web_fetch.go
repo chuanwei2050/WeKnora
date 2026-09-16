@@ -18,6 +18,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/prompt"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
@@ -366,12 +367,8 @@ func (t *WebFetchTool) processWithLLM(ctx context.Context, params webFetchParams
 		return "", fmt.Errorf("chat model not available for web_fetch")
 	}
 
-	systemMessage := "You are an intelligent assistant skilled at reading web page content. Answer the user's request based on the provided web page text. Never fabricate information that does not appear in the text."
-	userTemplate := `User request:
-%s
-
-Web page content:
-%s`
+	systemMessage := prompt.WebFetchSystem
+	userTemplate := prompt.WebFetchUser
 
 	messages := []chat.Message{
 		{

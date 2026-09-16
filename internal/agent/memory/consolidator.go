@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/token"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	sharedprompt "github.com/Tencent/WeKnora/internal/prompt"
 )
 
 const (
@@ -222,7 +223,7 @@ func (c *Consolidator) summarizeWithRetry(
 		summarizeCtx, cancel := context.WithTimeout(ctx, consolidationTimeout)
 
 		resp, err := c.chatModel.Chat(summarizeCtx, []chat.Message{
-			{Role: "system", Content: consolidationSystemPrompt},
+			{Role: "system", Content: sharedprompt.AgentMemoryConsolidationSystem},
 			{Role: "user", Content: prompt},
 		}, &chat.ChatOptions{
 			Temperature: 0.3, // low temperature for factual summarization
@@ -319,17 +320,3 @@ func truncateForPrompt(s string, maxLen int) string {
 	}
 	return string(runes[:maxLen]) + "..."
 }
-
-//nolint:lll // raw string literal used for prompt readability
-const consolidationSystemPrompt = "" +
-	"You are a conversation summarizer. " +
-	"Your task is to create a concise but comprehensive summary " +
-	"of a conversation between a user and an AI assistant.\n\n" +
-	"The summary should:\n" +
-	"- Be written in the same language as the original conversation\n" +
-	"- Preserve all key facts, numbers, and specific details\n" +
-	"- Include the outcomes of any tool executions\n" +
-	"- Note any errors or issues encountered\n" +
-	"- Be structured with clear sections if the conversation covered multiple topics\n" +
-	"- Be concise — aim for 30% or less of the original length\n\n" +
-	"Output only the summary, no preamble or explanation."

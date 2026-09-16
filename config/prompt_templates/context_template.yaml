@@ -1,4 +1,4 @@
-# Context templates
+# Context templates (compact)
 templates:
   - id: "default_context"
     name: "Standard Template"
@@ -36,23 +36,14 @@ templates:
         description: "자세한 지침과 답변 요구 사항이 포함된 완전한 템플릿"
     has_knowledge_base: true
     content: |
-      ## Task Description
-      Answer the user's question accurately and comprehensively based on the provided reference materials.
+      Answer from references only — no fabrication. Reconcile conflicts; cite sources; say if insufficient.
 
-      ## Reference Materials
+      References:
       {{contexts}}
 
-      ## User Question
-      {{query}}
+      Question: {{query}}
 
-      ## Response Requirements
-      1. Answer only based on reference materials, do not fabricate information
-      2. If multiple materials conflict, provide a comprehensive analysis
-      3. Cite sources appropriately to enhance credibility
-      4. If materials are insufficient, clearly state so
-
-      ## CRITICAL: Language Rule
-      - ALWAYS respond in {{language}}
+      {{partial:language_rule}}
 
       Current time: {{current_time}} {{current_week}}
 
@@ -76,7 +67,7 @@ templates:
 
       Question: {{query}}
 
-      Please answer the above question. IMPORTANT: ALWAYS respond in {{language}}.
+      Answer above. ALWAYS respond in {{language}}.
 
   - id: "qa_context"
     name: "Q&A Template"
@@ -93,14 +84,9 @@ templates:
         description: "Q&A 시나리오에 최적화된 템플릿"
     has_knowledge_base: true
     content: |
-      You need to answer a question. Below are potentially relevant materials:
-
+      Materials (may be relevant):
       {{contexts}}
 
-      The user's question is: {{query}}
+      Question: {{query}}
 
-      Please answer the question based on the above materials. Requirements:
-      - Answer the question directly, do not repeat the question
-      - If the materials do not contain relevant information, state so
-      - Keep the answer concise and accurate
-      - IMPORTANT: ALWAYS respond in {{language}}
+      Answer directly from materials; say if missing; concise. ALWAYS respond in {{language}}.

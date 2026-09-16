@@ -7,14 +7,18 @@ import (
 )
 
 const legacyDefaultFallbackPromptPrefix = "You are WeKnora, a professional and friendly AI assistant developed by Tencent."
-const currentDefaultFallbackPromptPrefix = "You are a professional and friendly AI assistant ."
+const previousDefaultFallbackPromptPrefix = "You are a professional and friendly AI assistant ."
+const currentDefaultFallbackPromptPrefix = "Friendly AI."
 
-// UpgradeLegacyDefaultFallbackPrompt replaces only the exact former built-in
-// prompt. Tenant-authored prompts are left untouched.
+// UpgradeLegacyDefaultFallbackPrompt replaces only exact former built-in
+// prompts. Tenant-authored prompts are left untouched.
 func UpgradeLegacyDefaultFallbackPrompt(prompt, currentDefault string) string {
-	legacyDefault := strings.Replace(currentDefault, currentDefaultFallbackPromptPrefix, legacyDefaultFallbackPromptPrefix, 1)
-	if strings.TrimSpace(prompt) == strings.TrimSpace(legacyDefault) {
-		return currentDefault
+	trimmed := strings.TrimSpace(prompt)
+	for _, oldPrefix := range []string{legacyDefaultFallbackPromptPrefix, previousDefaultFallbackPromptPrefix} {
+		oldDefault := strings.Replace(currentDefault, currentDefaultFallbackPromptPrefix, oldPrefix, 1)
+		if trimmed == strings.TrimSpace(oldDefault) {
+			return currentDefault
+		}
 	}
 	return prompt
 }

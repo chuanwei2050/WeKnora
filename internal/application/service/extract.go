@@ -18,68 +18,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	sharedprompt "github.com/Tencent/WeKnora/internal/prompt"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
-)
-
-const (
-	// tableDescriptionPromptTemplate is the prompt template for generating table descriptions
-	tableDescriptionPromptTemplate = `You are a data analysis expert. Based on the following table structure information and data samples, generate a concise table metadata description (200-300 words).
-
-Table name: %s
-
-%s
-
-%s
-
-Please describe the table from the following dimensions:
-1. **Data Subject**: What type of data does this table record? (e.g., user information, sales records, log data, etc.)
-2. **Core Fields**: List 3-5 most important fields and their meanings
-3. **Data Scale**: Total number of rows and columns
-4. **Business Scenarios**: What business analysis or application scenarios might this table be used for?
-5. **Key Characteristics**: What notable features does the data have? (e.g., contains geographic locations, has category labels, has hierarchical relationships, etc.)
-
-**Important Notes**:
-- Do not output specific data values or sample content
-- Use general descriptions so users can quickly determine if this table contains the information they need
-- Use concise and professional language for easy retrieval and understanding
-- Write the description in the same language as the data content`
-
-	// columnDescriptionsPromptTemplate is the prompt template for generating column descriptions
-	columnDescriptionsPromptTemplate = `You are a data analysis expert. Based on the following table structure information and data samples, generate structured description information for each column.
-
-Table name: %s
-
-%s
-
-%s
-
-Please generate a detailed description for each column, including the following information:
-1. **Field Meaning**: What information does this column store? (e.g., user ID, order amount, creation time, etc.)
-2. **Data Type**: The type and format of the data (e.g., integer, string, datetime, boolean, etc.)
-3. **Business Purpose**: The role of this field in business (e.g., for user identification, amount calculation, time sorting, etc.)
-4. **Data Characteristics**: Notable features of the data (e.g., unique identifier, nullable, has enum values, has units, etc.)
-
-Please output in the following format (one paragraph per column):
-
-**Column1** (data type)
-- Field Meaning: xxx
-- Business Purpose: xxx
-- Data Characteristics: xxx
-
-**Column2** (data type)
-- Field Meaning: xxx
-- Business Purpose: xxx
-- Data Characteristics: xxx
-
-**Important Notes**:
-- Do not output specific data values, only describe the field metadata
-- Use clear business terms for easy user understanding and search
-- If enum value ranges can be inferred from sample data, provide a summary (e.g., status field contains pending/in-progress/completed states)
-- Write descriptions in the same language as the data content`
 )
 
 // NewChunkExtractTask creates a new chunk extract task
@@ -863,7 +807,7 @@ func (s *DataTableSummaryService) cleanupOnFailure(ctx context.Context, resource
 
 // generateTableDescription generates a summary description for the entire table
 func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, chatModel chat.Chat, tableName, schemaDesc, sampleDesc string) (string, error) {
-	prompt := fmt.Sprintf(tableDescriptionPromptTemplate, tableName, schemaDesc, sampleDesc)
+	prompt := fmt.Sprintf(sharedprompt.TableDescription, tableName, schemaDesc, sampleDesc)
 	// logger.Debugf(ctx, "generateTableDescription prompt: %s", prompt)
 
 	thinking := false
@@ -884,7 +828,7 @@ func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, 
 // generateColumnDescriptions generates descriptions for each column in batch
 func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context, chatModel chat.Chat, tableName, schemaDesc, sampleDesc string) (string, error) {
 	// Build batch prompt for all columns
-	prompt := fmt.Sprintf(columnDescriptionsPromptTemplate, tableName, schemaDesc, sampleDesc)
+	prompt := fmt.Sprintf(sharedprompt.ColumnDescriptions, tableName, schemaDesc, sampleDesc)
 	// logger.Debugf(ctx, "generateColumnDescriptions prompt: %s", prompt)
 
 	// Call LLM once for all columns

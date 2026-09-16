@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/prompt"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -572,7 +573,7 @@ func (e *AgentEngine) runReActIteration(
 					round, *emptyRetries, maxEmptyResponseRetries)
 				*messagesPtr = append(*messagesPtr, chat.Message{
 					Role:    "user",
-					Content: "Please provide your answer by calling the final_answer tool.",
+					Content: prompt.FinalAnswerToolNudge,
 				})
 				return iterOutcomeContinue, nil
 			}
@@ -626,10 +627,6 @@ func (o iterOutcome) String() string {
 // Tool result image VLM description helpers
 // ---------------------------------------------------------------------------
 
-const toolImageAnalysisPrompt = "Describe the content of this image in detail. " +
-	"If it contains text, extract all readable text. " +
-	"If it contains charts or diagrams, describe the data and structure."
-
 // describeImages generates text descriptions for tool result images using the
 // configured imageDescriber (VLM). Each image is decoded from a data URI and
 // analyzed independently. Failures are logged and skipped gracefully.
@@ -649,7 +646,7 @@ func (e *AgentEngine) describeImages(ctx context.Context, imageDataURIs []string
 			logger.Warnf(ctx, "[Agent] Failed to decode tool result image %d: %v", i, err)
 			continue
 		}
-		desc, err := e.imageDescriber(ctx, imgBytes, toolImageAnalysisPrompt)
+		desc, err := e.imageDescriber(ctx, imgBytes, prompt.ToolImageAnalysis)
 		if err != nil {
 			logger.Warnf(ctx, "[Agent] VLM analysis failed for tool result image %d: %v", i, err)
 			continue

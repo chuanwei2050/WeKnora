@@ -8,6 +8,7 @@ import (
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/prompt"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -97,15 +98,9 @@ func (h *Handler) analyzeImageAttachments(ctx context.Context, images []ImageAtt
 // single analysis call that is tailored to the user's intent.
 func buildImageAnalysisPrompt(userQuery string) string {
 	if strings.TrimSpace(userQuery) == "" {
-		return "请分析这张图片的内容。如果包含文字，请提取关键文字信息；如果是自然图片，请描述其主要内容。用简洁的中文回答。"
+		return prompt.GenericImageAnalysis
 	}
-	return fmt.Sprintf(
-		"用户的问题是：%s\n\n请分析图片中与用户问题相关的内容。"+
-			"如果图片包含文字/文档/表格，请提取与问题相关的关键信息。"+
-			"如果是自然图片/截图/图表，请描述与问题相关的视觉内容。"+
-			"用简洁的中文回答，只输出分析结果。",
-		userQuery,
-	)
+	return prompt.IntentAwareImageAnalysis(userQuery)
 }
 
 func decodeDataURI(dataURI string) ([]byte, string, error) {

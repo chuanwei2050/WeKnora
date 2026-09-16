@@ -11,6 +11,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/event"
 	modelchat "github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/prompt"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -482,7 +483,7 @@ func validateWithChatModel(ctx context.Context, model modelchat.Chat, identity t
 	}
 	disableThinking := false
 	response, err := model.Chat(ctx, []modelchat.Message{
-		{Role: "system", Content: "You are an independent answer validator. Evaluate the draft against the supplied evidence. Return exactly one JSON object and no markdown with keys fact_score, logic_score, citation_score, completeness_score (each 0..1), and issues (array). If there are no issues, return \"issues\":[]. Each issue must use an existing draft claim_id (usually \"answer-claim\"), existing evidence_ids from the input, dimension in {fact,logic,citation,completeness}, severity in {info,warning,critical}, and a short message. Do not invent claim or evidence IDs. Do not return chain-of-thought, hidden reasoning, markdown fences, or prose."},
+		{Role: "system", Content: prompt.VerificationValidatorSystem},
 		{Role: "user", Content: buildValidationPrompt(draft, evidence)},
 	}, &modelchat.ChatOptions{
 		Temperature: 0,
@@ -533,7 +534,7 @@ func rewriteDraftWithChatModel(ctx context.Context, model modelchat.Chat, draft 
 		return "", fmt.Errorf("marshal validation reports: %w", err)
 	}
 	response, err := model.Chat(ctx, []modelchat.Message{
-		{Role: "system", Content: "You rewrite an answer after independent validation found issues. Use only the supplied evidence, fix unsupported or incomplete claims, and return only the revised answer. Do not expose physical table names, internal identifiers, internally generated aliases, or raw result payloads. Convert needed structured results into natural language. Do not show the structured-query process or raw result shapes. If the user explicitly asks about SQL, table structure, or business column names, answer that request; otherwise do not expose SQL or the query process. Do not return analysis, validator commentary, chain-of-thought, or a confidence explanation."},
+		{Role: "system", Content: prompt.VerificationRewriteSystem},
 		{Role: "user", Content: buildValidationPrompt(draft, evidence) + "\nValidation issues to address:\n" + string(reportPayload)},
 	}, &modelchat.ChatOptions{Temperature: 0, MaxTokens: 1024})
 	if err != nil {

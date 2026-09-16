@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	sharedprompt "github.com/Tencent/WeKnora/internal/prompt"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -26,45 +27,6 @@ func NewMemoryService(repo interfaces.MemoryRepository, modelService interfaces.
 		modelService: modelService,
 	}
 }
-
-const extractGraphPrompt = `
-You are an AI assistant that extracts knowledge graphs from conversations.
-Given the following conversation, extract entities and relationships.
-Output the result in JSON format with the following structure:
-{
-  "summary": "A brief summary of the conversation",
-  "entities": [
-    {
-      "title": "Entity Name",
-      "type": "Entity Type (e.g., Person, Location, Concept)",
-      "description": "Description of the entity"
-    }
-  ],
-  "relationships": [
-    {
-      "source": "Source Entity Name",
-      "target": "Target Entity Name",
-      "description": "Description of the relationship",
-      "weight": 1.0
-    }
-  ]
-}
-
-Conversation:
-%s
-`
-
-const extractKeywordsPrompt = `
-You are an AI assistant that extracts search keywords from a user query.
-Given the following query, extract relevant keywords for searching a knowledge graph.
-Output the result in JSON format:
-{
-  "keywords": ["keyword1", "keyword2"]
-}
-
-Query:
-%s
-`
 
 type extractionResult struct {
 	Summary       string                `json:"summary" jsonschema:"a brief summary of the conversation"`
@@ -115,7 +77,7 @@ func (s *MemoryService) AddEpisode(ctx context.Context, userID string, sessionID
 	}
 
 	// 2. Call LLM to extract graph
-	prompt := fmt.Sprintf(extractGraphPrompt, conversation)
+	prompt := fmt.Sprintf(sharedprompt.ExtractMemoryGraph, conversation)
 	resp, err := chatModel.Chat(ctx, []chat.Message{{Role: "user", Content: prompt}}, &chat.ChatOptions{
 		Format: utils.GenerateSchema[extractionResult](),
 	})
@@ -156,7 +118,7 @@ func (s *MemoryService) RetrieveMemory(ctx context.Context, userID string, query
 	}
 
 	// 1. Extract keywords
-	prompt := fmt.Sprintf(extractKeywordsPrompt, query)
+	prompt := fmt.Sprintf(sharedprompt.ExtractMemoryKeywords, query)
 	resp, err := chatModel.Chat(ctx, []chat.Message{{Role: "user", Content: prompt}}, &chat.ChatOptions{
 		Format: utils.GenerateSchema[keywordsResult](),
 	})

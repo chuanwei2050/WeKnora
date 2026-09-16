@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/prompt"
 	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -2173,12 +2174,6 @@ func (s *Service) sendFileResult(ctx context.Context, adapter Adapter, msg *Inco
 	}
 }
 
-// smartReplySystemPrompt is the system prompt used for generating smart notification replies.
-const smartReplySystemPrompt = "你是一个专业的 IM 机器人助手。请根据以下事件情况，生成一条简洁、清晰的通知消息。" +
-	"要求：1) 可适当使用 emoji 但不要过多；2) 语气专业平等，像同事之间对话，不要谄媚讨好，不要用「啦」「哦」「呢」「哟」等撒娇语气词；" +
-	"3) 直接输出消息内容，不要加任何额外解释；" +
-	"4) 如果事件中包含摘要或详细内容，请用 Markdown 格式结构化展示（使用标题、列表、加粗等），完整呈现，不要删减或概括；如果是简单通知，则控制在 2-3 句话以内。"
-
 // sendSmartReply generates a notification message using the channel's LLM and sends it
 // to the user. If the adapter supports streaming (StreamSender), it streams the reply
 // in real-time for a better user experience. Otherwise, it falls back to non-streaming.
@@ -2206,7 +2201,7 @@ func (s *Service) sendSmartReply(ctx context.Context, adapter Adapter, msg *Inco
 // streamSmartReply uses ChatStream to generate and stream a notification reply in real-time.
 func (s *Service) streamSmartReply(ctx context.Context, chatModel chat.Chat, streamer StreamSender, msg *IncomingMessage, situation string) error {
 	messages := []chat.Message{
-		{Role: "system", Content: smartReplySystemPrompt},
+		{Role: "system", Content: prompt.IMSmartReplySystem},
 		{Role: "user", Content: situation},
 	}
 
@@ -2291,7 +2286,7 @@ loop:
 // If the call fails, it returns the provided fallback text.
 func (s *Service) generateSmartReply(ctx context.Context, chatModel chat.Chat, situation string, fallback string) string {
 	messages := []chat.Message{
-		{Role: "system", Content: smartReplySystemPrompt},
+		{Role: "system", Content: prompt.IMSmartReplySystem},
 		{Role: "user", Content: situation},
 	}
 

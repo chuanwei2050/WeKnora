@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/prompt"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -123,12 +124,9 @@ func BuildSubQuestionPlan(ctx context.Context, model chat.Chat, query string, co
 	if model == nil {
 		return types.PlanSubQuestions(query, complexity, maxQuestions, maxCalls, maxDurationMs)
 	}
-	prompt := fmt.Sprintf(`将用户问题拆解为有序、有限的检索子问题。只输出一个 JSON 对象，不要 Markdown、解释或思维过程。
-每个子问题字段为 index、query、depends_on、required；index 从 1 开始，depends_on 只能引用更早的 index。
-仅在确实需要多步证据时返回多个子问题；简单问题返回一个子问题。后续子问题不得使用未解析的代词，必须能结合原问题和前序结果独立检索。
-最多 %d 个子问题。原问题：%s`, maxQuestions, strings.TrimSpace(query))
+	planPrompt := prompt.SubQuestionPlan(maxQuestions, strings.TrimSpace(query))
 	thinking := false
-	response, err := model.Chat(ctx, []chat.Message{{Role: "system", Content: prompt}}, &chat.ChatOptions{Temperature: 0, MaxCompletionTokens: 400, Thinking: &thinking})
+	response, err := model.Chat(ctx, []chat.Message{{Role: "system", Content: planPrompt}}, &chat.ChatOptions{Temperature: 0, MaxCompletionTokens: 400, Thinking: &thinking})
 	if err != nil || response == nil {
 		return types.PlanSubQuestions(query, complexity, maxQuestions, maxCalls, maxDurationMs)
 	}
@@ -493,7 +491,7 @@ func (p *PluginQueryUnderstand) buildPrompts(chatManage *types.ChatManage, histo
 	if len(chatManage.Images) > 0 {
 		queryContent += fmt.Sprintf("\n\n<images_uploaded count=\"%d\" />", len(chatManage.Images))
 		if len(chatManage.Images) > 1 {
-			systemPrompt += "\n当用户上传多张图片时，请额外返回 image_descriptions 数组，按图片出现顺序逐项描述；数组长度必须与图片数量一致。image_description 仍返回所有图片的合并说明。"
+			systemPrompt += prompt.MultiImageDescriptionsAppend
 		}
 	} else {
 		queryContent += "\n\n<no_image_attached />"
@@ -518,7 +516,7 @@ func (p *PluginQueryUnderstand) buildPrompts(chatManage *types.ChatManage, histo
 		"language":     chatManage.Language,
 	}
 	if chatManage.ComplexityRouting.Enabled {
-		systemPrompt += "\nReturn JSON fields complexity_level (L1/L2/L3/L4), reasoning_subtype (one of explicit_fact, contextual_fact, comparison, multi_hop, causal, hypothetical, transfer, unknown), needs_entity_relation (true only when entity relations, hierarchy, or multi-hop graph reasoning is needed), confidence (0..1), and rationale_summary (one short sentence, no chain-of-thought)."
+		systemPrompt += prompt.ComplexityJSONFieldsAppend
 		systemPrompt = AppendComplexityFewShotExamples(systemPrompt, chatManage.ComplexityRouting.FewShot, defaultComplexityFewShotLimit)
 	}
 	return types.RenderPromptPlaceholders(systemPrompt, vals),

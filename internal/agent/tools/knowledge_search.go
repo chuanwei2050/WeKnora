@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	sharedprompt "github.com/Tencent/WeKnora/internal/prompt"
 	"github.com/Tencent/WeKnora/internal/retrievalkernel"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -987,53 +988,16 @@ func (t *KnowledgeSearchTool) rerankWithLLM(
 		}
 
 		// Optimized prompt focused on retrieval matching and reranking
-		prompt := fmt.Sprintf(
-			`You are a search result reranking expert. Your task is to evaluate how well each retrieved passage matches the user's search query and information need.
-
-User Query: %s
-
-Your task: Rerank these search results by evaluating their retrieval relevance - how well each passage answers or relates to the query.
-
-Scoring Criteria (0.0 to 1.0):
-- 1.0 (0.9-1.0): Directly answers the query, contains key information needed, highly relevant
-- 0.8 (0.7-0.8): Strongly related, provides substantial relevant information
-- 0.6 (0.5-0.6): Moderately related, contains some relevant information but may be incomplete
-- 0.4 (0.3-0.4): Weakly related, minimal relevance to the query
-- 0.2 (0.1-0.2): Barely related, mostly irrelevant
-- 0.0 (0.0): Completely irrelevant, no relation to the query
-
-Evaluation Factors:
-1. Query-Answer Match: Does the passage directly address what the user is asking?
-2. Information Completeness: Does it provide sufficient information to answer the query?
-3. Semantic Relevance: Does the content semantically relate to the query intent?
-4. Key Term Coverage: Does it cover important terms/concepts from the query?
-5. Information Accuracy: Is the information accurate and trustworthy?
-
-Retrieved Passages:
-%s
-
-IMPORTANT: Return exactly %d scores, one per line, in this exact format:
-Passage 1: X.XX
-Passage 2: X.XX
-Passage 3: X.XX
-...
-Passage %d: X.XX
-
-Output only the scores, no explanations or additional text.`,
-			query,
-			passagesBuilder.String(),
-			len(batch),
-			len(batch),
-		)
+		userPrompt := sharedprompt.LLMRerankUser(query, passagesBuilder.String(), len(batch))
 
 		messages := []chat.Message{
 			{
 				Role:    "system",
-				Content: "You are a professional search result reranking expert specializing in information retrieval. You evaluate how well retrieved passages match user queries in search scenarios. Focus on retrieval relevance: whether the passage answers the query, provides needed information, and matches the user's information need. Always respond with scores only, no explanations.",
+				Content: sharedprompt.LLMRerankSystem,
 			},
 			{
 				Role:    "user",
-				Content: prompt,
+				Content: userPrompt,
 			},
 		}
 

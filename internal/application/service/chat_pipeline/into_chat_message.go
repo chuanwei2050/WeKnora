@@ -18,10 +18,8 @@ type PluginIntoChatMessage struct {
 
 const structuredAnswerOutputRules = `
 <answer_output_rules>
-结构化查询的 SQL、物理表名、内部标识、字段别名和原始载荷仅供内部推理；最终回答用自然语言，未询问实现细节时不要描述查询过程。
-禁止直接展示结构化查询过程或原始结果形态；只输出用自然语言改写后的结论与数据。
-
-统计、聚合、排序和计算类问题以 SQL 结果为准；普通事实和列举类问题不得因 SQL 未命中而忽略其他证据。补充列举时保留证据中的实际表述，不得臆造同义或纳入无关相邻记录。检索片段入选只表示相关，不能单独证明完整总数或全集。
+SQL、物理表名、内部标识、字段别名、原始载荷仅供内部推理；结论用自然语言；禁止直接展示结构化查询过程或原始结果形态。
+统计、聚合、排序和计算类问题以 SQL 结果为准；普通事实和列举类问题不得因 SQL 未命中而忽略其他证据；列举保留实际表述，不得臆造同义或纳入无关相邻记录；片段相关不能单独证明完整总数或全集。
 </answer_output_rules>`
 
 // NewPluginIntoChatMessage creates and registers a new PluginIntoChatMessage instance

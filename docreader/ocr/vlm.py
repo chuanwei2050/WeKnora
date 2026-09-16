@@ -6,6 +6,7 @@ from PIL import Image
 
 from docreader.config import CONFIG
 from docreader.ocr.base import OCRBackend
+from docreader.ocr.prompts import VLMOCR
 from docreader.utils import endecode
 
 logger = logging.getLogger(__name__)
@@ -30,13 +31,7 @@ class VLMOCRBackend(OCRBackend):
         )
         self.temperature = 0.0
         self.max_tokens = 5000
-
-        # Prompt for OCR text extraction with specific formatting requirements
-        self.prompt = "提取文档图片中正文的所有信息用markdown格式表示，"
-        "其中页眉、页脚部分忽略，"
-        "表格用html格式表达，"
-        "文档中公式用latex格式表示，"
-        "按照阅读顺序组织进行解析。"
+        self.prompt = VLMOCR
 
     def predict(self, image: Union[str, bytes, Image.Image]) -> str:
         """Extract text from an image using VLM OCR
