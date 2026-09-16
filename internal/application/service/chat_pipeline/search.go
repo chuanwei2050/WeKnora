@@ -1138,7 +1138,7 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 		return nil
 	}
 	defer limiter.Release()
-	webResults, err := p.webSearchService.Search(ctx, providerID, webConfig, chatManage.RewriteQuery)
+	webResults, err := p.webSearchService.Search(ctx, providerID, webConfig, authoritativeRetrievalQuery(chatManage))
 	if err != nil {
 		pipelineWarn(ctx, "Search", "web_search_error", map[string]interface{}{
 			"tenant_id": chatManage.TenantID,
@@ -1146,8 +1146,8 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 		})
 		return nil
 	}
-	// Build questions using RewriteQuery only
-	// questions := []string{strings.TrimSpace(chatManage.RewriteQuery)}
+	// Build questions using original query only
+	// questions := []string{strings.TrimSpace(authoritativeRetrievalQuery(chatManage))}
 	// Load session-scoped temp KB state from Redis using WebSearchStateRepository
 	// tempKBID, seen, ids := p.webSearchStateService.GetWebSearchTempKBState(ctx, chatManage.SessionID)
 	// compressed, kbID, newSeen, newIDs, err := p.webSearchService.CompressWithRAG(

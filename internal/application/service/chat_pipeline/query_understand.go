@@ -144,7 +144,7 @@ func conservativeRoutingDecision(chatManage *types.ChatManage, reason types.Degr
 }
 
 func conservativeRoutingClassification(chatManage *types.ChatManage) types.QuestionComplexity {
-	if chatManage != nil && (types.NeedsEntityRelation(chatManage.Query) || types.NeedsEntityRelation(chatManage.RewriteQuery)) {
+	if chatManage != nil && types.NeedsEntityRelation(chatManage.Query) {
 		// A parse failure must not erase an explicit relation request. This is a
 		// deterministic boundary hint, not a model-derived confidence score.
 		return types.QuestionComplexity{
@@ -610,8 +610,9 @@ func keywordRetrievalQuery(chatManage *types.ChatManage) string {
 	return strings.TrimSpace(chatManage.RewriteQuery)
 }
 
-// authoritativeRetrievalQuery keeps the primary vector query and every
-// Elasticsearch retrieval path anchored to the user's wording.
+// authoritativeRetrievalQuery keeps the primary vector query, ES/keyword
+// retrieval, and all non-vector consumers on the user's original wording.
+// Rewrites participate only via supplementalRewriteQuery for extra vector recall.
 func authoritativeRetrievalQuery(chatManage *types.ChatManage) string {
 	if chatManage == nil {
 		return ""

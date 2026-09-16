@@ -164,7 +164,7 @@ func ShouldUseGraph(chatManage *types.ChatManage) bool {
 	if chatManage.RoutingDecision != nil {
 		return chatManage.RoutingDecision.Budget.GraphEnabled && chatManage.RoutingDecision.Classification.NeedsEntityRelation
 	}
-	return types.NeedsEntityRelation(chatManage.Query) || types.NeedsEntityRelation(chatManage.RewriteQuery)
+	return types.NeedsEntityRelation(chatManage.Query)
 }
 
 // Extractor is a struct for extracting entities

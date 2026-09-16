@@ -44,11 +44,10 @@ func filterHistoryResults(
 		existingIDs[r.ID] = struct{}{}
 	}
 
-	// Use RewriteQuery if available (it's the cleaned-up retrieval query),
-	// otherwise fall back to the original query.
-	query := chatManage.RewriteQuery
+	// Prefer original query; rewrite is only used as supplemental vector recall.
+	query := chatManage.Query
 	if query == "" {
-		query = chatManage.Query
+		query = chatManage.RewriteQuery
 	}
 	queryTokens := searchutil.TokenizeSimple(query)
 

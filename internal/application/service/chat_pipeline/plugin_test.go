@@ -100,8 +100,9 @@ func TestStructuredAnswerOutputRulesAreAppendedWithoutChangingEvidence(t *testin
 		"SQL", "物理表名", "内部标识", "字段别名", "原始载荷", "自然语言",
 		"禁止直接展示结构化查询过程或原始结果形态",
 		"统计、聚合、排序和计算类问题以 SQL 结果为准",
-		"普通事实和列举类问题不得因 SQL 结果而忽略其他证据",
-		"实际表述", "同一对象的等价表述可合并", "非等价近义不可合并", "无关相邻记录",
+		"普通事实和列举类问题不得因 SQL 未命中而忽略其他证据",
+		"同一主体的等价表述可合并", "不得因字面差排除", "不同主体不可混并",
+		"实际表述", "无关相邻记录",
 		"不能单独证明完整总数或全集",
 	} {
 		if !strings.Contains(manage.UserContent, rule) {
@@ -141,7 +142,8 @@ func TestStructuredAndRerankedEvidenceAreBothRenderedForAnswerReview(t *testing.
 	}
 	for _, evidence := range []string{
 		reranked.Content, structured.Content,
-		"以 SQL 结果为准", "不得因 SQL 未命中而忽略其他证据", "实际表述", "无关相邻记录",
+		"以 SQL 结果为准", "不得因 SQL 未命中而忽略其他证据",
+		"同一主体的等价表述可合并", "不得因字面差排除", "无关相邻记录",
 	} {
 		if !strings.Contains(manage.UserContent, evidence) {
 			t.Fatalf("answer prompt missing %q: %s", evidence, manage.UserContent)

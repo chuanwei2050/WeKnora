@@ -107,7 +107,7 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	pipelineInfo(ctx, "SearchParallel", "start", map[string]interface{}{
 		"session_id":   chatManage.SessionID,
 		"has_entities": len(chatManage.Entity) > 0,
-		"query_bytes":  len([]byte(chatManage.RewriteQuery)),
+		"query_bytes":  len([]byte(authoritativeRetrievalQuery(chatManage))),
 	})
 
 	// Deep-copy to avoid concurrent read/write on shared slice fields

@@ -80,7 +80,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		"candidate_cnt": len(chatManage.SearchResult),
 		"rerank_model":  chatManage.RerankModelID,
 		"rerank_thresh": chatManage.RerankThreshold,
-		"query_bytes":   len([]byte(chatManage.RewriteQuery)),
+		"query_bytes":   len([]byte(authoritativeRetrievalQuery(chatManage))),
 	})
 	if len(chatManage.SearchResult) == 0 {
 		pipelineInfo(ctx, "Rerank", "skip", map[string]interface{}{
@@ -140,7 +140,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	if len(candidatesToRerank) > 0 {
 		// Run inference once; threshold filtering uses this response locally.
 		var rerankErr error
-		rerankResp, rerankErr = p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages, candidatesToRerank)
+		rerankResp, rerankErr = p.rerank(ctx, chatManage, rerankModel, authoritativeRetrievalQuery(chatManage), passages, candidatesToRerank)
 		if rerankErr != nil {
 			if errors.Is(rerankErr, rerank.ErrInvalidResponse) {
 				chatManage.RerankOutcome = types.RerankOutcomeInvalidCandidate
@@ -352,9 +352,9 @@ func adaptiveRerankCandidateLimit(chatManage *types.ChatManage) int {
 			target = 30
 		}
 	} else {
-		query := strings.TrimSpace(chatManage.RewriteQuery)
+		query := strings.TrimSpace(chatManage.Query)
 		if query == "" {
-			query = strings.TrimSpace(chatManage.Query)
+			query = strings.TrimSpace(chatManage.RewriteQuery)
 		}
 		switch {
 		case isShortEntityQuery(query):

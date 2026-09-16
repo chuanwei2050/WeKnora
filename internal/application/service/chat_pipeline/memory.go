@@ -56,10 +56,10 @@ func (p *MemoryPlugin) handleRetrieval(
 	}
 	logger.Info(ctx, "Start to retrieve memory")
 
-	// Retrieve memory context
-	query := chatManage.RewriteQuery
+	// Prefer original query; rewrite is only used as supplemental vector recall.
+	query := chatManage.Query
 	if query == "" {
-		query = chatManage.Query
+		query = chatManage.RewriteQuery
 	}
 
 	memoryContext, err := p.memoryService.RetrieveMemory(ctx, chatManage.UserID, query)

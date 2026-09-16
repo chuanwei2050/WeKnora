@@ -19,7 +19,7 @@ type PluginIntoChatMessage struct {
 const structuredAnswerOutputRules = `
 <answer_output_rules>
 SQL、物理表名、内部标识、字段别名、原始载荷仅供内部推理；结论用自然语言；禁止直接展示结构化查询过程或原始结果形态。
-统计、聚合、排序和计算类问题以 SQL 结果为准；普通事实和列举类问题不得因 SQL 结果而忽略其他证据；列举时同一对象的等价表述可合并，非等价近义不可合并；保留证据实际表述，不得纳入无关相邻记录；片段相关不能单独证明完整总数或全集。
+统计、聚合、排序和计算类问题以 SQL 结果为准；普通事实和列举类问题不得因 SQL 未命中而忽略其他证据；列举时同一主体的等价表述可合并，不得因字面差排除证据中的明确命中；不同主体不可混并；保留实际表述，不得纳入无关相邻记录；片段相关不能单独证明完整总数或全集。
 </answer_output_rules>`
 
 // NewPluginIntoChatMessage creates and registers a new PluginIntoChatMessage instance
@@ -85,15 +85,6 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 	// through the context template so runtime metadata (current_time, etc.) is injected.
 	if !chatManage.NeedsRetrieval() {
 		userContent := safeQuery
-		if rewrite := strings.TrimSpace(chatManage.RewriteQuery); rewrite != "" {
-			if safeRewrite, ok := utils.ValidateInput(rewrite); ok {
-				userContent = safeRewrite
-			} else {
-				pipelineWarn(ctx, "IntoChatMessage", "invalid_rewrite_query_fallback", map[string]interface{}{
-					"session_id": chatManage.SessionID,
-				})
-			}
-		}
 		if chatManage.ImageDescription != "" && !chatManage.ChatModelSupportsVision {
 			userContent += "\n\n[用户上传图片内容]\n" + chatManage.ImageDescription
 		}
