@@ -15,7 +15,7 @@ def test_defaults_to_one_and_only_expands_on_confirmed_relation():
     assert select_minimal_tables([hits[0], hits[2]], tables) == [people]
 
 
-def test_same_workbook_shared_columns_expand_schema_shortlist():
+def test_same_workbook_shared_columns_do_not_expand_minimal_shortlist():
     summary = table("summary")
     detail = table("detail")
     summary.columns = [
@@ -29,8 +29,8 @@ def test_same_workbook_shared_columns_expand_schema_shortlist():
         SimpleNamespace(original_name="有效期"),
     ]
     hits = [{"table_id": "summary", "score": 1.0}, {"table_id": "detail", "score": .9}]
-    assert select_minimal_tables(hits, {"summary": summary, "detail": detail}) == [summary, detail]
-    # Shared columns expand schema context but not JOIN width without FK.
+    # Column overlap alone must not widen the executable shortlist.
+    assert select_minimal_tables(hits, {"summary": summary, "detail": detail}) == [summary]
     assert confirmed_join_limit([summary, detail]) == 1
 
 

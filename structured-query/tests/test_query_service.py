@@ -179,7 +179,9 @@ def test_none_route_is_reconsidered_with_full_schema_when_profiles_are_relevant(
 
 
 def test_should_reconsider_none_requires_strong_evidence():
-    assert query_service.should_reconsider_none([], [{"text": "张三", "score": 0.1}]) is True
+    assert query_service.should_reconsider_none([], [{"text": "张三", "score": 0.1}]) is False
+    assert query_service.should_reconsider_none([], [{"text": "张三", "score": 2.0}]) is True
+    assert query_service.should_reconsider_none([], [{"text": "张三", "lexical_score": 2.0}]) is True
     assert query_service.should_reconsider_none([{"score": 2.0}], []) is True
     assert query_service.should_reconsider_none([{"score": 1.5}], []) is False
     assert query_service.should_reconsider_none([{"score": 0.4}], []) is False
@@ -363,20 +365,40 @@ def test_profile_metadata_scope_resolves_unique_dataset_without_phrase_rules():
 
 
 def test_profile_metadata_scope_treats_duplicate_content_as_one_owner():
-    """Rebuild orphans share content_sha256; they must not void unique file scope."""
-    first = _dataset("数科事业部实验室相关人员资质清单202607V3.0.xlsx", "人员资质统计")
-    duplicate = _dataset("数科事业部实验室相关人员资质清单202607V3.0.xlsx", "人员资质统计")
-    first.content_sha256 = duplicate.content_sha256 = "same-bytes"
+    """Rebuild orphans share content_sha256; keep only the newest activated copy."""
+    older = _dataset("数科事业部实验室相关人员资质清单202607V3.0.xlsx", "人员资质统计")
+    newer = _dataset("数科事业部实验室相关人员资质清单202607V3.0.xlsx", "人员资质统计")
+    older.content_sha256 = newer.content_sha256 = "same-bytes"
+    older.versions[0].activated_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    newer.versions[0].activated_at = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    older.created_at = older.versions[0].activated_at
+    newer.created_at = newer.versions[0].activated_at
     unrelated = _dataset("软件测评相关人员资质清单202607V3.0.xlsx", "人员资质统计")
     unrelated.content_sha256 = "other-bytes"
 
     selected, labels = query_service._match_profile_metadata_scope(
         "数科事业部人力资源清单里有多少个硕士学历的人员",
-        [first, duplicate, unrelated],
+        [older, newer, unrelated],
     )
 
-    assert {item.id for item in selected} == {first.id, duplicate.id}
-    assert set(labels) == {first.original_file_name}
+    assert selected == [newer]
+    assert labels == [newer.original_file_name]
+
+
+def test_profile_metadata_scope_compares_naive_and_aware_activation_times():
+    older = _dataset("数科事业部实验室相关人员资质清单202607V3.0.xlsx", "人员资质统计")
+    newer = _dataset("数科事业部实验室相关人员资质清单202607V3.0.xlsx", "人员资质统计")
+    older.content_sha256 = newer.content_sha256 = "same-bytes"
+    older.versions[0].activated_at = datetime(2026, 1, 1)  # naive
+    newer.versions[0].activated_at = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    older.created_at = older.versions[0].activated_at
+    newer.created_at = newer.versions[0].activated_at
+
+    selected, _ = query_service._match_profile_metadata_scope(
+        "数科事业部人力资源清单里有多少个硕士学历的人员",
+        [older, newer],
+    )
+    assert selected == [newer]
 
 
 def test_resolved_dataset_locator_is_removed_from_model_question():

@@ -16,16 +16,38 @@ def test_normalize_preserves_chinese_and_duplicate_headers():
 
 def test_promote_header_when_first_row_is_title_and_columns_are_numeric():
     frame = pd.DataFrame(
-        [["姓名", "学历"], ["张三", "硕士"], ["李四", "本科"]],
+        [["姓名", "年龄", "学历"], ["张三", 30, "硕士"], ["李四", 25, "本科"]],
+        columns=[0, 1, 2],
+    )
+    promoted = promote_header_row(frame)
+    assert list(promoted.columns) == ["姓名", "年龄", "学历"]
+    assert promoted.iloc[0].tolist() == ["张三", 30, "硕士"]
+
+    normalized, mapping = normalize_frame(frame)
+    assert mapping == {"c_001": "姓名", "c_002": "年龄", "c_003": "学历"}
+    assert normalized.iloc[0].tolist()[:1] == ["张三"]
+
+
+def test_promote_header_does_not_steal_headerless_data_row():
+    """Numeric placeholders + Chinese data must not promote the first person row."""
+    frame = pd.DataFrame(
+        [["张三", "硕士"], ["李四", "本科"], ["王五", "博士"]],
         columns=[0, 1],
     )
     promoted = promote_header_row(frame)
-    assert list(promoted.columns) == ["姓名", "学历"]
+    assert list(promoted.columns) == [0, 1]
+    assert len(promoted) == 3
     assert promoted.iloc[0].tolist() == ["张三", "硕士"]
 
-    normalized, mapping = normalize_frame(frame)
-    assert mapping == {"c_001": "姓名", "c_002": "学历"}
-    assert normalized.iloc[0].tolist() == ["张三", "硕士"]
+
+def test_promote_header_skips_when_year_columns_already_descriptive_enough():
+    frame = pd.DataFrame(
+        [["产品A", 10], ["产品B", 20]],
+        columns=["品名", "2024"],
+    )
+    promoted = promote_header_row(frame)
+    assert list(promoted.columns) == ["品名", "2024"]
+    assert len(promoted) == 2
 
 
 def test_parse_gb18030_csv():

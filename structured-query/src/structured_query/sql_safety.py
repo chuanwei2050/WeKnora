@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 import re
@@ -6,6 +6,9 @@ import unicodedata
 
 from sqlglot import exp, parse, parse_one
 from sqlglot.errors import ParseError
+
+# Column → one cell string, or a sequence of distinct cell strings from Profile.
+SupportedColumnValues = dict[str, str | Sequence[str]]
 
 
 class UnsafeSQL(ValueError):
@@ -68,7 +71,7 @@ def normalize_unambiguous_column_names(
 
 def remove_impossible_complete_profile_or_branches(
     sql: str,
-    supported_values_by_column: dict[str, str],
+    supported_values_by_column: SupportedColumnValues,
     complete_value_columns: set[str],
     dialect: str = "postgres",
 ) -> str:
@@ -83,7 +86,7 @@ def remove_impossible_complete_profile_or_branches(
         return sql
     complete = {column.casefold() for column in complete_value_columns}
     support_by_column = {
-        name.casefold(): _normalize_value_text(value)
+        name.casefold(): _support_cells(value)
         for name, value in supported_values_by_column.items()
         if name.casefold() in complete
     }
@@ -101,7 +104,7 @@ def remove_impossible_complete_profile_or_branches(
 def validate_read_only_sql(
     sql: str, allowed_tables: set[str], max_tables: int = 3, dialect: str = "postgres",
     question_text: str = "",
-    supported_values_by_column: dict[str, str] | None = None,
+    supported_values_by_column: SupportedColumnValues | None = None,
     probeable_columns: set[str] | None = None,
     verify_columns: set[str] | None = None,
     literal_support_probe: Callable[[str, str], bool] | None = None,
@@ -304,6 +307,60 @@ def _normalize_value_text(value: str) -> str:
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", value).casefold())
 
 
+def _support_cells(value: str | Sequence[str]) -> list[str]:
+    """Split Profile evidence into individual cell strings.
+
+    A bare string is treated as one cell unless it contains newlines (legacy
+    joined bag from older call sites).
+    """
+    if isinstance(value, str):
+        parts = [part for part in value.split("\n") if part.strip()]
+        return parts or ([value] if value else [])
+    cells: list[str] = []
+    for item in value:
+        text = str(item)
+        if text.strip():
+            cells.append(text)
+    return cells
+
+
+def _compact_in_any_cell(compact: str, cells: Sequence[str]) -> bool:
+    return any(compact in _normalize_value_text(cell) for cell in cells)
+
+
+def _longest_cell_overlap(compact: str, cells: Sequence[str]) -> tuple[str, str]:
+    """Return (overlap, source_cell) for the longest compact overlap in any cell."""
+    best_overlap = ""
+    best_cell = ""
+    for cell in cells:
+        overlap = _longest_supported_overlap(compact, _normalize_value_text(cell))
+        if len(overlap) > len(best_overlap):
+            best_overlap = overlap
+            best_cell = cell
+    return best_overlap, best_cell
+
+
+def _original_spelling_for_compact(overlap: str, cell: str) -> str:
+    """Map a whitespace-stripped overlap back onto the cell's original spelling."""
+    if not overlap or not cell:
+        return overlap
+    mapping: list[int] = []
+    compact_chars: list[str] = []
+    normalized = unicodedata.normalize("NFKC", cell)
+    for index, char in enumerate(normalized):
+        if char.isspace():
+            continue
+        compact_chars.append(char.casefold())
+        mapping.append(index)
+    compact_cell = "".join(compact_chars)
+    position = compact_cell.find(overlap)
+    if position < 0 or position + len(overlap) > len(mapping):
+        return overlap
+    start = mapping[position]
+    end = mapping[position + len(overlap) - 1] + 1
+    return normalized[start:end]
+
+
 _FILTER_PREDICATES = (
     exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE,
     exp.Like, exp.ILike, exp.In, exp.Between,
@@ -328,7 +385,7 @@ def _literal_fragments(raw: str) -> list[tuple[str, str]]:
 
 def rewrite_unsupported_filter_literals(
     sql: str,
-    supported_values_by_column: dict[str, str],
+    supported_values_by_column: SupportedColumnValues,
     *,
     dialect: str = "postgres",
     min_overlap: int = 2,
@@ -337,13 +394,14 @@ def rewrite_unsupported_filter_literals(
 
     Returns rewritten SQL when at least one literal changes; otherwise None.
     Only uses substrings already present in Profile — no synonym invention.
+    Rewritten text keeps the source cell's original spacing/spelling.
     """
     try:
         statement = parse_one(sql, read=dialect)
     except ParseError:
         return None
     support_by_column = {
-        name.casefold(): _normalize_value_text(value)
+        name.casefold(): _support_cells(value)
         for name, value in supported_values_by_column.items()
     }
     aliases = _table_aliases(statement)
@@ -357,7 +415,7 @@ def rewrite_unsupported_filter_literals(
         support_key = _resolve_column_key(columns[0], support_by_column, aliases)
         if support_key is None:
             continue
-        support = support_by_column[support_key]
+        cells = support_by_column[support_key]
         for literal in predicate.find_all(exp.Literal):
             if not literal.is_string:
                 continue
@@ -366,10 +424,10 @@ def rewrite_unsupported_filter_literals(
             cursor = 0
             for match in re.finditer(r"[%_]", original):
                 chunk = original[cursor:match.start()]
-                rewritten_parts.append(_shrink_literal_chunk(chunk, support, min_overlap))
+                rewritten_parts.append(_shrink_literal_chunk(chunk, cells, min_overlap))
                 rewritten_parts.append(match.group(0))
                 cursor = match.end()
-            rewritten_parts.append(_shrink_literal_chunk(original[cursor:], support, min_overlap))
+            rewritten_parts.append(_shrink_literal_chunk(original[cursor:], cells, min_overlap))
             new_value = "".join(rewritten_parts)
             if new_value != original:
                 literal.set("this", new_value)
@@ -379,20 +437,25 @@ def rewrite_unsupported_filter_literals(
     return statement.sql(dialect=dialect)
 
 
-def _shrink_literal_chunk(chunk: str, support: str, min_overlap: int) -> str:
+def _shrink_literal_chunk(chunk: str, cells: Sequence[str], min_overlap: int) -> str:
     compact = _normalize_value_text(chunk)
-    if not compact or compact in support:
+    if not compact:
         return chunk
-    overlap = _longest_supported_overlap(compact, support)
+    for cell in cells:
+        if compact not in _normalize_value_text(cell):
+            continue
+        spelling = _original_spelling_for_compact(compact, cell)
+        # Restore source spacing even when the compact form already matched.
+        return spelling or chunk
+    overlap, source_cell = _longest_cell_overlap(compact, cells)
     if len(overlap) < min_overlap:
         return chunk
-    excerpt = _nearest_supported_excerpt(overlap, support, context_chars=0)
-    return excerpt or overlap
+    return _original_spelling_for_compact(overlap, source_cell) or overlap
 
 
 def _validate_filter_literals(
     statement: exp.Expression,
-    supported_values_by_column: dict[str, str],
+    supported_values_by_column: SupportedColumnValues,
     *,
     probeable_columns: set[str],
     verify_columns: set[str],
@@ -400,7 +463,7 @@ def _validate_filter_literals(
 ) -> None:
     """Reject invented filter text where SQL crosses into the database executor."""
     support_by_column = {
-        name.casefold(): _normalize_value_text(value)
+        name.casefold(): _support_cells(value)
         for name, value in supported_values_by_column.items()
     }
     probeable = {name.casefold() for name in probeable_columns}
@@ -418,7 +481,7 @@ def _validate_filter_literals(
         support_key = _resolve_column_key(columns[0], support_by_column, aliases)
         if support_key is None:
             continue
-        support = support_by_column[support_key]
+        cells = support_by_column[support_key]
         for literal in predicate.find_all(exp.Literal):
             if not literal.is_string:
                 continue
@@ -433,7 +496,7 @@ def _validate_filter_literals(
                 unsupported_pairs = [
                     (compact, probe)
                     for compact, probe in fragments
-                    if compact not in support
+                    if not _compact_in_any_cell(compact, cells)
                 ]
                 unsupported = [compact for compact, _ in unsupported_pairs]
                 # Incomplete Profiles are samples: prefer a live existence probe
@@ -449,8 +512,12 @@ def _validate_filter_literals(
                         if not literal_support_probe(support_key, probe)
                     ]
             if unsupported:
-                overlap = _longest_supported_overlap(unsupported[0], support)
-                excerpt = _nearest_supported_excerpt(unsupported[0], support)
+                overlap, source_cell = _longest_cell_overlap(unsupported[0], cells)
+                excerpt = _original_spelling_for_compact(overlap, source_cell) if overlap else ""
+                if not excerpt and cells:
+                    excerpt = _nearest_supported_excerpt(
+                        unsupported[0], _normalize_value_text(cells[0])
+                    )
                 hint = (
                     f"column={support_key}; "
                     f"unsupported_fragment={unsupported[0][:48]}"
@@ -461,6 +528,7 @@ def _validate_filter_literals(
                     hint += f"; nearest_profile_evidence={excerpt}"
                 if hint not in failures:
                     failures.append(hint)
+    _validate_and_cooccurrence(statement, support_by_column, aliases, failures)
     if failures:
         # Preserve evidence for multiple invalid alternatives in the same SQL so
         # the one allowed repair call is not biased by whichever OR branch the
@@ -468,9 +536,71 @@ def _validate_filter_literals(
         raise UnsafeSQL("unsupported_value_literal", " | ".join(failures[:3]))
 
 
+def _flatten_and(node: exp.Expression) -> list[exp.Expression]:
+    if isinstance(node, exp.And):
+        return _flatten_and(node.this) + _flatten_and(node.expression)
+    return [node]
+
+
+def _validate_and_cooccurrence(
+    statement: exp.Expression,
+    support_by_column: dict[str, list[str]],
+    aliases: dict[str, str],
+    failures: list[str],
+) -> None:
+    """Reject AND filters on one column that never co-occur in the same cell.
+
+    Bag-of-fragments membership lets `%A% AND %B%` pass when A and B only appear
+    on different rows. Require at least one Profile cell that contains every
+    conjunct fragment for that column.
+    """
+    for node in statement.walk():
+        if not isinstance(node, exp.And):
+            continue
+        # Deduplicate nested And trees: only evaluate at the root of each chain.
+        if isinstance(node.parent, exp.And):
+            continue
+        fragments_by_column: dict[str, list[str]] = {}
+        for conjunct in _flatten_and(node):
+            if not isinstance(conjunct, _FILTER_PREDICATES):
+                continue
+            # IN/BETWEEN list alternatives that are OR-like, not conjuncts.
+            if isinstance(conjunct, (exp.In, exp.Between)):
+                continue
+            columns = list(conjunct.find_all(exp.Column))
+            if len(columns) != 1:
+                continue
+            support_key = _resolve_column_key(columns[0], support_by_column, aliases)
+            if support_key is None:
+                continue
+            for literal in conjunct.find_all(exp.Literal):
+                if not literal.is_string:
+                    continue
+                for compact, _ in _literal_fragments(literal.this):
+                    fragments_by_column.setdefault(support_key, []).append(compact)
+        for support_key, fragments in fragments_by_column.items():
+            unique = list(dict.fromkeys(fragments))
+            if len(unique) < 2:
+                continue
+            cells = support_by_column.get(support_key) or []
+            if not cells:
+                continue
+            if any(
+                all(fragment in _normalize_value_text(cell) for fragment in unique)
+                for cell in cells
+            ):
+                continue
+            hint = (
+                f"column={support_key}; "
+                f"unsupported_and_cooccurrence={'+'.join(item[:24] for item in unique[:3])}"
+            )
+            if hint not in failures:
+                failures.append(hint)
+
+
 def _predicate_is_impossible(
     predicate: exp.Expression,
-    support_by_column: dict[str, str],
+    support_by_column: dict[str, list[str]],
     aliases: dict[str, str],
 ) -> bool | None:
     """Return True/False only for a directly provable single-column predicate."""
@@ -482,14 +612,14 @@ def _predicate_is_impossible(
     support_key = _resolve_column_key(columns[0], support_by_column, aliases)
     if support_key is None:
         return None
-    support = support_by_column[support_key]
+    cells = support_by_column[support_key]
     literals = [literal for literal in predicate.find_all(exp.Literal) if literal.is_string]
     if not literals:
         return None
     for literal in literals:
         value = _normalize_value_text(literal.this)
         fragments = [part for part in re.split(r"[%_]", value) if len(part) >= 2]
-        if any(fragment not in support for fragment in fragments):
+        if any(not _compact_in_any_cell(fragment, cells) for fragment in fragments):
             return True
     return False
 
@@ -506,7 +636,7 @@ def _table_aliases(statement: exp.Expression) -> dict[str, str]:
 
 def _resolve_column_key(
     column: exp.Column,
-    support_by_column: dict[str, str],
+    support_by_column: dict[str, object],
     aliases: dict[str, str],
 ) -> str | None:
     name = column.name.casefold()

@@ -6,7 +6,7 @@ from structured_query import reindex
 
 def test_rebuild_replaces_each_active_version(monkeypatch):
     version = uuid4()
-    dataset = SimpleNamespace(tenant_id="tenant", namespace="kb")
+    dataset = SimpleNamespace(tenant_id="tenant", namespace="kb", original_file_name="人员.xlsx")
     version_row = SimpleNamespace(id=version)
     table = SimpleNamespace(id=uuid4(), sheet_name="人员", profile={"mschema": "schema"})
     column = SimpleNamespace(id=uuid4(), original_name="姓名", data_type="TEXT")

@@ -288,11 +288,71 @@ def test_incomplete_profile_can_use_bounded_runtime_literal_probe():
 def test_rewrite_shrinks_invented_literal_to_profile_overlap():
     rewritten = rewrite_unsupported_filter_literals(
         "SELECT * FROM people WHERE certificate ILIKE '%software reviewer exam%'",
-        {"people.certificate": "official qualification software reviewer"},
+        {"people.certificate": ["official qualification software reviewer"]},
     )
     assert rewritten is not None
-    assert "software reviewer" in rewritten.casefold().replace(" ", "") or "softwarereviewer" in rewritten.casefold().replace(" ", "")
+    assert "software reviewer" in rewritten.casefold()
+    assert "softwarereviewer" not in rewritten.casefold()
     assert "exam" not in rewritten.casefold()
+
+
+def test_rewrite_preserves_original_cell_spacing():
+    rewritten = rewrite_unsupported_filter_literals(
+        "SELECT * FROM people WHERE title ILIKE '%seniorengineerlevel%'",
+        {"people.title": ["Senior Engineer Level 3", "Junior Analyst"]},
+    )
+    assert rewritten is not None
+    assert "Senior Engineer Level" in rewritten or "senior engineer level" in rewritten.casefold()
+    assert "seniorengineerlevel" not in rewritten.casefold()
+
+
+def test_and_literals_must_cooccur_in_same_cell():
+    with pytest.raises(UnsafeSQL, match="unsupported_and_cooccurrence|unsupported_value_literal"):
+        validate_read_only_sql(
+            "SELECT * FROM people WHERE certificate ILIKE '%软件评测师%' "
+            "AND certificate ILIKE '%软考%'",
+            {"people"},
+            supported_values_by_column={
+                "people.certificate": ["高级软件评测师", "软考中级"],
+            },
+        )
+
+
+def test_and_literals_allowed_when_one_cell_contains_both():
+    result = validate_read_only_sql(
+        "SELECT * FROM people WHERE certificate ILIKE '%软件评测师%' "
+        "AND certificate ILIKE '%软考%'",
+        {"people"},
+        supported_values_by_column={
+            "people.certificate": ["软考软件评测师", "其他证书"],
+        },
+    )
+    assert result.tables == {"people"}
+
+
+def test_in_list_alternatives_are_not_treated_as_and_cooccurrence():
+    result = validate_read_only_sql(
+        "SELECT * FROM people WHERE certificate IN ('高级软件评测师', '软考中级') "
+        "AND name ILIKE '%张%'",
+        {"people"},
+        supported_values_by_column={
+            "people.certificate": ["高级软件评测师", "软考中级"],
+            "people.name": ["张三", "李四"],
+        },
+    )
+    assert result.tables == {"people"}
+
+
+def test_fragment_cannot_span_across_joined_cells():
+    """Legacy newline-joined bags must not let fragments cross cell boundaries."""
+    with pytest.raises(UnsafeSQL, match="unsupported_value_literal"):
+        validate_read_only_sql(
+            "SELECT * FROM people WHERE certificate ILIKE '%师软%'",
+            {"people"},
+            supported_values_by_column={
+                "people.certificate": "高级软件评测师\n软考中级",
+            },
+        )
 
 
 def test_complete_profile_never_uses_runtime_probe():

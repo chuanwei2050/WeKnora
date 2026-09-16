@@ -32,6 +32,9 @@ def _looks_like_header_cell(value: object) -> bool:
         return False
     if _NUMERIC_HEADER.fullmatch(text):
         return False
+    # Long free-text cells are almost always data, not column titles.
+    if len(text) > 32:
+        return False
     return True
 
 
@@ -58,25 +61,43 @@ def _drop_leading_empty_rows(frame: pd.DataFrame) -> pd.DataFrame:
 def promote_header_row(frame: pd.DataFrame) -> pd.DataFrame:
     """Promote the first data row when current columns look like values, not names.
 
-    Uses only structural signals (empty/Unnamed/numeric ratios) — no domain terms.
+    Uses only structural signals (empty/Unnamed/numeric ratios, short unique
+    labels, contrast vs the next row) — no domain terms. Biased against
+    promoting so headerless sheets keep their first data row.
     """
     working = _drop_leading_empty_rows(frame)
-    if working.empty:
+    if working.empty or len(working) < 2:
         return working
     current_quality = _header_quality(list(working.columns))
-    if current_quality >= 0.5 or len(working) == 0:
+    # Only intervene when the existing header is clearly non-descriptive.
+    if current_quality >= 0.35:
         return working
-    promoted_quality = _header_quality(working.iloc[0].tolist())
-    if promoted_quality <= current_quality + 0.2:
+    first_row = working.iloc[0].tolist()
+    promoted_quality = _header_quality(first_row)
+    if promoted_quality < 0.75 or promoted_quality < current_quality + 0.4:
+        return working
+    # If the next row looks equally "header-like", the first row is data.
+    second_quality = _header_quality(working.iloc[1].tolist())
+    if promoted_quality <= second_quality + 0.15:
+        return working
+    labels = [
+        str(value).strip()
+        for value in first_row
+        if value is not None and not (isinstance(value, float) and pd.isna(value)) and str(value).strip()
+    ]
+    if len(labels) < 2:
+        return working
+    if len(set(labels)) < max(2, int(len(labels) * 0.8)):
         return working
     new_columns = [
         str(value).strip() if value is not None and not (isinstance(value, float) and pd.isna(value)) and str(value).strip()
         else f"未命名列{ordinal}"
-        for ordinal, value in enumerate(working.iloc[0].tolist(), start=1)
+        for ordinal, value in enumerate(first_row, start=1)
     ]
     rest = working.iloc[1:].copy()
     rest.columns = new_columns
     return rest.reset_index(drop=True)
+
 
 
 def normalize_frame(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str]]:

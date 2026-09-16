@@ -66,13 +66,19 @@ def should_reconsider_none(
 ) -> bool:
     """Force a second SQL-only attempt only on strong record-op evidence.
 
-    Value hits are concrete cell matches. Column hits alone must clear the same
-    strength bar as lexical_evidence_is_sufficient (>=2) so topical mentions of
-    a field name (conceptual questions) do not override route=none. A clear file
-    title hit plus any column evidence is also enough — still no business phrases.
+    Value hits need the same strength bar as lexical_evidence_is_sufficient
+    (>=2) so a weak cell echo on a conceptual question does not override
+    route=none. Column hits alone use the same threshold. A clear file title
+    hit plus any column evidence is also enough — still no business phrases.
     """
-    if value_hits:
-        return True
+    for hit in value_hits or ():
+        try:
+            if float(hit.get("score", 0) or 0) >= 2:
+                return True
+            if float(hit.get("lexical_score", 0) or 0) >= 2:
+                return True
+        except (TypeError, ValueError):
+            continue
     for hit in column_hits or ():
         try:
             if float(hit.get("score", 0) or 0) >= 2:
@@ -113,7 +119,7 @@ def execute_with_one_repair(
     execute: Callable[[str], object],
     semantic_to_physical: dict[str, str] | None = None,
     dataset_scope: list[str] | None = None,
-    supported_values_by_column: dict[str, str] | None = None,
+    supported_values_by_column: dict[str, str | list[str]] | None = None,
     complete_value_columns: set[str] | None = None,
     max_sql_tables: int = 3,
     probeable_columns: set[str] | None = None,
@@ -172,6 +178,18 @@ def execute_with_one_repair(
             dialect=dialect,
         )
         sql_to_validate = normalized_sql
+        if supported_values_by_column:
+            # Restore Profile cell spelling (including spaces) and shrink invented
+            # fragments before the first validation pass so ILIKE hits real cells.
+            rewritten = rewrite_unsupported_filter_literals(
+                sql_to_validate,
+                supported_values_by_column,
+                dialect=dialect,
+            )
+            if rewritten and rewritten != sql_to_validate:
+                error_codes.append("literal_overlap_rewrite")
+                sql_to_validate = rewritten
+                attempts.append(rewritten)
         for coerce_pass in range(2):
             try:
                 stage_started = perf_counter()
@@ -314,7 +332,51 @@ def _match_profile_metadata_scope(question: str, datasets: list[Dataset]) -> tup
 
     if not candidates:
         return [], []
-    return [item[0] for item in candidates], [item[2] for item in candidates]
+    # Identical content may appear as rebuild orphans; keep only the newest
+    # activated copy so scope does not multiply table scans.
+    newest_by_content: dict[str, tuple[Dataset, str, str]] = {}
+    order: list[str] = []
+    for dataset, segment, label in candidates:
+        identity = dataset.content_sha256 or str(dataset.id)
+        active = next(
+            (version for version in dataset.versions if version.id == dataset.active_version_id),
+            None,
+        )
+        activated = _as_utc(
+            getattr(active, "activated_at", None) or getattr(dataset, "created_at", None)
+        )
+        prior = newest_by_content.get(identity)
+        if prior is None:
+            newest_by_content[identity] = (dataset, segment, label)
+            order.append(identity)
+            continue
+        prior_dataset = prior[0]
+        prior_active = next(
+            (
+                version
+                for version in prior_dataset.versions
+                if version.id == prior_dataset.active_version_id
+            ),
+            None,
+        )
+        prior_activated = _as_utc(
+            getattr(prior_active, "activated_at", None)
+            or getattr(prior_dataset, "created_at", None)
+        )
+        if activated is not None and (prior_activated is None or activated > prior_activated):
+            newest_by_content[identity] = (dataset, segment, label)
+        elif activated == prior_activated and str(dataset.id) > str(prior_dataset.id):
+            newest_by_content[identity] = (dataset, segment, label)
+    selected = [newest_by_content[key] for key in order]
+    return [item[0] for item in selected], [item[2] for item in selected]
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
 
 
 def _question_without_resolved_scope(question: str, scope_labels: list[str]) -> str:
@@ -683,7 +745,7 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
                     str(hit.get("text", ""))
                 )
         supported_values_by_column = {
-            name: "\n".join(parts) for name, parts in support_parts.items()
+            name: list(dict.fromkeys(parts)) for name, parts in support_parts.items()
         }
         complete_value_columns = {
             key

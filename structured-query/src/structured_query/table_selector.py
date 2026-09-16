@@ -21,6 +21,12 @@ def shortlist_tables(hits: list[dict[str, Any]], tables: dict[str, DataTable], m
 
 
 def select_minimal_tables(hits: list[dict[str, Any]], tables: dict[str, DataTable], max_tables: int = 3) -> list[DataTable]:
+    """Select the top table, expanding only through confirmed FK relations.
+
+    Shared column names alone must not widen the executable shortlist: that
+    path previously exposed sibling sheets without JOIN authority and wasted
+    the single repair attempt on wrong-sheet SQL.
+    """
     if not hits:
         return []
     ordered = [tables[str(hit["table_id"])] for hit in hits if str(hit["table_id"]) in tables]
@@ -32,13 +38,7 @@ def select_minimal_tables(hits: list[dict[str, Any]], tables: dict[str, DataTabl
         score = float(hit.get("score", 0))
         if len(selected) >= max_tables or score < top_score * 0.85:
             break
-        # Relevance identifies the best starting table. Expand through persisted
-        # FK relationships, or same-workbook sheets that share enough column
-        # names to be structural siblings (no business vocabulary).
-        if _has_confirmed_relation(selected, candidate) or (
-            candidate.version_id == selected[0].version_id
-            and _has_shared_column_relation(selected, candidate)
-        ):
+        if _has_confirmed_relation(selected, candidate):
             selected.append(candidate)
     return selected
 
@@ -67,38 +67,6 @@ def select_schema_candidates(
     return selected
 
 
-def _column_name_set(table: DataTable) -> set[str]:
-    columns = getattr(table, "columns", None) or ()
-    names: set[str] = set()
-    for column in columns:
-        original = str(getattr(column, "original_name", "") or "").strip().casefold()
-        if original:
-            names.add(original)
-    return names
-
-
-def _has_shared_column_relation(
-    selected: list[DataTable],
-    candidate: DataTable,
-    *,
-    min_shared: int = 2,
-    min_jaccard: float = 0.25,
-) -> bool:
-    """True when schemas overlap enough to be the same workbook's related sheets."""
-    candidate_names = _column_name_set(candidate)
-    if len(candidate_names) < min_shared:
-        return False
-    for table in selected:
-        base = _column_name_set(table)
-        if len(base) < min_shared:
-            continue
-        shared = base & candidate_names
-        union = base | candidate_names
-        if len(shared) >= min_shared and union and len(shared) / len(union) >= min_jaccard:
-            return True
-    return False
-
-
 def _has_confirmed_relation(selected: list[DataTable], candidate: DataTable) -> bool:
     candidate_names = {candidate.physical_name, f"{candidate.physical_schema}.{candidate.physical_name}"}
     selected_names = {table.physical_name for table in selected} | {
@@ -124,8 +92,6 @@ def confirmed_join_limit(tables: list[DataTable]) -> int:
         return 1
     connected = [tables[0]]
     for candidate in tables[1:]:
-        # Join execution still requires FK evidence; column overlap only expands
-        # schema context, not the authorized JOIN width.
         if _has_confirmed_relation(connected, candidate):
             connected.append(candidate)
     return len(connected)
