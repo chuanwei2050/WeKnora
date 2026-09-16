@@ -104,6 +104,45 @@ def test_allows_independent_union_branches_for_separate_counts():
     assert result.tables == {"people"}
 
 
+def test_rejects_duplicate_conditional_aggregates_in_one_select():
+    """Copy-pasted CASE filters make two metrics report the same count."""
+    sql = """
+        SELECT
+          SUM(CASE WHEN certificate ILIKE '%ISTQB%' THEN 1 ELSE 0 END) AS metric_1,
+          SUM(CASE WHEN certificate ILIKE '%检验员%' THEN 1 ELSE 0 END) AS metric_2,
+          SUM(CASE WHEN certificate ILIKE '%ISTQB%' THEN 1 ELSE 0 END) AS metric_3
+        FROM people
+    """
+    with pytest.raises(UnsafeSQL) as failure:
+        validate_read_only_sql(sql, {"people"})
+    assert failure.value.code == "duplicate_conditional_metric"
+    assert "独立筛选" in failure.value.repair_hint
+
+
+def test_allows_distinct_conditional_aggregates_in_one_select():
+    sql = """
+        SELECT
+          SUM(CASE WHEN certificate ILIKE '%软件评测师%' THEN 1 ELSE 0 END) AS metric_1,
+          SUM(CASE WHEN certificate ILIKE '%检验员%' THEN 1 ELSE 0 END) AS metric_2,
+          SUM(CASE WHEN certificate ILIKE '%ISTQB%' THEN 1 ELSE 0 END) AS metric_3
+        FROM people
+    """
+    result = validate_read_only_sql(sql, {"people"})
+    assert result.tables == {"people"}
+
+
+def test_allows_shared_structural_predicate_across_metrics():
+    """Shared status filters are fine; only identical full CASE predicates are rejected."""
+    sql = """
+        SELECT
+          SUM(CASE WHEN status = 'active' AND certificate ILIKE '%A%' THEN 1 ELSE 0 END) AS metric_1,
+          SUM(CASE WHEN status = 'active' AND certificate ILIKE '%B%' THEN 1 ELSE 0 END) AS metric_2
+        FROM people
+    """
+    result = validate_read_only_sql(sql, {"people"})
+    assert result.tables == {"people"}
+
+
 @pytest.mark.parametrize(
     "sql,error",
     [

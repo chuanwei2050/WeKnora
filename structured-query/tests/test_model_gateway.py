@@ -35,6 +35,7 @@ def test_generation_prompt_is_bound_to_selected_dialect(monkeypatch):
     assert "优先 route=\"sql\"，不要猜 none" in prompt
     assert "【文件/表】范围" in prompt
     assert "列出具体记录或实体" in prompt
+    assert "互不相同的筛选条件" in prompt
     assert "证书名称和数量" not in prompt
     assert "分别多少人" not in prompt
     assert "主体粒度不一致" not in prompt

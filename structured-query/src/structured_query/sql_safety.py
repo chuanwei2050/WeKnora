@@ -143,6 +143,7 @@ def validate_read_only_sql(
         )
     _reject_unrequested_near_duplicate_or(statement, question_text)
     _reject_cross_metric_or_leakage(statement)
+    _reject_duplicate_conditional_metrics(statement)
     return ValidatedSQL(sql=statement.sql(dialect=dialect), tables=frozenset(tables))
 
 
@@ -231,6 +232,72 @@ def _direct_projection_labels(select: exp.Select) -> set[str]:
         if isinstance(expression, exp.Literal) and expression.is_string:
             labels.add(_normalize_value_text(expression.this))
     return labels
+
+
+def _reject_duplicate_conditional_metrics(statement: exp.Expression) -> None:
+    """Reject multi-metric SELECT aggregates that reuse an identical CASE/FILTER.
+
+    Models answering "separate counts" often emit several SUM(CASE WHEN ...) or
+    FILTER aggregates in one SELECT, then copy-paste the same predicate into two
+    metrics. That is a structural failure mode: two named metrics collapse to
+    the same count. Shared structural predicates that differ in any branch are
+    allowed; only byte-identical normalized predicates are rejected.
+    """
+    selects = (
+        list(statement.find_all(exp.Select))
+        if not isinstance(statement, exp.Select)
+        else [statement]
+    )
+    for select in selects:
+        predicates = _conditional_metric_predicates(select)
+        if len(predicates) < 2:
+            continue
+        seen: set[str] = set()
+        for predicate in predicates:
+            if predicate in seen:
+                raise UnsafeSQL(
+                    "duplicate_conditional_metric",
+                    "多个聚合指标使用了完全相同的筛选条件；每个指标必须使用独立筛选，"
+                    "不得把另一个指标的条件复制过来",
+                )
+            seen.add(predicate)
+
+
+def _conditional_metric_predicates(select: exp.Select) -> list[str]:
+    """Return normalized CASE WHEN / FILTER predicates from aggregate projections."""
+    predicates: list[str] = []
+    for projection in select.expressions:
+        expression = projection.this if isinstance(projection, exp.Alias) else projection
+        predicate = _aggregate_condition_sql(expression)
+        if predicate:
+            predicates.append(predicate)
+    return predicates
+
+
+def _aggregate_condition_sql(expression: exp.Expression) -> str | None:
+    if not isinstance(expression, exp.AggFunc):
+        return None
+    case = expression.this if isinstance(expression.this, exp.Case) else None
+    if case is not None:
+        whens = case.args.get("ifs") or []
+        if not whens:
+            return None
+        parts = []
+        for when in whens:
+            condition = when.this if isinstance(when, exp.If) else None
+            if condition is None:
+                continue
+            parts.append(condition.sql(dialect="postgres"))
+        if not parts:
+            return None
+        return _normalize_value_text(" AND ".join(parts))
+    filter_clause = expression.args.get("filter")
+    if filter_clause is None:
+        return None
+    condition = filter_clause.this if hasattr(filter_clause, "this") else filter_clause
+    if condition is None:
+        return None
+    return _normalize_value_text(condition.sql(dialect="postgres"))
 
 
 def _normalize_value_text(value: str) -> str:

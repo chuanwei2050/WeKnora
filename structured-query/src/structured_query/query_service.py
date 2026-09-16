@@ -293,6 +293,57 @@ def _question_without_resolved_scope(question: str, scope_labels: list[str]) -> 
 _EQUIVALENT_SCHEMA_COVERAGE_TOLERANCE_RATIO = 0.01
 
 
+def _schema_signature(table: DataTable) -> tuple[str, ...]:
+    return tuple(
+        column.original_name
+        for column in sorted(table.columns, key=lambda item: item.ordinal)
+    )
+
+
+def _prefer_broader_equivalent_hits(
+    hits: list[dict], tables: dict[str, DataTable]
+) -> list[dict]:
+    """Within each equivalent schema, surface the broader snapshot first.
+
+    Retrieval often ranks a departmental subset above a broader workbook that
+    shares the same columns. Reorder only inside a signature group so unrelated
+    large tables cannot leapfrog a higher-scoring different schema. Broad
+    replacement after shortlist still runs; this just makes the default
+    shortlist start from coverage without encoding business vocabulary.
+    """
+    if len(hits) < 2:
+        return hits
+
+    groups: dict[tuple[str, ...], list[dict]] = {}
+    signature_order: list[tuple[str, ...]] = []
+    for hit in hits:
+        table = tables.get(str(hit["table_id"]))
+        signature = _schema_signature(table) if table is not None else (f"__missing__:{hit.get('table_id')}",)
+        if signature not in groups:
+            signature_order.append(signature)
+            groups[signature] = []
+        groups[signature].append(hit)
+
+    reordered: list[dict] = []
+    for signature in signature_order:
+        group = groups[signature]
+        if len(group) == 1 or signature[0].startswith("__missing__:"):
+            reordered.extend(group)
+            continue
+        largest = max(
+            int(tables[str(hit["table_id"])].row_count or 0) for hit in group
+        )
+        drift = max(1, int(largest * _EQUIVALENT_SCHEMA_COVERAGE_TOLERANCE_RATIO + 0.999))
+
+        def sort_key(hit: dict, *, _largest: int = largest, _drift: int = drift) -> tuple[int, float, str]:
+            table = tables[str(hit["table_id"])]
+            is_broad = int(table.row_count or 0) >= _largest - _drift
+            return (0 if is_broad else 1, -float(hit.get("score", 0)), str(hit["table_id"]))
+
+        reordered.extend(sorted(group, key=sort_key))
+    return reordered
+
+
 def _select_current_broad_tables(
     tables: list[DataTable],
     datasets_by_version: dict[UUID, Dataset],
@@ -305,11 +356,7 @@ def _select_current_broad_tables(
     """
     tables_by_signature: dict[tuple[str, ...], list[DataTable]] = {}
     for table in tables:
-        signature = tuple(
-            column.original_name
-            for column in sorted(table.columns, key=lambda item: item.ordinal)
-        )
-        tables_by_signature.setdefault(signature, []).append(table)
+        tables_by_signature.setdefault(_schema_signature(table), []).append(table)
 
     selected: dict[tuple[str, ...], DataTable] = {}
     for signature, equivalents in tables_by_signature.items():
@@ -390,6 +437,7 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
                 continue
             seen_content.add(identity)
             deduplicated_hits.append(hit)
+        deduplicated_hits = _prefer_broader_equivalent_hits(deduplicated_hits, tables_by_id)
         # Default to the strongest table. Expand only through persisted,
         # trustworthy relationships; do not make the model inspect three
         # unrelated/repeated schemas merely because three candidates exist.
@@ -413,7 +461,7 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
             )
             selected_tables = [
                 broadest_by_signature.get(
-                    tuple(column.original_name for column in sorted(table.columns, key=lambda item: item.ordinal)),
+                    _schema_signature(table),
                     table,
                 )
                 for table in selected_tables

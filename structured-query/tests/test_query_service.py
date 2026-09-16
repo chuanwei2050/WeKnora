@@ -245,6 +245,66 @@ def test_equivalent_schema_does_not_replace_full_table_with_new_subset():
     assert selected[("姓名",)] is full_table
 
 
+def test_rerank_hits_prefer_broader_equivalent_schema():
+    """Unscoped ranking should surface the larger equivalent snapshot before subsets."""
+    broad = SimpleNamespace(
+        id=uuid4(),
+        row_count=294,
+        columns=[SimpleNamespace(original_name="姓名", ordinal=1), SimpleNamespace(original_name="证书", ordinal=2)],
+    )
+    subset = SimpleNamespace(
+        id=uuid4(),
+        row_count=120,
+        columns=[SimpleNamespace(original_name="姓名", ordinal=1), SimpleNamespace(original_name="证书", ordinal=2)],
+    )
+    hits = [
+        {"table_id": str(subset.id), "score": 10.0},
+        {"table_id": str(broad.id), "score": 9.5},
+    ]
+    tables = {str(subset.id): subset, str(broad.id): broad}
+
+    reranked = query_service._prefer_broader_equivalent_hits(hits, tables)
+
+    assert [hit["table_id"] for hit in reranked] == [str(broad.id), str(subset.id)]
+
+
+def test_rerank_hits_do_not_let_unrelated_broad_table_leapfrog():
+    """A large unrelated schema must not outrank a higher-scoring different hit."""
+    people_subset = SimpleNamespace(
+        id=uuid4(),
+        row_count=120,
+        columns=[SimpleNamespace(original_name="姓名", ordinal=1)],
+    )
+    people_broad = SimpleNamespace(
+        id=uuid4(),
+        row_count=294,
+        columns=[SimpleNamespace(original_name="姓名", ordinal=1)],
+    )
+    finance = SimpleNamespace(
+        id=uuid4(),
+        row_count=900,
+        columns=[SimpleNamespace(original_name="金额", ordinal=1)],
+    )
+    hits = [
+        {"table_id": str(people_subset.id), "score": 10.0},
+        {"table_id": str(finance.id), "score": 9.8},
+        {"table_id": str(people_broad.id), "score": 9.5},
+    ]
+    tables = {
+        str(people_subset.id): people_subset,
+        str(people_broad.id): people_broad,
+        str(finance.id): finance,
+    }
+
+    reranked = query_service._prefer_broader_equivalent_hits(hits, tables)
+
+    assert [hit["table_id"] for hit in reranked] == [
+        str(people_broad.id),
+        str(people_subset.id),
+        str(finance.id),
+    ]
+
+
 def test_profile_metadata_scope_resolves_unique_dataset_without_phrase_rules():
     target = _dataset("数科事业部实验室相关人员资质清单202607V3.0.xlsx", "人员资质统计")
     unrelated = _dataset("软件测评相关人员资质清单202607V3.0.xlsx", "人员资质统计")
