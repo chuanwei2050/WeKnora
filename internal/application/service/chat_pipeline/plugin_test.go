@@ -101,7 +101,7 @@ func TestStructuredAnswerOutputRulesAreAppendedWithoutChangingEvidence(t *testin
 		"禁止直接展示结构化查询过程或原始结果形态",
 		"统计、聚合、排序和计算类问题以 SQL 结果为准",
 		"普通事实和列举类问题不得因 SQL 未命中而忽略其他证据",
-		"实际表述", "不得臆造同义", "无关相邻记录",
+		"实际表述", "同一对象的等价表述可合并", "非等价近义不可合并", "无关相邻记录",
 		"不能单独证明完整总数或全集",
 	} {
 		if !strings.Contains(manage.UserContent, rule) {
