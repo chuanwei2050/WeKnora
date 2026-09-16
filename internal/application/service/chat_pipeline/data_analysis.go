@@ -9,7 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-const dataAnalysisEvidenceInstruction = "结构化查询结果：请与其他检索证据交叉核对后回答。统计、聚合、排序和计算类问题以 SQL 结果为准；普通事实和列举类问题要把SQL结果和其他证据一起作为答案，保留实际表述，不得纳入无关相邻记录；片段相关不能单独证明完整总数或全集。"
+const dataAnalysisEvidenceInstruction = "结构化查询结果：请与其他检索证据交叉核对后回答。统计、聚合、排序和计算类问题以 SQL 结果为准；普通事实和列举类问题要把SQL结果和其他证据一起作为答案；片段相关不能单独证明完整总数或全集。"
 
 type PluginDataAnalysis struct {
 	knowledgeService interfaces.KnowledgeService
