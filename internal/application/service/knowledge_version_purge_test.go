@@ -161,8 +161,8 @@ func TestIndexableChunksForVersionKeepsOnlyTargetVersion(t *testing.T) {
 		{ID: "parent", KnowledgeID: "doc-1", KnowledgeVersionID: "version-new", ChunkType: types.ChunkTypeParentText, Content: "parent", IsEnabled: true},
 	}
 	got := indexableChunksForVersion(chunks, "version-new", "Title")
-	if len(got) != 2 {
-		t.Fatalf("indexable = %d, want 2 (text+summary)", len(got))
+	if len(got) != 1 {
+		t.Fatalf("indexable = %d, want 1 (text only; summary stays out of RAG)", len(got))
 	}
 	ids := map[string]bool{}
 	for _, item := range got {
@@ -171,7 +171,7 @@ func TestIndexableChunksForVersionKeepsOnlyTargetVersion(t *testing.T) {
 			t.Fatalf("content = %q", item.Content)
 		}
 	}
-	if !ids["new-1"] || !ids["sum-1"] || ids["parent"] || ids["old-1"] {
+	if !ids["new-1"] || ids["sum-1"] || ids["parent"] || ids["old-1"] {
 		t.Fatalf("chunk ids = %v", ids)
 	}
 }

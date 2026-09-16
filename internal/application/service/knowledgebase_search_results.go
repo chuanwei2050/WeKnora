@@ -448,7 +448,7 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 // isSearchableChunk checks if a chunk type should be included in search results.
 func (s *knowledgeBaseService) isSearchableChunk(chunk *types.Chunk) bool {
 	return slices.Contains([]types.ChunkType{
-		types.ChunkTypeText, types.ChunkTypeSummary,
+		types.ChunkTypeText,
 		types.ChunkTypeTableColumn, types.ChunkTypeTableSummary,
 		types.ChunkTypeFAQ,
 		types.ChunkTypeImageOCR, types.ChunkTypeImageCaption,

@@ -79,3 +79,13 @@ func TestSearchableKnowledgeVisibleRejectsDeletingDocument(t *testing.T) {
 		t.Fatal("deleting knowledge must not survive retrieval result enrichment")
 	}
 }
+
+func TestDocumentSummaryChunkIsNotSearchable(t *testing.T) {
+	svc := &knowledgeBaseService{}
+	if svc.isSearchableChunk(&types.Chunk{ChunkType: types.ChunkTypeSummary}) {
+		t.Fatal("document summary chunks must not enter RAG search results")
+	}
+	if !svc.isSearchableChunk(&types.Chunk{ChunkType: types.ChunkTypeText}) {
+		t.Fatal("text chunks must remain searchable")
+	}
+}

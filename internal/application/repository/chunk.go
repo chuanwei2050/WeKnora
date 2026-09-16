@@ -159,11 +159,11 @@ func (r *chunkRepository) ListIndexableChunksByKnowledgeID(
 }
 
 // indexableChunkTypes are chunk kinds that belong in ES/Milvus. Parent/entity/
-// relationship chunks are stored for context only and must not be listed here.
+// relationship chunks and document summaries are stored for context/UI only
+// and must not be listed here.
 func indexableChunkTypes() []types.ChunkType {
 	return []types.ChunkType{
 		types.ChunkTypeText,
-		types.ChunkTypeSummary,
 		types.ChunkTypeImageOCR,
 		types.ChunkTypeImageCaption,
 		types.ChunkTypeTableColumn,

@@ -2912,6 +2912,68 @@ func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfi
 	return
 }
 
+// isExcelRowStructuredFile reports spreadsheet types whose parser already emits
+// one KV line per data row. Those must not go through parent-child re-splitting.
+func isExcelRowStructuredFile(fileType string) bool {
+	switch strings.ToLower(strings.TrimPrefix(strings.TrimSpace(fileType), ".")) {
+	case "xlsx", "xls":
+		return true
+	default:
+		return false
+	}
+}
+
+// buildIngestChunks chooses the chunking strategy for document ingest.
+// Excel row dumps keep one line per chunk; other docs may use parent-child.
+func buildIngestChunks(fileType, markdown string, kb *types.KnowledgeBase) ([]types.ParsedChunk, []types.ParsedParentChunk) {
+	if isExcelRowStructuredFile(fileType) {
+		splitChunks := chunker.SplitRowStructuredText(markdown)
+		parsed := make([]types.ParsedChunk, len(splitChunks))
+		for i, c := range splitChunks {
+			parsed[i] = types.ParsedChunk{
+				Content: c.Content,
+				Seq:     c.Seq,
+				Start:   c.Start,
+				End:     c.End,
+			}
+		}
+		return parsed, nil
+	}
+
+	chunkCfg := buildSplitterConfig(kb)
+	if kb != nil && kb.ChunkingConfig.EnableParentChild {
+		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
+		pcResult := chunker.SplitTextParentChild(markdown, parentCfg, childCfg)
+		parsed := make([]types.ParsedChunk, len(pcResult.Children))
+		for i, c := range pcResult.Children {
+			parsed[i] = types.ParsedChunk{
+				Content:     c.Content,
+				Seq:         c.Seq,
+				Start:       c.Start,
+				End:         c.End,
+				ParentIndex: c.ParentIndex,
+			}
+		}
+		parents := make([]types.ParsedParentChunk, len(pcResult.Parents))
+		for i, p := range pcResult.Parents {
+			parents[i] = types.ParsedParentChunk{Content: p.Content, Seq: p.Seq, Start: p.Start, End: p.End}
+		}
+		return parsed, parents
+	}
+
+	splitChunks := chunker.SplitText(markdown, chunkCfg)
+	parsed := make([]types.ParsedChunk, len(splitChunks))
+	for i, c := range splitChunks {
+		parsed[i] = types.ParsedChunk{
+			Content: c.Content,
+			Seq:     c.Seq,
+			Start:   c.Start,
+			End:     c.End,
+		}
+	}
+	return parsed, nil
+}
+
 func indexingEnginesForKnowledgeBase(
 	params []types.RetrieverEngineParams,
 	kb *types.KnowledgeBase,
@@ -3895,8 +3957,8 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	}
 	knowledge = latest
 
-	// Create summary chunk and index it — only when RAG indexing is enabled.
-	// Wiki-only KBs don't need summary chunks in the vector index.
+	// Create summary chunk for UI/description linkage, but do not index it into
+	// RAG — summary text concentrates certificate keywords and crowds out row evidence.
 	if strings.TrimSpace(summary) != "" && kb.NeedsEmbeddingModel() {
 		// Get max chunk index
 		maxChunkIndex := 0
@@ -3930,34 +3992,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			return fmt.Errorf("failed to create summary chunk: %w", err)
 		}
 
-		// Index summary chunk
-		tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to get tenant info: %v", err)
-			return fmt.Errorf("failed to get tenant info: %w", err)
-		}
-		ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
-
-		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
-		if err != nil {
-			logger.Errorf(ctx, "Failed to init retrieve engine: %v", err)
-			return fmt.Errorf("failed to init retrieve engine: %w", err)
-		}
-
-		embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to get embedding model: %v", err)
-			return fmt.Errorf("failed to get embedding model: %w", err)
-		}
-
-		indexInfo := []*types.IndexInfo{documentChunkIndexInfo(summaryChunk, summaryChunk.Content, summaryChunk.ID)}
-
-		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfo); err != nil {
-			logger.Errorf(ctx, "Failed to index summary chunk: %v", err)
-			return fmt.Errorf("failed to index summary chunk: %w", err)
-		}
-
-		logger.Infof(ctx, "Successfully created and indexed summary chunk for knowledge: %s", payload.KnowledgeID)
+		logger.Infof(ctx, "Successfully created summary chunk (not RAG-indexed) for knowledge: %s", payload.KnowledgeID)
 	}
 
 	logger.Infof(ctx, "Successfully generated summary for knowledge: %s", payload.KnowledgeID)
@@ -10970,8 +11005,6 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	}
 
 	// Step 3: Split into chunks using Go chunker
-	chunkCfg := buildSplitterConfig(kb)
-
 	processOpts := ProcessChunksOptions{
 		EnableQuestionGeneration: payload.EnableQuestionGeneration,
 		QuestionCount:            payload.QuestionCount,
@@ -10985,37 +11018,21 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		processOpts.Metadata = convertResult.Metadata
 	}
 
-	if kb.ChunkingConfig.EnableParentChild {
-		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
-		pcResult := chunker.SplitTextParentChild(convertResult.MarkdownContent, parentCfg, childCfg)
-		chunks = make([]types.ParsedChunk, len(pcResult.Children))
-		for i, c := range pcResult.Children {
-			chunks[i] = types.ParsedChunk{
-				Content:     c.Content,
-				Seq:         c.Seq,
-				Start:       c.Start,
-				End:         c.End,
-				ParentIndex: c.ParentIndex,
-			}
-		}
-		parentChunks := make([]types.ParsedParentChunk, len(pcResult.Parents))
-		for i, p := range pcResult.Parents {
-			parentChunks[i] = types.ParsedParentChunk{Content: p.Content, Seq: p.Seq, Start: p.Start, End: p.End}
-		}
+	markdown := ""
+	if convertResult != nil {
+		markdown = convertResult.MarkdownContent
+	}
+	fileType := knowledge.FileType
+	if fileType == "" {
+		fileType = payload.FileType
+	}
+	var parentChunks []types.ParsedParentChunk
+	chunks, parentChunks = buildIngestChunks(fileType, markdown, kb)
+	if len(parentChunks) > 0 {
 		processOpts.ParentChunks = parentChunks
 		logger.Infof(ctx, "Split document into %d parent + %d child chunks for knowledge %s",
-			len(pcResult.Parents), len(pcResult.Children), knowledge.ID)
+			len(parentChunks), len(chunks), knowledge.ID)
 	} else {
-		splitChunks := chunker.SplitText(convertResult.MarkdownContent, chunkCfg)
-		chunks = make([]types.ParsedChunk, len(splitChunks))
-		for i, c := range splitChunks {
-			chunks[i] = types.ParsedChunk{
-				Content: c.Content,
-				Seq:     c.Seq,
-				Start:   c.Start,
-				End:     c.End,
-			}
-		}
 		logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)
 	}
 

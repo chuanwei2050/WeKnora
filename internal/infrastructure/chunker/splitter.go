@@ -140,6 +140,38 @@ func runeLen(s string) int {
 	return utf8.RuneCountInString(s)
 }
 
+// SplitRowStructuredText keeps each non-empty line as one chunk.
+// Used for Excel KV row dumps so size-based / parent-child splits cannot cut
+// through a single personnel row after the parser already emitted one row per line.
+func SplitRowStructuredText(text string) []Chunk {
+	if text == "" {
+		return nil
+	}
+	lines := strings.Split(text, "\n")
+	chunks := make([]Chunk, 0, len(lines))
+	offset := 0
+	seq := 0
+	for i, line := range lines {
+		lineRunes := utf8.RuneCountInString(line)
+		content := strings.TrimRight(line, "\r")
+		contentRunes := utf8.RuneCountInString(content)
+		if strings.TrimSpace(content) != "" {
+			chunks = append(chunks, Chunk{
+				Content: content,
+				Seq:     seq,
+				Start:   offset,
+				End:     offset + contentRunes,
+			})
+			seq++
+		}
+		offset += lineRunes
+		if i < len(lines)-1 {
+			offset++ // account for the '\n' separator
+		}
+	}
+	return chunks
+}
+
 // SplitText splits text into chunks with overlap, respecting protected patterns.
 func SplitText(text string, cfg SplitterConfig) []Chunk {
 	if text == "" {

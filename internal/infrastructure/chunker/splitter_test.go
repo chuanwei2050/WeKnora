@@ -1164,3 +1164,32 @@ func TestSplitText_LargeProtectedTableRespectsChunkSize(t *testing.T) {
 		}
 	}
 }
+
+func TestSplitRowStructuredTextKeepsWholeExcelRows(t *testing.T) {
+	longCert := strings.Repeat("系统集成项目管理工程师证书详情", 40)
+	row1 := "序号: 1,姓名: 夏雨欣,专业证书: 系统集成项目管理师"
+	row2 := "序号: 2,姓名: 许乃汉,专业证书: " + longCert
+	text := row1 + "\n" + row2 + "\n"
+
+	chunks := SplitRowStructuredText(text)
+	if len(chunks) != 2 {
+		t.Fatalf("got %d chunks, want 2 (one per Excel row)", len(chunks))
+	}
+	if chunks[0].Content != row1 || chunks[1].Content != row2 {
+		t.Fatalf("rows were altered or mid-split:\n0=%q\n1=%q", chunks[0].Content, chunks[1].Content)
+	}
+	if utf8.RuneCountInString(chunks[1].Content) < 384 {
+		t.Fatal("expected long row to stay intact beyond typical child size")
+	}
+}
+
+func TestSplitTextParentChildCutsLongExcelKVRow(t *testing.T) {
+	longCert := strings.Repeat("系统集成项目管理工程师", 40)
+	row := "序号: 2,姓名: 许乃汉,职称专业: 系统集成项目管理工程师,专业证书: " + longCert
+	parentCfg := SplitterConfig{ChunkSize: 4096, ChunkOverlap: 0, Separators: []string{"\n\n", "\n", "。"}}
+	childCfg := SplitterConfig{ChunkSize: 384, ChunkOverlap: 0, Separators: []string{"\n\n", "\n", "。"}}
+	got := SplitTextParentChild(row+"\n", parentCfg, childCfg)
+	if len(got.Children) < 2 {
+		t.Fatalf("expected parent-child to mid-split long Excel KV row, got %d children", len(got.Children))
+	}
+}

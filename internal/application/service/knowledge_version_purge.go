@@ -47,10 +47,11 @@ func purgeSupersededVersionIndexes(
 		if chunk.ID == "" {
 			continue
 		}
-		// Parent/entity/relationship chunks are not indexed.
+		// Parent/entity/relationship/summary chunks are not indexed into RAG.
 		if chunk.ChunkType == types.ChunkTypeParentText ||
 			chunk.ChunkType == types.ChunkTypeEntity ||
-			chunk.ChunkType == types.ChunkTypeRelationship {
+			chunk.ChunkType == types.ChunkTypeRelationship ||
+			chunk.ChunkType == types.ChunkTypeSummary {
 			continue
 		}
 		indexChunkIDs = append(indexChunkIDs, chunk.ID)
@@ -107,7 +108,8 @@ func indexableChunksForVersion(chunks []*types.Chunk, versionID, title string) [
 		}
 		if chunk.ChunkType == types.ChunkTypeParentText ||
 			chunk.ChunkType == types.ChunkTypeEntity ||
-			chunk.ChunkType == types.ChunkTypeRelationship {
+			chunk.ChunkType == types.ChunkTypeRelationship ||
+			chunk.ChunkType == types.ChunkTypeSummary {
 			continue
 		}
 		indexInfo = append(indexInfo, documentChunkIndexInfo(chunk, titlePrefix+chunk.Content, chunk.ID))
