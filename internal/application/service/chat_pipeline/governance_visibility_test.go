@@ -141,6 +141,21 @@ func TestGovernanceRunsBeforeCandidateLimit(t *testing.T) {
 	}
 }
 
+func TestFilterGovernedSearchResultsRejectsDisabledFolderUsingDocumentTag(t *testing.T) {
+	plugin := &PluginSearch{knowledgeService: governanceKnowledgeFixture{items: []*types.Knowledge{
+		{ID: "moved-doc", KnowledgeBaseID: "kb", TagID: "template"},
+	}}}
+	results := []*types.SearchResult{
+		{ID: "stale-index", KnowledgeID: "moved-doc", KnowledgeBaseID: "kb", TagID: "parent-enabled"},
+	}
+	filtered := plugin.filterGovernedSearchResults(context.Background(), 7, types.SearchTargets{{
+		Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb", TagIDs: []string{"parent-enabled"},
+	}}, results)
+	if len(filtered) != 0 {
+		t.Fatalf("document moved into a closed folder leaked through stale chunk tag: %+v", filtered)
+	}
+}
+
 func TestGovernedGraphEvidenceRejectsPendingOnlyVersion(t *testing.T) {
 	plugin := &PluginSearchEntity{}
 	result := types.GraphSearchResult{Citations: []types.GraphEvidence{{KnowledgeID: "pending-only", KnowledgeVersionID: "v1"}}}

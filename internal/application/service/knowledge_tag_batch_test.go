@@ -74,3 +74,11 @@ func TestUpdateKnowledgeTagBatchSynchronizesDocumentChunks(t *testing.T) {
 	require.Equal(t, targetTagID, chunkRepo.updated[0].TagID)
 	require.Equal(t, targetTagID, chunkRepo.updated[1].TagID)
 }
+
+func TestChunkTagIDsForIndexSyncUsesMovedFolderNotStaleChunk(t *testing.T) {
+	stale := &types.Chunk{ID: "chunk-1", TagID: "parent-enabled"}
+	updates, toUpdate := chunkTagIDsForIndexSync([]*types.Chunk{stale}, "template")
+	require.Equal(t, map[string]string{"chunk-1": "template"}, updates)
+	require.Len(t, toUpdate, 1)
+	require.Equal(t, "template", stale.TagID)
+}

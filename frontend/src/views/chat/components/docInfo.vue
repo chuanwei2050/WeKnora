@@ -32,7 +32,7 @@
                         <span class="doc-group-title" :title="group.title">{{ group.title }}</span>
                         <span class="doc-group-count">{{ $t('chat.referenceChunkCount', { count: group.chunks.length }) }}</span>
                     </div>
-                    <div class="doc-group-actions" v-if="group.knowledgeBaseId" @click.stop>
+                    <div class="doc-group-actions" v-if="canNavigateToDocument(group)" @click.stop>
                         <t-tooltip :content="$t('chat.navigateToDocument')">
                             <span class="doc-group-navigate" @click="navigateToDocument(group)">
                                 <t-icon name="jump" size="14px" />
@@ -123,6 +123,7 @@ const groupedKnowledgeRefs = computed(() => {
                 tagId: item.tag_id,
                 chunkId: item.id || item.chunk_id,
                 chunkType: item.chunk_type,
+                matchType: item.match_type,
                 chunks: [],
             });
         }
@@ -157,8 +158,15 @@ const truncateContent = (content, maxLen) => {
     return text.slice(0, maxLen) + '...';
 };
 
+const canNavigateToDocument = (group) => {
+    if (!group?.knowledgeId || !group?.knowledgeBaseId) return false;
+    if (group.matchType === 9) return false;
+    if (String(group.chunkId || group.key || '').startsWith('structured_')) return false;
+    return true;
+};
+
 const navigateToDocument = async (group) => {
-    if (!group.knowledgeBaseId) return;
+    if (!canNavigateToDocument(group)) return;
     let directoryId = group.directoryId;
     let tagId = group.tagId;
     if (group.knowledgeId) {

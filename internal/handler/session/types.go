@@ -44,7 +44,7 @@ type CreateKnowledgeQARequest struct {
 	AgentEnabled          bool                   `json:"agent_enabled"`                         // Whether agent mode is enabled for this request
 	AgentID               string                 `json:"agent_id"`                              // Selected custom agent ID (backend resolves shared agent and its tenant from share relation)
 	WebSearchEnabled      bool                   `json:"web_search_enabled"`                    // Whether web search is enabled for this request
-	FilterDisabledFolders bool                   `json:"filter_disabled_folders"`               // Whether to exclude folders disabled for search
+	FilterDisabledFolders *bool                  `json:"filter_disabled_folders"`               // Omitted defaults to excluding folders disabled for search (chat/widget)
 	SummaryModelID        string                 `json:"summary_model_id"`                      // Optional summary model ID for this request (overrides session default)
 	MentionedItems        []MentionedItemRequest `json:"mentioned_items"`                       // @mentioned knowledge bases and files
 	DisableTitle          bool                   `json:"disable_title"`                         // Whether to disable auto title generation

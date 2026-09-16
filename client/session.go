@@ -215,7 +215,7 @@ type KnowledgeQARequest struct {
 	AgentEnabled          bool              `json:"agent_enabled"`           // Whether agent mode is enabled for this request
 	AgentID               string            `json:"agent_id"`                // Selected custom agent ID for this request
 	WebSearchEnabled      bool              `json:"web_search_enabled"`      // Whether web search is enabled for this request
-	FilterDisabledFolders bool              `json:"filter_disabled_folders"` // Whether to exclude folders disabled for search
+	FilterDisabledFolders *bool             `json:"filter_disabled_folders,omitempty"` // Omitted defaults to excluding folders disabled for search on chat APIs
 	SummaryModelID        string            `json:"summary_model_id"`        // Optional summary model ID (overrides session default)
 	DisableTitle          bool              `json:"disable_title"`           // Whether to disable auto title generation
 	Images                []ImageAttachment `json:"images,omitempty"`        // Attached images for multimodal chat

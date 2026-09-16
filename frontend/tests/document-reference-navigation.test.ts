@@ -90,4 +90,32 @@ describe('document reference navigation', () => {
     expect(mocks.routerPush).not.toHaveBeenCalled()
     expect(mocks.warning).toHaveBeenCalledWith('chat.referenceDocumentUnavailable')
   })
+
+  it('hides the jump button for structured query results', async () => {
+    const wrapper = shallowMount(DocInfo, {
+      props: {
+        embeddedMode: false,
+        session: {
+          knowledge_references: [{
+            id: 'structured_kb-1',
+            match_type: 9,
+            content: '{"rows":[[1]]}',
+            knowledge_base_id: 'kb-1',
+            knowledge_title: '结构化查询结果',
+          }],
+        },
+      },
+      global: {
+        mocks: { $t: (key: string) => key },
+        stubs: {
+          't-icon': true,
+          't-tooltip': { template: '<div><slot /></div>' },
+          't-popup': { template: '<div><slot /></div>' },
+        },
+      },
+    })
+
+    await wrapper.get('.refer_header').trigger('click')
+    expect(wrapper.find('.doc-group-navigate').exists()).toBe(false)
+  })
 })

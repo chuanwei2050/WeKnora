@@ -400,6 +400,16 @@ func searchResultKnowledgeDisplay(knowledge *types.Knowledge, chunk *types.Chunk
 	return knowledge.Title, knowledge.FileName, knowledge.Source, knowledge.Description
 }
 
+func searchResultTagID(knowledge *types.Knowledge, chunk *types.Chunk) string {
+	if knowledge != nil && strings.TrimSpace(knowledge.TagID) != "" {
+		return knowledge.TagID
+	}
+	if chunk != nil {
+		return chunk.TagID
+	}
+	return ""
+}
+
 func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 	knowledge *types.Knowledge,
 	score float64,
@@ -430,7 +440,7 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 		ChunkMetadata:        chunk.Metadata,
 		MatchedContent:       matchedContent,
 		KnowledgeBaseID:      knowledge.KnowledgeBaseID,
-		TagID:                chunk.TagID,
+		TagID:                searchResultTagID(knowledge, chunk),
 		DirectoryID:          knowledge.DirectoryID,
 	}
 }

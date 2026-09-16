@@ -8466,19 +8466,54 @@ func (s *knowledgeService) ProcessChunkTagSync(ctx context.Context, task *asynq.
 		return err
 	}
 	updates := make(map[string]string)
+	chunksToUpdate := make([]*types.Chunk, 0)
 	for _, knowledgeID := range payload.KnowledgeIDs {
 		chunks, err := s.chunkRepo.ListChunksByKnowledgeID(ctx, payload.TenantID, knowledgeID)
 		if err != nil {
 			return err
 		}
-		for _, chunk := range chunks {
-			updates[chunk.ID] = chunk.TagID
+		indexUpdates, staleChunks := chunkTagIDsForIndexSync(chunks, payload.ExpectedTagID)
+		for chunkID, tagID := range indexUpdates {
+			updates[chunkID] = tagID
+		}
+		chunksToUpdate = append(chunksToUpdate, staleChunks...)
+	}
+	if len(chunksToUpdate) > 0 {
+		if err := s.chunkRepo.UpdateChunks(ctx, chunksToUpdate); err != nil {
+			return err
 		}
 	}
 	if len(updates) == 0 {
 		return nil
 	}
 	return retrieveEngine.BatchUpdateChunkMetadata(ctx, types.MergeChunkMetadataPatches(nil, updates))
+}
+
+// chunkTagIDsForIndexSync maps chunks onto the folder that search must use.
+// After "move to category", knowledge.tag_id is already the destination, but
+// chunk rows and the retrieval index can still hold the source folder. The
+// expected tag from the move payload is authoritative.
+func chunkTagIDsForIndexSync(chunks []*types.Chunk, expectedTagID string) (map[string]string, []*types.Chunk) {
+	expectedTagID = strings.TrimSpace(expectedTagID)
+	updates := make(map[string]string, len(chunks))
+	var stale []*types.Chunk
+	now := time.Now()
+	for _, chunk := range chunks {
+		if chunk == nil || chunk.ID == "" {
+			continue
+		}
+		tagID := expectedTagID
+		if tagID == "" {
+			tagID = chunk.TagID
+		}
+		updates[chunk.ID] = tagID
+		if expectedTagID != "" && chunk.TagID != expectedTagID {
+			chunk.TagID = expectedTagID
+			chunk.UpdatedAt = now
+			stale = append(stale, chunk)
+		}
+	}
+	return updates, stale
 }
 
 // UpdateFAQEntryTag updates the tag assigned to an FAQ entry.

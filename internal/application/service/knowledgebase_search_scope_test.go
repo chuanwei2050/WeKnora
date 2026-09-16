@@ -84,3 +84,25 @@ func TestFilterSearchResultsByScopeUsesAuthoritativeHydratedTag(t *testing.T) {
 	require.Len(t, filtered, 1)
 	require.Equal(t, "allowed", filtered[0].ID)
 }
+
+func TestSearchResultTagIDPrefersDocumentFolder(t *testing.T) {
+	require.Equal(t, "folder-now", searchResultTagID(
+		&types.Knowledge{TagID: "folder-now"},
+		&types.Chunk{TagID: "folder-old"},
+	))
+	require.Equal(t, "chunk-folder", searchResultTagID(
+		&types.Knowledge{},
+		&types.Chunk{TagID: "chunk-folder"},
+	))
+}
+
+func TestFilterSearchResultsByScopeRejectsDocumentMovedToDisabledFolder(t *testing.T) {
+	knowledge := &types.Knowledge{ID: "doc", KnowledgeBaseID: "kb", TagID: "template"}
+	chunk := &types.Chunk{ID: "chunk", KnowledgeID: "doc", KnowledgeBaseID: "kb", TagID: "parent-enabled"}
+	result := (&knowledgeBaseService{}).buildSearchResult(chunk, knowledge, 1, types.MatchTypeEmbedding, "")
+
+	filtered := filterSearchResultsByScope([]*types.SearchResult{result}, []string{"kb"}, nil, []string{"parent-enabled"})
+
+	require.Empty(t, filtered)
+	require.Equal(t, "template", result.TagID)
+}

@@ -117,10 +117,38 @@ func (p *PluginSearch) searchHistory(ctx context.Context, manage *types.ChatMana
 		}
 	}
 	results := make([]*types.SearchResult, 0, len(candidates))
+	knowledgeByID := map[string]*types.Knowledge{}
+	if p.knowledgeService != nil {
+		knowledgeIDs := make([]string, 0, len(candidates))
+		seen := make(map[string]struct{}, len(candidates))
+		for _, candidate := range candidates {
+			if candidate == nil || candidate.KnowledgeID == "" {
+				continue
+			}
+			if _, ok := seen[candidate.KnowledgeID]; ok {
+				continue
+			}
+			seen[candidate.KnowledgeID] = struct{}{}
+			knowledgeIDs = append(knowledgeIDs, candidate.KnowledgeID)
+		}
+		if len(knowledgeIDs) > 0 {
+			if knowledges, err := p.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, manage.TenantID, knowledgeIDs); err == nil {
+				for _, knowledge := range knowledges {
+					if knowledge != nil {
+						knowledgeByID[knowledge.ID] = knowledge
+					}
+				}
+			}
+		}
+	}
 	for _, candidate := range candidates {
 		chunk := byID[candidate.ID]
 		if chunk == nil || !chunk.IsEnabled || chunk.DeletedAt.Valid || chunk.KnowledgeID != candidate.KnowledgeID || chunk.KnowledgeBaseID != candidate.KnowledgeBaseID || chunk.KnowledgeVersionID != candidate.KnowledgeVersionID {
 			continue
+		}
+		folderID := chunk.TagID
+		if knowledge := knowledgeByID[chunk.KnowledgeID]; knowledge != nil && strings.TrimSpace(knowledge.TagID) != "" {
+			folderID = knowledge.TagID
 		}
 		inScope := manage.SearchTargets == nil
 		for _, target := range manage.SearchTargets {
@@ -130,7 +158,7 @@ func (p *PluginSearch) searchHistory(ctx context.Context, manage *types.ChatMana
 			if target.Type == types.SearchTargetTypeKnowledge && target.KnowledgeIDs != nil && !slices.Contains(target.KnowledgeIDs, chunk.KnowledgeID) {
 				continue
 			}
-			if target.TagIDs != nil && !slices.Contains(target.TagIDs, chunk.TagID) {
+			if target.TagIDs != nil && !slices.Contains(target.TagIDs, folderID) {
 				continue
 			}
 			inScope = true
@@ -149,6 +177,7 @@ func (p *PluginSearch) searchHistory(ctx context.Context, manage *types.ChatMana
 		candidate.ChunkMetadata = chunk.Metadata
 		candidate.MatchedContent = ""
 		candidate.KeywordLeader = false
+		candidate.TagID = folderID
 		results = append(results, candidate)
 	}
 	return results

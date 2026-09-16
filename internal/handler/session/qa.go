@@ -238,7 +238,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		knowledgeIDs:          secutils.SanitizeForLogArray(knowledgeIDs),
 		summaryModelID:        secutils.SanitizeForLog(request.SummaryModelID),
 		webSearchEnabled:      request.WebSearchEnabled,
-		filterDisabledFolders: request.FilterDisabledFolders,
+		filterDisabledFolders: types.FilterDisabledFoldersDefault(request.FilterDisabledFolders),
 		enableMemory:          request.EnableMemory,
 		mentionedItems:        convertMentionedItems(request.MentionedItems),
 		effectiveTenantID:     effectiveTenantID,

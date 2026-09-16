@@ -306,6 +306,9 @@ func (p *PluginSearch) filterGovernedSearchResults(
 						if target.Type == types.SearchTargetTypeKnowledge && target.KnowledgeIDs != nil && !slices.Contains(target.KnowledgeIDs, item.ID) {
 							continue
 						}
+						if target.TagIDs != nil && strings.TrimSpace(item.TagID) != "" && !slices.Contains(target.TagIDs, item.TagID) {
+							continue
+						}
 						scoped = append(scoped, item)
 						break
 					}

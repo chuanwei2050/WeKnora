@@ -1668,7 +1668,7 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 		Query                    string    `json:"query" binding:"required"`
 		AgentID                  string    `json:"agent_id"`
 		SelectedKnowledgeBaseIDs *[]string `json:"selected_knowledge_base_ids"`
-		FilterDisabledFolders    bool      `json:"filter_disabled_folders"`
+		FilterDisabledFolders    *bool     `json:"filter_disabled_folders"`
 		Images                   []struct {
 			Data string `json:"data"`
 		} `json:"images"`
@@ -1886,7 +1886,7 @@ func (h *IntegrationHandler) SendChatMessage(c *gin.Context) {
 	}()
 	session, err := h.sessions.GetSession(generationCtx, binding.SessionID)
 	if err == nil {
-		qaRequest := &types.QARequest{Session: session, Query: req.Query, AssistantMessageID: assistantMessage.ID, KnowledgeBaseIDs: selected, UserMessageID: userMessage.ID, ImageURLs: imageURLs, Attachments: processedAttachments, CustomAgent: customAgent, FilterDisabledFolders: req.FilterDisabledFolders}
+		qaRequest := &types.QARequest{Session: session, Query: req.Query, AssistantMessageID: assistantMessage.ID, KnowledgeBaseIDs: selected, UserMessageID: userMessage.ID, ImageURLs: imageURLs, Attachments: processedAttachments, CustomAgent: customAgent, FilterDisabledFolders: types.FilterDisabledFoldersDefault(req.FilterDisabledFolders)}
 		if agentMode {
 			err = h.sessions.AgentQA(generationCtx, qaRequest, eventBus)
 		} else {
