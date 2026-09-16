@@ -277,6 +277,7 @@ def _match_profile_metadata_scope(question: str, datasets: list[Dataset]) -> tup
         ]
 
     candidates: list[tuple[Dataset, str, str]] = []
+    datasets_by_id = {str(dataset.id): dataset for dataset in datasets}
     for dataset in datasets:
         matches = [
             (_longest_shared_segment(normalized_label, normalized_question), original_label)
@@ -299,9 +300,16 @@ def _match_profile_metadata_scope(question: str, datasets: list[Dataset]) -> tup
         owners = {
             dataset_id
             for dataset_id, labels in labels_by_dataset.items()
-            if any(segment in normalized_label for _, normalized_label in labels)
+            if any(segment in owner_label for _, owner_label in labels)
         }
-        if owners == {str(dataset.id)}:
+        # Rebuild orphans share content_sha256; treat identical content as one
+        # logical owner so duplicate imports cannot void an otherwise unique scope.
+        owner_identities = {
+            (datasets_by_id[owner_id].content_sha256 or owner_id)
+            for owner_id in owners
+            if owner_id in datasets_by_id
+        }
+        if len(owner_identities) == 1 and str(dataset.id) in owners:
             candidates.append((dataset, segment, label))
 
     if not candidates:

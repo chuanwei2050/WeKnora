@@ -44,7 +44,7 @@ def test_generation_prompt_is_bound_to_selected_dialect(monkeypatch):
     assert captured["response_format"]["type"] == "json_schema"
     assert captured["response_format"]["json_schema"]["strict"] is True
     assert captured["model"] == "dynamic-model"
-    assert captured["max_completion_tokens"] == 512
+    assert captured["max_completion_tokens"] == 1536
     assert captured["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
 
 

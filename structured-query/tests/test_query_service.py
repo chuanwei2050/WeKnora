@@ -239,6 +239,7 @@ def _dataset(file_name, *sheet_names):
     return SimpleNamespace(
         id=uuid4(), original_file_name=file_name,
         active_version_id=version_id, versions=[version],
+        content_sha256=str(uuid4()),
     )
 
 
@@ -359,6 +360,23 @@ def test_profile_metadata_scope_resolves_unique_dataset_without_phrase_rules():
 
     assert selected == [target]
     assert labels == [target.original_file_name]
+
+
+def test_profile_metadata_scope_treats_duplicate_content_as_one_owner():
+    """Rebuild orphans share content_sha256; they must not void unique file scope."""
+    first = _dataset("数科事业部实验室相关人员资质清单202607V3.0.xlsx", "人员资质统计")
+    duplicate = _dataset("数科事业部实验室相关人员资质清单202607V3.0.xlsx", "人员资质统计")
+    first.content_sha256 = duplicate.content_sha256 = "same-bytes"
+    unrelated = _dataset("软件测评相关人员资质清单202607V3.0.xlsx", "人员资质统计")
+    unrelated.content_sha256 = "other-bytes"
+
+    selected, labels = query_service._match_profile_metadata_scope(
+        "数科事业部人力资源清单里有多少个硕士学历的人员",
+        [first, duplicate, unrelated],
+    )
+
+    assert {item.id for item in selected} == {first.id, duplicate.id}
+    assert set(labels) == {first.original_file_name}
 
 
 def test_resolved_dataset_locator_is_removed_from_model_question():

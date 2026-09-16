@@ -31,6 +31,28 @@ def _drop_managed_physical_tables(session: Session, dataset: Dataset) -> None:
             session.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{name}"'))
 
 
+def _purge_dataset(session: Session, dataset: Dataset) -> None:
+    """Drop physical tables/vectors, then delete the dataset via DB CASCADE.
+
+    Clearing ``active_version_id`` and calling ``session.delete(dataset)`` makes
+    SQLAlchemy NULL ``DatasetVersion.dataset_id`` before the parent row is gone,
+    which violates the NOT NULL FK. Delete children/parent with SQL instead so
+    ``ON DELETE CASCADE`` can run.
+    """
+    _drop_managed_physical_tables(session, dataset)
+    for version in list(dataset.versions):
+        try:
+            delete_version(dataset.tenant_id, version.id)
+        except Exception:
+            pass
+    session.execute(
+        text("UPDATE sq_datasets SET active_version_id = NULL WHERE id = :id"),
+        {"id": dataset.id},
+    )
+    session.execute(text("DELETE FROM sq_datasets WHERE id = :id"), {"id": dataset.id})
+    session.expire_all()
+
+
 def delete_datasets_by_idempotency_prefix(
     session: Session,
     *,
@@ -66,15 +88,7 @@ def delete_datasets_by_idempotency_prefix(
     )
     deleted = 0
     for dataset in datasets:
-        _drop_managed_physical_tables(session, dataset)
-        for version in list(dataset.versions):
-            try:
-                delete_version(dataset.tenant_id, version.id)
-            except Exception:
-                pass
-        dataset.active_version_id = None
-        session.flush()
-        session.delete(dataset)
+        _purge_dataset(session, dataset)
         deleted += 1
     if deleted:
         session.commit()
@@ -93,15 +107,7 @@ def delete_dataset(session: Session, *, tenant_id: str, dataset_id: UUID) -> boo
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": f"dataset-scope:{tenant_id}:{dataset.namespace}"},
     )
-    _drop_managed_physical_tables(session, dataset)
-    for version in list(dataset.versions):
-        try:
-            delete_version(dataset.tenant_id, version.id)
-        except Exception:
-            pass
-    dataset.active_version_id = None
-    session.flush()
-    session.delete(dataset)
+    _purge_dataset(session, dataset)
     session.commit()
     return True
 
