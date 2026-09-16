@@ -258,6 +258,11 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		vectorResults = fuseVectorRetrievalLists(retrieveResults)
 		vectorResults = filterRetrievedIndexesByScope(vectorResults, searchKBIDs, params.KnowledgeIDs, params.TagIDs)
 	}
+	// Drop title-banner / Unnamed-col Excel stats rows before RRF and leader
+	// reservation so they cannot occupy coarse-rank or reserved rerank slots.
+	// Keep-all is decided across both channels: a placeholder-only keyword
+	// list must not re-enter fusion when the vector channel still has records.
+	vectorResults, keywordResults = filterPlaceholderHeaderChannels(ctx, vectorResults, keywordResults)
 	// Saturation must use the authoritative fused vector list, not the
 	// pre-fuse concatenation of split multi-query budgets.
 	vectorRecallSaturated := len(vectorResults) >= vectorMatchCount
@@ -319,6 +324,63 @@ func markKeywordLeader(results []*types.SearchResult, keywordResults []*types.In
 		result.KeywordLeader = true
 		return
 	}
+}
+
+// filterPlaceholderHeaderChannels drops Excel stats/title-banner KV rows from
+// both retrieval channels before fusion. Placeholders are restored only when
+// neither channel retains non-placeholder evidence.
+func filterPlaceholderHeaderChannels(
+	ctx context.Context,
+	vectorResults, keywordResults []*types.IndexWithScore,
+) ([]*types.IndexWithScore, []*types.IndexWithScore) {
+	filteredVector, droppedVector := dropPlaceholderHeaderIndexes(vectorResults)
+	filteredKeyword, droppedKeyword := dropPlaceholderHeaderIndexes(keywordResults)
+	if droppedVector == 0 && droppedKeyword == 0 {
+		return vectorResults, keywordResults
+	}
+	if len(filteredVector) == 0 && len(filteredKeyword) == 0 {
+		logger.Infof(ctx, "Placeholder header filter kept all hits (no non-placeholder evidence across channels)")
+		return vectorResults, keywordResults
+	}
+	if droppedVector > 0 {
+		logger.Infof(ctx, "Placeholder header filter on vector: before=%d after=%d dropped=%d",
+			len(vectorResults), len(filteredVector), droppedVector)
+	}
+	if droppedKeyword > 0 {
+		logger.Infof(ctx, "Placeholder header filter on keyword: before=%d after=%d dropped=%d",
+			len(keywordResults), len(filteredKeyword), droppedKeyword)
+	}
+	return filteredVector, filteredKeyword
+}
+
+func dropPlaceholderHeaderIndexes(results []*types.IndexWithScore) ([]*types.IndexWithScore, int) {
+	if len(results) == 0 {
+		return results, 0
+	}
+	filtered := make([]*types.IndexWithScore, 0, len(results))
+	dropped := 0
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		if searchutil.IsPlaceholderHeaderKV(result.Content) {
+			dropped++
+			continue
+		}
+		filtered = append(filtered, result)
+	}
+	if dropped == 0 {
+		return results, 0
+	}
+	return filtered, dropped
+}
+
+// filterPlaceholderHeaderIndexes is retained for unit tests of the drop helper.
+func filterPlaceholderHeaderIndexes(
+	ctx context.Context, channel string, results []*types.IndexWithScore,
+) []*types.IndexWithScore {
+	filtered, _ := filterPlaceholderHeaderChannels(ctx, results, nil)
+	return filtered
 }
 
 func resolveRetrievalMatchCounts(params types.SearchParams) (int, int) {

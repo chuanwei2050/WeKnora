@@ -328,10 +328,30 @@ func applyConfiguredRerankPrior(result *types.SearchResult, chatManage *types.Ch
 // and keeps the candidate count within the configured retrieval budget.
 func prepareRerankCandidates(results []*types.SearchResult, limit int) []*types.SearchResult {
 	results = removeDuplicateResults(results)
+	results = demotePlaceholderHeaderChunks(results)
 	if limit > 0 && len(results) > limit {
 		return results[:limit]
 	}
 	return results
+}
+
+// demotePlaceholderHeaderChunks is a defense-in-depth filter after early
+// retrieval filtering. Reserved leaders are no longer exempt: placeholder KV
+// rows must not occupy the rerank window when record rows exist.
+func demotePlaceholderHeaderChunks(results []*types.SearchResult) []*types.SearchResult {
+	preferred := make([]*types.SearchResult, 0, len(results))
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		if !searchutil.IsPlaceholderHeaderKV(result.Content) {
+			preferred = append(preferred, result)
+		}
+	}
+	if len(preferred) == 0 {
+		return results
+	}
+	return preferred
 }
 
 func adaptiveRerankCandidateLimit(chatManage *types.ChatManage) int {

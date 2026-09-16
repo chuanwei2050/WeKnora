@@ -26,6 +26,58 @@ func TestFuseVectorRetrievalListsUsesRankAcrossQueries(t *testing.T) {
 	}
 }
 
+func TestFilterPlaceholderHeaderIndexesDropsStatsBeforeLeaders(t *testing.T) {
+	stats := &types.IndexWithScore{
+		ChunkID: "stats",
+		Content: "col_3: 信息系统集成高级管理,col_4: 1.0\ncol_3: 全国软件行业人才证书,col_4: 1.0",
+		Score:   0.99,
+	}
+	person := &types.IndexWithScore{
+		ChunkID: "person",
+		Content: "序号: 67.0,工号: GDJL16616,姓名: 夏雨欣,专业证书: 系统集成项目管理师",
+		Score:   0.4,
+	}
+	got := filterPlaceholderHeaderIndexes(t.Context(), "vector", []*types.IndexWithScore{stats, person})
+	if len(got) != 1 || got[0].ChunkID != "person" {
+		t.Fatalf("expected only person row after early filter, got %+v", got)
+	}
+}
+
+func TestFilterPlaceholderHeaderIndexesKeepsAllWhenOnlyStatsRemain(t *testing.T) {
+	stats := &types.IndexWithScore{
+		ChunkID: "stats",
+		Content: "Unnamed: 2: 系统集成项目管理师,Unnamed: 3: 1",
+	}
+	got := filterPlaceholderHeaderIndexes(t.Context(), "keyword", []*types.IndexWithScore{stats})
+	if len(got) != 1 || got[0].ChunkID != "stats" {
+		t.Fatalf("expected placeholder-only channel to be kept, got %+v", got)
+	}
+}
+
+func TestFilterPlaceholderHeaderChannelsDropsPlaceholderOnlyKeywordWhenVectorHasRecords(t *testing.T) {
+	person := &types.IndexWithScore{
+		ChunkID: "person",
+		Content: "序号: 67.0,工号: GDJL16616,姓名: 夏雨欣,专业证书: 系统集成项目管理师",
+		Score:   0.4,
+	}
+	stats := &types.IndexWithScore{
+		ChunkID: "stats",
+		Content: "col_3: 信息系统集成高级管理,col_4: 1.0",
+		Score:   0.99,
+	}
+	vector, keyword := filterPlaceholderHeaderChannels(
+		t.Context(),
+		[]*types.IndexWithScore{person},
+		[]*types.IndexWithScore{stats},
+	)
+	if len(vector) != 1 || vector[0].ChunkID != "person" {
+		t.Fatalf("expected vector person to remain, got %+v", vector)
+	}
+	if len(keyword) != 0 {
+		t.Fatalf("expected placeholder-only keyword channel to be emptied when vector has records, got %+v", keyword)
+	}
+}
+
 func TestPreserveRetrieverLeadersKeepsKeywordOnlyExactMatch(t *testing.T) {
 	vectorResults := make([]*types.IndexWithScore, 30)
 	keywordResults := make([]*types.IndexWithScore, 30)

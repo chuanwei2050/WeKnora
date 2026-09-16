@@ -93,6 +93,41 @@ func TestPrepareRerankCandidatesDeduplicatesAndLimits(t *testing.T) {
 	}
 }
 
+func TestPrepareRerankCandidatesDemotesPlaceholderHeaderRows(t *testing.T) {
+	stats := &types.SearchResult{
+		ID:      "stats",
+		Content: "col_3: 信息系统集成高级管理,col_4: 1.0",
+		Score:   0.9,
+	}
+	person := &types.SearchResult{
+		ID:      "person",
+		Content: "序号: 67.0,工号: GDJL16616,姓名: 夏雨欣,专业证书: 系统集成项目管理师",
+		Score:   0.4,
+	}
+	unnamed := &types.SearchResult{
+		ID:      "unnamed",
+		Content: "Unnamed: 2: 系统集成项目管理师,Unnamed: 3: 1",
+		Score:   0.8,
+	}
+
+	got := prepareRerankCandidates([]*types.SearchResult{stats, unnamed, person}, 2)
+	if len(got) != 1 {
+		t.Fatalf("expected only the person row in the rerank window, got %d", len(got))
+	}
+	if got[0].ID != "person" {
+		t.Fatalf("expected person row to stay in the rerank window, got %s", got[0].ID)
+	}
+}
+
+func TestPrepareRerankCandidatesKeepsPlaceholderRowsWhenTheyAreAllEvidence(t *testing.T) {
+	first := &types.SearchResult{ID: "a", Content: "col_3: 证书A,col_4: 1.0"}
+	second := &types.SearchResult{ID: "b", Content: "Unnamed: 2: 证书B,Unnamed: 3: 2"}
+	got := prepareRerankCandidates([]*types.SearchResult{first, second}, 2)
+	if len(got) != 2 || got[0].ID != "a" || got[1].ID != "b" {
+		t.Fatalf("expected placeholder-only evidence to stay, got %+v", got)
+	}
+}
+
 func TestGlobalRerankWindowKeepsReservedCandidateAfterAggregation(t *testing.T) {
 	results := make([]*types.SearchResult, 30)
 	for i := range results {
