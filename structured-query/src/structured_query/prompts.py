@@ -34,7 +34,7 @@ def build_forced_sql_route_policy(dialect: str) -> str:
 def build_routed_sql_route_policy(dialect: str) -> str:
     return f"""你是结构化查询路由器和 {dialect} Text-to-SQL 生成器。
 
-何时 route="sql"：问题需要对结构化记录做明细检索、筛选、排序/排名、分组、计算、聚合、计数或比较（含「有多少/分别多少/列出谁」），且 Schema/候选值足以支持。
+何时 route="sql"：问题需要对结构化记录做明细检索、筛选、排序/排名、分组、计算、聚合、计数或比较，且 Schema/候选值足以支持。
 何时 route="none"：概念解释/建议/叙事摘要/无记录操作的事实问答，或证据不足以支持该记录操作。仅提文件名或主题 ≠ 需要 SQL。
 
 规则：

@@ -279,6 +279,14 @@ def _longest_shared_segment(left: str, right: str) -> str:
     return left[best_end - best_length : best_end]
 
 
+# Scope overlap floors are length heuristics for metadata substring matching,
+# not domain vocabulary. Short spans must be label prefixes to avoid topic words
+# accidentally selecting a file; longer mid-label overlaps are allowed.
+_SCOPE_MIN_OVERLAP_CHARS = 4
+_SCOPE_SHORT_SPAN_CHARS = 8
+_SCOPE_MID_LABEL_OVERLAP_CHARS = 6
+
+
 def _match_profile_metadata_scope(question: str, datasets: list[Dataset]) -> tuple[list[Dataset], list[str]]:
     """Resolve explicit dataset/sheet scope from persisted metadata, without business phrases."""
     normalized_question = _normalize_scope_text(question)
@@ -302,14 +310,14 @@ def _match_profile_metadata_scope(question: str, datasets: list[Dataset]) -> tup
             for original_label, normalized_label in labels_by_dataset[str(dataset.id)]
         ]
         segment, label = max(matches, key=lambda item: len(item[0]), default=("", ""))
-        if len(segment) < 4:
+        if len(segment) < _SCOPE_MIN_OVERLAP_CHARS:
             continue
         normalized_label = _normalize_scope_text(label)
         # Short unique spans must align to a label prefix (file/sheet start).
         # Mid-string accidents are ignored unless the span is long or the full
         # label already appears in the question.
         if (
-            len(segment) < 8
+            len(segment) < _SCOPE_SHORT_SPAN_CHARS
             and not normalized_label.startswith(segment)
             and normalized_label not in normalized_question
             and segment != normalized_label
@@ -398,8 +406,11 @@ def _question_without_resolved_scope(question: str, scope_labels: list[str]) -> 
         normalized_prefix = _normalize_scope_text(prefix)
         if any(
             (shared := _longest_shared_segment(normalized_prefix, label))
-            and len(shared) >= 4
-            and (label.startswith(shared) or len(shared) >= 6)
+            and len(shared) >= _SCOPE_MIN_OVERLAP_CHARS
+            and (
+                label.startswith(shared)
+                or len(shared) >= _SCOPE_MID_LABEL_OVERLAP_CHARS
+            )
             for label in normalized_labels
         ):
             return suffix

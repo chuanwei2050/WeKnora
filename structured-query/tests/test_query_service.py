@@ -468,6 +468,25 @@ def test_profile_metadata_scope_does_not_treat_shared_topic_as_file_scope():
     assert labels == []
 
 
+def test_profile_metadata_scope_works_on_neutral_inventory_names():
+    """Scope floors are length heuristics; must not depend on HR/cert vocabulary."""
+    target = _dataset("西城配送中心库存台账2026.xlsx", "SKU明细")
+    unrelated = _dataset("东城配送中心库存台账2026.xlsx", "SKU明细")
+
+    selected, labels = query_service._match_profile_metadata_scope(
+        "西城配送中心库存台账里有多少个缺货SKU", [target, unrelated]
+    )
+
+    assert selected == [target]
+    assert labels == [target.original_file_name]
+
+    stripped = query_service._question_without_resolved_scope(
+        "西城配送中心库存台账里有多少个缺货SKU",
+        [target.original_file_name],
+    )
+    assert stripped == "有多少个缺货SKU"
+
+
 def test_profile_metadata_scope_can_match_a_unique_sheet_name():
     first = _dataset("book-a.xlsx", "年度人员明细")
     second = _dataset("book-b.xlsx", "项目明细")
