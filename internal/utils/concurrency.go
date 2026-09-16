@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	defaultConcurrencyPoolSize   = 5
+	defaultConcurrencyPoolSize   = 8
 	defaultBatchEmbedSize        = 20
 	defaultAsynqConcurrency      = 12
 	defaultAsynqImageConcurrency = 4
