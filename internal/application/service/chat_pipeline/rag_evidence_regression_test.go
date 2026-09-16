@@ -141,7 +141,7 @@ func (s historyChunkService) GetRepository() interfaces.ChunkRepository { return
 
 func TestHistoryRevalidatesScopeVersionAndCurrentChunk(t *testing.T) {
 	expired := time.Now().Add(-time.Hour)
-	for _, scenario := range []string{"valid", "other_kb", "other_document", "disabled_tag", "empty_tags", "stale_version", "expired", "revoked", "disabled_chunk", "deleted_chunk"} {
+	for _, scenario := range []string{"valid", "other_kb", "other_document", "disabled_tag", "stale_chunk_tag", "empty_tags", "stale_version", "expired", "revoked", "disabled_chunk", "deleted_chunk"} {
 		t.Run(scenario, func(t *testing.T) {
 			historical := &types.SearchResult{ID: "chunk", KnowledgeID: "doc", KnowledgeBaseID: "kb", KnowledgeVersionID: "v1", Content: "production access", Score: 0.9, Metadata: map[string]string{"existing": "value"}}
 			target := &types.SearchTarget{Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb", KnowledgeIDs: []string{"doc"}, TagIDs: []string{"enabled"}}
@@ -156,6 +156,8 @@ func TestHistoryRevalidatesScopeVersionAndCurrentChunk(t *testing.T) {
 				target.KnowledgeIDs = []string{"other"}
 			case "disabled_tag":
 				chunk.TagID = "disabled"
+			case "stale_chunk_tag":
+				knowledge.TagID = "template"
 			case "empty_tags":
 				target.TagIDs = []string{}
 			case "stale_version":
