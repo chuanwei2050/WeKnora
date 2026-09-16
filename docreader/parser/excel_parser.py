@@ -1,11 +1,9 @@
 """
 Excel Parser Module
 
-Parses .xlsx/.xls via python-calamine (Rust), then emits one key-value line
-per data row so Go can index person/certificate rows as atomic retrieval units.
-
-Does not emit Markdown tables: length-based merging of table rows was burying
-name rows under statistical sheets during RAG TopK.
+Parses .xlsx/.xls via python-calamine (Rust), then converts each data row into
+comma-separated key-value text — same shape as the former pandas path, so Go
+can SplitText as before.
 """
 import logging
 from datetime import date, datetime, time
@@ -45,18 +43,25 @@ def _is_empty_row(row: Sequence[Any]) -> bool:
     return True
 
 
+def _normalize_headers(header_row: List[str]) -> List[str]:
+    """Match pandas: blank header cells become Unnamed: N (0-based)."""
+    headers: List[str] = []
+    for i, cell in enumerate(header_row):
+        name = cell.strip() if cell else ""
+        if not name:
+            name = f"Unnamed: {i}"
+        headers.append(name)
+    return headers
+
+
 def _row_to_kv(headers: List[str], row: List[str]) -> str:
     pairs: List[str] = []
     width = max(len(headers), len(row))
     for i in range(width):
-        header = headers[i] if i < len(headers) else f"col_{i + 1}"
+        header = headers[i] if i < len(headers) else f"Unnamed: {i}"
         value = row[i] if i < len(row) else ""
-        if not header and not value:
-            continue
         if not value:
             continue
-        if not header:
-            header = f"col_{i + 1}"
         pairs.append(f"{header}: {value}")
     return ",".join(pairs)
 
@@ -71,13 +76,8 @@ def _open_workbook(content: bytes) -> CalamineWorkbook:
 class ExcelParser(BaseParser):
     """Parser for Excel files (.xlsx, .xls).
 
-    Converts each sheet into:
-        ## SheetName
-        col1: v1,col2: v2
-        col1: v3,col2: v4
-
-    First non-empty row is the header. Empty rows are skipped. Each data row
-    becomes one line (and one Document.chunk) for Go tabular row splitting.
+    Each sheet's first non-empty row is the header; remaining rows become
+    "col: val,col: val\\n" lines (and Document.chunks). Empty rows are skipped.
     """
 
     def parse_into_text(self, content: bytes) -> Document:
@@ -87,22 +87,16 @@ class ExcelParser(BaseParser):
         start = 0
 
         for sheet_name in workbook.sheet_names:
-            header_line = f"## {sheet_name}\n"
-            end = start + len(header_line)
-            text.append(header_line)
-            chunks.append(Chunk(content=header_line, seq=len(chunks), start=start, end=end))
-            start = end
-
             raw_rows = workbook.get_sheet_by_name(sheet_name).to_python()
             rows: List[List[str]] = []
             for raw in raw_rows:
                 if _is_empty_row(raw):
                     continue
                 rows.append([_cell_to_str(value) for value in raw])
-            if not rows:
+            if len(rows) < 2:
                 continue
 
-            headers = rows[0]
+            headers = _normalize_headers(rows[0])
             for row in rows[1:]:
                 kv = _row_to_kv(headers, row)
                 if not kv:
