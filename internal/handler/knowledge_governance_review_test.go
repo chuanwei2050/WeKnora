@@ -130,7 +130,7 @@ func TestRejectRequiresNonEmptyComment(t *testing.T) {
 	}
 	h := NewKnowledgeGovernanceHandler(repo, reviewTestKnowledgeService{
 		knowledge: &types.Knowledge{ID: "doc-1", TenantID: 1, KnowledgeBaseID: "kb-1", PendingVersionID: version.ID, CreatedBy: "author"},
-	}, reviewTestKnowledgeBaseService{kbs: []*types.KnowledgeBase{kb}})
+	}, reviewTestKnowledgeBaseService{kbs: []*types.KnowledgeBase{kb}}, nil)
 
 	r := gin.New()
 	r.Use(middleware.ErrorHandler())
@@ -206,7 +206,7 @@ func TestListReviewTasksUsesReviewableKnowledgeBases(t *testing.T) {
 	h := NewKnowledgeGovernanceHandler(repo, nil, reviewTestKnowledgeBaseService{kbs: []*types.KnowledgeBase{
 		{ID: "kb-visible", TenantID: 1, Governance: types.KnowledgeGovernanceConfig{Enabled: true, ProfileID: "p", ProfileVersion: "1"}, ReviewerIDs: types.StringArray{"reviewer"}},
 		{ID: "kb-hidden", TenantID: 1, Governance: types.KnowledgeGovernanceConfig{Enabled: true, ProfileID: "p", ProfileVersion: "1"}, ReviewerIDs: types.StringArray{"other-reviewer"}},
-	}})
+	}}, nil)
 
 	r := gin.New()
 	r.Use(middleware.ErrorHandler())

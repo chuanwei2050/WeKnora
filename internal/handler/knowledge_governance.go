@@ -2,10 +2,12 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -20,6 +22,7 @@ type KnowledgeGovernanceHandler struct {
 	repo           interfaces.KnowledgeGovernanceRepository
 	knowledge      interfaces.KnowledgeService
 	knowledgeBases interfaces.KnowledgeBaseService
+	indexPurger    service.VersionIndexPurger
 }
 
 type governedVersionStager interface {
@@ -34,22 +37,44 @@ func NewKnowledgeGovernanceHandler(
 	repo interfaces.KnowledgeGovernanceRepository,
 	knowledge interfaces.KnowledgeService,
 	knowledgeBases interfaces.KnowledgeBaseService,
+	indexPurger service.VersionIndexPurger,
 ) *KnowledgeGovernanceHandler {
-	return &KnowledgeGovernanceHandler{repo: repo, knowledge: knowledge, knowledgeBases: knowledgeBases}
+	return &KnowledgeGovernanceHandler{
+		repo:           repo,
+		knowledge:      knowledge,
+		knowledgeBases: knowledgeBases,
+		indexPurger:    indexPurger,
+	}
 }
 
 // activateVersion coordinates the governed visibility switch. Vector and
 // keyword retrieval use the database current_version_id as their shared
 // visibility pointer; the graph namespace is switched first and rolled back
-// if the database transaction cannot complete.
+// if the database transaction cannot complete. After a successful switch,
+// superseded version hits are removed from ES/Milvus so TopK is not flooded
+// by stale chunks that governance would later filter out.
 func (h *KnowledgeGovernanceHandler) activateVersion(c *gin.Context, tenantID uint64, version *types.KnowledgeVersion, now time.Time) error {
 	if version == nil {
 		return errors.NewNotFoundError("knowledge version not found")
 	}
+	var activateErr error
 	if version.EffectiveAt != nil && now.Before(*version.EffectiveAt) {
-		return h.repo.ActivateVersion(c.Request.Context(), tenantID, version.ID, now)
+		activateErr = h.repo.ActivateVersion(c.Request.Context(), tenantID, version.ID, now)
+	} else {
+		activateErr = h.repo.ActivateVersion(c.Request.Context(), tenantID, version.ID, now)
 	}
-	return h.repo.ActivateVersion(c.Request.Context(), tenantID, version.ID, now)
+	if activateErr != nil {
+		return activateErr
+	}
+	if h.indexPurger == nil {
+		return nil
+	}
+	// Always reconcile after a successful DB activate so mid-flight purge/reindex
+	// failures remain recoverable on retry (document can otherwise become unsearchable).
+	if err := h.indexPurger.ReconcileCurrentVersionIndexes(c.Request.Context(), tenantID, version.KnowledgeID); err != nil {
+		return fmt.Errorf("reconcile version indexes: %w", err)
+	}
+	return nil
 }
 
 type createKnowledgeVersionRequest struct {

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -13,22 +15,59 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// VersionIndexPurger removes superseded knowledge versions from retrieval indexes
+// and Postgres chunks after a governed activation. Pending-review chunks are kept.
+type VersionIndexPurger interface {
+	PurgeAfterActivation(ctx context.Context, tenantID uint64, knowledgeID, supersededVersionID string) error
+	// ReconcileCurrentVersionIndexes clears all retrieval hits for a knowledge
+	// document, rewrites indexes for its current published version only, and
+	// deletes superseded DB chunks (keeps pending-review versions).
+	ReconcileCurrentVersionIndexes(ctx context.Context, tenantID uint64, knowledgeID string) error
+}
+
 type KnowledgePublishService struct {
 	repo          interfaces.KnowledgeGovernanceRepository
 	knowledgeRepo interfaces.KnowledgeRepository
 	kbService     interfaces.KnowledgeBaseService
+	indexPurger   VersionIndexPurger
 	task          interfaces.TaskEnqueuer
 	redisClient   *redis.Client
+}
+
+func NewVersionIndexPurger(
+	chunkService interfaces.ChunkService,
+	kbService interfaces.KnowledgeBaseService,
+	knowledgeRepo interfaces.KnowledgeRepository,
+	tenantService interfaces.TenantService,
+	modelService interfaces.ModelService,
+	retrieveEngine interfaces.RetrieveEngineRegistry,
+) VersionIndexPurger {
+	return &versionIndexPurger{
+		chunkService:   chunkService,
+		kbService:      kbService,
+		knowledgeRepo:  knowledgeRepo,
+		tenantService:  tenantService,
+		modelService:   modelService,
+		retrieveEngine: retrieveEngine,
+	}
 }
 
 func NewKnowledgePublishService(
 	repo interfaces.KnowledgeGovernanceRepository,
 	knowledgeRepo interfaces.KnowledgeRepository,
 	kbService interfaces.KnowledgeBaseService,
+	indexPurger VersionIndexPurger,
 	task interfaces.TaskEnqueuer,
 	redisClient *redis.Client,
 ) interfaces.TaskHandler {
-	return &KnowledgePublishService{repo: repo, knowledgeRepo: knowledgeRepo, kbService: kbService, task: task, redisClient: redisClient}
+	return &KnowledgePublishService{
+		repo:          repo,
+		knowledgeRepo: knowledgeRepo,
+		kbService:     kbService,
+		indexPurger:   indexPurger,
+		task:          task,
+		redisClient:   redisClient,
+	}
 }
 
 func (s *KnowledgePublishService) Handle(ctx context.Context, task *asynq.Task) error {
@@ -45,6 +84,12 @@ func (s *KnowledgePublishService) Handle(ctx context.Context, task *asynq.Task) 
 		return fmt.Errorf("knowledge version not found")
 	}
 	if version.Status == types.KnowledgeVersionActive {
+		// Activation already committed on a prior attempt. Always reconcile
+		// indexes so purge/reindex failures remain retryable (delete-then-reindex
+		// can leave empty indexes if BatchIndex failed mid-way).
+		if err := s.reconcileIndexesAfterActivation(ctx, payload.TenantID, payload.KnowledgeID); err != nil {
+			return err
+		}
 		if err := s.ensurePublishReview(ctx, payload.VersionID); err != nil {
 			return err
 		}
@@ -71,11 +116,35 @@ func (s *KnowledgePublishService) Handle(ctx context.Context, task *asynq.Task) 
 		_ = s.repo.UpdateVersionStatus(ctx, payload.TenantID, payload.VersionID, types.KnowledgeVersionPublishFailed)
 		return fmt.Errorf("activate governed knowledge version: %w", err)
 	}
+	if err := s.reconcileIndexesAfterActivation(ctx, payload.TenantID, payload.KnowledgeID); err != nil {
+		// Activation already succeeded; surface reconcile failures so asynq
+		// retries can finish without re-activating.
+		return err
+	}
 	if err := s.ensurePublishReview(ctx, payload.VersionID); err != nil {
 		return err
 	}
 	if err := s.enqueueWikiAfterActivation(ctx, payload); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (s *KnowledgePublishService) reconcileIndexesAfterActivation(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+) error {
+	if s.indexPurger == nil {
+		return nil
+	}
+	knowledgeID = strings.TrimSpace(knowledgeID)
+	if knowledgeID == "" {
+		return nil
+	}
+	if err := s.indexPurger.ReconcileCurrentVersionIndexes(ctx, tenantID, knowledgeID); err != nil {
+		logger.Errorf(ctx, "[KnowledgePublish] failed to reconcile indexes knowledge=%s: %v", knowledgeID, err)
+		return fmt.Errorf("reconcile version indexes: %w", err)
 	}
 	return nil
 }

@@ -59,7 +59,7 @@ func TestKnowledgeGovernanceAPIFormatsVersionHistoryAndCitation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := openKnowledgeGovernanceAPITestDB(t)
 	repo := repository.NewKnowledgeGovernanceRepository(db, nil)
-	governance := NewKnowledgeGovernanceHandler(repo, nil, nil)
+	governance := NewKnowledgeGovernanceHandler(repo, nil, nil, nil)
 
 	effectiveAt := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	current := &types.KnowledgeVersion{

@@ -18,6 +18,7 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -2041,6 +2042,9 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 		logger.Infof(ctx, "Marked knowledge %s as deleting (previous status: %s)", id, originalStatus)
 	}
 
+	// Drop structured-query sidecar datasets before the knowledge row disappears.
+	s.cleanupStructuredDatasets(ctx, knowledge)
+
 	// Resolve file service for this KB before spawning goroutines
 	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
 	kbFileSvc := s.resolveFileService(ctx, kb)
@@ -2407,6 +2411,10 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		}
 	}
 	logger.Infof(ctx, "Marked %d knowledge entries as deleting", len(knowledgeList))
+
+	for _, knowledge := range knowledgeList {
+		s.cleanupStructuredDatasets(ctx, knowledge)
+	}
 
 	// Pre-resolve file services per KB so goroutines don't need DB access
 	kbFileServices := make(map[string]interfaces.FileService)
@@ -4332,7 +4340,7 @@ func (s *knowledgeService) ProcessKBMaintenance(ctx context.Context, task *asynq
 				if s.config.StructuredQuery == nil || !s.config.StructuredQuery.Enabled {
 					itemErr = fmt.Errorf("structured query is disabled")
 				} else {
-					_, itemErr = submitStructuredFileRequestWithKey(ctx, s.config.StructuredQuery, knowledge, s.resolveFileServiceForPath(ctx, kb, knowledge.FilePath), s.repo, knowledge.ID+"-"+knowledge.FileHash+"-"+payload.RunID)
+					_, itemErr = s.resubmitStructuredFile(ctx, s.config.StructuredQuery, knowledge, s.resolveFileServiceForPath(ctx, kb, knowledge.FilePath), s.repo, knowledge.ID+"-"+knowledge.FileHash+"-"+payload.RunID)
 				}
 			}
 		default:
@@ -4434,6 +4442,17 @@ func (s *knowledgeService) rebuildKnowledgeRetriever(ctx context.Context, tenant
 	if err != nil {
 		return err
 	}
+	currentVersionID := strings.TrimSpace(knowledge.CurrentVersionID)
+	// Drop every existing index for this document first, then rewrite only the
+	// currently published version. Governed KBs keep superseded chunks in
+	// Postgres for rollback/audit, but retrieval indexes must never serve them.
+	dimension := 0
+	if embedder != nil {
+		dimension = embedder.GetDimensions()
+	}
+	if err := engine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, dimension, kb.Type); err != nil {
+		return fmt.Errorf("clear knowledge indexes before rebuild: %w", err)
+	}
 	indexInfo := make([]*types.IndexInfo, 0, len(chunks))
 	titlePrefix := ""
 	if title := strings.TrimSpace(knowledge.Title); title != "" {
@@ -4441,6 +4460,9 @@ func (s *knowledgeService) rebuildKnowledgeRetriever(ctx context.Context, tenant
 	}
 	for _, chunk := range chunks {
 		if chunk == nil || chunk.ChunkType == types.ChunkTypeParentText || chunk.ChunkType == types.ChunkTypeEntity || chunk.ChunkType == types.ChunkTypeRelationship {
+			continue
+		}
+		if currentVersionID != "" && strings.TrimSpace(chunk.KnowledgeVersionID) != currentVersionID {
 			continue
 		}
 		indexInfo = append(indexInfo, documentChunkIndexInfo(chunk, titlePrefix+chunk.Content, chunk.ID))
@@ -5148,28 +5170,30 @@ func (s *knowledgeService) StopAllParsesInKnowledgeBase(ctx context.Context, kbI
 // cleanupStoppedParseArtifacts removes parse-derived products while keeping the
 // knowledge row and source file. Best-effort: failures are logged, not returned.
 func (s *knowledgeService) cleanupStoppedParseArtifacts(ctx context.Context, knowledgeID string) {
-	if s.chunkService == nil || s.tenantService == nil {
-		return
-	}
-	ctx, err := s.ensureTenantInfo(ctx)
-	if err != nil {
-		logger.Warnf(ctx, "stop-parse artifact cleanup skipped (tenant): knowledge=%s err=%v", knowledgeID, err)
-		return
-	}
 	knowledge, err := s.GetKnowledgeByID(ctx, knowledgeID)
 	if err != nil || knowledge == nil {
 		logger.Warnf(ctx, "stop-parse artifact cleanup skipped (load): knowledge=%s err=%v", knowledgeID, err)
 		return
 	}
 
-	if s.kbService != nil {
-		if kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID); kbErr == nil && kb != nil && kb.IsWikiEnabled() {
-			s.prepareWikiForReparse(ctx, knowledge)
-		}
-	}
+	// Structured sidecar cleanup does not require chunk/tenant services.
+	s.cleanupStructuredDatasets(ctx, knowledge)
 
-	if cleanErr := s.cleanupKnowledgeResources(ctx, knowledge); cleanErr != nil {
-		logger.Warnf(ctx, "stop-parse artifact cleanup partial: knowledge=%s err=%v", knowledgeID, cleanErr)
+	if s.chunkService != nil && s.tenantService != nil {
+		enriched, tenantErr := s.ensureTenantInfo(ctx)
+		if tenantErr != nil {
+			logger.Warnf(ctx, "stop-parse artifact cleanup skipped (tenant): knowledge=%s err=%v", knowledgeID, tenantErr)
+		} else {
+			ctx = enriched
+			if s.kbService != nil {
+				if kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID); kbErr == nil && kb != nil && kb.IsWikiEnabled() {
+					s.prepareWikiForReparse(ctx, knowledge)
+				}
+			}
+			if cleanErr := s.cleanupKnowledgeResources(ctx, knowledge); cleanErr != nil {
+				logger.Warnf(ctx, "stop-parse artifact cleanup partial: knowledge=%s err=%v", knowledgeID, cleanErr)
+			}
+		}
 	}
 
 	// Persist cleared derived fields; keep failed + user-stop message from interrupt.
@@ -5552,6 +5576,14 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 		if slices.Contains([]string{"csv", "xlsx", "xls"}, getFileType(existing.FileName)) {
 			NewDataTableSummaryTask(ctx, s.task, tenantID, existing.ID, kb.SummaryModelID, kb.EmbeddingModelID)
 		}
+		// Single-doc / batch reparse must drop and recreate the SQL sidecar;
+		// otherwise old datasets remain until a KB-wide structured maintenance run.
+		s.queueStructuredResubmit(
+			ctx,
+			existing,
+			s.resolveFileServiceForPath(ctx, kb, existing.FilePath),
+			existing.ID+"-"+existing.FileHash+"-reparse-"+strconv.FormatInt(time.Now().UnixNano(), 10),
+		)
 
 		return existing, nil
 	}
