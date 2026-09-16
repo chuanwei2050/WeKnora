@@ -3590,9 +3590,22 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	knowledgePersisted := persistProcessingState()
 	if isGovernedStaging && !knowledgePersisted {
-		cleanupCreatedChunks()
-		logger.Infof(ctx, "Discarded staged resources for superseded governed version %s", stagingVersionID)
-		return
+		// Auto-publish may activate the version (clearing pending) while this
+		// worker is still finishing. If the version is already current, keep the
+		// staged chunks and persist via the post-process-safe CAS instead of
+		// discarding the active version's data and leaving parse_status stuck.
+		updated, err := updateKnowledgeForCurrentOrPendingVersion(ctx, s.repo, knowledge, stagingVersionID)
+		if err != nil {
+			logger.Warnf(ctx, "processChunks failed to persist already-active governed version %s: %v", stagingVersionID, err)
+		}
+		if updated {
+			knowledgePersisted = true
+			logger.Infof(ctx, "Persisted processing state for already-active governed version %s", stagingVersionID)
+		} else {
+			cleanupCreatedChunks()
+			logger.Infof(ctx, "Discarded staged resources for superseded governed version %s", stagingVersionID)
+			return
+		}
 	}
 
 	// Enqueue multimodal tasks for images (async, non-blocking)
@@ -5483,6 +5496,16 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return existing, nil
 		}
 		return existing, nil
+	}
+
+	// A second reparse while a governed pending version is still in flight resets
+	// parse_status and races the first worker/publish path, which can leave the
+	// document stuck in "processing" after the version is already active.
+	if kb.Governance.Enabled && strings.TrimSpace(existing.PendingVersionID) != "" {
+		switch existing.ParseStatus {
+		case types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusCompleted:
+			return nil, werrors.NewConflictError("该知识正在版本重建或发布中，请稍后再试")
+		}
 	}
 
 	// Governed reparses retain the current production version while the pending
