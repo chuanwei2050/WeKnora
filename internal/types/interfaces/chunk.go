@@ -30,6 +30,9 @@ type ChunkRepository interface {
 	ListChunksBySeqID(ctx context.Context, tenantID uint64, seqIDs []int64) ([]*types.Chunk, error)
 	// ListChunksByKnowledgeID lists chunks by knowledge id
 	ListChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// ListIndexableChunksByKnowledgeID lists chunks that belong in retrieval indexes
+	// (text/summary/image/table/faq), excluding parent/entity/relationship.
+	ListIndexableChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
 	// ListChunksByKnowledgeIDBounded loads a whole text document only when it fits both limits.
 	ListChunksByKnowledgeIDBounded(ctx context.Context, tenantID uint64, knowledgeID string, maxChunks int, maxBytes int64) ([]*types.Chunk, bool, error)
 	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id.
@@ -64,6 +67,12 @@ type ChunkRepository interface {
 	DeleteChunks(ctx context.Context, tenantID uint64, ids []string) error
 	// DeleteChunksByKnowledgeID deletes chunks by knowledge id
 	DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error
+	// DeleteChunksExcludingVersions soft-deletes all chunks for a knowledge
+	// document whose knowledge_version_id is not in keepVersionIDs (empty version
+	// counts as excluded when keepVersionIDs is non-empty).
+	DeleteChunksExcludingVersions(ctx context.Context, tenantID uint64, knowledgeID string, keepVersionIDs []string) (int64, error)
+	// DeleteChunksByKnowledgeVersionID soft-deletes all chunks for one version.
+	DeleteChunksByKnowledgeVersionID(ctx context.Context, tenantID uint64, knowledgeID, versionID string) (int64, error)
 	// DeleteByKnowledgeList deletes all chunks for a knowledge list
 	DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error
 	// ListImageInfoByKnowledgeIDs returns non-empty (knowledge_id, image_info) pairs for image cleanup.
@@ -124,6 +133,8 @@ type ChunkService interface {
 	GetChunkByIDOnly(ctx context.Context, id string) (*types.Chunk, error)
 	// ListChunksByKnowledgeID lists chunks by knowledge id
 	ListChunksByKnowledgeID(ctx context.Context, knowledgeID string) ([]*types.Chunk, error)
+	// ListIndexableChunksByKnowledgeID lists retrieval-indexable chunks for a knowledge.
+	ListIndexableChunksByKnowledgeID(ctx context.Context, knowledgeID string) ([]*types.Chunk, error)
 	// ListChunksByKnowledgeIDBounded loads a whole text document only when it fits both limits.
 	ListChunksByKnowledgeIDBounded(ctx context.Context, tenantID uint64, knowledgeID string, maxChunks int, maxBytes int64) ([]*types.Chunk, bool, error)
 	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id
@@ -143,6 +154,11 @@ type ChunkService interface {
 	DeleteChunks(ctx context.Context, ids []string) error
 	// DeleteChunksByKnowledgeID deletes chunks by knowledge id
 	DeleteChunksByKnowledgeID(ctx context.Context, knowledgeID string) error
+	// DeleteChunksExcludingVersions soft-deletes superseded chunks of every type
+	// (text/parent/summary/image/...), keeping only the listed version IDs.
+	DeleteChunksExcludingVersions(ctx context.Context, knowledgeID string, keepVersionIDs []string) (int64, error)
+	// DeleteChunksByKnowledgeVersionID soft-deletes all chunks for one version.
+	DeleteChunksByKnowledgeVersionID(ctx context.Context, knowledgeID, versionID string) (int64, error)
 	// DeleteByKnowledgeList deletes all chunks for a knowledge list
 	DeleteByKnowledgeList(ctx context.Context, ids []string) error
 	// ListChunkByParentID lists chunks by parent id

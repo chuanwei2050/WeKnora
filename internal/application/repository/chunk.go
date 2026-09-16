@@ -145,6 +145,33 @@ func (r *chunkRepository) ListChunksByKnowledgeID(
 	return chunks, nil
 }
 
+func (r *chunkRepository) ListIndexableChunksByKnowledgeID(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) ([]*types.Chunk, error) {
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ? AND chunk_type IN ?", tenantID, knowledgeID, indexableChunkTypes()).
+		Order("chunk_index ASC").
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
+// indexableChunkTypes are chunk kinds that belong in ES/Milvus. Parent/entity/
+// relationship chunks are stored for context only and must not be listed here.
+func indexableChunkTypes() []types.ChunkType {
+	return []types.ChunkType{
+		types.ChunkTypeText,
+		types.ChunkTypeSummary,
+		types.ChunkTypeImageOCR,
+		types.ChunkTypeImageCaption,
+		types.ChunkTypeTableColumn,
+		types.ChunkTypeTableSummary,
+		types.ChunkTypeFAQ,
+	}
+}
+
 func (r *chunkRepository) ListChunksByKnowledgeIDBounded(
 	ctx context.Context, tenantID uint64, knowledgeID string, maxChunks int, maxBytes int64,
 ) (chunks []*types.Chunk, fits bool, err error) {
@@ -521,6 +548,51 @@ func (r *chunkRepository) DeleteChunksByKnowledgeID(ctx context.Context, tenantI
 	return r.db.WithContext(ctx).Where(
 		"tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID,
 	).Delete(&types.Chunk{}).Error
+}
+
+// DeleteChunksExcludingVersions soft-deletes chunks whose version is not kept.
+func (r *chunkRepository) DeleteChunksExcludingVersions(
+	ctx context.Context, tenantID uint64, knowledgeID string, keepVersionIDs []string,
+) (int64, error) {
+	keep := make([]string, 0, len(keepVersionIDs))
+	seen := map[string]struct{}{}
+	for _, id := range keepVersionIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		keep = append(keep, id)
+	}
+	if knowledgeID == "" {
+		return 0, nil
+	}
+	q := r.db.WithContext(ctx).Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID)
+	if len(keep) == 0 {
+		// No published/pending version to keep — refuse mass delete of the whole doc.
+		return 0, nil
+	}
+	q = q.Where("(knowledge_version_id IS NULL OR knowledge_version_id = '' OR knowledge_version_id NOT IN ?)", keep)
+	res := q.Delete(&types.Chunk{})
+	return res.RowsAffected, res.Error
+}
+
+// DeleteChunksByKnowledgeVersionID soft-deletes all chunks for one knowledge version.
+func (r *chunkRepository) DeleteChunksByKnowledgeVersionID(
+	ctx context.Context, tenantID uint64, knowledgeID, versionID string,
+) (int64, error) {
+	versionID = strings.TrimSpace(versionID)
+	if knowledgeID == "" || versionID == "" {
+		return 0, nil
+	}
+	res := r.db.WithContext(ctx).Where(
+		"tenant_id = ? AND knowledge_id = ? AND knowledge_version_id = ?",
+		tenantID, knowledgeID, versionID,
+	).Delete(&types.Chunk{})
+	return res.RowsAffected, res.Error
 }
 
 // ListImageInfoByKnowledgeIDs returns non-empty image_info values for the given knowledge IDs.

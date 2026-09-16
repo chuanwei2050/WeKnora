@@ -21,9 +21,48 @@ func (s *purgeChunkStub) ListChunksByKnowledgeID(_ context.Context, knowledgeID 
 	return s.chunks, nil
 }
 
+func (s *purgeChunkStub) ListIndexableChunksByKnowledgeID(ctx context.Context, knowledgeID string) ([]*types.Chunk, error) {
+	return s.ListChunksByKnowledgeID(ctx, knowledgeID)
+}
+
 func (s *purgeChunkStub) DeleteChunks(_ context.Context, ids []string) error {
 	s.deletedIDs = append(s.deletedIDs, ids...)
 	return nil
+}
+
+func (s *purgeChunkStub) DeleteChunksByKnowledgeVersionID(_ context.Context, _ string, versionID string) (int64, error) {
+	n := int64(0)
+	for _, chunk := range s.chunks {
+		if chunk == nil || strings.TrimSpace(chunk.KnowledgeVersionID) != strings.TrimSpace(versionID) {
+			continue
+		}
+		s.deletedIDs = append(s.deletedIDs, chunk.ID)
+		n++
+	}
+	return n, nil
+}
+
+func (s *purgeChunkStub) DeleteChunksExcludingVersions(_ context.Context, _ string, keepVersionIDs []string) (int64, error) {
+	keep := map[string]struct{}{}
+	for _, id := range keepVersionIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			keep[id] = struct{}{}
+		}
+	}
+	n := int64(0)
+	for _, chunk := range s.chunks {
+		if chunk == nil {
+			continue
+		}
+		v := strings.TrimSpace(chunk.KnowledgeVersionID)
+		if _, ok := keep[v]; ok {
+			continue
+		}
+		s.deletedIDs = append(s.deletedIDs, chunk.ID)
+		n++
+	}
+	return n, nil
 }
 
 type purgeEngineStub struct {
@@ -118,17 +157,22 @@ func TestIndexableChunksForVersionKeepsOnlyTargetVersion(t *testing.T) {
 	chunks := []*types.Chunk{
 		{ID: "old-1", KnowledgeID: "doc-1", KnowledgeVersionID: "version-old", ChunkType: types.ChunkTypeText, Content: "old", IsEnabled: true},
 		{ID: "new-1", KnowledgeID: "doc-1", KnowledgeVersionID: "version-new", ChunkType: types.ChunkTypeText, Content: "new", IsEnabled: true},
+		{ID: "sum-1", KnowledgeID: "doc-1", KnowledgeVersionID: "version-new", ChunkType: types.ChunkTypeSummary, Content: "summary", IsEnabled: true},
 		{ID: "parent", KnowledgeID: "doc-1", KnowledgeVersionID: "version-new", ChunkType: types.ChunkTypeParentText, Content: "parent", IsEnabled: true},
 	}
 	got := indexableChunksForVersion(chunks, "version-new", "Title")
-	if len(got) != 1 {
-		t.Fatalf("indexable = %d, want 1", len(got))
+	if len(got) != 2 {
+		t.Fatalf("indexable = %d, want 2 (text+summary)", len(got))
 	}
-	if got[0].ChunkID != "new-1" {
-		t.Fatalf("chunk id = %q", got[0].ChunkID)
+	ids := map[string]bool{}
+	for _, item := range got {
+		ids[item.ChunkID] = true
+		if !strings.HasPrefix(item.Content, "Title\n") {
+			t.Fatalf("content = %q", item.Content)
+		}
 	}
-	if !strings.HasPrefix(got[0].Content, "Title\n") {
-		t.Fatalf("content = %q", got[0].Content)
+	if !ids["new-1"] || !ids["sum-1"] || ids["parent"] || ids["old-1"] {
+		t.Fatalf("chunk ids = %v", ids)
 	}
 }
 

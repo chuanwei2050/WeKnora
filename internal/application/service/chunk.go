@@ -142,6 +142,20 @@ func (s *chunkService) ListChunksByKnowledgeID(ctx context.Context, knowledgeID 
 	return chunks, nil
 }
 
+func (s *chunkService) ListIndexableChunksByKnowledgeID(ctx context.Context, knowledgeID string) ([]*types.Chunk, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	chunks, err := s.chunkRepository.ListIndexableChunksByKnowledgeID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_id": knowledgeID,
+			"tenant_id":    tenantID,
+		})
+		return nil, err
+	}
+	logger.Infof(ctx, "Retrieved %d indexable chunks for knowledge %s", len(chunks), knowledgeID)
+	return chunks, nil
+}
+
 func (s *chunkService) ListChunksByKnowledgeIDBounded(
 	ctx context.Context, tenantID uint64, knowledgeID string, maxChunks int, maxBytes int64,
 ) ([]*types.Chunk, bool, error) {
@@ -311,6 +325,36 @@ func (s *chunkService) DeleteChunksByKnowledgeID(ctx context.Context, knowledgeI
 
 	logger.Info(ctx, "All chunks under knowledge deleted successfully")
 	return nil
+}
+
+func (s *chunkService) DeleteChunksExcludingVersions(ctx context.Context, knowledgeID string, keepVersionIDs []string) (int64, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	n, err := s.chunkRepository.DeleteChunksExcludingVersions(ctx, tenantID, knowledgeID, keepVersionIDs)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_id": knowledgeID,
+			"tenant_id":    tenantID,
+			"keep":         keepVersionIDs,
+		})
+		return 0, err
+	}
+	logger.Infof(ctx, "Deleted %d superseded chunks for knowledge %s (kept %v)", n, knowledgeID, keepVersionIDs)
+	return n, nil
+}
+
+func (s *chunkService) DeleteChunksByKnowledgeVersionID(ctx context.Context, knowledgeID, versionID string) (int64, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	n, err := s.chunkRepository.DeleteChunksByKnowledgeVersionID(ctx, tenantID, knowledgeID, versionID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_id": knowledgeID,
+			"version_id":   versionID,
+			"tenant_id":    tenantID,
+		})
+		return 0, err
+	}
+	logger.Infof(ctx, "Deleted %d chunks for knowledge %s version %s", n, knowledgeID, versionID)
+	return n, nil
 }
 
 func (s *chunkService) DeleteByKnowledgeList(ctx context.Context, ids []string) error {

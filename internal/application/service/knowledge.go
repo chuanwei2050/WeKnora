@@ -4438,14 +4438,14 @@ func (s *knowledgeService) rebuildKnowledgeRetriever(ctx context.Context, tenant
 			return err
 		}
 	}
-	chunks, err := s.chunkService.ListChunksByKnowledgeID(ctx, knowledge.ID)
+	chunks, err := s.chunkService.ListIndexableChunksByKnowledgeID(ctx, knowledge.ID)
 	if err != nil {
 		return err
 	}
 	currentVersionID := strings.TrimSpace(knowledge.CurrentVersionID)
 	// Drop every existing index for this document first, then rewrite only the
-	// currently published version. Governed KBs keep superseded chunks in
-	// Postgres for rollback/audit, but retrieval indexes must never serve them.
+	// currently published version. Pending-review chunks stay in DB; superseded
+	// versions are purged after publish. Retrieval indexes must never serve them.
 	dimension := 0
 	if embedder != nil {
 		dimension = embedder.GetDimensions()

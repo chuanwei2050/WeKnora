@@ -40,7 +40,6 @@ func purgeSupersededVersionIndexes(
 		return fmt.Errorf("list chunks for superseded version purge: %w", err)
 	}
 	indexChunkIDs := make([]string, 0, len(chunks))
-	dbChunkIDs := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
 		if chunk == nil || strings.TrimSpace(chunk.KnowledgeVersionID) != supersededVersionID {
 			continue
@@ -48,7 +47,6 @@ func purgeSupersededVersionIndexes(
 		if chunk.ID == "" {
 			continue
 		}
-		dbChunkIDs = append(dbChunkIDs, chunk.ID)
 		// Parent/entity/relationship chunks are not indexed.
 		if chunk.ChunkType == types.ChunkTypeParentText ||
 			chunk.ChunkType == types.ChunkTypeEntity ||
@@ -62,13 +60,12 @@ func purgeSupersededVersionIndexes(
 			return fmt.Errorf("delete superseded version indexes: %w", err)
 		}
 	}
-	if len(dbChunkIDs) > 0 {
-		if err := deps.chunkService.DeleteChunks(ctx, dbChunkIDs); err != nil {
-			return fmt.Errorf("delete superseded version chunks: %w", err)
-		}
+	n, err := deps.chunkService.DeleteChunksByKnowledgeVersionID(ctx, knowledgeID, supersededVersionID)
+	if err != nil {
+		return fmt.Errorf("delete superseded version chunks: %w", err)
 	}
 	logger.Infof(ctx, "[KnowledgePublish] purged superseded version knowledge=%s version=%s index=%d db=%d",
-		knowledgeID, supersededVersionID, len(indexChunkIDs), len(dbChunkIDs))
+		knowledgeID, supersededVersionID, len(indexChunkIDs), n)
 	return nil
 }
 
@@ -171,7 +168,7 @@ func (p *versionIndexPurger) reconcileCurrentVersionIndexes(ctx context.Context,
 	if err != nil {
 		return fmt.Errorf("load knowledge base for index reconcile: %w", err)
 	}
-	chunks, err := p.chunkService.ListChunksByKnowledgeID(ctx, knowledge.ID)
+	chunks, err := p.chunkService.ListIndexableChunksByKnowledgeID(ctx, knowledge.ID)
 	if err != nil {
 		return fmt.Errorf("list chunks for index reconcile: %w", err)
 	}
@@ -216,13 +213,18 @@ func (p *versionIndexPurger) reconcileCurrentVersionIndexes(ctx context.Context,
 		}
 	}
 
-	staleIDs := staleChunkIDsForDeletion(chunks, currentVersionID, pendingVersionID)
-	if len(staleIDs) > 0 {
-		if err := p.chunkService.DeleteChunks(ctx, staleIDs); err != nil {
-			return fmt.Errorf("delete superseded db chunks: %w", err)
-		}
+	keepVersions := make([]string, 0, 2)
+	if currentVersionID != "" {
+		keepVersions = append(keepVersions, currentVersionID)
+	}
+	if pendingVersionID != "" {
+		keepVersions = append(keepVersions, pendingVersionID)
+	}
+	deletedDB, err := p.chunkService.DeleteChunksExcludingVersions(ctx, knowledge.ID, keepVersions)
+	if err != nil {
+		return fmt.Errorf("delete superseded db chunks: %w", err)
 	}
 	logger.Infof(ctx, "[KnowledgePublish] reconciled knowledge=%s reason=%s current=%s deleted_db=%d",
-		knowledge.ID, reason, currentVersionID, len(staleIDs))
+		knowledge.ID, reason, currentVersionID, deletedDB)
 	return nil
 }
