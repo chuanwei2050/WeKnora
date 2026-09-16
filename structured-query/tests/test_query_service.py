@@ -184,6 +184,50 @@ def test_should_reconsider_none_requires_strong_evidence():
     assert query_service.should_reconsider_none([{"score": 1.5}], []) is False
     assert query_service.should_reconsider_none([{"score": 0.4}], []) is False
     assert query_service.should_reconsider_none([], []) is False
+    assert query_service.should_reconsider_none(
+        [{"score": 0.5}], [], table_hits=[{"title_score": 3}]
+    ) is True
+    assert query_service.should_reconsider_none(
+        [], [], table_hits=[{"title_score": 5}]
+    ) is False
+
+
+def test_exclusive_value_evidence_protects_subset_from_broad_replace():
+    subset_id = str(uuid4())
+    broad_id = str(uuid4())
+    protected = query_service._tables_with_exclusive_value_evidence(
+        [
+            {"table_id": subset_id, "score": 2.0},
+            {"table_id": broad_id, "score": 0.4},
+        ]
+    )
+    assert protected == {subset_id}
+
+
+def test_literal_overlap_rewrite_avoids_model_repair(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        query_service,
+        "generate_sql",
+        lambda *args, **kwargs: calls.append(1) or SQLGeneration(
+            route="sql",
+            sql="SELECT * FROM people WHERE certificate ILIKE '%software reviewer exam%'",
+        ),
+    )
+    outcome = query_service.execute_with_one_repair(
+        "tenant-a",
+        "证书",
+        "schema",
+        [],
+        {"people"},
+        "postgres",
+        lambda sql: ExecutionResult(["certificate"], [["software reviewer"]]),
+        supported_values_by_column={"people.certificate": "official qualification software reviewer"},
+    )
+    assert outcome.model_calls == 1
+    assert "literal_overlap_rewrite" in outcome.error_codes
+    assert "exam" not in outcome.sql.casefold()
+
 
 
 def _dataset(file_name, *sheet_names):

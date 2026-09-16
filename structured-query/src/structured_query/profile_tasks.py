@@ -45,7 +45,7 @@ def _profile_datasource(task, job_id: str) -> None:
                 )
                 session.add(table); session.flush()
                 session.add(SchemaProfile(version_id=version.id, kind="table", table_id=table.id, payload=table.profile))
-                documents.append(ProfileDocument(dataset.tenant_id, dataset.namespace, version.id, "table", table.id, None, f"{profile.table.schema}.{profile.table.name}"))
+                documents.append(ProfileDocument(dataset.tenant_id, dataset.namespace, version.id, "table", table.id, None, f"{dataset.original_file_name}\n{profile.table.schema}.{profile.table.name}"))
                 def profile_one(raw):
                     persist = source.field_policies.get(
                         f'{profile.table.schema}.{profile.table.name}.{raw["name"]}', {}

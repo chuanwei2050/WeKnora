@@ -132,7 +132,10 @@ def _import_dataset(task, job_id: str, object_key: str, file_name: str) -> None:
                         kind="table",
                         table_id=table.id,
                         column_id=None,
-                        text=f"{parsed_table.sheet_name}\n{table.profile['mschema']}",
+                        text=(
+                            f"{dataset.original_file_name}\n{parsed_table.sheet_name}\n"
+                            f"{table.profile['mschema']}"
+                        ),
                     )
                 )
                 for ordinal, column_profile in enumerate(column_profiles, start=1):

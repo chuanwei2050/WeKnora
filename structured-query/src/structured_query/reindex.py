@@ -23,7 +23,7 @@ def rebuild_profile_index(version_id: UUID | None = None) -> dict[str, int]:
             documents: list[ProfileDocument] = []
             tables = list(session.scalars(select(DataTable).where(DataTable.version_id == version.id)))
             for table in tables:
-                documents.append(ProfileDocument(dataset.tenant_id, dataset.namespace, version.id, "table", table.id, None, f"{table.sheet_name}\n{table.profile.get('mschema', '')}"))
+                documents.append(ProfileDocument(dataset.tenant_id, dataset.namespace, version.id, "table", table.id, None, f"{dataset.original_file_name}\n{table.sheet_name}\n{table.profile.get('mschema', '')}"))
                 columns = list(session.scalars(select(DataColumn).where(DataColumn.table_id == table.id)))
                 for column in columns:
                     documents.append(ProfileDocument(dataset.tenant_id, dataset.namespace, version.id, "column", table.id, column.id, f"{table.sheet_name} {column.original_name} {column.data_type}"))

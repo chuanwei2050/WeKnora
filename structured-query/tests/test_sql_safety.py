@@ -4,6 +4,7 @@ from structured_query.sql_safety import (
     UnsafeSQL,
     normalize_unambiguous_column_names,
     remove_impossible_complete_profile_or_branches,
+    rewrite_unsupported_filter_literals,
     validate_read_only_sql,
 )
 
@@ -281,7 +282,17 @@ def test_incomplete_profile_can_use_bounded_runtime_literal_probe():
         literal_support_probe=lambda column, fragment: probes.append((column, fragment)) or True,
     )
     assert result.tables == {"people"}
-    assert probes == [("people.certificate", "rarecertificate")]
+    assert probes == [("people.certificate", "rare certificate")]
+
+
+def test_rewrite_shrinks_invented_literal_to_profile_overlap():
+    rewritten = rewrite_unsupported_filter_literals(
+        "SELECT * FROM people WHERE certificate ILIKE '%software reviewer exam%'",
+        {"people.certificate": "official qualification software reviewer"},
+    )
+    assert rewritten is not None
+    assert "software reviewer" in rewritten.casefold().replace(" ", "") or "softwarereviewer" in rewritten.casefold().replace(" ", "")
+    assert "exam" not in rewritten.casefold()
 
 
 def test_complete_profile_never_uses_runtime_probe():

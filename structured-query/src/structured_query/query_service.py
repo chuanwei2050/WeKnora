@@ -28,6 +28,7 @@ from .model_gateway import ModelGenerationError, generate_sql
 from .sql_safety import (
     normalize_unambiguous_column_names,
     remove_impossible_complete_profile_or_branches,
+    rewrite_unsupported_filter_literals,
     validate_read_only_sql,
 )
 from .table_selector import confirmed_join_limit, select_schema_candidates
@@ -61,12 +62,14 @@ class QueryAttemptsFailed(ValueError):
 def should_reconsider_none(
     column_hits: list[dict] | None,
     value_hits: list[dict] | None,
+    table_hits: list[dict] | None = None,
 ) -> bool:
     """Force a second SQL-only attempt only on strong record-op evidence.
 
     Value hits are concrete cell matches. Column hits alone must clear the same
     strength bar as lexical_evidence_is_sufficient (>=2) so topical mentions of
-    a field name (conceptual questions) do not override route=none.
+    a field name (conceptual questions) do not override route=none. A clear file
+    title hit plus any column evidence is also enough — still no business phrases.
     """
     if value_hits:
         return True
@@ -76,7 +79,13 @@ def should_reconsider_none(
                 return True
         except (TypeError, ValueError):
             continue
-    return False
+    best_title = 0.0
+    for hit in table_hits or ():
+        try:
+            best_title = max(best_title, float(hit.get("title_score", 0) or 0))
+        except (TypeError, ValueError):
+            continue
+    return best_title >= 2 and bool(column_hits)
 
 
 def trace_sql_attempts(attempts: list[str]) -> list[str]:
@@ -152,51 +161,78 @@ def execute_with_one_repair(
                 int(model_seconds * 1000), int(validation_seconds * 1000), int(execution_seconds * 1000),
             )
         attempts.append(generation.sql)
-        try:
-            stage_started = perf_counter()
-            normalized_sql = normalize_unambiguous_column_names(
-                generation.sql, semantic_to_physical or {}, dialect=dialect
-            )
-            normalized_sql = remove_impossible_complete_profile_or_branches(
-                normalized_sql,
-                supported_values_by_column or {},
-                complete_value_columns or set(),
-                dialect=dialect,
-            )
-            validated = validate_read_only_sql(
-                normalized_sql,
-                allowed,
-                max_tables=max_sql_tables,
-                dialect=dialect,
-                question_text=question,
-                supported_values_by_column=supported_values_by_column,
-                probeable_columns=probeable_columns,
-                verify_columns=verify_columns,
-                literal_support_probe=literal_support_probe,
-            )
-            validation_seconds += perf_counter() - stage_started
-            stage_started = perf_counter()
-            result = execute(validated.sql)
-            execution_seconds += perf_counter() - stage_started
-            return QueryAttemptOutcome(
-                "sql", validated.sql, attempts, error_codes, attempt_number + 1, result,
-                int(model_seconds * 1000), int(validation_seconds * 1000), int(execution_seconds * 1000),
-            )
-        except (UnsafeSQL, QueryExecutionError) as error:
-            if isinstance(error, QueryExecutionError):
-                execution_seconds += perf_counter() - stage_started
-            else:
+        stage_started = perf_counter()
+        normalized_sql = normalize_unambiguous_column_names(
+            generation.sql, semantic_to_physical or {}, dialect=dialect
+        )
+        normalized_sql = remove_impossible_complete_profile_or_branches(
+            normalized_sql,
+            supported_values_by_column or {},
+            complete_value_columns or set(),
+            dialect=dialect,
+        )
+        sql_to_validate = normalized_sql
+        for coerce_pass in range(2):
+            try:
+                stage_started = perf_counter()
+                validated = validate_read_only_sql(
+                    sql_to_validate,
+                    allowed,
+                    max_tables=max_sql_tables,
+                    dialect=dialect,
+                    question_text=question,
+                    supported_values_by_column=supported_values_by_column,
+                    probeable_columns=probeable_columns,
+                    verify_columns=verify_columns,
+                    literal_support_probe=literal_support_probe,
+                )
                 validation_seconds += perf_counter() - stage_started
-            code = error.code
-            error_codes.append(code)
-            if attempt_number == 1 or (isinstance(error, QueryExecutionError) and not error.retryable):
-                raise QueryAttemptsFailed(
-                    code, attempts, error_codes, attempt_number + 1,
+                stage_started = perf_counter()
+                result = execute(validated.sql)
+                execution_seconds += perf_counter() - stage_started
+                return QueryAttemptOutcome(
+                    "sql", validated.sql, attempts, error_codes, attempt_number + 1, result,
                     int(model_seconds * 1000), int(validation_seconds * 1000), int(execution_seconds * 1000),
-                ) from error
-            repair = f"previous_attempt={generation.sql}\nerror_code={code}"
-            if isinstance(error, UnsafeSQL) and error.repair_hint:
-                repair += f"\nrepair_hint={error.repair_hint}"
+                )
+            except UnsafeSQL as error:
+                validation_seconds += perf_counter() - stage_started
+                if (
+                    coerce_pass == 0
+                    and error.code == "unsupported_value_literal"
+                    and supported_values_by_column
+                ):
+                    rewritten = rewrite_unsupported_filter_literals(
+                        sql_to_validate,
+                        supported_values_by_column,
+                        dialect=dialect,
+                    )
+                    if rewritten and rewritten != sql_to_validate:
+                        error_codes.append("literal_overlap_rewrite")
+                        sql_to_validate = rewritten
+                        attempts.append(rewritten)
+                        continue
+                error_codes.append(error.code)
+                if attempt_number == 1:
+                    raise QueryAttemptsFailed(
+                        error.code, attempts, error_codes, attempt_number + 1,
+                        int(model_seconds * 1000), int(validation_seconds * 1000), int(execution_seconds * 1000),
+                    ) from error
+                repair = f"previous_attempt={generation.sql}\nerror_code={error.code}"
+                if error.repair_hint:
+                    repair += f"\nrepair_hint={error.repair_hint}"
+                break
+            except QueryExecutionError as error:
+                execution_seconds += perf_counter() - stage_started
+                error_codes.append(error.code)
+                if attempt_number == 1 or not error.retryable:
+                    raise QueryAttemptsFailed(
+                        error.code, attempts, error_codes, attempt_number + 1,
+                        int(model_seconds * 1000), int(validation_seconds * 1000), int(execution_seconds * 1000),
+                    ) from error
+                repair = f"previous_attempt={generation.sql}\nerror_code={error.code}"
+                break
+        if repair is None:
+            raise AssertionError("unreachable")
     raise AssertionError("unreachable")
 
 
@@ -249,6 +285,17 @@ def _match_profile_metadata_scope(question: str, datasets: list[Dataset]) -> tup
         segment, label = max(matches, key=lambda item: len(item[0]), default=("", ""))
         if len(segment) < 4:
             continue
+        normalized_label = _normalize_scope_text(label)
+        # Short unique spans must align to a label prefix (file/sheet start).
+        # Mid-string accidents are ignored unless the span is long or the full
+        # label already appears in the question.
+        if (
+            len(segment) < 8
+            and not normalized_label.startswith(segment)
+            and normalized_label not in normalized_question
+            and segment != normalized_label
+        ):
+            continue
         owners = {
             dataset_id
             for dataset_id, labels in labels_by_dataset.items()
@@ -280,11 +327,42 @@ def _question_without_resolved_scope(question: str, scope_labels: list[str]) -> 
             continue
         normalized_prefix = _normalize_scope_text(prefix)
         if any(
-            len(_longest_shared_segment(normalized_prefix, label)) >= 4
+            (shared := _longest_shared_segment(normalized_prefix, label))
+            and len(shared) >= 4
+            and (label.startswith(shared) or len(shared) >= 6)
             for label in normalized_labels
         ):
             return suffix
     return question
+
+
+def _tables_with_exclusive_value_evidence(value_hits: list[dict]) -> set[str]:
+    """Return table ids that uniquely dominate value retrieval.
+
+    When one table alone carries the strongest cell evidence, broad-schema
+    replacement must not swap it for a larger peer with the same columns.
+    """
+    best_by_table: dict[str, float] = {}
+    for hit in value_hits:
+        table_id = str(hit.get("table_id", ""))
+        if not table_id:
+            continue
+        try:
+            score = float(hit.get("score", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        best_by_table[table_id] = max(best_by_table.get(table_id, 0.0), score)
+    if not best_by_table:
+        return set()
+    strongest = max(best_by_table.values())
+    if strongest <= 0:
+        return set()
+    winners = {
+        table_id
+        for table_id, score in best_by_table.items()
+        if score >= strongest * 0.95
+    }
+    return winners if len(winners) == 1 else set()
 
 
 # Tolerate ~1% row-count drift between equivalent full-table snapshots so a
@@ -400,10 +478,19 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
         analysis_question = _question_without_resolved_scope(
             request.question, scope_labels
         )
+        # Drop datasets whose import/profile job has not activated a version yet.
+        datasets = [dataset for dataset in datasets if dataset.active_version_id]
         datasets_by_version = {dataset.active_version_id: dataset for dataset in datasets}
-        active_versions = [dataset.active_version_id for dataset in datasets if dataset.active_version_id]
+        active_versions = [dataset.active_version_id for dataset in datasets]
         if not active_versions:
-            raise ValueError("no_active_dataset")
+            # Binding can land before Celery finishes; treat as route=none so the
+            # chat pipeline does not mark a hard structured-query failure.
+            finished = perf_counter()
+            return QueryResponse(
+                route="none",
+                timings=QueryTimings(total_ms=int((finished - started) * 1000)),
+                model_calls=0,
+            )
         metadata_scope_done = perf_counter()
         candidates = retrieve_profile_candidates(
             session,
@@ -416,7 +503,19 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
         column_hits = candidates.column_hits
         value_hits = candidates.value_hits
         if not table_hits:
-            raise ValueError("no_relevant_table")
+            finished = perf_counter()
+            return QueryResponse(
+                route="none",
+                timings=QueryTimings(
+                    retrieval_ms=int((finished - started) * 1000),
+                    metadata_scope_ms=int((metadata_scope_done - started) * 1000),
+                    lexical_ms=candidates.lexical_ms,
+                    embedding_ms=candidates.embedding_ms,
+                    vector_ms=candidates.vector_ms,
+                    total_ms=int((finished - started) * 1000),
+                ),
+                model_calls=0,
+            )
         table_selection_started = perf_counter()
         candidate_ids = {UUID(hit["table_id"]) for hit in table_hits}
         candidate_tables = list(session.scalars(
@@ -450,7 +549,9 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
         if not scope_labels:
             # Equivalent schemas represent overlapping snapshots or subsets. For an
             # unscoped aggregate/list question, use the broadest candidate rather
-            # than silently answering from a smaller departmental subset.
+            # than silently answering from a smaller departmental subset — unless
+            # value evidence uniquely identifies the smaller table.
+            protected_tables = _tables_with_exclusive_value_evidence(value_hits)
             scope_tables = list(session.scalars(
                 select(DataTable)
                 .options(selectinload(DataTable.columns))
@@ -460,10 +561,9 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
                 scope_tables, datasets_by_version
             )
             selected_tables = [
-                broadest_by_signature.get(
-                    _schema_signature(table),
-                    table,
-                )
+                table
+                if str(table.id) in protected_tables
+                else broadest_by_signature.get(_schema_signature(table), table)
                 for table in selected_tables
             ]
             selected_tables = list({str(table.id): table for table in selected_tables}.values())
@@ -640,7 +740,9 @@ def run_query(tenant_id: str, request: QueryRequest) -> QueryResponse:
                 full_schema_context,
                 # Strong value/column evidence can override a mistaken none;
                 # weak topical column hits must not (conceptual questions).
-                reconsider_none=should_reconsider_none(column_hits, value_hits),
+                reconsider_none=should_reconsider_none(
+                    column_hits, value_hits, table_hits=deduplicated_hits
+                ),
             )
         except QueryAttemptsFailed as failure:
             failed_at = perf_counter()

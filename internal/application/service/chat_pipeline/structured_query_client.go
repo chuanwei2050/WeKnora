@@ -135,6 +135,10 @@ func (p *PluginDataAnalysis) queryStructuredNamespace(ctx context.Context, manag
 	started := time.Now()
 	response, err := (structuredquery.Client{BaseURL: cfg.BaseURL, APIKey: cfg.APIKey, Timeout: time.Duration(max(1, cfg.RequestTimeout)) * time.Second}).Query(ctx, tenantID, payload)
 	if err != nil {
+		if structuredquery.IsSoftFailure(err) {
+			logger.Infof(ctx, "[StructuredQuery] namespace=%s soft-skip: %v", namespace, err)
+			return nil, nil
+		}
 		return nil, err
 	}
 	if response.Route == "none" {

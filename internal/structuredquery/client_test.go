@@ -2,6 +2,7 @@ package structuredquery
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -95,5 +96,17 @@ func TestShouldRetryStructuredQueryStatus(t *testing.T) {
 	}
 	if shouldRetryStructuredQueryStatus(http.StatusUnprocessableEntity, `{"detail":"unsafe_sql"}`) {
 		t.Fatal("non-model 422 must not retry")
+	}
+}
+
+func TestIsSoftFailure(t *testing.T) {
+	if !IsSoftFailure(fmt.Errorf("status 422: no_active_dataset")) {
+		t.Fatal("no_active_dataset should be soft")
+	}
+	if !IsSoftFailure(fmt.Errorf("status 422: {\"detail\":\"no_relevant_table\"}")) {
+		t.Fatal("no_relevant_table should be soft")
+	}
+	if IsSoftFailure(fmt.Errorf("status 422: unsupported_value_literal")) {
+		t.Fatal("literal failures must stay hard")
 	}
 }

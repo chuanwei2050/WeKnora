@@ -310,6 +310,86 @@ _FILTER_PREDICATES = (
 )
 
 
+def _literal_fragments(raw: str) -> list[tuple[str, str]]:
+    """Return (compact, probe) fragment pairs from a SQL string literal.
+
+    Compact form is used for Profile membership (whitespace-insensitive).
+    Probe form keeps internal spaces so live ILIKE can still hit stored cells.
+    """
+    folded = unicodedata.normalize("NFKC", raw).casefold()
+    pairs: list[tuple[str, str]] = []
+    for part in re.split(r"[%_]", folded):
+        probe = part.strip()
+        compact = _normalize_value_text(probe)
+        if len(compact) >= 2:
+            pairs.append((compact, probe))
+    return pairs
+
+
+def rewrite_unsupported_filter_literals(
+    sql: str,
+    supported_values_by_column: dict[str, str],
+    *,
+    dialect: str = "postgres",
+    min_overlap: int = 2,
+) -> str | None:
+    """Mechanically shrink invented filter text to the longest Profile overlap.
+
+    Returns rewritten SQL when at least one literal changes; otherwise None.
+    Only uses substrings already present in Profile — no synonym invention.
+    """
+    try:
+        statement = parse_one(sql, read=dialect)
+    except ParseError:
+        return None
+    support_by_column = {
+        name.casefold(): _normalize_value_text(value)
+        for name, value in supported_values_by_column.items()
+    }
+    aliases = _table_aliases(statement)
+    changed = False
+    for predicate in statement.walk():
+        if not isinstance(predicate, _FILTER_PREDICATES):
+            continue
+        columns = list(predicate.find_all(exp.Column))
+        if len(columns) != 1:
+            continue
+        support_key = _resolve_column_key(columns[0], support_by_column, aliases)
+        if support_key is None:
+            continue
+        support = support_by_column[support_key]
+        for literal in predicate.find_all(exp.Literal):
+            if not literal.is_string:
+                continue
+            rewritten_parts: list[str] = []
+            original = unicodedata.normalize("NFKC", literal.this)
+            cursor = 0
+            for match in re.finditer(r"[%_]", original):
+                chunk = original[cursor:match.start()]
+                rewritten_parts.append(_shrink_literal_chunk(chunk, support, min_overlap))
+                rewritten_parts.append(match.group(0))
+                cursor = match.end()
+            rewritten_parts.append(_shrink_literal_chunk(original[cursor:], support, min_overlap))
+            new_value = "".join(rewritten_parts)
+            if new_value != original:
+                literal.set("this", new_value)
+                changed = True
+    if not changed:
+        return None
+    return statement.sql(dialect=dialect)
+
+
+def _shrink_literal_chunk(chunk: str, support: str, min_overlap: int) -> str:
+    compact = _normalize_value_text(chunk)
+    if not compact or compact in support:
+        return chunk
+    overlap = _longest_supported_overlap(compact, support)
+    if len(overlap) < min_overlap:
+        return chunk
+    excerpt = _nearest_supported_excerpt(overlap, support, context_chars=0)
+    return excerpt or overlap
+
+
 def _validate_filter_literals(
     statement: exp.Expression,
     supported_values_by_column: dict[str, str],
@@ -342,24 +422,32 @@ def _validate_filter_literals(
         for literal in predicate.find_all(exp.Literal):
             if not literal.is_string:
                 continue
-            value = _normalize_value_text(literal.this)
-            # LIKE wildcards separate independently supported fragments. A
-            # single-character fragment is too weak to validate meaningfully.
-            fragments = [part for part in re.split(r"[%_]", value) if len(part) >= 2]
+            fragments = _literal_fragments(literal.this)
             if support_key in verify and literal_support_probe is not None:
                 unsupported = [
-                    fragment for fragment in fragments
-                    if not literal_support_probe(support_key, fragment)
+                    compact
+                    for compact, probe in fragments
+                    if not literal_support_probe(support_key, probe)
                 ]
             else:
-                unsupported = [fragment for fragment in fragments if fragment not in support]
-            if (
-                unsupported
-                and support_key in probeable
-                and literal_support_probe is not None
-                and all(literal_support_probe(support_key, fragment) for fragment in unsupported)
-            ):
-                unsupported = []
+                unsupported_pairs = [
+                    (compact, probe)
+                    for compact, probe in fragments
+                    if compact not in support
+                ]
+                unsupported = [compact for compact, _ in unsupported_pairs]
+                # Incomplete Profiles are samples: prefer a live existence probe
+                # before rejecting, using whitespace-preserving probe text.
+                if (
+                    unsupported_pairs
+                    and support_key in probeable
+                    and literal_support_probe is not None
+                ):
+                    unsupported = [
+                        compact
+                        for compact, probe in unsupported_pairs
+                        if not literal_support_probe(support_key, probe)
+                    ]
             if unsupported:
                 overlap = _longest_supported_overlap(unsupported[0], support)
                 excerpt = _nearest_supported_excerpt(unsupported[0], support)

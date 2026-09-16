@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from csv import Error as CSVError
 from io import BytesIO
 from pathlib import Path
+import re
 from typing import BinaryIO
 from zipfile import BadZipFile, ZipFile
 
@@ -11,6 +12,7 @@ from python_calamine import CalamineWorkbook
 
 
 SUPPORTED_EXTENSIONS = {".csv", ".xls", ".xlsx"}
+_NUMERIC_HEADER = re.compile(r"^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$")
 
 
 @dataclass(frozen=True)
@@ -24,12 +26,66 @@ def physical_column_name(ordinal: int) -> str:
     return f"c_{ordinal:03d}"
 
 
+def _looks_like_header_cell(value: object) -> bool:
+    text = str(value).strip() if value is not None and not (isinstance(value, float) and pd.isna(value)) else ""
+    if not text or text.lower().startswith("unnamed"):
+        return False
+    if _NUMERIC_HEADER.fullmatch(text):
+        return False
+    return True
+
+
+def _header_quality(values: list[object]) -> float:
+    if not values:
+        return 0.0
+    return sum(1 for value in values if _looks_like_header_cell(value)) / len(values)
+
+
+def _drop_leading_empty_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    keep_from = 0
+    for index in range(len(frame)):
+        row = frame.iloc[index]
+        if any(str(value).strip() for value in row.tolist() if value is not None and not (isinstance(value, float) and pd.isna(value))):
+            keep_from = index
+            break
+    else:
+        return frame.iloc[0:0].copy()
+    return frame.iloc[keep_from:].reset_index(drop=True) if keep_from else frame
+
+
+def promote_header_row(frame: pd.DataFrame) -> pd.DataFrame:
+    """Promote the first data row when current columns look like values, not names.
+
+    Uses only structural signals (empty/Unnamed/numeric ratios) — no domain terms.
+    """
+    working = _drop_leading_empty_rows(frame)
+    if working.empty:
+        return working
+    current_quality = _header_quality(list(working.columns))
+    if current_quality >= 0.5 or len(working) == 0:
+        return working
+    promoted_quality = _header_quality(working.iloc[0].tolist())
+    if promoted_quality <= current_quality + 0.2:
+        return working
+    new_columns = [
+        str(value).strip() if value is not None and not (isinstance(value, float) and pd.isna(value)) and str(value).strip()
+        else f"未命名列{ordinal}"
+        for ordinal, value in enumerate(working.iloc[0].tolist(), start=1)
+    ]
+    rest = working.iloc[1:].copy()
+    rest.columns = new_columns
+    return rest.reset_index(drop=True)
+
+
 def normalize_frame(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str]]:
-    normalized = frame.copy()
+    promoted = promote_header_row(frame)
+    normalized = promoted.copy()
     mapping: dict[str, str] = {}
     physical_names: list[str] = []
     seen_original: dict[str, int] = {}
-    for ordinal, raw in enumerate(frame.columns, start=1):
+    for ordinal, raw in enumerate(promoted.columns, start=1):
         original = str(raw).strip() or f"未命名列{ordinal}"
         occurrence = seen_original.get(original, 0) + 1
         seen_original[original] = occurrence

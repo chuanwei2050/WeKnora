@@ -4,7 +4,7 @@ from zipfile import ZipFile
 import pandas as pd
 import pytest
 
-from structured_query.ingestion import _validate_xlsx_archive, normalize_frame, parse_tabular_file
+from structured_query.ingestion import _validate_xlsx_archive, normalize_frame, parse_tabular_file, promote_header_row
 
 
 def test_normalize_preserves_chinese_and_duplicate_headers():
@@ -12,6 +12,20 @@ def test_normalize_preserves_chinese_and_duplicate_headers():
     normalized, mapping = normalize_frame(frame)
     assert list(normalized.columns) == ["c_001", "c_002"]
     assert mapping == {"c_001": "姓名", "c_002": "姓名#2"}
+
+
+def test_promote_header_when_first_row_is_title_and_columns_are_numeric():
+    frame = pd.DataFrame(
+        [["姓名", "学历"], ["张三", "硕士"], ["李四", "本科"]],
+        columns=[0, 1],
+    )
+    promoted = promote_header_row(frame)
+    assert list(promoted.columns) == ["姓名", "学历"]
+    assert promoted.iloc[0].tolist() == ["张三", "硕士"]
+
+    normalized, mapping = normalize_frame(frame)
+    assert mapping == {"c_001": "姓名", "c_002": "学历"}
+    assert normalized.iloc[0].tolist() == ["张三", "硕士"]
 
 
 def test_parse_gb18030_csv():

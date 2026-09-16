@@ -153,3 +153,22 @@ func shouldRetryStructuredQueryStatus(status int, body string) bool {
 	}
 	return strings.Contains(body, "model_unavailable") || strings.Contains(body, "model_timeout")
 }
+
+// IsSoftFailure reports sidecar 422s that should not mark the chat pipeline as
+// a hard structured-query failure (import still running, empty recall, etc.).
+func IsSoftFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	for _, code := range []string{
+		"no_active_dataset",
+		"dataset_not_ready",
+		"no_relevant_table",
+	} {
+		if strings.Contains(message, code) {
+			return true
+		}
+	}
+	return false
+}

@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     weknora_service_key: SecretStr
     model_config_ttl_seconds: int = Field(default=30, ge=0, le=3600)
     model_request_timeout_seconds: int = Field(default=180, ge=10, le=600)
-    sql_max_completion_tokens: int = Field(default=512, ge=128, le=4096)
+    sql_max_completion_tokens: int = Field(default=1536, ge=128, le=4096)
     embedding_batch_size: int = Field(default=64, ge=1, le=512)
 
     api_keys: Annotated[dict[str, str], NoDecode]
@@ -88,7 +88,7 @@ class Settings(BaseSettings):
     max_plan_cost: float = Field(default=1_000_000, gt=0)
     max_plan_rows: int = Field(default=10_000_000, gt=0)
     low_cardinality_limit: int = Field(default=2_000, ge=10, le=100_000)
-    high_cardinality_sample: int = Field(default=500, ge=10, le=10_000)
+    high_cardinality_sample: int = Field(default=1000, ge=10, le=10_000)
     import_lock_seconds: int = Field(default=900, ge=30, le=86_400)
     max_import_sheets: int = Field(default=64, ge=1, le=1_024)
     max_import_rows_per_sheet: int = Field(default=1_000_000, ge=1_000, le=10_000_000)

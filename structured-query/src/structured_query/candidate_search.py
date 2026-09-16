@@ -324,7 +324,11 @@ def lexical_evidence_is_sufficient(
     best_title = max((float(hit.get("title_score", 0)) for hit in table_hits), default=0.0)
     best_column = max((float(hit.get("score", 0)) for hit in column_hits), default=0.0)
     best_value = max((float(hit.get("score", 0)) for hit in value_hits), default=0.0)
-    return best_title > 0 or best_column >= 2 or best_value >= 2
+    if best_value >= 2 or best_column >= 2:
+        return True
+    # Weak title alone must not skip vector search; require a clear title signal
+    # plus at least some column/value corroboration.
+    return best_title >= 2 and (best_column >= 1 or best_value >= 1)
 
 
 def diversify_value_hits(hits: list[dict[str, Any]], limit: int, per_column: int = 5) -> list[dict[str, Any]]:

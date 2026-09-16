@@ -40,8 +40,14 @@ def test_weak_generic_lexical_hit_keeps_vector_fallback_enabled():
     assert not lexical_evidence_is_sufficient(
         [{"title_score": 0, "score": 1}], [{"score": 1}], []
     )
+    assert not lexical_evidence_is_sufficient(
+        [{"title_score": 1, "score": 1}], [{"score": 1}], []
+    )
     assert lexical_evidence_is_sufficient(
         [{"title_score": 3, "score": 1}], [{"score": 1}], []
+    )
+    assert lexical_evidence_is_sufficient(
+        [{"title_score": 0, "score": 1}], [{"score": 2}], []
     )
 
 
