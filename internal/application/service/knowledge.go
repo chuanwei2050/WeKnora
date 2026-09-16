@@ -2864,6 +2864,19 @@ func buildSplitterConfig(kb *types.KnowledgeBase) chunker.SplitterConfig {
 	return chunkCfg
 }
 
+// useTabularRowChunking reports whether this knowledge should keep one Excel
+// data row per indexed chunk (restores pre-Markdown-table retrieval granularity).
+func useTabularRowChunking(knowledge *types.Knowledge) bool {
+	if knowledge == nil {
+		return false
+	}
+	ft := strings.ToLower(strings.TrimPrefix(knowledge.FileType, "."))
+	if ft == "" {
+		ft = getFileType(knowledge.FileName)
+	}
+	return ft == "xlsx" || ft == "xls"
+}
+
 // effectiveEmbedChunkSize returns the KB size used for embedding-bound caps
 // (JSON pre-chunk, table-summary split). Parent-child mode uses child_chunk_size.
 func effectiveEmbedChunkSize(kb *types.KnowledgeBase) int {
@@ -10918,7 +10931,26 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		processOpts.Metadata = convertResult.Metadata
 	}
 
-	if kb.ChunkingConfig.EnableParentChild {
+	if useTabularRowChunking(knowledge) {
+		// Excel: one KV data row per chunk so certificate/name rows are not
+		// merged with statistical sheets under length-based SplitText.
+		if kb.ChunkingConfig.EnableParentChild {
+			logger.Infof(ctx, "Excel knowledge %s: using per-row chunking (skip parent-child merge)", knowledge.ID)
+		}
+		rowCfg := chunkCfg
+		rowCfg.ChunkSize = effectiveEmbedChunkSize(kb)
+		splitChunks := chunker.SplitTabularRows(convertResult.MarkdownContent, rowCfg)
+		chunks = make([]types.ParsedChunk, len(splitChunks))
+		for i, c := range splitChunks {
+			chunks[i] = types.ParsedChunk{
+				Content: c.Content,
+				Seq:     c.Seq,
+				Start:   c.Start,
+				End:     c.End,
+			}
+		}
+		logger.Infof(ctx, "Split Excel into %d row chunks for knowledge %s", len(chunks), knowledge.ID)
+	} else if kb.ChunkingConfig.EnableParentChild {
 		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
 		pcResult := chunker.SplitTextParentChild(convertResult.MarkdownContent, parentCfg, childCfg)
 		chunks = make([]types.ParsedChunk, len(pcResult.Children))

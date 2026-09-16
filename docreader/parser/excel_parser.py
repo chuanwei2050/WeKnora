@@ -1,8 +1,11 @@
 """
 Excel Parser Module
 
-Parses .xlsx/.xls into markdown tables via python-calamine (Rust), then returns
-plain markdown for the Go app to chunk. Does not emit per-row chunks.
+Parses .xlsx/.xls via python-calamine (Rust), then emits one key-value line
+per data row so Go can index person/certificate rows as atomic retrieval units.
+
+Does not emit Markdown tables: length-based merging of table rows was burying
+name rows under statistical sheets during RAG TopK.
 """
 import logging
 from datetime import date, datetime, time
@@ -11,7 +14,7 @@ from typing import Any, List, Sequence
 
 from python_calamine import CalamineWorkbook
 
-from docreader.models.document import Document
+from docreader.models.document import Chunk, Document
 from docreader.parser.base_parser import BaseParser
 
 logger = logging.getLogger(__name__)
@@ -29,7 +32,7 @@ def _cell_to_str(value: Any) -> str:
     if isinstance(value, time):
         return value.isoformat(timespec="seconds")
     text = str(value).strip()
-    return text.replace("\r\n", " ").replace("\n", " ").replace("|", "\\|")
+    return text.replace("\r\n", " ").replace("\n", " ")
 
 
 def _is_empty_row(row: Sequence[Any]) -> bool:
@@ -42,28 +45,20 @@ def _is_empty_row(row: Sequence[Any]) -> bool:
     return True
 
 
-def _to_markdown_table(rows: List[List[str]]) -> str:
-    if not rows:
-        return ""
-
-    width = max(len(row) for row in rows)
-    normalized = [row + [""] * (width - len(row)) for row in rows]
-
-    while width > 0 and all(not row[width - 1] for row in normalized):
-        width -= 1
-        for row in normalized:
-            row.pop()
-    if width == 0:
-        return ""
-
-    header = normalized[0]
-    lines = [
-        "| " + " | ".join(header) + " |",
-        "| " + " | ".join("---" for _ in header) + " |",
-    ]
-    for row in normalized[1:]:
-        lines.append("| " + " | ".join(row) + " |")
-    return "\n".join(lines)
+def _row_to_kv(headers: List[str], row: List[str]) -> str:
+    pairs: List[str] = []
+    width = max(len(headers), len(row))
+    for i in range(width):
+        header = headers[i] if i < len(headers) else f"col_{i + 1}"
+        value = row[i] if i < len(row) else ""
+        if not header and not value:
+            continue
+        if not value:
+            continue
+        if not header:
+            header = f"col_{i + 1}"
+        pairs.append(f"{header}: {value}")
+    return ",".join(pairs)
 
 
 def _open_workbook(content: bytes) -> CalamineWorkbook:
@@ -76,39 +71,51 @@ def _open_workbook(content: bytes) -> CalamineWorkbook:
 class ExcelParser(BaseParser):
     """Parser for Excel files (.xlsx, .xls).
 
-    Converts each sheet into a markdown section:
+    Converts each sheet into:
         ## SheetName
-        | col1 | col2 |
-        | --- | --- |
-        | a | b |
+        col1: v1,col2: v2
+        col1: v3,col2: v4
 
-    First non-empty row is treated as the table header. Completely empty rows
-    are skipped. Chunking is left to the Go app.
+    First non-empty row is the header. Empty rows are skipped. Each data row
+    becomes one line (and one Document.chunk) for Go tabular row splitting.
     """
 
     def parse_into_text(self, content: bytes) -> Document:
         workbook = _open_workbook(content)
-        parts: List[str] = []
+        text: List[str] = []
+        chunks: List[Chunk] = []
+        start = 0
 
         for sheet_name in workbook.sheet_names:
-            parts.append(f"## {sheet_name}")
+            header_line = f"## {sheet_name}\n"
+            end = start + len(header_line)
+            text.append(header_line)
+            chunks.append(Chunk(content=header_line, seq=len(chunks), start=start, end=end))
+            start = end
+
             raw_rows = workbook.get_sheet_by_name(sheet_name).to_python()
             rows: List[List[str]] = []
             for raw in raw_rows:
                 if _is_empty_row(raw):
                     continue
                 rows.append([_cell_to_str(value) for value in raw])
+            if not rows:
+                continue
 
-            table = _to_markdown_table(rows)
-            if table:
-                parts.append("")
-                parts.append(table)
-            parts.append("")
+            headers = rows[0]
+            for row in rows[1:]:
+                kv = _row_to_kv(headers, row)
+                if not kv:
+                    continue
+                content_row = kv + "\n"
+                end = start + len(content_row)
+                text.append(content_row)
+                chunks.append(
+                    Chunk(content=content_row, seq=len(chunks), start=start, end=end)
+                )
+                start = end
 
-        markdown = "\n".join(parts).strip()
-        if markdown:
-            markdown += "\n"
-        return Document(content=markdown)
+        return Document(content="".join(text), chunks=chunks)
 
 
 if __name__ == "__main__":

@@ -96,12 +96,18 @@ def minimal_xlsx() -> bytes:
 
 
 def main() -> None:
-    md = ExcelParser(file_name="t.xlsx").parse_into_text(minimal_xlsx()).content
+    doc = ExcelParser(file_name="t.xlsx").parse_into_text(minimal_xlsx())
+    md = doc.content
     assert "## Patents" in md, md
-    assert "| Name | ID |" in md, md
-    assert "Alpha\\|Beta" in md, md
+    assert "Name: Alpha|Beta" in md, md
+    assert "ID: 1" in md, md
+    assert "| Name | ID |" not in md, md
+    data_chunks = [c for c in doc.chunks if not c.content.startswith("## ")]
+    assert len(data_chunks) == 1, data_chunks
+    assert "Name: Alpha|Beta,ID: 1" in data_chunks[0].content, data_chunks[0].content
     print("OK")
     print(md)
+    print("chunks", len(doc.chunks))
 
 
 if __name__ == "__main__":
