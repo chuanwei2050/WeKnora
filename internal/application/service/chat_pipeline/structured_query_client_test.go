@@ -16,10 +16,21 @@ import (
 type structuredKnowledgeFixture struct{ interfaces.KnowledgeService }
 
 func (structuredKnowledgeFixture) ListKnowledgeByKnowledgeBaseID(context.Context, string) ([]*types.Knowledge, error) {
-	return []*types.Knowledge{{
-		ID: "knowledge-1", EnableStatus: "enabled", ParseStatus: types.ParseStatusCompleted,
-		Metadata: types.JSON(`{"structured_dataset_id":"dataset-1"}`),
-	}}, nil
+	return []*types.Knowledge{
+		{
+			ID: "knowledge-1", EnableStatus: "enabled", ParseStatus: types.ParseStatusCompleted,
+			Metadata: types.JSON(`{"structured_dataset_id":"dataset-1"}`),
+		},
+		{
+			// Failed / stopped docs and orphan sidecar rows must stay out of the whitelist.
+			ID: "knowledge-stopped", EnableStatus: "enabled", ParseStatus: types.ParseStatusFailed,
+			Metadata: types.JSON(`{"structured_dataset_id":"dataset-orphan"}`),
+		},
+		{
+			ID: "knowledge-disabled", EnableStatus: "disabled", ParseStatus: types.ParseStatusCompleted,
+			Metadata: types.JSON(`{"structured_dataset_id":"dataset-disabled"}`),
+		},
+	}, nil
 }
 
 type emptyStructuredKnowledgeFixture struct{ interfaces.KnowledgeService }
@@ -28,7 +39,7 @@ func (emptyStructuredKnowledgeFixture) ListKnowledgeByKnowledgeBaseID(context.Co
 	return nil, nil
 }
 
-func TestStructuredQueryUsesNamespaceWithoutPerRequestDatasetScan(t *testing.T) {
+func TestStructuredQuerySkipsSidecarWhenWholeKBHasNoBoundDatasets(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
@@ -54,8 +65,8 @@ func TestStructuredQueryUsesNamespaceWithoutPerRequestDatasetScan(t *testing.T) 
 	if err := plugin.OnEvent(context.Background(), types.DATA_ANALYSIS, manage, func() *PluginError { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if requestCount != 1 {
-		t.Fatalf("whole-KB query must delegate readiness to the structured namespace, got %d requests", requestCount)
+	if requestCount != 0 {
+		t.Fatalf("whole-KB with no bound datasets must skip sidecar, got %d requests", requestCount)
 	}
 }
 
@@ -66,8 +77,9 @@ func TestStructuredQueryStartsBeforeRetrievalAndMergesLater(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if _, exists := payload["dataset_ids"]; exists {
-			t.Fatalf("whole-KB request must not scan and materialize dataset ids: %#v", payload)
+		ids, _ := payload["dataset_ids"].([]any)
+		if len(ids) != 1 || ids[0] != "dataset-1" {
+			t.Fatalf("whole-KB request must whitelist enabled completed datasets only: %#v", payload)
 		}
 		if r.Header.Get("X-Tenant-ID") != "7" {
 			t.Fatalf("tenant header missing: %q", r.Header.Get("X-Tenant-ID"))

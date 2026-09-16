@@ -10,7 +10,12 @@ from .config import Settings, get_settings
 from .contracts import DatabaseDatasetCreate, DatasetAccepted, ErrorDetail, HealthResponse, JobResponse, JobState, QueryRequest, QueryResponse
 from .database import ImportJob, initialize_database, session_factory
 from .datasource_registry import refresh_datasource_profile, register_datasource
-from .datasets import IdempotencyConflict, create_dataset as persist_dataset
+from .datasets import (
+    IdempotencyConflict,
+    create_dataset as persist_dataset,
+    delete_dataset,
+    delete_datasets_by_idempotency_prefix,
+)
 from .object_store import upload_stream
 from .observability import metrics_middleware
 
@@ -109,6 +114,36 @@ def create_app(*, initialize: bool = True) -> FastAPI:
             except Exception as error:
                 raise HTTPException(status_code=503, detail="profile_dispatch_failed") from error
         return DatasetAccepted(dataset_id=dataset.id, version_id=version.id, job_id=job.id)
+
+    @app.delete("/v1/datasets/{dataset_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["datasets"])
+    def remove_dataset(
+        dataset_id: UUID,
+        principal: Principal = Depends(authenticate),
+    ) -> Response:
+        with session_factory()() as session:
+            deleted = delete_dataset(session, tenant_id=principal.tenant_id, dataset_id=dataset_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="dataset_not_found")
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.delete("/v1/datasets", status_code=status.HTTP_200_OK, tags=["datasets"])
+    def remove_datasets_by_prefix(
+        namespace: str,
+        idempotency_prefix: str,
+        principal: Principal = Depends(authenticate),
+    ) -> dict[str, int]:
+        namespace = (namespace or "").strip()
+        idempotency_prefix = (idempotency_prefix or "").strip()
+        if not namespace or not idempotency_prefix:
+            raise HTTPException(status_code=422, detail="namespace_and_idempotency_prefix_required")
+        with session_factory()() as session:
+            deleted = delete_datasets_by_idempotency_prefix(
+                session,
+                tenant_id=principal.tenant_id,
+                namespace=namespace,
+                idempotency_prefix=idempotency_prefix,
+            )
+        return {"deleted": deleted}
 
     @app.post(
         "/v1/datasets/{dataset_id}/profile-refresh",

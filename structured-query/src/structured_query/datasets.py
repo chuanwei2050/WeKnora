@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 from hashlib import sha256
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import select, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from .database import Dataset, DatasetVersion, ImportJob, Namespace, Tenant
+from .database import Dataset, DatasetSourceType, DatasetVersion, ImportJob, Namespace, Tenant
+from .vector_store import delete_version
 
 
 class IdempotencyConflict(ValueError):
@@ -18,6 +19,91 @@ class CreatedDataset:
     version: DatasetVersion
     job: ImportJob
     created: bool
+
+
+def _drop_managed_physical_tables(session: Session, dataset: Dataset) -> None:
+    if dataset.source_type != DatasetSourceType.MANAGED_FILE:
+        return
+    for version in dataset.versions:
+        for table in version.tables:
+            schema = table.physical_schema.replace('"', "")
+            name = table.physical_name.replace('"', "")
+            session.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{name}"'))
+
+
+def delete_datasets_by_idempotency_prefix(
+    session: Session,
+    *,
+    tenant_id: str,
+    namespace: str,
+    idempotency_prefix: str,
+) -> int:
+    """Delete sidecar datasets whose idempotency_key starts with prefix.
+
+    File imports use keys like ``{knowledge_id}-{file_hash}`` and maintenance
+    rebuilds append ``-{run_id}``, so prefix ``{knowledge_id}-`` clears both the
+    current binding and orphaned rebuild copies.
+    """
+    prefix = (idempotency_prefix or "").strip()
+    if not prefix:
+        return 0
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"dataset-scope:{tenant_id}:{namespace}"},
+    )
+    datasets = list(
+        session.scalars(
+            select(Dataset)
+            .options(
+                selectinload(Dataset.versions).selectinload(DatasetVersion.tables),
+            )
+            .where(
+                Dataset.tenant_id == tenant_id,
+                Dataset.namespace == namespace,
+                Dataset.idempotency_key.startswith(prefix),
+            )
+        ).unique()
+    )
+    deleted = 0
+    for dataset in datasets:
+        _drop_managed_physical_tables(session, dataset)
+        for version in list(dataset.versions):
+            try:
+                delete_version(dataset.tenant_id, version.id)
+            except Exception:
+                pass
+        dataset.active_version_id = None
+        session.flush()
+        session.delete(dataset)
+        deleted += 1
+    if deleted:
+        session.commit()
+    return deleted
+
+
+def delete_dataset(session: Session, *, tenant_id: str, dataset_id: UUID) -> bool:
+    dataset = session.scalar(
+        select(Dataset)
+        .options(selectinload(Dataset.versions).selectinload(DatasetVersion.tables))
+        .where(Dataset.id == dataset_id, Dataset.tenant_id == tenant_id)
+    )
+    if dataset is None:
+        return False
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"dataset-scope:{tenant_id}:{dataset.namespace}"},
+    )
+    _drop_managed_physical_tables(session, dataset)
+    for version in list(dataset.versions):
+        try:
+            delete_version(dataset.tenant_id, version.id)
+        except Exception:
+            pass
+    dataset.active_version_id = None
+    session.flush()
+    session.delete(dataset)
+    session.commit()
+    return True
 
 
 def create_dataset(

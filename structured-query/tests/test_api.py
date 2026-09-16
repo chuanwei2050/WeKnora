@@ -169,3 +169,48 @@ def test_database_registration_retries_failed_dispatch_idempotently(client, monk
     )
     assert response.status_code == 202
     assert queued == [str(ids[2])]
+
+
+def test_delete_dataset_by_id(client, monkeypatch):
+    from structured_query import api
+
+    dataset_id = uuid4()
+    monkeypatch.setattr(api, "session_factory", lambda: lambda: nullcontext(object()))
+    monkeypatch.setattr(api, "delete_dataset", lambda *args, **kwargs: True)
+    response = client.delete(
+        f"/v1/datasets/{dataset_id}",
+        headers={"X-API-Key": "valid-key"},
+    )
+    assert response.status_code == 204
+
+    monkeypatch.setattr(api, "delete_dataset", lambda *args, **kwargs: False)
+    missing = client.delete(
+        f"/v1/datasets/{dataset_id}",
+        headers={"X-API-Key": "valid-key"},
+    )
+    assert missing.status_code == 404
+
+
+def test_delete_datasets_by_idempotency_prefix(client, monkeypatch):
+    from structured_query import api
+
+    monkeypatch.setattr(api, "session_factory", lambda: lambda: nullcontext(object()))
+    monkeypatch.setattr(
+        api,
+        "delete_datasets_by_idempotency_prefix",
+        lambda *args, **kwargs: 2,
+    )
+    response = client.delete(
+        "/v1/datasets",
+        headers={"X-API-Key": "valid-key"},
+        params={"namespace": "kb", "idempotency_prefix": "knowledge-1-"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 2}
+
+    rejected = client.delete(
+        "/v1/datasets",
+        headers={"X-API-Key": "valid-key"},
+        params={"namespace": "kb"},
+    )
+    assert rejected.status_code == 422

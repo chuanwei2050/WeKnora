@@ -63,6 +63,32 @@ func TestClientQueryRetriesModelUnavailableOnce(t *testing.T) {
 	}
 }
 
+func TestClientDeleteDatasetsByPrefix(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/v1/datasets" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if r.URL.Query().Get("namespace") != "kb" || r.URL.Query().Get("idempotency_prefix") != "doc-1-" {
+			t.Fatalf("unexpected query: %s", r.URL.RawQuery)
+		}
+		if r.Header.Get("X-API-Key") != "secret" || r.Header.Get("X-Tenant-ID") != "7" {
+			t.Fatalf("missing auth headers")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"deleted":2}`))
+	}))
+	defer server.Close()
+
+	deleted, err := (Client{BaseURL: server.URL, APIKey: "secret", Timeout: time.Second}).
+		DeleteDatasetsByPrefix(context.Background(), 7, "kb", "doc-1-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 2 {
+		t.Fatalf("deleted=%d", deleted)
+	}
+}
+
 func TestShouldRetryStructuredQueryStatus(t *testing.T) {
 	if !shouldRetryStructuredQueryStatus(http.StatusUnprocessableEntity, `{"detail":"model_unavailable"}`) {
 		t.Fatal("model_unavailable should retry")

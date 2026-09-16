@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -93,6 +94,54 @@ func (c Client) Query(ctx context.Context, tenantID uint64, request Request) (*R
 		return &result, nil
 	}
 	return nil, lastErr
+}
+
+// DeleteDatasetsByPrefix removes sidecar datasets whose idempotency_key starts
+// with prefix (typically "{knowledgeID}-"), including rebuild orphans.
+func (c Client) DeleteDatasetsByPrefix(ctx context.Context, tenantID uint64, namespace, idempotencyPrefix string) (int, error) {
+	namespace = strings.TrimSpace(namespace)
+	idempotencyPrefix = strings.TrimSpace(idempotencyPrefix)
+	if tenantID == 0 || namespace == "" || idempotencyPrefix == "" {
+		return 0, fmt.Errorf("tenant, namespace and idempotency prefix are required")
+	}
+	timeout := c.Timeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	httpClient := c.HTTP
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	endpoint := fmt.Sprintf(
+		"%s/v1/datasets?namespace=%s&idempotency_prefix=%s",
+		strings.TrimRight(c.BaseURL, "/"),
+		url.QueryEscape(namespace),
+		url.QueryEscape(idempotencyPrefix),
+	)
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodDelete, endpoint, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("X-API-Key", c.APIKey)
+	req.Header.Set("X-Tenant-ID", fmt.Sprint(tenantID))
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return 0, fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(message)))
+	}
+	var payload struct {
+		Deleted int `json:"deleted"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
+		return 0, err
+	}
+	return payload.Deleted, nil
 }
 
 func shouldRetryStructuredQueryStatus(status int, body string) bool {

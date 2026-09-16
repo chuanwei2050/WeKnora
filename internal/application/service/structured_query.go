@@ -15,6 +15,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/structuredquery"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -28,6 +29,13 @@ type knowledgeMetadataMerger interface {
 	MergeKnowledgeMetadata(context.Context, uint64, string, types.JSON) error
 }
 
+var structuredMetadataKeys = []string{
+	"structured_dataset_id",
+	"structured_version_id",
+	"structured_job_id",
+	"structured_submitted_at",
+}
+
 func isStructuredFile(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {
 	case ".csv", ".xls", ".xlsx":
@@ -35,6 +43,74 @@ func isStructuredFile(name string) bool {
 	default:
 		return false
 	}
+}
+
+// cleanupStructuredDatasets drops sidecar SQL datasets for this knowledge
+// (including rebuild orphans keyed as knowledgeID-*) and clears local bindings.
+// Best-effort: failures are logged and do not fail the caller.
+func (s *knowledgeService) cleanupStructuredDatasets(ctx context.Context, knowledge *types.Knowledge) {
+	if knowledge == nil || strings.TrimSpace(knowledge.ID) == "" {
+		return
+	}
+	cfg := s.config
+	if cfg == nil || cfg.StructuredQuery == nil || !cfg.StructuredQuery.Enabled {
+		stripStructuredMetadata(knowledge)
+		return
+	}
+	sq := cfg.StructuredQuery
+	if strings.TrimSpace(sq.BaseURL) == "" || strings.TrimSpace(sq.APIKey) == "" {
+		stripStructuredMetadata(knowledge)
+		return
+	}
+	client := structuredquery.Client{
+		BaseURL: sq.BaseURL,
+		APIKey:  sq.APIKey,
+		Timeout: time.Duration(max(1, sq.RequestTimeout)) * time.Second,
+	}
+	prefix := knowledge.ID + "-"
+	deleted, err := client.DeleteDatasetsByPrefix(ctx, knowledge.TenantID, knowledge.KnowledgeBaseID, prefix)
+	if err != nil {
+		logger.Warnf(ctx, "[StructuredQuery] cleanup failed knowledge=%s err=%v", knowledge.ID, err)
+	} else if deleted > 0 {
+		logger.Infof(ctx, "[StructuredQuery] cleaned %d dataset(s) for knowledge=%s", deleted, knowledge.ID)
+	}
+	stripStructuredMetadata(knowledge)
+}
+
+func stripStructuredMetadata(knowledge *types.Knowledge) {
+	if knowledge == nil || len(knowledge.Metadata) == 0 {
+		return
+	}
+	meta, err := knowledge.Metadata.Map()
+	if err != nil || meta == nil {
+		return
+	}
+	changed := false
+	for _, key := range structuredMetadataKeys {
+		if _, ok := meta[key]; ok {
+			delete(meta, key)
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	encoded, marshalErr := json.Marshal(meta)
+	if marshalErr != nil {
+		return
+	}
+	knowledge.Metadata = types.JSON(encoded)
+}
+
+// resubmitStructuredFile drops existing sidecar datasets for this knowledge
+// (including prior rebuild orphans), then uploads again under a fresh
+// idempotency key. Used by KB maintenance "structured" rebuild and
+// single-document ReparseKnowledge.
+func (s *knowledgeService) resubmitStructuredFile(ctx context.Context, cfg *config.StructuredQueryConfig, knowledge *types.Knowledge, fileService interface {
+	GetFile(context.Context, string) (io.ReadCloser, error)
+}, merger any, idempotencyKey string) (structuredDatasetAccepted, error) {
+	s.cleanupStructuredDatasets(ctx, knowledge)
+	return submitStructuredFileRequestWithKey(ctx, cfg, knowledge, fileService, merger, idempotencyKey)
 }
 
 func (s *knowledgeService) submitStructuredFile(ctx context.Context, knowledge *types.Knowledge, fileService interface {
@@ -48,6 +124,23 @@ func (s *knowledgeService) submitStructuredFile(ctx context.Context, knowledge *
 		background := context.WithoutCancel(ctx)
 		if _, err := submitStructuredFileRequest(background, cfg, knowledge, fileService, s.repo); err != nil {
 			logger.Errorf(background, "[StructuredQuery] dataset submission failed: %v", err)
+		}
+	}()
+}
+
+// queueStructuredResubmit deletes old sidecar datasets and re-uploads under a
+// fresh key. Used by single-doc / batch reparse so orphans are not retained.
+func (s *knowledgeService) queueStructuredResubmit(ctx context.Context, knowledge *types.Knowledge, fileService interface {
+	GetFile(context.Context, string) (io.ReadCloser, error)
+}, idempotencyKey string) {
+	cfg := s.config.StructuredQuery
+	if cfg == nil || !cfg.Enabled || knowledge == nil || !isStructuredFile(knowledge.FileName) {
+		return
+	}
+	go func() {
+		background := context.WithoutCancel(ctx)
+		if _, err := s.resubmitStructuredFile(background, cfg, knowledge, fileService, s.repo, idempotencyKey); err != nil {
+			logger.Errorf(background, "[StructuredQuery] dataset resubmit failed: %v", err)
 		}
 	}()
 }

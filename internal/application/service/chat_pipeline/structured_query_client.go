@@ -76,16 +76,20 @@ func (p *PluginDataAnalysis) queryStructuredNamespace(ctx context.Context, manag
 			break
 		}
 	}
-	if ids == nil && hasTagScope {
+	if ids == nil {
+		// Whole-KB (and tag-scoped) search must still whitelist bound datasets so
+		// deleted/stopped/rebuild-orphaned sidecar tables cannot be queried.
 		knowledges, err := p.knowledgeService.ListKnowledgeByKnowledgeBaseID(ctx, namespace)
 		if err != nil {
 			return nil, fmt.Errorf("list scoped structured datasets: %w", err)
 		}
 		allowedTags := map[string]struct{}{}
-		for _, target := range manage.SearchTargets {
-			if target != nil && target.KnowledgeBaseID == namespace {
-				for _, tagID := range target.TagIDs {
-					allowedTags[tagID] = struct{}{}
+		if hasTagScope {
+			for _, target := range manage.SearchTargets {
+				if target != nil && target.KnowledgeBaseID == namespace {
+					for _, tagID := range target.TagIDs {
+						allowedTags[tagID] = struct{}{}
+					}
 				}
 			}
 		}
@@ -93,14 +97,16 @@ func (p *PluginDataAnalysis) queryStructuredNamespace(ctx context.Context, manag
 			if knowledge == nil || knowledge.EnableStatus != "enabled" || knowledge.ParseStatus != types.ParseStatusCompleted {
 				continue
 			}
-			if _, allowed := allowedTags[knowledge.TagID]; !allowed {
-				continue
+			if hasTagScope {
+				if _, allowed := allowedTags[knowledge.TagID]; !allowed {
+					continue
+				}
 			}
 			if datasetID := knowledge.GetMetadata()["structured_dataset_id"]; datasetID != "" {
 				payload.DatasetIDs = append(payload.DatasetIDs, datasetID)
 			}
 		}
-	} else if ids != nil {
+	} else {
 		for _, id := range ids {
 			knowledge, err := p.knowledgeService.GetKnowledgeByID(ctx, id)
 			if err != nil || knowledge == nil || knowledge.EnableStatus != "enabled" || knowledge.ParseStatus != types.ParseStatusCompleted {
@@ -111,7 +117,7 @@ func (p *PluginDataAnalysis) queryStructuredNamespace(ctx context.Context, manag
 			}
 		}
 	}
-	if (ids != nil || hasTagScope) && len(payload.DatasetIDs) == 0 {
+	if len(payload.DatasetIDs) == 0 {
 		// A knowledge base may be part of the normal RAG scope without having
 		// any tabular dataset.  This is an expected route-none case, not a
 		// structured-query failure.  Skip the sidecar request entirely so a
