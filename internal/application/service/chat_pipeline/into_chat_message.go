@@ -19,7 +19,7 @@ type PluginIntoChatMessage struct {
 const structuredAnswerOutputRules = `
 <answer_output_rules>
 SQL、物理表名、内部标识、字段别名、原始载荷仅供内部推理；结论用自然语言；禁止直接展示结构化查询过程或原始结果形态。
-统计、聚合、排序和计算类问题以 SQL 结果为准；普通事实和列举类问题不得因 SQL 未命中而忽略其他证据；列举时同一主体的等价表述可合并，不得因字面差排除证据中的明确命中；不同主体不可混并；保留实际表述，不得纳入无关相邻记录；片段相关不能单独证明完整总数或全集。
+统计、聚合、排序和计算类问题以 SQL 结果为准；普通事实和列举类问题要把SQL结果和其他证据一起作为答案，保留实际表述，不得纳入无关相邻记录；片段相关不能单独证明完整总数或全集。
 </answer_output_rules>`
 
 // NewPluginIntoChatMessage creates and registers a new PluginIntoChatMessage instance
